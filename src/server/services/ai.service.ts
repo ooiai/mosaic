@@ -148,12 +148,15 @@ export default ${componentName};`;
   }
 
   private extractComponentName(prompt: string): string {
-    const words = prompt.split(' ')
-      .filter(w => w.length > 3)
+    // Extract meaningful words and create a component name
+    const words = prompt
+      .split(' ')
+      .filter(w => w.length > 2 && !['the', 'and', 'for', 'with'].includes(w.toLowerCase()))
       .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
     
-    const name = words.slice(0, 2).join('');
-    return name || 'GeneratedComponent';
+    // Take first 2-3 words or fallback to generic name
+    const name = words.slice(0, Math.min(3, words.length)).join('');
+    return name && name.length >= 4 ? name : 'GeneratedComponent';
   }
 }
 
