@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { generateCodeRouter } from './routes/generate';
@@ -23,7 +23,7 @@ app.use('/api/generate', generateCodeRouter);
 app.use('/api/modify', modifyCodeRouter);
 
 // Error handling middleware
-app.use((err: Error, req: Request, res: Response, next: any) => {
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Error:', err);
   res.status(500).json({ 
     error: 'Internal server error', 

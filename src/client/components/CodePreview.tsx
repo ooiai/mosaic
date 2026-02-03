@@ -19,6 +19,16 @@ export const CodePreview: React.FC<CodePreviewProps> = ({ code }) => {
       .replace(/^interface\s+\w+Props\s*{[^}]*}/gm, '') // Remove interface (TypeScript not needed in preview)
       .replace(/:\s*React\.FC<\w+>/g, ''); // Remove React.FC types
     
+    // Properly escape the code for safe embedding in template literal
+    const escapeForTemplate = (str: string): string => {
+      return str
+        .replace(/\\/g, '\\\\')  // Escape backslashes first
+        .replace(/`/g, '\\`')     // Escape backticks
+        .replace(/\$/g, '\\$');   // Escape dollar signs
+    };
+    
+    const safeCode = escapeForTemplate(transformedCode);
+    
     // Create preview HTML with the generated code
     const previewHtml = `
       <!DOCTYPE html>
@@ -41,21 +51,20 @@ export const CodePreview: React.FC<CodePreviewProps> = ({ code }) => {
         <body>
           <div id="root"></div>
           <script type="text/babel">
-            ${transformedCode}
+            const codeToExecute = \`${safeCode}\`;
             
             // Try to render the component
             try {
               const root = ReactDOM.createRoot(document.getElementById('root'));
               
-              // Find the component function - look for const/function declarations
-              const componentMatch = transformedCode.match(/(?:const|function)\\s+(\\w+)\\s*[=:]?/);
+              // Extract component function name using regex
+              const componentMatch = codeToExecute.match(/(?:const|function)\\s+(\\w+)\\s*[=:]?/);
               const componentName = componentMatch ? componentMatch[1] : null;
               
-              if (componentName && typeof window[componentName] !== 'undefined') {
-                root.render(React.createElement(window[componentName]));
-              } else if (componentName) {
-                // Try to eval the component
-                root.render(React.createElement(eval(componentName)));
+              if (componentName) {
+                // Create a safe function context without eval
+                const ComponentFunction = new Function('React', 'return ' + codeToExecute + '; return ' + componentName)(React);
+                root.render(React.createElement(ComponentFunction));
               } else {
                 document.getElementById('root').innerHTML = \`
                   <div style="padding: 2rem; text-align: center; color: #666;">
@@ -66,7 +75,7 @@ export const CodePreview: React.FC<CodePreviewProps> = ({ code }) => {
                 \`;
               }
             } catch (error) {
-              // Show a friendly message instead of error
+              // Show a friendly message
               document.getElementById('root').innerHTML = \`
                 <div style="padding: 2rem; background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px;">
                   <h3 style="color: #0369a1; margin-top: 0;">✓ Code Generated Successfully</h3>
