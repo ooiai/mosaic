@@ -1,0 +1,17 @@
+{
+  "name": "mosaic",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.28.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "pnpm -C apps/web dev",
+    "build:web": "pnpm -C apps/web build",
+    "preview:web": "pnpm -C apps/web preview",
+    "lint:web": "pnpm -C apps/web lint",
+    "typecheck:web": "pnpm -C apps/web typecheck"
+  }
+}
