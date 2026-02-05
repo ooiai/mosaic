@@ -1,0 +1,11 @@
+[package]
+name = "common"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+neocrates = { workspace = true, features = ["logger"] }
+serde = { workspace = true, features = ["derive"] }
+bon.workspace = true
+regex.workspace = true

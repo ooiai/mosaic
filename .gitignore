@@ -48,3 +48,6 @@ zxxk.json*
 
 .vscode/
 .idea/
+
+# config
+config.yml

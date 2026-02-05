@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = ["bin/openapi", "crates/common", "crates/domain-openapi", "crates/infra-openapi", "crates/openapi-http"]
+
+default-members = ["bin/openapi"]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["jerrychir <jerrychir@gmail.com>"]
+edition = "2024"
+
+[workspace.dependencies]
+#
+# bin
+#
+monolith = { path = "bin/openapi" }
+
+#
+# crates
+#
+common = { path = "crates/common" }
+domain-openapi = { path = "crates/domain-openapi" }
+infra-openapi = { path = "crates/infra-openapi" }
+openapi-http = { path = "crates/openapi-http" }
+
+#
+# dependencies
+#
+neocrates = "0.1.38"
+regex = "1"
+
+# database
+diesel = "2"
+diesel_migrations = "2"
+chrono = "0.4"
+
+# core
+serde = "1"
+serde_json = "1"
+clap = "4"
+bon = "3.8"
+validator = "0.20"

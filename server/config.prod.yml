@@ -1,0 +1,24 @@
+rust-log:
+  level: debug,error,warn,info,tower_http=debug,error,warn,info,wxkefu_rs=debug,error,warn,info,diesel=debug,SQL_LOG=1
+  sql-log: true
+
+server:
+  # The project prefix
+  prefix: tp
+  # The project debug mode
+  debug: true
+  # The project host
+  host: 0.0.0.0
+  # The project port
+  port: 6620
+
+pg-database:
+  url: postgres://postgres:postgres@localhost:5432/postgres
+  max_size: 20
+
+redis:
+  url: redis://127.0.0.1:6379/0
+
+apalis:
+  url: redis://127.0.0.1:6379/1
+  concurrency: 10
