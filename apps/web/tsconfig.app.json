@@ -7,6 +7,14 @@
     "module": "ESNext",
     "types": ["vite/client"],
     "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@mosaic/ui": ["../../packages/ui/src/index.ts"],
+      "@mosaic/workbench": ["../../packages/workbench/src/index.ts"],
+      "react": ["./node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
+      "@tauri-apps/api/core": ["./node_modules/@tauri-apps/api/core.d.ts"]
+    },
 
     /* Bundler mode */
     "moduleResolution": "bundler",

@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mosaic/ui": "workspace:*",
+    "@mosaic/workbench": "workspace:*",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "@tauri-apps/api": "^2",
