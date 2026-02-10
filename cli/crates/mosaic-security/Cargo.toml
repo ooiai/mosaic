@@ -9,6 +9,7 @@ mosaic-core = { path = "../mosaic-core" }
 chrono.workspace = true
 regex.workspace = true
 serde.workspace = true
+toml.workspace = true
 uuid.workspace = true
 walkdir.workspace = true
 
