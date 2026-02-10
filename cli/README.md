@@ -12,7 +12,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
 - Agents runtime (`agents list|add|show|remove|default|route`)
-- Plugins and skills runtime (`plugins list|info|check`, `skills list|info|check`)
+- Plugins and skills runtime (`plugins list|info|check|install|remove`, `skills list|info|check|install|remove`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
 - Command aliases compatible with OpenClaw-style naming:
@@ -157,9 +157,13 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state ask --agent writer "hell
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins list
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins info <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins check
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins install --path ./my-plugin
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins remove <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills list
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills info <skill-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills check
+cargo run -p mosaic-cli --bin mosaic -- --project-state skills install --path ./writer
+cargo run -p mosaic-cli --bin mosaic -- --project-state skills remove <skill-id>
 ```
 
 ## Optional Live Smoke Test

@@ -65,6 +65,15 @@ pub struct ExtensionCheckReport {
     pub results: Vec<ExtensionCheckResult>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallOutcome {
+    pub kind: String,
+    pub id: String,
+    pub source_path: String,
+    pub installed_path: String,
+    pub replaced: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct RegistryRoots {
     pub state_root: PathBuf,
@@ -173,6 +182,100 @@ impl ExtensionRegistry {
             failed,
             results,
         })
+    }
+
+    pub fn install_plugin_from_path(
+        &self,
+        source_path: &Path,
+        force: bool,
+    ) -> Result<InstallOutcome> {
+        let source_dir = canonicalize_existing_dir(source_path, "plugin source path")?;
+        let discovered = discover_plugin_entry(ExtensionSource::Project, &source_dir);
+        if !discovered.manifest_exists {
+            return Err(MosaicError::Validation(format!(
+                "plugin source {} is missing plugin.toml",
+                source_dir.display()
+            )));
+        }
+        if !discovered.manifest_valid {
+            return Err(MosaicError::Validation(
+                discovered
+                    .manifest_error
+                    .unwrap_or_else(|| "plugin manifest is invalid".to_string()),
+            ));
+        }
+        let plugin_id = normalize_package_id(&discovered.id, "plugin id")?;
+        let destination_root = self.roots.state_root.join("plugins");
+        let destination = destination_root.join(&plugin_id);
+        let source_real = std::fs::canonicalize(&source_dir).map_err(|err| {
+            MosaicError::Io(format!(
+                "failed to canonicalize plugin source {}: {err}",
+                source_dir.display()
+            ))
+        })?;
+        let destination_real = std::fs::canonicalize(&destination).ok();
+        if destination_real.as_ref() == Some(&source_real) {
+            return Ok(InstallOutcome {
+                kind: "plugin".to_string(),
+                id: plugin_id,
+                source_path: source_real.display().to_string(),
+                installed_path: source_real.display().to_string(),
+                replaced: false,
+            });
+        }
+
+        let existed = destination.exists();
+        if existed && !force {
+            return Err(MosaicError::Validation(format!(
+                "plugin '{}' already exists at {} (use --force to replace)",
+                plugin_id,
+                destination.display()
+            )));
+        }
+        if existed {
+            std::fs::remove_dir_all(&destination)?;
+        }
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        copy_dir_recursive(&source_dir, &destination)?;
+        let installed = discover_plugin_entry(ExtensionSource::Project, &destination);
+        if !installed.manifest_valid {
+            return Err(MosaicError::Validation(
+                installed
+                    .manifest_error
+                    .unwrap_or_else(|| "installed plugin manifest is invalid".to_string()),
+            ));
+        }
+        Ok(InstallOutcome {
+            kind: "plugin".to_string(),
+            id: installed.id,
+            source_path: source_dir.display().to_string(),
+            installed_path: destination.display().to_string(),
+            replaced: existed,
+        })
+    }
+
+    pub fn remove_project_plugin(&self, plugin_id: &str) -> Result<bool> {
+        let plugin_id = plugin_id.trim();
+        if plugin_id.is_empty() {
+            return Err(MosaicError::Validation(
+                "plugin id cannot be empty".to_string(),
+            ));
+        }
+        let target = self
+            .list_plugins()?
+            .into_iter()
+            .find(|item| item.id == plugin_id && item.source == ExtensionSource::Project);
+        let Some(target) = target else {
+            return Ok(false);
+        };
+        let path = PathBuf::from(target.path);
+        if !path.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_dir_all(path)?;
+        Ok(true)
     }
 
     pub fn list_skills(&self) -> Result<Vec<SkillEntry>> {
@@ -315,6 +418,94 @@ impl ExtensionRegistry {
         })
     }
 
+    pub fn install_skill_from_path(
+        &self,
+        source_path: &Path,
+        force: bool,
+    ) -> Result<InstallOutcome> {
+        let source_dir = canonicalize_existing_dir(source_path, "skill source path")?;
+        let skill_file = source_dir.join("SKILL.md");
+        if !skill_file.is_file() {
+            return Err(MosaicError::Validation(format!(
+                "skill source {} is missing SKILL.md",
+                source_dir.display()
+            )));
+        }
+        let skill_id = source_dir
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .ok_or_else(|| {
+                MosaicError::Validation(format!(
+                    "unable to derive skill id from {}",
+                    source_dir.display()
+                ))
+            })?;
+        let skill_id = normalize_package_id(&skill_id, "skill id")?;
+        let destination_root = self.roots.state_root.join("skills");
+        let destination = destination_root.join(&skill_id);
+        let source_real = std::fs::canonicalize(&source_dir).map_err(|err| {
+            MosaicError::Io(format!(
+                "failed to canonicalize skill source {}: {err}",
+                source_dir.display()
+            ))
+        })?;
+        let destination_real = std::fs::canonicalize(&destination).ok();
+        if destination_real.as_ref() == Some(&source_real) {
+            return Ok(InstallOutcome {
+                kind: "skill".to_string(),
+                id: skill_id,
+                source_path: source_real.display().to_string(),
+                installed_path: source_real.display().to_string(),
+                replaced: false,
+            });
+        }
+
+        let existed = destination.exists();
+        if existed && !force {
+            return Err(MosaicError::Validation(format!(
+                "skill '{}' already exists at {} (use --force to replace)",
+                skill_id,
+                destination.display()
+            )));
+        }
+        if existed {
+            std::fs::remove_dir_all(&destination)?;
+        }
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        copy_dir_recursive(&source_dir, &destination)?;
+        Ok(InstallOutcome {
+            kind: "skill".to_string(),
+            id: skill_id,
+            source_path: source_dir.display().to_string(),
+            installed_path: destination.display().to_string(),
+            replaced: existed,
+        })
+    }
+
+    pub fn remove_project_skill(&self, skill_id: &str) -> Result<bool> {
+        let skill_id = skill_id.trim();
+        if skill_id.is_empty() {
+            return Err(MosaicError::Validation(
+                "skill id cannot be empty".to_string(),
+            ));
+        }
+        let target = self
+            .list_skills()?
+            .into_iter()
+            .find(|item| item.id == skill_id && item.source == ExtensionSource::Project);
+        let Some(target) = target else {
+            return Ok(false);
+        };
+        let path = PathBuf::from(target.path);
+        if !path.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_dir_all(path)?;
+        Ok(true)
+    }
+
     fn plugin_roots(&self) -> Vec<(ExtensionSource, PathBuf)> {
         let mut raw = vec![(
             ExtensionSource::Project,
@@ -372,6 +563,82 @@ fn dedupe_roots(roots: Vec<(ExtensionSource, PathBuf)>) -> Vec<(ExtensionSource,
         }
     }
     unique
+}
+
+fn normalize_package_id(raw: &str, field_name: &str) -> Result<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(MosaicError::Validation(format!(
+            "{field_name} cannot be empty"
+        )));
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(MosaicError::Validation(format!(
+            "{field_name} '{value}' contains invalid characters"
+        )));
+    }
+    Ok(value.to_string())
+}
+
+fn canonicalize_existing_dir(path: &Path, label: &str) -> Result<PathBuf> {
+    if !path.exists() {
+        return Err(MosaicError::Validation(format!(
+            "{label} '{}' does not exist",
+            path.display()
+        )));
+    }
+    if !path.is_dir() {
+        return Err(MosaicError::Validation(format!(
+            "{label} '{}' must be a directory",
+            path.display()
+        )));
+    }
+    std::fs::canonicalize(path).map_err(|err| {
+        MosaicError::Io(format!(
+            "failed to canonicalize {label} '{}': {err}",
+            path.display()
+        ))
+    })
+}
+
+fn copy_dir_recursive(source_dir: &Path, destination_dir: &Path) -> Result<()> {
+    for entry in WalkDir::new(source_dir) {
+        let entry = match entry {
+            Ok(value) => value,
+            Err(err) => {
+                return Err(MosaicError::Io(format!(
+                    "failed to walk {}: {err}",
+                    source_dir.display()
+                )));
+            }
+        };
+        let path = entry.path();
+        let relative = path.strip_prefix(source_dir).map_err(|err| {
+            MosaicError::Io(format!(
+                "failed to compute relative path for {}: {err}",
+                path.display()
+            ))
+        })?;
+        let target_path = destination_dir.join(relative);
+        if entry.file_type().is_dir() {
+            std::fs::create_dir_all(&target_path)?;
+            continue;
+        }
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(path, &target_path).map_err(|err| {
+            MosaicError::Io(format!(
+                "failed to copy {} -> {}: {err}",
+                path.display(),
+                target_path.display()
+            ))
+        })?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -594,5 +861,73 @@ mod tests {
         assert!(!report.ok);
         assert_eq!(report.checked, 1);
         assert_eq!(report.failed, 1);
+    }
+
+    #[test]
+    fn plugin_install_and_remove_flow() {
+        let temp = tempdir().expect("tempdir");
+        let state_root = temp.path().join(".mosaic");
+        let registry = ExtensionRegistry::new(RegistryRoots {
+            state_root: state_root.clone(),
+            codex_home: None,
+            user_home: None,
+        });
+
+        let source_dir = temp.path().join("plugin-source");
+        std::fs::create_dir_all(&source_dir).expect("create source");
+        std::fs::write(
+            source_dir.join("plugin.toml"),
+            "[plugin]\nid = \"hello_plugin\"\nname = \"Hello\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("write manifest");
+        std::fs::write(source_dir.join("README.md"), "hello plugin").expect("write readme");
+
+        let installed = registry
+            .install_plugin_from_path(&source_dir, false)
+            .expect("install plugin");
+        assert_eq!(installed.kind, "plugin");
+        assert_eq!(installed.id, "hello_plugin");
+        assert!(PathBuf::from(installed.installed_path).exists());
+
+        let removed = registry
+            .remove_project_plugin("hello_plugin")
+            .expect("remove plugin");
+        assert!(removed);
+        let after = registry.list_plugins().expect("list after remove");
+        assert!(after.is_empty());
+    }
+
+    #[test]
+    fn skill_install_and_remove_flow() {
+        let temp = tempdir().expect("tempdir");
+        let state_root = temp.path().join(".mosaic");
+        let registry = ExtensionRegistry::new(RegistryRoots {
+            state_root,
+            codex_home: None,
+            user_home: None,
+        });
+
+        let source_dir = temp.path().join("writer");
+        std::fs::create_dir_all(&source_dir).expect("create source");
+        std::fs::write(
+            source_dir.join("SKILL.md"),
+            "# Writer\nGenerate short release notes.\n",
+        )
+        .expect("write skill file");
+        std::fs::write(source_dir.join("template.md"), "template").expect("write asset");
+
+        let installed = registry
+            .install_skill_from_path(&source_dir, false)
+            .expect("install skill");
+        assert_eq!(installed.kind, "skill");
+        assert_eq!(installed.id, "writer");
+        assert!(PathBuf::from(installed.installed_path).exists());
+
+        let removed = registry
+            .remove_project_skill("writer")
+            .expect("remove skill");
+        assert!(removed);
+        let after = registry.list_skills().expect("list skills");
+        assert!(after.is_empty());
     }
 }
