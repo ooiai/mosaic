@@ -43,6 +43,35 @@ jobs:
         name: web-dist
         path: apps/web/dist/
 
+  rust-cli-test:
+    name: Rust CLI Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - name: Cache Rust dependencies (CLI)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          cli/target
+        key: ${{ runner.os }}-cli-cargo-${{ hashFiles('cli/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cli-cargo-
+
+    - name: Build and test Rust CLI workspace
+      run: |
+        cd cli
+        cargo test --workspace
+
   desktop-test:
     name: Desktop App Tests
     needs: web-test
@@ -125,7 +154,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web-test, desktop-test]
+    needs: [web-test, rust-cli-test, desktop-test]
     runs-on: ubuntu-latest
 
     steps:
