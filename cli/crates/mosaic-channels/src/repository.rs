@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use mosaic_core::error::{MosaicError, Result};
 
@@ -143,39 +143,18 @@ impl ChannelRepository {
         let send_kind = if probe { "test_probe" } else { "message" };
         let text_preview = truncate_text(text, TEXT_PREVIEW_LIMIT);
         let retry_policy = RetryPolicy::from_env();
-
-        let delivery = match channel.kind.as_str() {
-            "mock" | "local" | "stdout" => providers::local_delivery_success(),
-            "slack_webhook" => {
-                let endpoint = channel.endpoint.clone().ok_or_else(|| {
-                    MosaicError::Validation(format!(
-                        "channel '{}' kind=slack_webhook requires endpoint",
-                        channel.id
-                    ))
-                })?;
-                providers::send_slack_webhook(&endpoint, text, token, &retry_policy).await?
-            }
-            "webhook" => {
-                let endpoint = channel.endpoint.clone().ok_or_else(|| {
-                    MosaicError::Validation(format!(
-                        "channel '{}' kind=webhook requires endpoint",
-                        channel.id
-                    ))
-                })?;
-                let payload = json!({
-                    "channel_id": channel.id,
-                    "channel_name": channel.name,
-                    "text": text,
-                    "ts": Utc::now(),
-                });
-                providers::send_webhook(&endpoint, payload, token, &retry_policy).await?
-            }
-            other => {
-                return Err(MosaicError::Validation(format!(
-                    "unsupported channel kind '{other}', expected slack_webhook|webhook|mock|local|stdout"
-                )));
-            }
-        };
+        let delivery = providers::dispatch_send(
+            &channel.kind,
+            providers::ChannelDispatchRequest {
+                channel_id: &channel.id,
+                channel_name: &channel.name,
+                endpoint: channel.endpoint.as_deref(),
+                text,
+                bearer_token: token.as_deref(),
+            },
+            &retry_policy,
+        )
+        .await?;
 
         let event = ChannelEvent {
             ts: Utc::now(),

@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 use mosaic_core::error::{MosaicError, Result};
 
+use crate::providers;
 use crate::types::{ChannelAuthConfig, ChannelEntry, ChannelListItem, ChannelsFile};
 
 pub const CHANNELS_SCHEMA_VERSION: u32 = 2;
@@ -114,68 +115,17 @@ pub(crate) fn normalize_channels(channels: &mut [ChannelEntry]) -> Result<()> {
 }
 
 pub(crate) fn normalize_kind(kind: &str) -> Result<String> {
-    let normalized = kind.trim().to_lowercase();
-    let normalized = match normalized.as_str() {
-        "slack" | "slack-webhook" | "slack_webhook" => "slack_webhook".to_string(),
-        "webhook" => "webhook".to_string(),
-        "mock" | "local" | "stdout" => normalized,
-        other => {
-            return Err(MosaicError::Validation(format!(
-                "unsupported channel kind '{other}', expected slack_webhook|webhook|mock|local|stdout"
-            )));
-        }
-    };
-    Ok(normalized)
+    providers::resolve_kind(kind).ok_or_else(|| {
+        MosaicError::Validation(format!(
+            "unsupported channel kind '{}', expected {}",
+            kind.trim(),
+            providers::supported_kinds_hint()
+        ))
+    })
 }
 
 pub(crate) fn validate_endpoint_for_kind(kind: &str, endpoint: Option<&str>) -> Result<()> {
-    match kind {
-        "slack_webhook" => {
-            let endpoint = endpoint.ok_or_else(|| {
-                MosaicError::Validation("slack_webhook channel requires --endpoint".to_string())
-            })?;
-            if endpoint.starts_with("mock-http://") {
-                return Ok(());
-            }
-            let url = reqwest::Url::parse(endpoint).map_err(|err| {
-                MosaicError::Validation(format!("invalid slack webhook endpoint URL: {err}"))
-            })?;
-            let host_ok = matches!(url.host_str(), Some("hooks.slack.com"));
-            let path_ok = url.path().starts_with("/services/");
-            if !host_ok || !path_ok {
-                return Err(MosaicError::Validation(
-                    "slack webhook endpoint must match https://hooks.slack.com/services/..."
-                        .to_string(),
-                ));
-            }
-        }
-        "webhook" => {
-            let endpoint = endpoint.ok_or_else(|| {
-                MosaicError::Validation("webhook channel requires --endpoint".to_string())
-            })?;
-            if endpoint.starts_with("mock-http://") {
-                return Ok(());
-            }
-            let url = reqwest::Url::parse(endpoint).map_err(|err| {
-                MosaicError::Validation(format!("invalid webhook endpoint URL: {err}"))
-            })?;
-            match url.scheme() {
-                "http" | "https" => {}
-                scheme => {
-                    return Err(MosaicError::Validation(format!(
-                        "unsupported webhook endpoint scheme '{scheme}', expected http/https"
-                    )));
-                }
-            }
-        }
-        "mock" | "local" | "stdout" => {}
-        other => {
-            return Err(MosaicError::Validation(format!(
-                "unsupported channel kind '{other}'"
-            )));
-        }
-    }
-    Ok(())
+    providers::validate_endpoint_for_kind(kind, endpoint)
 }
 
 pub(crate) fn mask_optional_endpoint(endpoint: Option<&str>) -> Option<String> {

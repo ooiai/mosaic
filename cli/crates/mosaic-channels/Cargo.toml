@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 mosaic-core = { path = "../mosaic-core" }
+async-trait.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
 serde.workspace = true
