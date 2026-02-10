@@ -1,4 +1,4 @@
-import { cn } from '../lib/cn';
+import { cn } from '../../lib/utils';
 
 export type SegmentedOption<T extends string> = {
   value: T;

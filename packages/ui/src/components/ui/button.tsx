@@ -1,8 +1,14 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
-import { cn } from '../lib/cn';
+import { cn } from '../../lib/utils';
 
-export type ButtonVariant = 'ghost' | 'subtle' | 'primary';
-export type ButtonSize = 'sm' | 'md';
+export type ButtonVariant =
+  | 'default'
+  | 'secondary'
+  | 'ghost'
+  | 'outline'
+  | 'primary'
+  | 'subtle';
+export type ButtonSize = 'sm' | 'md' | 'lg';
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
@@ -10,7 +16,7 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { className, variant = 'subtle', size = 'md', type = 'button', ...props },
+  { className, variant = 'default', size = 'md', type = 'button', ...props },
   ref,
 ) {
   return (

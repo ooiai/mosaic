@@ -9,8 +9,11 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
+      "@/*": ["./src/*"],
       "@mosaic/ui": ["../../packages/ui/src/index.ts"],
+      "@mosaic/ui/*": ["../../packages/ui/src/*"],
       "@mosaic/workbench": ["../../packages/workbench/src/index.ts"],
+      "@mosaic/workbench/*": ["../../packages/workbench/src/*"],
       "react": ["./node_modules/@types/react/index.d.ts"],
       "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
       "@tauri-apps/api/core": ["./node_modules/@tauri-apps/api/core.d.ts"]

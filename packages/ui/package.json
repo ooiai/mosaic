@@ -5,7 +5,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./global.css": "./src/global.css",
+    "./globals.css": "./src/globals.css"
   },
   "peerDependencies": {
     "react": "^19.2.0"
