@@ -828,6 +828,7 @@ dependencies = [
  "mosaic-gateway",
  "mosaic-memory",
  "mosaic-ops",
+ "mosaic-plugins",
  "mosaic-provider-openai",
  "mosaic-security",
  "mosaic-tools",
@@ -890,6 +891,18 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "mosaic-plugins"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "mosaic-core",
+ "serde",
+ "tempfile",
+ "toml",
+ "walkdir",
 ]
 
 [[package]]

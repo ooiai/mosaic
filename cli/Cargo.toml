@@ -4,6 +4,7 @@ members = [
   "crates/mosaic-cli",
   "crates/mosaic-core",
   "crates/mosaic-agent",
+  "crates/mosaic-plugins",
   "crates/mosaic-channels",
   "crates/mosaic-gateway",
   "crates/mosaic-ops",

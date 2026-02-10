@@ -19,6 +19,7 @@ use mosaic_channels::{
 };
 use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
 use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
+use mosaic_plugins::{ExtensionRegistry, RegistryRoots};
 
 use mosaic_agent::{AgentRunOptions, AgentRunner};
 use mosaic_core::audit::AuditStore;
@@ -75,6 +76,8 @@ enum Commands {
     Sandbox(SandboxArgs),
     Memory(MemoryArgs),
     Security(SecurityArgs),
+    Plugins(PluginsArgs),
+    Skills(SkillsArgs),
     Status,
     Health,
     Doctor,
@@ -371,6 +374,32 @@ enum SecurityCommand {
     },
 }
 
+#[derive(Args, Debug, Clone)]
+struct PluginsArgs {
+    #[command(subcommand)]
+    command: PluginsCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum PluginsCommand {
+    List,
+    Info { plugin_id: String },
+    Check { plugin_id: Option<String> },
+}
+
+#[derive(Args, Debug, Clone)]
+struct SkillsArgs {
+    #[command(subcommand)]
+    command: SkillsCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SkillsCommand {
+    List,
+    Info { skill_id: String },
+    Check { skill_id: Option<String> },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct GatewayState {
     running: bool,
@@ -484,6 +513,8 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Sandbox(args) => handle_sandbox(&cli, args),
         Commands::Memory(args) => handle_memory(&cli, args),
         Commands::Security(args) => handle_security(&cli, args),
+        Commands::Plugins(args) => handle_plugins(&cli, args),
+        Commands::Skills(args) => handle_skills(&cli, args),
         Commands::Status => handle_status(&cli),
         Commands::Health => handle_health(&cli).await,
         Commands::Doctor => handle_doctor(&cli).await,
@@ -1810,6 +1841,161 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
     Ok(())
 }
 
+fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let registry = ExtensionRegistry::new(RegistryRoots::from_state_root(paths.root_dir.clone()));
+
+    match args.command {
+        PluginsCommand::List => {
+            let plugins = registry.list_plugins()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "count": plugins.len(),
+                    "plugins": plugins,
+                }));
+            } else if plugins.is_empty() {
+                println!("No plugins found.");
+            } else {
+                println!("plugins: {}", plugins.len());
+                for plugin in plugins {
+                    println!(
+                        "- {} ({}) source={:?} version={} manifest_valid={}",
+                        plugin.id,
+                        plugin.name,
+                        plugin.source,
+                        plugin.version.unwrap_or_else(|| "-".to_string()),
+                        plugin.manifest_valid
+                    );
+                }
+            }
+        }
+        PluginsCommand::Info { plugin_id } => {
+            let plugin = registry.plugin_info(&plugin_id)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "plugin": plugin,
+                }));
+            } else {
+                println!("id: {}", plugin.id);
+                println!("name: {}", plugin.name);
+                println!("source: {:?}", plugin.source);
+                println!(
+                    "version: {}",
+                    plugin.version.unwrap_or_else(|| "-".to_string())
+                );
+                println!(
+                    "description: {}",
+                    plugin.description.unwrap_or_else(|| "-".to_string())
+                );
+                println!("path: {}", plugin.path);
+                println!("manifest path: {}", plugin.manifest_path);
+                println!("manifest valid: {}", plugin.manifest_valid);
+                if let Some(error) = plugin.manifest_error {
+                    println!("manifest error: {error}");
+                }
+            }
+        }
+        PluginsCommand::Check { plugin_id } => {
+            let report = registry.check_plugins(plugin_id.as_deref())?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "report": report,
+                }));
+            } else {
+                println!(
+                    "plugin checks: checked={} failed={} ok={}",
+                    report.checked, report.failed, report.ok
+                );
+                for result in report.results {
+                    println!(
+                        "- {} source={:?} ok={}",
+                        result.id, result.source, result.ok
+                    );
+                    for check in result.checks {
+                        let status = if check.ok { "OK" } else { "WARN" };
+                        println!("  [{status}] {}: {}", check.name, check.detail);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_skills(cli: &Cli, args: SkillsArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let registry = ExtensionRegistry::new(RegistryRoots::from_state_root(paths.root_dir.clone()));
+
+    match args.command {
+        SkillsCommand::List => {
+            let skills = registry.list_skills()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "count": skills.len(),
+                    "skills": skills,
+                }));
+            } else if skills.is_empty() {
+                println!("No skills found.");
+            } else {
+                println!("skills: {}", skills.len());
+                for skill in skills {
+                    println!("- {} ({}) source={:?}", skill.id, skill.title, skill.source);
+                }
+            }
+        }
+        SkillsCommand::Info { skill_id } => {
+            let skill = registry.skill_info(&skill_id)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "skill": skill,
+                }));
+            } else {
+                println!("id: {}", skill.id);
+                println!("title: {}", skill.title);
+                println!(
+                    "description: {}",
+                    skill.description.unwrap_or_else(|| "-".to_string())
+                );
+                println!("source: {:?}", skill.source);
+                println!("path: {}", skill.path);
+                println!("skill file: {}", skill.skill_file);
+            }
+        }
+        SkillsCommand::Check { skill_id } => {
+            let report = registry.check_skills(skill_id.as_deref())?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "report": report,
+                }));
+            } else {
+                println!(
+                    "skill checks: checked={} failed={} ok={}",
+                    report.checked, report.failed, report.ok
+                );
+                for result in report.results {
+                    println!(
+                        "- {} source={:?} ok={}",
+                        result.id, result.source, result.ok
+                    );
+                    for check in result.checks {
+                        let status = if check.ok { "OK" } else { "WARN" };
+                        println!("  [{status}] {}: {}", check.name, check.detail);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn spawn_gateway_process(cli: &Cli, host: &str, port: u16) -> Result<u32> {
     let exe = std::env::current_exe().map_err(|err| {
         MosaicError::Io(format!("failed to resolve current executable path: {err}"))
@@ -2279,6 +2465,41 @@ async fn handle_doctor(cli: &Cli) -> Result<()> {
                 "memory_index",
                 false,
                 format!("failed to load memory status: {err}"),
+            ));
+        }
+    }
+
+    let extension_registry =
+        ExtensionRegistry::new(RegistryRoots::from_state_root(paths.root_dir.clone()));
+    match extension_registry.check_plugins(None) {
+        Ok(report) => {
+            checks.push(run_check(
+                "plugins_check",
+                report.ok,
+                format!("checked={} failed={}", report.checked, report.failed),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "plugins_check",
+                false,
+                format!("failed to run plugin checks: {err}"),
+            ));
+        }
+    }
+    match extension_registry.check_skills(None) {
+        Ok(report) => {
+            checks.push(run_check(
+                "skills_check",
+                report.ok,
+                format!("checked={} failed={}", report.checked, report.failed),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "skills_check",
+                false,
+                format!("failed to run skill checks: {err}"),
             ));
         }
     }

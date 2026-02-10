@@ -11,6 +11,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
+- Plugins and skills runtime (`plugins list|info|check`, `skills list|info|check`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
 - Command aliases compatible with OpenClaw-style naming:
@@ -31,6 +32,7 @@ cli/
     mosaic-ops
     mosaic-memory
     mosaic-security
+    mosaic-plugins
     mosaic-tools
     mosaic-provider-openai
 ```
@@ -106,6 +108,7 @@ Gateway ops guide: `docs/gateway-ops.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
 Security audit guide: `docs/security-audit.md`
+Plugins and skills guide: `docs/plugins-skills.md`
 
 ### Ops Runtime
 
@@ -133,6 +136,17 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state memory status
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --deep
+```
+
+### Plugins and Skills Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins list
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins info <plugin-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins check
+cargo run -p mosaic-cli --bin mosaic -- --project-state skills list
+cargo run -p mosaic-cli --bin mosaic -- --project-state skills info <skill-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state skills check
 ```
 
 ## Optional Live Smoke Test
