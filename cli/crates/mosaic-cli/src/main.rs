@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tiny_http::{Method, Response, Server};
 
-use mosaic_agents::{AddAgentInput, AgentStore, agent_routes_path, agents_file_path};
+use mosaic_agents::{
+    AddAgentInput, AgentStore, UpdateAgentInput, agent_routes_path, agents_file_path,
+};
 use mosaic_channels::{
     AddChannelInput, ChannelRepository, DEFAULT_CHANNEL_TOKEN_ENV, channels_events_dir,
     channels_file_path, format_channel_for_output,
@@ -406,6 +408,37 @@ enum AgentsCommand {
         tools_enabled: Option<bool>,
         #[arg(long, value_enum)]
         guard_mode: Option<GuardModeArg>,
+        #[arg(long)]
+        set_default: bool,
+        #[arg(long = "route")]
+        route_keys: Vec<String>,
+    },
+    Update {
+        agent_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        clear_model: bool,
+        #[arg(long)]
+        temperature: Option<f32>,
+        #[arg(long)]
+        clear_temperature: bool,
+        #[arg(long)]
+        max_turns: Option<u32>,
+        #[arg(long)]
+        clear_max_turns: bool,
+        #[arg(long)]
+        tools_enabled: Option<bool>,
+        #[arg(long)]
+        clear_tools_enabled: bool,
+        #[arg(long, value_enum)]
+        guard_mode: Option<GuardModeArg>,
+        #[arg(long)]
+        clear_guard_mode: bool,
         #[arg(long)]
         set_default: bool,
         #[arg(long = "route")]
@@ -2045,6 +2078,69 @@ fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
             } else {
                 println!("Created agent {} ({})", created.id, created.name);
                 println!("profile: {}", created.profile);
+            }
+        }
+        AgentsCommand::Update {
+            agent_id,
+            name,
+            profile,
+            model,
+            clear_model,
+            temperature,
+            clear_temperature,
+            max_turns,
+            clear_max_turns,
+            tools_enabled,
+            clear_tools_enabled,
+            guard_mode,
+            clear_guard_mode,
+            set_default,
+            route_keys,
+        } => {
+            if !manager.exists() {
+                return Err(MosaicError::Config(
+                    "config file not found. run `mosaic setup` first".to_string(),
+                ));
+            }
+            let config = manager.load()?;
+            if let Some(profile_name) = profile.as_deref() {
+                let _ = config.resolve_profile(Some(profile_name))?;
+            }
+
+            let updated = store.update(
+                &agent_id,
+                UpdateAgentInput {
+                    name,
+                    profile,
+                    model,
+                    clear_model,
+                    temperature,
+                    clear_temperature,
+                    max_turns,
+                    clear_max_turns,
+                    tools_enabled,
+                    clear_tools_enabled,
+                    guard_mode: guard_mode.map(Into::into),
+                    clear_guard_mode,
+                },
+            )?;
+
+            if set_default {
+                store.set_default(&updated.id)?;
+            }
+            for route_key in route_keys {
+                store.set_route(&route_key, &updated.id)?;
+            }
+            let routes = store.load_routes()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "agent": updated,
+                    "routes": routes,
+                }));
+            } else {
+                println!("Updated agent {} ({})", updated.id, updated.name);
+                println!("profile: {}", updated.profile);
             }
         }
         AgentsCommand::Show { agent_id } => {

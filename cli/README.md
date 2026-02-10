@@ -11,7 +11,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
-- Agents runtime (`agents list|add|show|remove|default|route`)
+- Agents runtime (`agents list|add|update|show|remove|default|route`)
 - Plugins and skills runtime (`plugins list|info|check|install|remove`, `skills list|info|check|install|remove`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
@@ -146,6 +146,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . 
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents list
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents add --name Writer --id writer --set-default --route ask
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents update writer --name "Writer V2" --route chat
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents show writer
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents route list
 cargo run -p mosaic-cli --bin mosaic -- --project-state ask --agent writer "hello"
