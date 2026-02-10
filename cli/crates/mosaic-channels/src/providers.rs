@@ -1,3 +1,8 @@
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
+use async_trait::async_trait;
+use chrono::Utc;
 use serde_json::{Value, json};
 
 use mosaic_core::error::{MosaicError, Result};
@@ -14,32 +19,256 @@ pub(crate) struct DeliveryAttemptResult {
     pub endpoint_masked: Option<String>,
 }
 
-pub(crate) fn local_delivery_success() -> DeliveryAttemptResult {
-    DeliveryAttemptResult {
-        ok: true,
-        attempts: 1,
-        http_status: Some(200),
-        error: None,
-        endpoint_masked: None,
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ChannelDispatchRequest<'a> {
+    pub channel_id: &'a str,
+    pub channel_name: &'a str,
+    pub endpoint: Option<&'a str>,
+    pub text: &'a str,
+    pub bearer_token: Option<&'a str>,
+}
+
+#[async_trait]
+trait ChannelProvider: Send + Sync {
+    fn canonical_kind(&self) -> &'static str;
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()>;
+
+    async fn send(
+        &self,
+        request: ChannelDispatchRequest<'_>,
+        policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult>;
+}
+
+#[derive(Default)]
+struct ChannelProviderRegistry {
+    providers: HashMap<String, Arc<dyn ChannelProvider>>,
+    aliases: HashMap<String, String>,
+}
+
+impl ChannelProviderRegistry {
+    fn with_defaults() -> Self {
+        let mut registry = Self::default();
+        registry.register(Arc::new(SlackWebhookProvider));
+        registry.register(Arc::new(GenericWebhookProvider));
+        registry.register(Arc::new(LocalProvider { kind: "mock" }));
+        registry.register(Arc::new(LocalProvider { kind: "local" }));
+        registry.register(Arc::new(LocalProvider { kind: "stdout" }));
+        registry
+    }
+
+    fn register(&mut self, provider: Arc<dyn ChannelProvider>) {
+        let canonical = normalize_kind_token(provider.canonical_kind());
+        self.aliases.insert(canonical.clone(), canonical.clone());
+        for alias in provider.aliases() {
+            self.aliases
+                .insert(normalize_kind_token(alias), canonical.clone());
+        }
+        self.providers.insert(canonical, provider);
+    }
+
+    fn resolve_kind(&self, kind: &str) -> Option<String> {
+        self.aliases.get(&normalize_kind_token(kind)).cloned()
+    }
+
+    fn validate_endpoint_for_kind(&self, kind: &str, endpoint: Option<&str>) -> Result<()> {
+        let provider = self.provider_for_kind(kind)?;
+        provider.validate_endpoint(endpoint)
+    }
+
+    async fn dispatch(
+        &self,
+        kind: &str,
+        request: ChannelDispatchRequest<'_>,
+        policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult> {
+        let provider = self.provider_for_kind(kind)?;
+        provider.send(request, policy).await
+    }
+
+    fn supported_kinds(&self) -> Vec<String> {
+        let mut kinds = self.providers.keys().cloned().collect::<Vec<_>>();
+        kinds.sort();
+        kinds
+    }
+
+    fn supported_kinds_hint(&self) -> String {
+        self.supported_kinds().join("|")
+    }
+
+    fn provider_for_kind(&self, kind: &str) -> Result<Arc<dyn ChannelProvider>> {
+        let resolved = self.resolve_kind(kind).ok_or_else(|| {
+            MosaicError::Validation(format!(
+                "unsupported channel kind '{}', expected {}",
+                kind,
+                self.supported_kinds_hint()
+            ))
+        })?;
+        self.providers.get(&resolved).cloned().ok_or_else(|| {
+            MosaicError::Validation(format!(
+                "channel provider for kind '{}' is not registered",
+                resolved
+            ))
+        })
     }
 }
 
-pub(crate) async fn send_slack_webhook(
-    endpoint: &str,
-    text: &str,
-    bearer_token: Option<String>,
-    policy: &RetryPolicy,
-) -> Result<DeliveryAttemptResult> {
-    send_with_retry(endpoint, json!({ "text": text }), bearer_token, policy).await
+struct SlackWebhookProvider;
+
+#[async_trait]
+impl ChannelProvider for SlackWebhookProvider {
+    fn canonical_kind(&self) -> &'static str {
+        "slack_webhook"
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["slack", "slack-webhook"]
+    }
+
+    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
+        let endpoint = endpoint.ok_or_else(|| {
+            MosaicError::Validation("slack_webhook channel requires --endpoint".to_string())
+        })?;
+        if endpoint.starts_with("mock-http://") {
+            return Ok(());
+        }
+        let url = reqwest::Url::parse(endpoint).map_err(|err| {
+            MosaicError::Validation(format!("invalid slack webhook endpoint URL: {err}"))
+        })?;
+        let host_ok = matches!(url.host_str(), Some("hooks.slack.com"));
+        let path_ok = url.path().starts_with("/services/");
+        if !host_ok || !path_ok {
+            return Err(MosaicError::Validation(
+                "slack webhook endpoint must match https://hooks.slack.com/services/..."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn send(
+        &self,
+        request: ChannelDispatchRequest<'_>,
+        policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult> {
+        let endpoint = request.endpoint.ok_or_else(|| {
+            MosaicError::Validation("slack_webhook channel requires --endpoint".to_string())
+        })?;
+        send_with_retry(
+            endpoint,
+            json!({ "text": request.text }),
+            request.bearer_token.map(str::to_string),
+            policy,
+        )
+        .await
+    }
 }
 
-pub(crate) async fn send_webhook(
-    endpoint: &str,
-    payload: Value,
-    bearer_token: Option<String>,
+struct GenericWebhookProvider;
+
+#[async_trait]
+impl ChannelProvider for GenericWebhookProvider {
+    fn canonical_kind(&self) -> &'static str {
+        "webhook"
+    }
+
+    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
+        let endpoint = endpoint.ok_or_else(|| {
+            MosaicError::Validation("webhook channel requires --endpoint".to_string())
+        })?;
+        if endpoint.starts_with("mock-http://") {
+            return Ok(());
+        }
+        let url = reqwest::Url::parse(endpoint).map_err(|err| {
+            MosaicError::Validation(format!("invalid webhook endpoint URL: {err}"))
+        })?;
+        match url.scheme() {
+            "http" | "https" => Ok(()),
+            scheme => Err(MosaicError::Validation(format!(
+                "unsupported webhook endpoint scheme '{scheme}', expected http/https"
+            ))),
+        }
+    }
+
+    async fn send(
+        &self,
+        request: ChannelDispatchRequest<'_>,
+        policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult> {
+        let endpoint = request.endpoint.ok_or_else(|| {
+            MosaicError::Validation("webhook channel requires --endpoint".to_string())
+        })?;
+        let payload = json!({
+            "channel_id": request.channel_id,
+            "channel_name": request.channel_name,
+            "text": request.text,
+            "ts": Utc::now(),
+        });
+        send_with_retry(
+            endpoint,
+            payload,
+            request.bearer_token.map(str::to_string),
+            policy,
+        )
+        .await
+    }
+}
+
+struct LocalProvider {
+    kind: &'static str,
+}
+
+#[async_trait]
+impl ChannelProvider for LocalProvider {
+    fn canonical_kind(&self) -> &'static str {
+        self.kind
+    }
+
+    fn validate_endpoint(&self, _endpoint: Option<&str>) -> Result<()> {
+        Ok(())
+    }
+
+    async fn send(
+        &self,
+        _request: ChannelDispatchRequest<'_>,
+        _policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult> {
+        Ok(local_delivery_success())
+    }
+}
+
+fn normalize_kind_token(kind: &str) -> String {
+    kind.trim().to_lowercase().replace('-', "_")
+}
+
+fn default_registry() -> &'static ChannelProviderRegistry {
+    static REGISTRY: OnceLock<ChannelProviderRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(ChannelProviderRegistry::with_defaults)
+}
+
+pub(crate) fn resolve_kind(kind: &str) -> Option<String> {
+    default_registry().resolve_kind(kind)
+}
+
+pub(crate) fn supported_kinds_hint() -> String {
+    default_registry().supported_kinds_hint()
+}
+
+pub(crate) fn validate_endpoint_for_kind(kind: &str, endpoint: Option<&str>) -> Result<()> {
+    default_registry().validate_endpoint_for_kind(kind, endpoint)
+}
+
+pub(crate) async fn dispatch_send(
+    kind: &str,
+    request: ChannelDispatchRequest<'_>,
     policy: &RetryPolicy,
 ) -> Result<DeliveryAttemptResult> {
-    send_with_retry(endpoint, payload, bearer_token, policy).await
+    default_registry().dispatch(kind, request, policy).await
 }
 
 async fn send_with_retry(
@@ -197,13 +426,33 @@ async fn simulate_mock_http(endpoint: &str, policy: &RetryPolicy) -> Result<Deli
     })
 }
 
+fn local_delivery_success() -> DeliveryAttemptResult {
+    DeliveryAttemptResult {
+        ok: true,
+        attempts: 1,
+        http_status: Some(200),
+        error: None,
+        endpoint_masked: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
-    use serde_json::json;
-
     use super::*;
+
+    #[test]
+    fn registry_resolves_kind_aliases() {
+        assert_eq!(resolve_kind("slack"), Some("slack_webhook".to_string()));
+        assert_eq!(
+            resolve_kind("slack-webhook"),
+            Some("slack_webhook".to_string())
+        );
+        assert_eq!(resolve_kind("local"), Some("local".to_string()));
+        assert_eq!(resolve_kind("stdout"), Some("stdout".to_string()));
+        assert!(resolve_kind("telegram").is_none());
+    }
 
     #[tokio::test]
     async fn mock_http_simulates_retry_and_success() {
@@ -211,10 +460,15 @@ mod tests {
             timeout: Duration::from_millis(10),
             backoff_ms: vec![1, 1, 1],
         };
-        let result = send_webhook(
-            "mock-http://500,500,200",
-            json!({"text":"hello"}),
-            None,
+        let result = dispatch_send(
+            "webhook",
+            ChannelDispatchRequest {
+                channel_id: "ch_1",
+                channel_name: "demo",
+                endpoint: Some("mock-http://500,500,200"),
+                text: "hello",
+                bearer_token: None,
+            },
             &policy,
         )
         .await

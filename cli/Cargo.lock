@@ -804,6 +804,7 @@ dependencies = [
 name = "mosaic-channels"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "mosaic-core",
  "reqwest",
