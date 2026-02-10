@@ -108,9 +108,9 @@ fn channels_real_send_flow() {
             "--name",
             "local-slack",
             "--kind",
-            "mock",
+            "slack_webhook",
             "--endpoint",
-            "https://example.test",
+            "mock-http://200",
         ])
         .assert()
         .success()
@@ -123,30 +123,24 @@ fn channels_real_send_flow() {
         .expect("channel id")
         .to_string();
     assert_eq!(add_json["channel"]["name"], "local-slack");
+    assert_eq!(add_json["channel"]["kind"], "slack_webhook");
+    assert!(add_json["channel"]["endpoint_masked"].is_string());
 
-    let login_output = Command::cargo_bin("mosaic")
+    let test_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .env("TEST_CHANNEL_TOKEN", "mock-token")
-        .args([
-            "--project-state",
-            "--json",
-            "channels",
-            "login",
-            &channel_id,
-            "--token-env",
-            "TEST_CHANNEL_TOKEN",
-        ])
+        .args(["--project-state", "--json", "channels", "test", &channel_id])
         .assert()
         .success()
         .get_output()
         .stdout
         .clone();
-    let login_json: Value = serde_json::from_slice(&login_output).expect("login json");
-    assert_eq!(login_json["ok"], true);
-    assert_eq!(login_json["token_present"], true);
+    let test_json: Value = serde_json::from_slice(&test_output).expect("test json");
+    assert_eq!(test_json["ok"], true);
+    assert_eq!(test_json["probe"], true);
+    assert_eq!(test_json["kind"], "test_probe");
 
-    let list_after = Command::cargo_bin("mosaic")
+    let list_after_test = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
         .args(["--project-state", "--json", "channels", "list"])
@@ -155,11 +149,14 @@ fn channels_real_send_flow() {
         .get_output()
         .stdout
         .clone();
-    let list_after: Value = serde_json::from_slice(&list_after).expect("list after json");
-    let channels = list_after["channels"].as_array().expect("channels array");
+    let list_after_test: Value = serde_json::from_slice(&list_after_test).expect("list after test");
+    let channels = list_after_test["channels"]
+        .as_array()
+        .expect("channels array");
     assert_eq!(channels.len(), 1);
     assert_eq!(channels[0]["id"], channel_id);
-    assert!(channels[0]["last_login_at"].is_string());
+    assert!(channels[0]["last_send_at"].is_null());
+    assert!(channels[0]["endpoint_masked"].is_string());
 
     let send_output = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -180,7 +177,217 @@ fn channels_real_send_flow() {
         .clone();
     let send_json: Value = serde_json::from_slice(&send_output).expect("send json");
     assert_eq!(send_json["ok"], true);
-    let path = send_json["path"].as_str().expect("event path");
+    assert_eq!(send_json["kind"], "message");
+    assert_eq!(send_json["attempts"], 1);
+    let path = send_json["event_path"].as_str().expect("event path");
     let event_content = std::fs::read_to_string(path).expect("event file content");
-    assert!(event_content.contains("hello-channel"));
+    let events = event_content
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("event line json"))
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["kind"], "test_probe");
+    assert_eq!(events[1]["kind"], "message");
+    assert_eq!(events[1]["delivery_status"], "success");
+    assert!(
+        events[1]["text_preview"]
+            .as_str()
+            .expect("text_preview")
+            .contains("hello-channel")
+    );
+
+    let list_after_send = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "channels", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_after_send: Value = serde_json::from_slice(&list_after_send).expect("list after send");
+    let channels_after_send = list_after_send["channels"]
+        .as_array()
+        .expect("channels array");
+    assert!(channels_after_send[0]["last_send_at"].is_string());
+    assert!(channels_after_send[0]["last_error"].is_null());
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_retry_policy_mock_http() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_5xx = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "retry-5xx",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://500,500,200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_5xx: Value = serde_json::from_slice(&add_5xx).expect("add 5xx channel");
+    let retry_5xx_id = add_5xx["channel"]["id"]
+        .as_str()
+        .expect("retry 5xx channel id")
+        .to_string();
+
+    let send_5xx = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &retry_5xx_id,
+            "--text",
+            "retry me",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_5xx: Value = serde_json::from_slice(&send_5xx).expect("send 5xx");
+    assert_eq!(send_5xx["attempts"], 3);
+    assert_eq!(send_5xx["http_status"], 200);
+
+    let add_4xx = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "fail-4xx",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://429",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_4xx: Value = serde_json::from_slice(&add_4xx).expect("add 4xx channel");
+    let fail_4xx_id = add_4xx["channel"]["id"]
+        .as_str()
+        .expect("fail 4xx channel id")
+        .to_string();
+
+    let fail_4xx = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &fail_4xx_id,
+            "--text",
+            "will fail",
+        ])
+        .assert()
+        .failure()
+        .code(4)
+        .get_output()
+        .stdout
+        .clone();
+    let fail_4xx: Value = serde_json::from_slice(&fail_4xx).expect("fail 4xx json");
+    assert_eq!(fail_4xx["ok"], false);
+    let fail_4xx_event_path = temp
+        .path()
+        .join(".mosaic/data/channel-events")
+        .join(format!("{fail_4xx_id}.jsonl"));
+    let fail_4xx_events = std::fs::read_to_string(&fail_4xx_event_path).expect("4xx event file");
+    let fail_4xx_last = fail_4xx_events
+        .lines()
+        .last()
+        .expect("4xx event line")
+        .to_string();
+    let fail_4xx_last: Value = serde_json::from_str(&fail_4xx_last).expect("4xx event json");
+    assert_eq!(fail_4xx_last["attempt"], 1);
+    assert_eq!(fail_4xx_last["http_status"], 429);
+    assert_eq!(fail_4xx_last["delivery_status"], "failed");
+
+    let list_after_4xx = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "channels", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_after_4xx: Value = serde_json::from_slice(&list_after_4xx).expect("list after 4xx");
+    let failed_channel = list_after_4xx["channels"]
+        .as_array()
+        .expect("channels array")
+        .iter()
+        .find(|channel| channel["id"].as_str() == Some(fail_4xx_id.as_str()))
+        .expect("failed channel in list");
+    assert!(failed_channel["last_error"].is_string());
+
+    let add_timeout = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "retry-timeout",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://timeout,timeout,200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_timeout: Value = serde_json::from_slice(&add_timeout).expect("add timeout channel");
+    let retry_timeout_id = add_timeout["channel"]["id"]
+        .as_str()
+        .expect("timeout channel id")
+        .to_string();
+
+    let send_timeout = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &retry_timeout_id,
+            "--text",
+            "timeout retry",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_timeout: Value = serde_json::from_slice(&send_timeout).expect("timeout send");
+    assert_eq!(send_timeout["attempts"], 3);
+    assert_eq!(send_timeout["http_status"], 200);
 }

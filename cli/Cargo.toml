@@ -4,6 +4,7 @@ members = [
   "crates/mosaic-cli",
   "crates/mosaic-core",
   "crates/mosaic-agent",
+  "crates/mosaic-channels",
   "crates/mosaic-tools",
   "crates/mosaic-provider-openai",
 ]

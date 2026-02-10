@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tiny_http::{Method, Response, Server};
 
+use mosaic_channels::{
+    AddChannelInput, ChannelRepository, DEFAULT_CHANNEL_TOKEN_ENV, channels_events_dir,
+    channels_file_path, format_channel_for_output,
+};
+
 use mosaic_agent::{AgentRunOptions, AgentRunner};
 use mosaic_core::audit::AuditStore;
 use mosaic_core::config::{
@@ -186,10 +191,12 @@ enum ChannelsCommand {
     Add {
         #[arg(long)]
         name: String,
-        #[arg(long, default_value = "mock")]
+        #[arg(long, default_value = "slack_webhook")]
         kind: String,
         #[arg(long)]
         endpoint: Option<String>,
+        #[arg(long)]
+        token_env: Option<String>,
     },
     Login {
         channel_id: String,
@@ -203,6 +210,11 @@ enum ChannelsCommand {
         #[arg(long)]
         token_env: Option<String>,
     },
+    Test {
+        channel_id: String,
+        #[arg(long)]
+        token_env: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,17 +225,6 @@ struct GatewayState {
     pid: u32,
     started_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ChannelEntry {
-    id: String,
-    name: String,
-    kind: String,
-    endpoint: Option<String>,
-    created_at: DateTime<Utc>,
-    last_login_at: Option<DateTime<Utc>>,
-    last_login_token_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -845,11 +846,12 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
 async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
-    let channels_path = paths.data_dir.join("channels.json");
-    let channel_events_dir = paths.data_dir.join("channel-events");
-    let mut channels: Vec<ChannelEntry> = load_json_file_opt(&channels_path)?.unwrap_or_default();
+    let channels_path = channels_file_path(&paths.data_dir);
+    let channel_events_dir = channels_events_dir(&paths.data_dir);
+    let repository = ChannelRepository::new(channels_path.clone(), channel_events_dir);
     match args.command {
         ChannelsCommand::List => {
+            let channels = repository.list()?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -861,15 +863,20 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             } else {
                 for channel in channels {
                     println!(
-                        "{} name={} kind={} endpoint={} last_login={}",
+                        "{} name={} kind={} endpoint={} last_login={} last_send={} last_error={}",
                         channel.id,
                         channel.name,
                         channel.kind,
-                        channel.endpoint.unwrap_or_else(|| "-".to_string()),
+                        channel.endpoint_masked.unwrap_or_else(|| "-".to_string()),
                         channel
                             .last_login_at
                             .map(|v| v.to_rfc3339())
-                            .unwrap_or_else(|| "-".to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        channel
+                            .last_send_at
+                            .map(|v| v.to_rfc3339())
+                            .unwrap_or_else(|| "-".to_string()),
+                        channel.last_error.unwrap_or_else(|| "-".to_string())
                     );
                 }
             }
@@ -878,55 +885,49 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             name,
             kind,
             endpoint,
+            token_env,
         } => {
-            let now = Utc::now();
-            let entry = ChannelEntry {
-                id: format!("ch_{}", uuid::Uuid::new_v4()),
+            let entry = repository.add(AddChannelInput {
                 name,
                 kind,
                 endpoint,
-                created_at: now,
-                last_login_at: None,
-                last_login_token_env: None,
-            };
-            channels.push(entry.clone());
-            save_json_file(&channels_path, &channels)?;
+                token_env,
+            })?;
+            let rendered = format_channel_for_output(&entry);
             if cli.json {
                 print_json(&json!({
                     "ok": true,
-                    "channel": entry,
+                    "channel": rendered,
                     "path": channels_path.display().to_string(),
                 }));
             } else {
-                println!("Channel added: {}", entry.id);
+                println!("Channel added: {}", rendered.id);
             }
         }
         ChannelsCommand::Login {
             channel_id,
             token_env,
         } => {
-            let token_env = token_env.unwrap_or_else(|| "CHANNEL_TOKEN".to_string());
-            let token_present = std::env::var(&token_env).is_ok();
-            let channel = channels
-                .iter_mut()
-                .find(|entry| entry.id == channel_id)
-                .ok_or_else(|| MosaicError::Config(format!("channel '{channel_id}' not found")))?;
-            channel.last_login_at = Some(Utc::now());
-            channel.last_login_token_env = Some(token_env.clone());
-            save_json_file(&channels_path, &channels)?;
+            let token_env = token_env.unwrap_or_else(|| DEFAULT_CHANNEL_TOKEN_ENV.to_string());
+            let login = repository.login(&channel_id, &token_env)?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "channel_id": channel_id,
-                    "token_env": token_env,
-                    "token_present": token_present,
+                    "token_env": login.token_env,
+                    "token_present": login.token_present,
+                    "channel": format_channel_for_output(&login.channel),
                 }));
             } else {
                 println!("Channel login recorded for {channel_id}");
                 println!(
                     "token env {} {}",
-                    token_env,
-                    if token_present { "found" } else { "not found" }
+                    login.token_env,
+                    if login.token_present {
+                        "found"
+                    } else {
+                        "not found"
+                    }
                 );
             }
         }
@@ -935,102 +936,51 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             text,
             token_env,
         } => {
-            if text.trim().is_empty() {
-                return Err(MosaicError::Validation(
-                    "send text cannot be empty".to_string(),
-                ));
+            let result = repository
+                .send(&channel_id, &text, token_env, false)
+                .await?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "channel_id": result.channel_id,
+                    "kind": result.kind,
+                    "delivered_via": result.delivered_via,
+                    "attempts": result.attempts,
+                    "http_status": result.http_status,
+                    "endpoint_masked": result.endpoint_masked,
+                    "event_path": result.event_path,
+                }));
+            } else {
+                println!("Message sent via {}", result.delivered_via);
+                if let Some(endpoint) = result.endpoint_masked {
+                    println!("endpoint: {endpoint}");
+                }
             }
-            let channel_idx = channels
-                .iter()
-                .position(|entry| entry.id == channel_id)
-                .ok_or_else(|| MosaicError::Config(format!("channel '{channel_id}' not found")))?;
-            channels[channel_idx].last_login_at = Some(Utc::now());
-            save_json_file(&channels_path, &channels)?;
-            let channel = channels[channel_idx].clone();
-            match channel.kind.as_str() {
-                "mock" | "local" | "stdout" => {
-                    let path = channel_events_dir.join(format!("{}.jsonl", channel.id));
-                    if let Some(parent) = path.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    let payload = json!({
-                        "ts": Utc::now(),
-                        "channel_id": channel.id,
-                        "channel_name": channel.name,
-                        "kind": channel.kind,
-                        "text": text,
-                    });
-                    let mut file = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&path)?;
-                    use std::io::Write as _;
-                    file.write_all(serde_json::to_string(&payload)?.as_bytes())?;
-                    file.write_all(b"\n")?;
-                    if cli.json {
-                        print_json(&json!({
-                            "ok": true,
-                            "delivered_via": channel.kind,
-                            "path": path.display().to_string(),
-                        }));
-                    } else {
-                        println!("Message stored in {}", path.display());
-                    }
-                }
-                "webhook" => {
-                    let endpoint = channel.endpoint.clone().ok_or_else(|| {
-                        MosaicError::Validation(format!(
-                            "channel '{}' kind=webhook requires endpoint",
-                            channel.id
-                        ))
-                    })?;
-                    let client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(15))
-                        .build()
-                        .map_err(|err| {
-                            MosaicError::Network(format!("failed to build HTTP client: {err}"))
-                        })?;
-                    let mut req = client.post(&endpoint).json(&json!({
-                        "channel_id": channel.id,
-                        "channel_name": channel.name,
-                        "text": text,
-                        "ts": Utc::now(),
-                    }));
-                    let selected_token_env =
-                        token_env.or_else(|| channel.last_login_token_env.clone());
-                    if let Some(token_env) = selected_token_env
-                        && let Ok(token) = std::env::var(&token_env)
-                    {
-                        req = req.bearer_auth(token);
-                    }
-                    let resp = req.send().await.map_err(|err| {
-                        if err.is_timeout() {
-                            MosaicError::Network("webhook request timed out".to_string())
-                        } else {
-                            MosaicError::Network(format!("webhook request failed: {err}"))
-                        }
-                    })?;
-                    if !resp.status().is_success() {
-                        return Err(MosaicError::Network(format!(
-                            "webhook returned status {}",
-                            resp.status()
-                        )));
-                    }
-                    if cli.json {
-                        print_json(&json!({
-                            "ok": true,
-                            "delivered_via": "webhook",
-                            "endpoint": endpoint,
-                            "status": resp.status().as_u16(),
-                        }));
-                    } else {
-                        println!("Message sent to webhook {}", endpoint);
-                    }
-                }
-                other => {
-                    return Err(MosaicError::Validation(format!(
-                        "unsupported channel kind '{other}', expected mock|local|stdout|webhook"
-                    )));
+        }
+        ChannelsCommand::Test {
+            channel_id,
+            token_env,
+        } => {
+            let probe_text = "mosaic channel connectivity probe";
+            let result = repository
+                .send(&channel_id, probe_text, token_env, true)
+                .await?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "channel_id": result.channel_id,
+                    "kind": result.kind,
+                    "probe": result.probe,
+                    "attempts": result.attempts,
+                    "http_status": result.http_status,
+                    "endpoint_masked": result.endpoint_masked,
+                    "event_path": result.event_path,
+                }));
+            } else {
+                println!("Channel test passed for {}", result.channel_id);
+                println!("attempts: {}", result.attempts);
+                if let Some(endpoint) = result.endpoint_masked {
+                    println!("endpoint: {endpoint}");
                 }
             }
         }
@@ -1290,6 +1240,10 @@ async fn handle_health(cli: &Cli) -> Result<()> {
 async fn handle_doctor(cli: &Cli) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     let manager = ConfigManager::new(paths.config_path.clone());
+    let channels_repo = ChannelRepository::new(
+        channels_file_path(&paths.data_dir),
+        channels_events_dir(&paths.data_dir),
+    );
     let mut checks = vec![];
 
     checks.push(run_check(
@@ -1335,6 +1289,21 @@ async fn handle_doctor(cli: &Cli) -> Result<()> {
                 "provider_connectivity",
                 false,
                 "skipped because API key env is missing",
+            ));
+        }
+    }
+
+    match channels_repo.doctor_checks() {
+        Ok(channel_checks) => {
+            for check in channel_checks {
+                checks.push(run_check(check.name, check.ok, check.detail));
+            }
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "channels_file",
+                false,
+                format!("failed to inspect channels: {err}"),
             ));
         }
     }

@@ -7,7 +7,7 @@ This workspace ships a pure CLI with no frontend dependency.
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `status`, `health`, `doctor`)
 - Gateway skeleton (`gateway run|status|health`)
-- Channels skeleton (`channels add|list|login`)
+- Channels (Slack webhook beta: `channels add|list|test|send`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
 - Command aliases compatible with OpenClaw-style naming:
@@ -23,6 +23,7 @@ cli/
     mosaic-cli
     mosaic-core
     mosaic-agent
+    mosaic-channels
     mosaic-tools
     mosaic-provider-openai
 ```
@@ -75,10 +76,17 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state gateway stop
 ### Channels Runtime
 
 ```bash
-cargo run -p mosaic-cli --bin mosaic -- --project-state channels add --name demo --kind mock
-cargo run -p mosaic-cli --bin mosaic -- --project-state channels list
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels add \
+  --name team-alerts \
+  --kind slack_webhook \
+  --endpoint https://hooks.slack.com/services/T000/B000/XXXXX
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels test <channel-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels send <channel-id> --text "hello"
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels list
 ```
+
+Detailed guide: `docs/channels-slack.md`
 
 ## Optional Live Smoke Test
 
