@@ -826,6 +826,7 @@ dependencies = [
  "mosaic-channels",
  "mosaic-core",
  "mosaic-gateway",
+ "mosaic-memory",
  "mosaic-ops",
  "mosaic-provider-openai",
  "mosaic-tools",
@@ -869,7 +870,13 @@ dependencies = [
 name = "mosaic-memory"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "mosaic-core",
  "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]

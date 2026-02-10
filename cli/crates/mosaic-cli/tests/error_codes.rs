@@ -59,7 +59,13 @@ fn gateway_call_unknown_method_returns_gateway_protocol_exit_code() {
         .expect("binary")
         .current_dir(temp.path())
         .env("MOSAIC_GATEWAY_TEST_MODE", "1")
-        .args(["--project-state", "--json", "gateway", "call", "unknown_method"])
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "call",
+            "unknown_method",
+        ])
         .assert()
         .failure()
         .code(9)
