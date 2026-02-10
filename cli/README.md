@@ -87,6 +87,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels list
 ```
 
 Detailed guide: `docs/channels-slack.md`
+Discord webhook guide: `docs/channels-discord.md`
 
 ## Optional Live Smoke Test
 

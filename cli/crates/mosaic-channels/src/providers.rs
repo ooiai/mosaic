@@ -55,6 +55,7 @@ impl ChannelProviderRegistry {
     fn with_defaults() -> Self {
         let mut registry = Self::default();
         registry.register(Arc::new(SlackWebhookProvider));
+        registry.register(Arc::new(DiscordWebhookProvider));
         registry.register(Arc::new(GenericWebhookProvider));
         registry.register(Arc::new(LocalProvider { kind: "mock" }));
         registry.register(Arc::new(LocalProvider { kind: "local" }));
@@ -212,6 +213,64 @@ impl ChannelProvider for GenericWebhookProvider {
         send_with_retry(
             endpoint,
             payload,
+            request.bearer_token.map(str::to_string),
+            policy,
+        )
+        .await
+    }
+}
+
+struct DiscordWebhookProvider;
+
+#[async_trait]
+impl ChannelProvider for DiscordWebhookProvider {
+    fn canonical_kind(&self) -> &'static str {
+        "discord_webhook"
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["discord", "discord-webhook"]
+    }
+
+    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
+        let endpoint = endpoint.ok_or_else(|| {
+            MosaicError::Validation("discord_webhook channel requires --endpoint".to_string())
+        })?;
+        if endpoint.starts_with("mock-http://") {
+            return Ok(());
+        }
+        let url = reqwest::Url::parse(endpoint).map_err(|err| {
+            MosaicError::Validation(format!("invalid discord webhook endpoint URL: {err}"))
+        })?;
+        let host_ok = matches!(
+            url.host_str(),
+            Some("discord.com")
+                | Some("canary.discord.com")
+                | Some("ptb.discord.com")
+                | Some("discordapp.com")
+        );
+        let path = url.path();
+        let path_ok = path.starts_with("/api/webhooks/") || path.contains("/webhooks/");
+        if !host_ok || !path_ok {
+            return Err(MosaicError::Validation(
+                "discord webhook endpoint must match https://discord.com/api/webhooks/..."
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn send(
+        &self,
+        request: ChannelDispatchRequest<'_>,
+        policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult> {
+        let endpoint = request.endpoint.ok_or_else(|| {
+            MosaicError::Validation("discord_webhook channel requires --endpoint".to_string())
+        })?;
+        send_with_retry(
+            endpoint,
+            json!({ "content": request.text }),
             request.bearer_token.map(str::to_string),
             policy,
         )
@@ -448,6 +507,11 @@ mod tests {
         assert_eq!(
             resolve_kind("slack-webhook"),
             Some("slack_webhook".to_string())
+        );
+        assert_eq!(resolve_kind("discord"), Some("discord_webhook".to_string()));
+        assert_eq!(
+            resolve_kind("discord-webhook"),
+            Some("discord_webhook".to_string())
         );
         assert_eq!(resolve_kind("local"), Some("local".to_string()));
         assert_eq!(resolve_kind("stdout"), Some("stdout".to_string()));
