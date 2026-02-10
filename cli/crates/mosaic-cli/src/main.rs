@@ -451,8 +451,21 @@ struct PluginsArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum PluginsCommand {
     List,
-    Info { plugin_id: String },
-    Check { plugin_id: Option<String> },
+    Info {
+        plugin_id: String,
+    },
+    Check {
+        plugin_id: Option<String>,
+    },
+    Install {
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        force: bool,
+    },
+    Remove {
+        plugin_id: String,
+    },
 }
 
 #[derive(Args, Debug, Clone)]
@@ -464,8 +477,21 @@ struct SkillsArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum SkillsCommand {
     List,
-    Info { skill_id: String },
-    Check { skill_id: Option<String> },
+    Info {
+        skill_id: String,
+    },
+    Check {
+        skill_id: Option<String>,
+    },
+    Install {
+        #[arg(long)]
+        path: String,
+        #[arg(long)]
+        force: bool,
+    },
+    Remove {
+        skill_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2291,6 +2317,46 @@ fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
                 }
             }
         }
+        PluginsCommand::Install { path, force } => {
+            let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+            let source = {
+                let value = PathBuf::from(path);
+                if value.is_absolute() {
+                    value
+                } else {
+                    cwd.join(value)
+                }
+            };
+            let outcome = registry.install_plugin_from_path(&source, force)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "installed": outcome,
+                }));
+            } else {
+                println!(
+                    "Installed plugin {} -> {}",
+                    outcome.id, outcome.installed_path
+                );
+                if outcome.replaced {
+                    println!("replaced existing plugin package");
+                }
+            }
+        }
+        PluginsCommand::Remove { plugin_id } => {
+            let removed = registry.remove_project_plugin(&plugin_id)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": removed,
+                    "plugin_id": plugin_id,
+                }));
+            } else if removed {
+                println!("Removed plugin {plugin_id}");
+            } else {
+                println!("Plugin {plugin_id} not found in project scope.");
+            }
+        }
     }
     Ok(())
 }
@@ -2359,6 +2425,46 @@ fn handle_skills(cli: &Cli, args: SkillsArgs) -> Result<()> {
                         println!("  [{status}] {}: {}", check.name, check.detail);
                     }
                 }
+            }
+        }
+        SkillsCommand::Install { path, force } => {
+            let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+            let source = {
+                let value = PathBuf::from(path);
+                if value.is_absolute() {
+                    value
+                } else {
+                    cwd.join(value)
+                }
+            };
+            let outcome = registry.install_skill_from_path(&source, force)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "installed": outcome,
+                }));
+            } else {
+                println!(
+                    "Installed skill {} -> {}",
+                    outcome.id, outcome.installed_path
+                );
+                if outcome.replaced {
+                    println!("replaced existing skill package");
+                }
+            }
+        }
+        SkillsCommand::Remove { skill_id } => {
+            let removed = registry.remove_project_skill(&skill_id)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": removed,
+                    "skill_id": skill_id,
+                }));
+            } else if removed {
+                println!("Removed skill {skill_id}");
+            } else {
+                println!("Skill {skill_id} not found in project scope.");
             }
         }
     }

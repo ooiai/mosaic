@@ -9,11 +9,15 @@ This module provides a local, CLI-first runtime for discovering and validating p
 mosaic --project-state plugins list
 mosaic --project-state plugins info <plugin-id>
 mosaic --project-state plugins check [plugin-id]
+mosaic --project-state plugins install --path ./my-plugin [--force]
+mosaic --project-state plugins remove <plugin-id>
 
 # Skills
 mosaic --project-state skills list
 mosaic --project-state skills info <skill-id>
 mosaic --project-state skills check [skill-id]
+mosaic --project-state skills install --path ./writer [--force]
+mosaic --project-state skills remove <skill-id>
 ```
 
 ## Discovery Roots
@@ -59,3 +63,12 @@ All commands support `--json`. Successful command envelope:
 - `report.results[]`
 
 Missing target IDs return validation error (`exit_code=7`).
+
+## Install/Remove Behavior
+
+- `install` currently writes to project scope only (`.mosaic/plugins` and `.mosaic/skills`).
+- `install` requires:
+  - plugin source contains `plugin.toml`
+  - skill source contains `SKILL.md`
+- If target ID already exists, use `--force` to replace.
+- `remove` only deletes project-scope entries and is a no-op for user/global sources.

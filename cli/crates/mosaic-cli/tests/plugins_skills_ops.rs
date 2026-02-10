@@ -135,3 +135,96 @@ fn plugins_info_missing_returns_validation_error() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "validation");
 }
+
+#[test]
+#[allow(deprecated)]
+fn plugins_and_skills_install_remove_flow() {
+    let temp = tempdir().expect("tempdir");
+    let plugin_source = temp.path().join("sample-plugin");
+    let skill_source = temp.path().join("writer");
+    std::fs::create_dir_all(&plugin_source).expect("create plugin source");
+    std::fs::create_dir_all(&skill_source).expect("create skill source");
+    std::fs::write(
+        plugin_source.join("plugin.toml"),
+        "[plugin]\nid = \"sample_plugin\"\nname = \"Sample Plugin\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(
+        skill_source.join("SKILL.md"),
+        "# Writer\nGenerate concise notes.\n",
+    )
+    .expect("write skill file");
+
+    let plugin_install = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "plugins",
+            "install",
+            "--path",
+            "sample-plugin",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugin_install: Value =
+        serde_json::from_slice(&plugin_install).expect("plugin install json");
+    assert_eq!(plugin_install["ok"], true);
+    assert_eq!(plugin_install["installed"]["id"], "sample_plugin");
+
+    let skill_install = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "skills",
+            "install",
+            "--path",
+            "writer",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let skill_install: Value = serde_json::from_slice(&skill_install).expect("skill install json");
+    assert_eq!(skill_install["ok"], true);
+    assert_eq!(skill_install["installed"]["id"], "writer");
+
+    let plugin_remove = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "plugins",
+            "remove",
+            "sample_plugin",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugin_remove: Value = serde_json::from_slice(&plugin_remove).expect("plugin remove json");
+    assert_eq!(plugin_remove["ok"], true);
+    assert_eq!(plugin_remove["removed"], true);
+
+    let skill_remove = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "skills", "remove", "writer"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let skill_remove: Value = serde_json::from_slice(&skill_remove).expect("skill remove json");
+    assert_eq!(skill_remove["ok"], true);
+    assert_eq!(skill_remove["removed"], true);
+}
