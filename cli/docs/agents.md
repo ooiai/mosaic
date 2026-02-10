@@ -11,6 +11,8 @@ mosaic --project-state agents show <agent_id>
 
 # Create/remove agents
 mosaic --project-state agents add --name Writer --id writer --profile default --set-default --route ask
+mosaic --project-state agents update writer --name "Writer V2" --model gpt-4o-mini --route chat
+mosaic --project-state agents update writer --clear-model --clear-temperature
 mosaic --project-state agents remove writer
 
 # Default agent
@@ -47,6 +49,14 @@ Each agent may override these profile fields:
 - `agent.max_turns`
 - `tools.enabled`
 - `tools.run.guard_mode`
+
+`agents update` supports clearing optional overrides:
+
+- `--clear-model`
+- `--clear-temperature`
+- `--clear-max-turns`
+- `--clear-tools-enabled`
+- `--clear-guard-mode`
 
 All commands support `--json` and use the common envelope:
 

@@ -36,6 +36,22 @@ pub struct AddAgentInput {
     pub guard_mode: Option<RunGuardMode>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct UpdateAgentInput {
+    pub name: Option<String>,
+    pub profile: Option<String>,
+    pub model: Option<String>,
+    pub clear_model: bool,
+    pub temperature: Option<f32>,
+    pub clear_temperature: bool,
+    pub max_turns: Option<u32>,
+    pub clear_max_turns: bool,
+    pub tools_enabled: Option<bool>,
+    pub clear_tools_enabled: bool,
+    pub guard_mode: Option<RunGuardMode>,
+    pub clear_guard_mode: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentRoutes {
     pub default_agent_id: Option<String>,
@@ -151,6 +167,60 @@ impl AgentStore {
         routes.routes.retain(|_, value| value != &agent_id);
         self.save_routes(&routes)?;
         Ok(true)
+    }
+
+    pub fn update(&self, agent_id: &str, input: UpdateAgentInput) -> Result<AgentDefinition> {
+        let agent_id = normalize_agent_id(agent_id)?;
+        validate_agent_update_input(&input)?;
+
+        let mut file = self.load_agents()?;
+        let agent = file
+            .agents
+            .iter_mut()
+            .find(|agent| agent.id == agent_id)
+            .ok_or_else(|| MosaicError::Validation(format!("agent '{agent_id}' not found")))?;
+
+        if let Some(name) = input.name {
+            agent.name = name.trim().to_string();
+        }
+        if let Some(profile) = input.profile {
+            agent.profile = profile.trim().to_string();
+        }
+
+        if input.clear_model {
+            agent.model = None;
+        } else if let Some(model) = input.model {
+            agent.model = Some(model.trim().to_string());
+        }
+
+        if input.clear_temperature {
+            agent.temperature = None;
+        } else if let Some(temperature) = input.temperature {
+            agent.temperature = Some(temperature);
+        }
+
+        if input.clear_max_turns {
+            agent.max_turns = None;
+        } else if let Some(max_turns) = input.max_turns {
+            agent.max_turns = Some(max_turns);
+        }
+
+        if input.clear_tools_enabled {
+            agent.tools_enabled = None;
+        } else if let Some(tools_enabled) = input.tools_enabled {
+            agent.tools_enabled = Some(tools_enabled);
+        }
+
+        if input.clear_guard_mode {
+            agent.guard_mode = None;
+        } else if let Some(guard_mode) = input.guard_mode {
+            agent.guard_mode = Some(guard_mode);
+        }
+
+        agent.updated_at = Utc::now();
+        let updated = agent.clone();
+        self.save_agents(&file)?;
+        Ok(updated)
     }
 
     pub fn load_routes(&self) -> Result<AgentRoutes> {
@@ -507,6 +577,88 @@ fn validate_agent_fields(
     Ok(())
 }
 
+fn validate_agent_update_input(input: &UpdateAgentInput) -> Result<()> {
+    if input.name.is_none()
+        && input.profile.is_none()
+        && input.model.is_none()
+        && !input.clear_model
+        && input.temperature.is_none()
+        && !input.clear_temperature
+        && input.max_turns.is_none()
+        && !input.clear_max_turns
+        && input.tools_enabled.is_none()
+        && !input.clear_tools_enabled
+        && input.guard_mode.is_none()
+        && !input.clear_guard_mode
+    {
+        return Err(MosaicError::Validation(
+            "no update fields provided".to_string(),
+        ));
+    }
+    if input.clear_model && input.model.is_some() {
+        return Err(MosaicError::Validation(
+            "cannot use --model and --clear-model together".to_string(),
+        ));
+    }
+    if input.clear_temperature && input.temperature.is_some() {
+        return Err(MosaicError::Validation(
+            "cannot use --temperature and --clear-temperature together".to_string(),
+        ));
+    }
+    if input.clear_max_turns && input.max_turns.is_some() {
+        return Err(MosaicError::Validation(
+            "cannot use --max-turns and --clear-max-turns together".to_string(),
+        ));
+    }
+    if input.clear_tools_enabled && input.tools_enabled.is_some() {
+        return Err(MosaicError::Validation(
+            "cannot use --tools-enabled and --clear-tools-enabled together".to_string(),
+        ));
+    }
+    if input.clear_guard_mode && input.guard_mode.is_some() {
+        return Err(MosaicError::Validation(
+            "cannot use --guard-mode and --clear-guard-mode together".to_string(),
+        ));
+    }
+
+    if let Some(name) = &input.name {
+        if name.trim().is_empty() {
+            return Err(MosaicError::Validation(
+                "agent name cannot be empty".to_string(),
+            ));
+        }
+    }
+    if let Some(profile) = &input.profile {
+        if profile.trim().is_empty() {
+            return Err(MosaicError::Validation(
+                "agent profile cannot be empty".to_string(),
+            ));
+        }
+    }
+    if let Some(model) = &input.model {
+        if model.trim().is_empty() {
+            return Err(MosaicError::Validation(
+                "agent model cannot be empty".to_string(),
+            ));
+        }
+    }
+    if let Some(value) = input.temperature {
+        if !(0.0..=2.0).contains(&value) {
+            return Err(MosaicError::Validation(
+                "temperature must be in [0.0, 2.0]".to_string(),
+            ));
+        }
+    }
+    if let Some(value) = input.max_turns {
+        if value == 0 {
+            return Err(MosaicError::Validation(
+                "max_turns must be greater than 0".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -621,5 +773,76 @@ mod tests {
             resolved.profile.tools.run.guard_mode,
             RunGuardMode::AllConfirm
         ));
+    }
+
+    #[test]
+    fn update_agent_overrides_and_clear_fields() {
+        let temp = tempdir().expect("tempdir");
+        let store = build_store(&temp);
+        store
+            .add(AddAgentInput {
+                id: Some("writer".to_string()),
+                name: "Writer".to_string(),
+                profile: "default".to_string(),
+                model: Some("gpt-4o-mini".to_string()),
+                temperature: Some(0.5),
+                max_turns: Some(6),
+                tools_enabled: Some(true),
+                guard_mode: Some(RunGuardMode::ConfirmDangerous),
+            })
+            .expect("add");
+
+        let updated = store
+            .update(
+                "writer",
+                UpdateAgentInput {
+                    name: Some("Writer V2".to_string()),
+                    model: Some("mock-model".to_string()),
+                    clear_temperature: true,
+                    tools_enabled: Some(false),
+                    guard_mode: Some(RunGuardMode::AllConfirm),
+                    ..UpdateAgentInput::default()
+                },
+            )
+            .expect("update");
+
+        assert_eq!(updated.name, "Writer V2");
+        assert_eq!(updated.model.as_deref(), Some("mock-model"));
+        assert_eq!(updated.temperature, None);
+        assert_eq!(updated.tools_enabled, Some(false));
+        assert!(matches!(updated.guard_mode, Some(RunGuardMode::AllConfirm)));
+    }
+
+    #[test]
+    fn update_agent_rejects_conflicting_clear_and_set_flags() {
+        let temp = tempdir().expect("tempdir");
+        let store = build_store(&temp);
+        store
+            .add(AddAgentInput {
+                id: Some("writer".to_string()),
+                name: "Writer".to_string(),
+                profile: "default".to_string(),
+                model: None,
+                temperature: None,
+                max_turns: None,
+                tools_enabled: None,
+                guard_mode: None,
+            })
+            .expect("add");
+
+        let err = store
+            .update(
+                "writer",
+                UpdateAgentInput {
+                    model: Some("mock-model".to_string()),
+                    clear_model: true,
+                    ..UpdateAgentInput::default()
+                },
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot use --model and --clear-model together")
+        );
     }
 }
