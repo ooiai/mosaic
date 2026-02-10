@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 mosaic-agent = { path = "../mosaic-agent" }
+mosaic-channels = { path = "../mosaic-channels" }
 mosaic-core = { path = "../mosaic-core" }
 mosaic-provider-openai = { path = "../mosaic-provider-openai" }
 mosaic-tools = { path = "../mosaic-tools" }
@@ -20,7 +21,6 @@ serde_json.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 tiny_http.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

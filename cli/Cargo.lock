@@ -801,6 +801,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-channels"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mosaic-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "mosaic-cli"
 version = "0.1.0"
 dependencies = [
@@ -808,6 +822,7 @@ dependencies = [
  "chrono",
  "clap",
  "mosaic-agent",
+ "mosaic-channels",
  "mosaic-core",
  "mosaic-provider-openai",
  "mosaic-tools",
@@ -818,7 +833,6 @@ dependencies = [
  "tempfile",
  "tiny_http",
  "tokio",
- "uuid",
 ]
 
 [[package]]
