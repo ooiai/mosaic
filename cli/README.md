@@ -9,6 +9,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Gateway control plane (`gateway run|status|health|probe|discover|call|stop`)
 - Channels runtime (`channels add|list|status|test|send|logs|capabilities|resolve|remove|logout`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
+- Memory runtime (`memory index|search|status`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
 - Command aliases compatible with OpenClaw-style naming:
@@ -102,6 +103,7 @@ Detailed guide: `docs/channels-slack.md`
 Discord webhook guide: `docs/channels-discord.md`
 Gateway ops guide: `docs/gateway-ops.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
+Memory guide: `docs/memory.md`
 
 ### Ops Runtime
 
@@ -114,6 +116,14 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state approvals set allowlist
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals allowlist add "cargo test"
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox list
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox explain --profile restricted
+```
+
+### Memory Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory index --path .
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory search "rust cli"
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory status
 ```
 
 ## Optional Live Smoke Test

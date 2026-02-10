@@ -18,6 +18,7 @@ use mosaic_channels::{
     channels_file_path, format_channel_for_output,
 };
 use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
+use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
 
 use mosaic_agent::{AgentRunOptions, AgentRunner};
 use mosaic_core::audit::AuditStore;
@@ -71,6 +72,7 @@ enum Commands {
     System(SystemArgs),
     Approvals(ApprovalsArgs),
     Sandbox(SandboxArgs),
+    Memory(MemoryArgs),
     Status,
     Health,
     Doctor,
@@ -321,6 +323,32 @@ enum SandboxCommand {
     },
 }
 
+#[derive(Args, Debug, Clone)]
+struct MemoryArgs {
+    #[command(subcommand)]
+    command: MemoryCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum MemoryCommand {
+    Index {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long, default_value_t = 500)]
+        max_files: usize,
+        #[arg(long, default_value_t = 262_144)]
+        max_file_size: usize,
+        #[arg(long, default_value_t = 16_384)]
+        max_content_bytes: usize,
+    },
+    Search {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    Status,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct GatewayState {
     running: bool,
@@ -432,6 +460,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::System(args) => handle_system(&cli, args),
         Commands::Approvals(args) => handle_approvals(&cli, args),
         Commands::Sandbox(args) => handle_sandbox(&cli, args),
+        Commands::Memory(args) => handle_memory(&cli, args),
         Commands::Status => handle_status(&cli),
         Commands::Health => handle_health(&cli).await,
         Commands::Doctor => handle_doctor(&cli).await,
@@ -1607,6 +1636,90 @@ fn handle_sandbox(cli: &Cli, args: SandboxArgs) -> Result<()> {
     Ok(())
 }
 
+fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let store = MemoryStore::new(
+        memory_index_path(&paths.data_dir),
+        memory_status_path(&paths.data_dir),
+    );
+
+    match args.command {
+        MemoryCommand::Index {
+            path,
+            max_files,
+            max_file_size,
+            max_content_bytes,
+        } => {
+            let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+            let root = {
+                let raw = PathBuf::from(path);
+                if raw.is_absolute() {
+                    raw
+                } else {
+                    cwd.join(raw)
+                }
+            };
+            let result = store.index(MemoryIndexOptions {
+                root,
+                max_files,
+                max_file_size,
+                max_content_bytes,
+            })?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "index": result,
+                }));
+            } else {
+                println!("memory indexed documents: {}", result.indexed_documents);
+                println!("memory skipped files: {}", result.skipped_files);
+                println!("index path: {}", result.index_path);
+            }
+        }
+        MemoryCommand::Search { query, limit } => {
+            let result = store.search(&query, Some(limit))?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "result": result,
+                }));
+            } else if result.hits.is_empty() {
+                println!("No memory hits.");
+            } else {
+                println!(
+                    "memory search hits: {} (showing {})",
+                    result.total_hits,
+                    result.hits.len()
+                );
+                for hit in result.hits {
+                    println!("{} score={} {}", hit.path, hit.score, hit.snippet);
+                }
+            }
+        }
+        MemoryCommand::Status => {
+            let status = store.status()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "status": status,
+                }));
+            } else {
+                println!("indexed documents: {}", status.indexed_documents);
+                println!(
+                    "last indexed at: {}",
+                    status
+                        .last_indexed_at
+                        .map(|value| value.to_rfc3339())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!("index path: {}", status.index_path);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn spawn_gateway_process(cli: &Cli, host: &str, port: u16) -> Result<u32> {
     let exe = std::env::current_exe().map_err(|err| {
         MosaicError::Io(format!("failed to resolve current executable path: {err}"))
@@ -2052,6 +2165,30 @@ async fn handle_doctor(cli: &Cli) -> Result<()> {
                 "sandbox_policy",
                 false,
                 format!("failed to load sandbox policy: {err}"),
+            ));
+        }
+    }
+
+    let memory_store = MemoryStore::new(
+        memory_index_path(&paths.data_dir),
+        memory_status_path(&paths.data_dir),
+    );
+    match memory_store.status() {
+        Ok(status) => {
+            checks.push(run_check(
+                "memory_index",
+                true,
+                format!(
+                    "indexed_documents={} index_path={}",
+                    status.indexed_documents, status.index_path
+                ),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "memory_index",
+                false,
+                format!("failed to load memory status: {err}"),
             ));
         }
     }
