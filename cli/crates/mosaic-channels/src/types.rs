@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub(crate) const TEXT_PREVIEW_LIMIT: usize = 120;
 
@@ -59,6 +60,47 @@ pub struct ChannelSendResult {
     pub probe: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ChannelStatus {
+    pub total_channels: usize,
+    pub healthy_channels: usize,
+    pub channels_with_errors: usize,
+    pub kinds: BTreeMap<String, usize>,
+    pub last_send_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelLogEntry {
+    pub ts: DateTime<Utc>,
+    pub channel_id: String,
+    pub kind: String,
+    pub delivery_status: String,
+    pub attempt: usize,
+    pub http_status: Option<u16>,
+    pub error: Option<String>,
+    pub text_preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelCapability {
+    pub kind: String,
+    pub aliases: Vec<String>,
+    pub supports_endpoint: bool,
+    pub supports_token_env: bool,
+    pub supports_test_probe: bool,
+    pub supports_bearer_token: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelDirectoryEntry {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub endpoint_masked: Option<String>,
+    pub last_send_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChannelLoginResult {
     pub token_env: String,
@@ -71,18 +113,6 @@ pub struct DoctorCheck {
     pub name: String,
     pub ok: bool,
     pub detail: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct ChannelEvent {
-    pub ts: DateTime<Utc>,
-    pub channel_id: String,
-    pub kind: String,
-    pub delivery_status: String,
-    pub attempt: usize,
-    pub http_status: Option<u16>,
-    pub error: Option<String>,
-    pub text_preview: String,
 }
 
 pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {

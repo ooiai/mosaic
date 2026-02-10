@@ -9,6 +9,7 @@ use mosaic_core::error::{MosaicError, Result};
 
 use crate::policy::{RetryPolicy, should_retry_http_status};
 use crate::schema::mask_endpoint;
+use crate::types::ChannelCapability;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DeliveryAttemptResult {
@@ -35,6 +36,8 @@ trait ChannelProvider: Send + Sync {
     fn aliases(&self) -> &'static [&'static str] {
         &[]
     }
+
+    fn capability(&self) -> ChannelCapability;
 
     fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()>;
 
@@ -102,9 +105,23 @@ impl ChannelProviderRegistry {
         self.supported_kinds().join("|")
     }
 
+    fn capabilities_for_kind(&self, kind: Option<&str>) -> Result<Vec<ChannelCapability>> {
+        if let Some(kind) = kind {
+            let provider = self.provider_for_kind(kind)?;
+            return Ok(vec![provider.capability()]);
+        }
+        let mut capabilities = self
+            .providers
+            .values()
+            .map(|provider| provider.capability())
+            .collect::<Vec<_>>();
+        capabilities.sort_by(|lhs, rhs| lhs.kind.cmp(&rhs.kind));
+        Ok(capabilities)
+    }
+
     fn provider_for_kind(&self, kind: &str) -> Result<Arc<dyn ChannelProvider>> {
         let resolved = self.resolve_kind(kind).ok_or_else(|| {
-            MosaicError::Validation(format!(
+            MosaicError::ChannelUnsupported(format!(
                 "unsupported channel kind '{}', expected {}",
                 kind,
                 self.supported_kinds_hint()
@@ -129,6 +146,17 @@ impl ChannelProvider for SlackWebhookProvider {
 
     fn aliases(&self) -> &'static [&'static str] {
         &["slack", "slack-webhook"]
+    }
+
+    fn capability(&self) -> ChannelCapability {
+        ChannelCapability {
+            kind: self.canonical_kind().to_string(),
+            aliases: self.aliases().iter().map(ToString::to_string).collect(),
+            supports_endpoint: true,
+            supports_token_env: true,
+            supports_test_probe: true,
+            supports_bearer_token: true,
+        }
     }
 
     fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
@@ -176,6 +204,17 @@ struct GenericWebhookProvider;
 impl ChannelProvider for GenericWebhookProvider {
     fn canonical_kind(&self) -> &'static str {
         "webhook"
+    }
+
+    fn capability(&self) -> ChannelCapability {
+        ChannelCapability {
+            kind: self.canonical_kind().to_string(),
+            aliases: Vec::new(),
+            supports_endpoint: true,
+            supports_token_env: true,
+            supports_test_probe: true,
+            supports_bearer_token: true,
+        }
     }
 
     fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
@@ -230,6 +269,17 @@ impl ChannelProvider for DiscordWebhookProvider {
 
     fn aliases(&self) -> &'static [&'static str] {
         &["discord", "discord-webhook"]
+    }
+
+    fn capability(&self) -> ChannelCapability {
+        ChannelCapability {
+            kind: self.canonical_kind().to_string(),
+            aliases: self.aliases().iter().map(ToString::to_string).collect(),
+            supports_endpoint: true,
+            supports_token_env: true,
+            supports_test_probe: true,
+            supports_bearer_token: true,
+        }
     }
 
     fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
@@ -288,6 +338,17 @@ impl ChannelProvider for LocalProvider {
         self.kind
     }
 
+    fn capability(&self) -> ChannelCapability {
+        ChannelCapability {
+            kind: self.canonical_kind().to_string(),
+            aliases: Vec::new(),
+            supports_endpoint: false,
+            supports_token_env: true,
+            supports_test_probe: true,
+            supports_bearer_token: true,
+        }
+    }
+
     fn validate_endpoint(&self, _endpoint: Option<&str>) -> Result<()> {
         Ok(())
     }
@@ -320,6 +381,10 @@ pub(crate) fn supported_kinds_hint() -> String {
 
 pub(crate) fn validate_endpoint_for_kind(kind: &str, endpoint: Option<&str>) -> Result<()> {
     default_registry().validate_endpoint_for_kind(kind, endpoint)
+}
+
+pub(crate) fn capabilities_for_kind(kind: Option<&str>) -> Result<Vec<ChannelCapability>> {
+    default_registry().capabilities_for_kind(kind)
 }
 
 pub(crate) async fn dispatch_send(

@@ -18,6 +18,10 @@ pub struct StatePaths {
     pub root_dir: PathBuf,
     pub config_path: PathBuf,
     pub data_dir: PathBuf,
+    pub policy_dir: PathBuf,
+    pub approvals_policy_path: PathBuf,
+    pub sandbox_policy_path: PathBuf,
+    pub system_events_path: PathBuf,
     pub sessions_dir: PathBuf,
     pub audit_dir: PathBuf,
     pub audit_log_path: PathBuf,
@@ -42,6 +46,10 @@ impl StatePaths {
         let root_dir = config_home.join("mosaic");
         let config_path = root_dir.join("config.toml");
         let data_dir = data_home.join("mosaic");
+        let policy_dir = root_dir.join("policy");
+        let approvals_policy_path = policy_dir.join("approvals.toml");
+        let sandbox_policy_path = policy_dir.join("sandbox.toml");
+        let system_events_path = data_dir.join("system-events.jsonl");
         let sessions_dir = data_dir.join("sessions");
         let audit_dir = data_dir.join("audit");
         let audit_log_path = audit_dir.join("commands.jsonl");
@@ -51,6 +59,10 @@ impl StatePaths {
             root_dir,
             config_path,
             data_dir,
+            policy_dir,
+            approvals_policy_path,
+            sandbox_policy_path,
+            system_events_path,
             sessions_dir,
             audit_dir,
             audit_log_path,
@@ -61,6 +73,10 @@ impl StatePaths {
         let root_dir = cwd.join(project_dir_name);
         let config_path = root_dir.join("config.toml");
         let data_dir = root_dir.join("data");
+        let policy_dir = root_dir.join("policy");
+        let approvals_policy_path = policy_dir.join("approvals.toml");
+        let sandbox_policy_path = policy_dir.join("sandbox.toml");
+        let system_events_path = data_dir.join("system-events.jsonl");
         let sessions_dir = data_dir.join("sessions");
         let audit_dir = data_dir.join("audit");
         let audit_log_path = audit_dir.join("commands.jsonl");
@@ -70,6 +86,10 @@ impl StatePaths {
             root_dir,
             config_path,
             data_dir,
+            policy_dir,
+            approvals_policy_path,
+            sandbox_policy_path,
+            system_events_path,
             sessions_dir,
             audit_dir,
             audit_log_path,
@@ -80,6 +100,8 @@ impl StatePaths {
         if let Some(parent) = self.config_path.parent() {
             fs::create_dir_all(parent)?;
         }
+        fs::create_dir_all(&self.data_dir)?;
+        fs::create_dir_all(&self.policy_dir)?;
         fs::create_dir_all(&self.sessions_dir)?;
         fs::create_dir_all(&self.audit_dir)?;
         Ok(())
