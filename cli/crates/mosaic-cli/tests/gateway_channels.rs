@@ -215,6 +215,75 @@ fn channels_real_send_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn channels_discord_webhook_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "discord-alerts",
+            "--kind",
+            "discord",
+            "--endpoint",
+            "mock-http://200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add discord json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+    assert_eq!(add_json["channel"]["kind"], "discord_webhook");
+
+    let send_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "hello-discord",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_json: Value = serde_json::from_slice(&send_output).expect("send discord json");
+    assert_eq!(send_json["ok"], true);
+    assert_eq!(send_json["delivered_via"], "discord_webhook");
+
+    let list_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "channels", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_json: Value = serde_json::from_slice(&list_output).expect("list json");
+    let channels = list_json["channels"].as_array().expect("channels array");
+    assert_eq!(channels.len(), 1);
+    assert_eq!(channels[0]["kind"], "discord_webhook");
+    assert!(channels[0]["last_send_at"].is_string());
+}
+
+#[test]
+#[allow(deprecated)]
 fn channels_retry_policy_mock_http() {
     let temp = tempdir().expect("tempdir");
 

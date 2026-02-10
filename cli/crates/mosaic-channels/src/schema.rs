@@ -208,4 +208,25 @@ mod tests {
         );
         assert!(validate_endpoint_for_kind("slack_webhook", Some("https://example.com")).is_err());
     }
+
+    #[test]
+    fn endpoint_validation_for_discord_webhook() {
+        assert!(
+            validate_endpoint_for_kind(
+                "discord_webhook",
+                Some("https://discord.com/api/webhooks/1/abc")
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_endpoint_for_kind(
+                "discord",
+                Some("https://canary.discord.com/api/webhooks/1/abc")
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_endpoint_for_kind("discord_webhook", Some("https://example.com/abc")).is_err()
+        );
+    }
 }
