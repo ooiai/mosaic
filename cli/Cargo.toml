@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/mosaic-cli",
+  "crates/mosaic-core",
+  "crates/mosaic-agent",
+  "crates/mosaic-tools",
+  "crates/mosaic-provider-openai",
+]
+default-members = ["crates/mosaic-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+assert_cmd = "2"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
+dirs = "6"
+predicates = "3"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+toml = "0.8"
+tiny_http = "0.12"
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
