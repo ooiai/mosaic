@@ -11,6 +11,10 @@ Commands:
   session    
   gateway    
   channels   
+  logs       
+  system     
+  approvals  
+  sandbox    
   status     
   health     
   doctor     

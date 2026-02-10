@@ -11,12 +11,14 @@ use walkdir::WalkDir;
 
 use mosaic_core::config::RunGuardMode;
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_ops::{ApprovalDecision, RuntimePolicy, evaluate_approval, evaluate_sandbox};
 
 const MAX_DEFAULT_SEARCH_RESULTS: usize = 50;
 
 #[derive(Debug, Clone)]
 pub struct ToolExecutor {
     guard_mode: RunGuardMode,
+    runtime_policy: Option<RuntimePolicy>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,8 +75,11 @@ struct RunCommandArgs {
 }
 
 impl ToolExecutor {
-    pub fn new(guard_mode: RunGuardMode) -> Self {
-        Self { guard_mode }
+    pub fn new(guard_mode: RunGuardMode, runtime_policy: Option<RuntimePolicy>) -> Self {
+        Self {
+            guard_mode,
+            runtime_policy,
+        }
     }
 
     pub fn execute(&self, name: &str, args: Value, context: &ToolContext) -> Result<Value> {
@@ -161,22 +166,66 @@ impl ToolExecutor {
     fn run_cmd(&self, args: Value, context: &ToolContext) -> Result<Value> {
         let parsed: RunCommandArgs = serde_json::from_value(args)?;
         let decision = self.classify_command(&parsed.command);
+        let mut confirmation_reasons = Vec::new();
+        let mut auto_approved_by: Option<String> = None;
+
+        if let Some(runtime_policy) = &self.runtime_policy {
+            if let Some(reason) = evaluate_sandbox(&parsed.command, runtime_policy.sandbox.profile)
+            {
+                return Err(MosaicError::SandboxDenied(reason));
+            }
+
+            match evaluate_approval(&parsed.command, &runtime_policy.approval) {
+                ApprovalDecision::Auto { approved_by } => {
+                    auto_approved_by = Some(approved_by);
+                }
+                ApprovalDecision::NeedsConfirmation { reason } => {
+                    confirmation_reasons.push(reason);
+                }
+                ApprovalDecision::Deny { reason } => {
+                    return Err(MosaicError::ApprovalRequired(reason));
+                }
+            }
+        }
+
         let approved_by = match decision {
-            GuardDecision::AllowAuto => "auto_safe".to_string(),
+            GuardDecision::AllowAuto => {
+                if confirmation_reasons.is_empty() {
+                    auto_approved_by.unwrap_or_else(|| "auto_safe".to_string())
+                } else if context.yes {
+                    "flag_yes".to_string()
+                } else if context.interactive {
+                    let reason = confirmation_reasons.join("; ");
+                    if confirm_command(&parsed.command, &reason)? {
+                        "user_prompt".to_string()
+                    } else {
+                        return Err(MosaicError::ApprovalRequired(
+                            "command execution cancelled by user".to_string(),
+                        ));
+                    }
+                } else {
+                    let reason = confirmation_reasons.join("; ");
+                    return Err(MosaicError::ApprovalRequired(format!(
+                        "command requires approval: {reason}. rerun with --yes"
+                    )));
+                }
+            }
             GuardDecision::NeedsConfirmation { reason } => {
+                confirmation_reasons.push(reason);
+                let reason = confirmation_reasons.join("; ");
                 if context.yes {
                     "flag_yes".to_string()
                 } else if context.interactive {
                     if confirm_command(&parsed.command, &reason)? {
                         "user_prompt".to_string()
                     } else {
-                        return Err(MosaicError::Tool(
+                        return Err(MosaicError::ApprovalRequired(
                             "command execution cancelled by user".to_string(),
                         ));
                     }
                 } else {
-                    return Err(MosaicError::Tool(format!(
-                        "command requires confirmation: {reason}. rerun with --yes"
+                    return Err(MosaicError::ApprovalRequired(format!(
+                        "command requires approval: {reason}. rerun with --yes"
                     )));
                 }
             }
@@ -371,13 +420,15 @@ fn is_dangerous_or_mutating(command: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use mosaic_ops::{ApprovalMode, ApprovalPolicy, RuntimePolicy, SandboxPolicy, SandboxProfile};
+
     use super::*;
     use tempfile::tempdir;
 
     #[test]
     fn read_write_search_tool_flow() {
         let temp = tempdir().unwrap();
-        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous);
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
         let ctx = ToolContext {
             cwd: temp.path().to_path_buf(),
             yes: true,
@@ -409,7 +460,7 @@ mod tests {
     #[test]
     fn blocks_high_risk_command() {
         let temp = tempdir().unwrap();
-        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous);
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
         let ctx = ToolContext {
             cwd: temp.path().to_path_buf(),
             yes: true,
@@ -425,7 +476,7 @@ mod tests {
     #[test]
     fn run_command_executes_when_yes_is_set() {
         let temp = tempdir().unwrap();
-        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous);
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
         let ctx = ToolContext {
             cwd: temp.path().to_path_buf(),
             yes: true,
@@ -442,5 +493,53 @@ mod tests {
                 .unwrap_or_default()
                 .contains("cli-test")
         );
+    }
+
+    #[test]
+    fn approval_policy_deny_blocks_run_command() {
+        let temp = tempdir().unwrap();
+        let mut approval = ApprovalPolicy::default();
+        approval.mode = ApprovalMode::Deny;
+        let policy = RuntimePolicy {
+            approval,
+            sandbox: SandboxPolicy::default(),
+        };
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, Some(policy));
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: true,
+            interactive: false,
+        };
+
+        let err = executor
+            .execute("run_cmd", json!({"command":"echo blocked"}), &ctx)
+            .unwrap_err();
+        assert!(matches!(err, MosaicError::ApprovalRequired(_)));
+    }
+
+    #[test]
+    fn sandbox_restricted_blocks_network_command() {
+        let temp = tempdir().unwrap();
+        let mut sandbox = SandboxPolicy::default();
+        sandbox.profile = SandboxProfile::Restricted;
+        let policy = RuntimePolicy {
+            approval: ApprovalPolicy::default(),
+            sandbox,
+        };
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, Some(policy));
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: true,
+            interactive: false,
+        };
+
+        let err = executor
+            .execute(
+                "run_cmd",
+                json!({"command":"curl https://example.com"}),
+                &ctx,
+            )
+            .unwrap_err();
+        assert!(matches!(err, MosaicError::SandboxDenied(_)));
     }
 }

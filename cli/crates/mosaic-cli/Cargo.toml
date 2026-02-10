@@ -12,6 +12,8 @@ path = "src/main.rs"
 mosaic-agent = { path = "../mosaic-agent" }
 mosaic-channels = { path = "../mosaic-channels" }
 mosaic-core = { path = "../mosaic-core" }
+mosaic-gateway = { path = "../mosaic-gateway" }
+mosaic-ops = { path = "../mosaic-ops" }
 mosaic-provider-openai = { path = "../mosaic-provider-openai" }
 mosaic-tools = { path = "../mosaic-tools" }
 chrono.workspace = true

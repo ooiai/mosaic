@@ -17,6 +17,7 @@ use mosaic_channels::{
     AddChannelInput, ChannelRepository, DEFAULT_CHANNEL_TOKEN_ENV, channels_events_dir,
     channels_file_path, format_channel_for_output,
 };
+use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
 
 use mosaic_agent::{AgentRunOptions, AgentRunner};
 use mosaic_core::audit::AuditStore;
@@ -27,6 +28,10 @@ use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::provider::Provider;
 use mosaic_core::session::SessionStore;
 use mosaic_core::state::{StateMode, StatePaths};
+use mosaic_ops::{
+    ApprovalMode, ApprovalStore, RuntimePolicy, SandboxProfile, SandboxStore, SystemEventStore,
+    collect_logs, list_profiles, snapshot_presence, system_events_path,
+};
 use mosaic_provider_openai::OpenAiCompatibleProvider;
 use mosaic_tools::ToolExecutor;
 
@@ -62,6 +67,10 @@ enum Commands {
     Session(SessionArgs),
     Gateway(GatewayArgs),
     Channels(ChannelsArgs),
+    Logs(LogsArgs),
+    System(SystemArgs),
+    Approvals(ApprovalsArgs),
+    Sandbox(SandboxArgs),
     Status,
     Health,
     Doctor,
@@ -169,6 +178,13 @@ enum GatewayCommand {
     },
     Status,
     Health,
+    Call {
+        method: String,
+        #[arg(long)]
+        params: Option<String>,
+    },
+    Probe,
+    Discover,
     Stop,
     #[command(hide = true)]
     Serve {
@@ -188,6 +204,7 @@ struct ChannelsArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum ChannelsCommand {
     List,
+    Status,
     Add {
         #[arg(long)]
         name: String,
@@ -215,6 +232,93 @@ enum ChannelsCommand {
         #[arg(long)]
         token_env: Option<String>,
     },
+    Logs {
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        tail: usize,
+    },
+    Capabilities {
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long)]
+        target: Option<String>,
+    },
+    Resolve {
+        #[arg(long)]
+        channel: String,
+        query: Vec<String>,
+    },
+    Remove {
+        channel_id: String,
+    },
+    Logout {
+        channel_id: String,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct LogsArgs {
+    #[arg(long)]
+    follow: bool,
+    #[arg(long, default_value_t = 100)]
+    tail: usize,
+}
+
+#[derive(Args, Debug, Clone)]
+struct SystemArgs {
+    #[command(subcommand)]
+    command: SystemCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SystemCommand {
+    Event {
+        name: String,
+        #[arg(long)]
+        data: Option<String>,
+    },
+    Presence,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ApprovalsArgs {
+    #[command(subcommand)]
+    command: ApprovalsCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ApprovalsCommand {
+    Get,
+    Set {
+        #[arg(value_enum)]
+        mode: ApprovalModeArg,
+    },
+    Allowlist {
+        #[command(subcommand)]
+        command: AllowlistCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum AllowlistCommand {
+    Add { prefix: String },
+    Remove { prefix: String },
+}
+
+#[derive(Args, Debug, Clone)]
+struct SandboxArgs {
+    #[command(subcommand)]
+    command: SandboxCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SandboxCommand {
+    List,
+    Explain {
+        #[arg(long, value_enum)]
+        profile: Option<SandboxProfileArg>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +337,42 @@ enum GuardModeArg {
     ConfirmDangerous,
     AllConfirm,
     Unrestricted,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum ApprovalModeArg {
+    Deny,
+    Confirm,
+    Allowlist,
+}
+
+impl From<ApprovalModeArg> for ApprovalMode {
+    fn from(value: ApprovalModeArg) -> Self {
+        match value {
+            ApprovalModeArg::Deny => Self::Deny,
+            ApprovalModeArg::Confirm => Self::Confirm,
+            ApprovalModeArg::Allowlist => Self::Allowlist,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum SandboxProfileArg {
+    Restricted,
+    Standard,
+    Elevated,
+}
+
+impl From<SandboxProfileArg> for SandboxProfile {
+    fn from(value: SandboxProfileArg) -> Self {
+        match value {
+            SandboxProfileArg::Restricted => Self::Restricted,
+            SandboxProfileArg::Standard => Self::Standard,
+            SandboxProfileArg::Elevated => Self::Elevated,
+        }
+    }
 }
 
 impl From<GuardModeArg> for RunGuardMode {
@@ -288,6 +428,10 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Session(args) => handle_session(&cli, args).await,
         Commands::Gateway(args) => handle_gateway(&cli, args).await,
         Commands::Channels(args) => handle_channels(&cli, args).await,
+        Commands::Logs(args) => handle_logs(&cli, args).await,
+        Commands::System(args) => handle_system(&cli, args),
+        Commands::Approvals(args) => handle_approvals(&cli, args),
+        Commands::Sandbox(args) => handle_sandbox(&cli, args),
         Commands::Status => handle_status(&cli),
         Commands::Health => handle_health(&cli).await,
         Commands::Doctor => handle_doctor(&cli).await,
@@ -791,6 +935,177 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             }
             emit_checks(cli.json, "gateway_health", checks)?;
         }
+        GatewayCommand::Call { method, params } => {
+            if gateway_test_mode() {
+                let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
+                if !state.as_ref().is_some_and(|value| value.running) {
+                    return Err(MosaicError::GatewayUnavailable(
+                        "gateway is not running in test mode".to_string(),
+                    ));
+                }
+                let params = params
+                    .as_deref()
+                    .map(|value| parse_json_input(value, "gateway params"))
+                    .transpose()?
+                    .unwrap_or(Value::Null);
+                let data = match method.as_str() {
+                    "status" => json!({
+                        "ok": true,
+                        "service": "mosaic-gateway",
+                        "test_mode": true,
+                    }),
+                    "health" => json!({
+                        "ok": true,
+                        "service": "mosaic-gateway",
+                        "test_mode": true,
+                    }),
+                    "echo" => json!({
+                        "ok": true,
+                        "echo": params,
+                        "test_mode": true,
+                    }),
+                    _ => {
+                        return Err(MosaicError::GatewayProtocol(format!(
+                            "unknown gateway method '{}' in test mode",
+                            method
+                        )));
+                    }
+                };
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "request_id": "gateway-test-mode",
+                        "method": method,
+                        "data": data,
+                        "gateway": { "host": "127.0.0.1", "port": 8787 },
+                    }));
+                } else {
+                    println!("gateway method: {method}");
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&data).unwrap_or_default()
+                    );
+                }
+                return Ok(());
+            }
+
+            let (host, port) = resolve_gateway_target(&gateway_path)?;
+            let client = HttpGatewayClient::new(&host, port)?;
+            let params = params
+                .as_deref()
+                .map(|value| parse_json_input(value, "gateway params"))
+                .transpose()?;
+            let request = GatewayRequest::new(method.clone(), params);
+            let request_id = request.id.clone();
+            let response = client.call(request).await?;
+            let result = response.result.unwrap_or(Value::Null);
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "request_id": request_id,
+                    "method": method,
+                    "data": result,
+                    "gateway": {
+                        "host": host,
+                        "port": port,
+                    }
+                }));
+            } else {
+                println!("gateway method: {method}");
+                println!("request id: {request_id}");
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| "{}".to_string())
+                );
+            }
+        }
+        GatewayCommand::Probe => {
+            if gateway_test_mode() {
+                let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
+                if !state.as_ref().is_some_and(|value| value.running) {
+                    return Err(MosaicError::GatewayUnavailable(
+                        "gateway is not running in test mode".to_string(),
+                    ));
+                }
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "probe": {
+                            "ok": true,
+                            "endpoint": "test-mode://gateway/health",
+                            "latency_ms": 0,
+                            "detail": "gateway test mode",
+                        },
+                        "gateway": { "host": "127.0.0.1", "port": 8787 },
+                    }));
+                } else {
+                    println!("gateway probe ok (test mode)");
+                }
+                return Ok(());
+            }
+
+            let (host, port) = resolve_gateway_target(&gateway_path)?;
+            let client = HttpGatewayClient::new(&host, port)?;
+            let probe = client.probe().await?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "probe": probe,
+                    "gateway": {
+                        "host": host,
+                        "port": port,
+                    }
+                }));
+            } else {
+                println!("gateway probe ok");
+                println!("endpoint: {}", probe.endpoint);
+                println!("latency: {}ms", probe.latency_ms);
+                println!("detail: {}", probe.detail);
+            }
+        }
+        GatewayCommand::Discover => {
+            if gateway_test_mode() {
+                let methods = vec!["health", "status", "echo"];
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "discovery": {
+                            "ok": true,
+                            "endpoint": "test-mode://gateway/discover",
+                            "methods": methods,
+                        },
+                        "gateway": { "host": "127.0.0.1", "port": 8787 },
+                    }));
+                } else {
+                    println!("gateway methods:");
+                    println!("- health");
+                    println!("- status");
+                    println!("- echo");
+                }
+                return Ok(());
+            }
+
+            let (host, port) = resolve_gateway_target(&gateway_path)?;
+            let client = HttpGatewayClient::new(&host, port)?;
+            let discovery = client.discover().await?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "discovery": discovery,
+                    "gateway": {
+                        "host": host,
+                        "port": port,
+                    }
+                }));
+            } else if discovery.methods.is_empty() {
+                println!("gateway methods: <none>");
+            } else {
+                println!("gateway methods:");
+                for method in discovery.methods {
+                    println!("- {method}");
+                }
+            }
+        }
         GatewayCommand::Stop => {
             let state: GatewayState = load_json_file_opt(&gateway_path)?.ok_or_else(|| {
                 MosaicError::Config("gateway state file not found; not running".to_string())
@@ -881,6 +1196,28 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 }
             }
         }
+        ChannelsCommand::Status => {
+            let status = repository.status()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "status": status,
+                }));
+            } else {
+                println!("channels total: {}", status.total_channels);
+                println!("channels healthy: {}", status.healthy_channels);
+                println!("channels with errors: {}", status.channels_with_errors);
+                if let Some(last_send_at) = status.last_send_at {
+                    println!("last send at: {}", last_send_at.to_rfc3339());
+                }
+                if !status.kinds.is_empty() {
+                    println!("kinds:");
+                    for (kind, count) in status.kinds {
+                        println!("- {kind}: {count}");
+                    }
+                }
+            }
+        }
         ChannelsCommand::Add {
             name,
             kind,
@@ -957,6 +1294,113 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 }
             }
         }
+        ChannelsCommand::Logs { channel, tail } => {
+            let events = repository.logs(channel.as_deref(), tail)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "events": events,
+                    "channel": channel,
+                }));
+            } else if events.is_empty() {
+                println!("No channel events found.");
+            } else {
+                for event in events {
+                    println!(
+                        "{} channel={} kind={} status={} attempt={} http={} error={} preview={}",
+                        event.ts.to_rfc3339(),
+                        event.channel_id,
+                        event.kind,
+                        event.delivery_status,
+                        event.attempt,
+                        event
+                            .http_status
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        event.error.unwrap_or_else(|| "-".to_string()),
+                        event.text_preview
+                    );
+                }
+            }
+        }
+        ChannelsCommand::Capabilities { channel, target } => {
+            let capabilities = repository.capabilities(channel.as_deref(), target.as_deref())?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "capabilities": capabilities,
+                }));
+            } else if capabilities.is_empty() {
+                println!("No channel capabilities resolved.");
+            } else {
+                for capability in capabilities {
+                    println!(
+                        "{} aliases={} endpoint={} token_env={} probe={} bearer_token={}",
+                        capability.kind,
+                        if capability.aliases.is_empty() {
+                            "-".to_string()
+                        } else {
+                            capability.aliases.join(",")
+                        },
+                        capability.supports_endpoint,
+                        capability.supports_token_env,
+                        capability.supports_test_probe,
+                        capability.supports_bearer_token
+                    );
+                }
+            }
+        }
+        ChannelsCommand::Resolve { channel, query } => {
+            let query = query.join(" ");
+            let entries = repository.resolve(&channel, &query)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "entries": entries,
+                    "channel": channel,
+                    "query": query,
+                }));
+            } else if entries.is_empty() {
+                println!("No channels resolved.");
+            } else {
+                for entry in entries {
+                    println!(
+                        "{} name={} kind={} endpoint={} last_send={} last_error={}",
+                        entry.id,
+                        entry.name,
+                        entry.kind,
+                        entry.endpoint_masked.unwrap_or_else(|| "-".to_string()),
+                        entry
+                            .last_send_at
+                            .map(|value| value.to_rfc3339())
+                            .unwrap_or_else(|| "-".to_string()),
+                        entry.last_error.unwrap_or_else(|| "-".to_string())
+                    );
+                }
+            }
+        }
+        ChannelsCommand::Remove { channel_id } => {
+            let removed = repository.remove(&channel_id)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": format_channel_for_output(&removed),
+                }));
+            } else {
+                println!("Removed channel {}", removed.id);
+            }
+        }
+        ChannelsCommand::Logout { channel_id } => {
+            let logged_out = repository.logout(&channel_id)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "channel": format_channel_for_output(&logged_out),
+                }));
+            } else {
+                println!("Cleared token env for channel {}", logged_out.id);
+            }
+        }
         ChannelsCommand::Test {
             channel_id,
             token_env,
@@ -981,6 +1425,181 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 println!("attempts: {}", result.attempts);
                 if let Some(endpoint) = result.endpoint_masked {
                     println!("endpoint: {endpoint}");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_logs(cli: &Cli, args: LogsArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+
+    if !args.follow {
+        let entries = collect_logs(&paths.data_dir, args.tail)?;
+        if cli.json {
+            print_json(&json!({
+                "ok": true,
+                "logs": entries,
+            }));
+        } else if entries.is_empty() {
+            println!("No logs found.");
+        } else {
+            for entry in entries {
+                println!(
+                    "{} [{}] {}",
+                    entry
+                        .ts
+                        .map(|value| value.to_rfc3339())
+                        .unwrap_or_else(|| "-".to_string()),
+                    entry.source,
+                    entry.payload
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    let mut printed = 0usize;
+    loop {
+        let entries = collect_logs(&paths.data_dir, args.tail.max(200))?;
+        if entries.len() > printed {
+            for entry in entries.iter().skip(printed) {
+                println!(
+                    "{} [{}] {}",
+                    entry
+                        .ts
+                        .map(|value| value.to_rfc3339())
+                        .unwrap_or_else(|| "-".to_string()),
+                    entry.source,
+                    entry.payload
+                );
+            }
+            printed = entries.len();
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+fn handle_system(cli: &Cli, args: SystemArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let store = SystemEventStore::new(system_events_path(&paths.data_dir));
+    match args.command {
+        SystemCommand::Event { name, data } => {
+            let data = data
+                .as_deref()
+                .map(|value| parse_json_input(value, "system event data"))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            let event = store.append_event(&name, data)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "event": event,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!("event recorded: {}", event.name);
+                println!("path: {}", store.path().display());
+            }
+        }
+        SystemCommand::Presence => {
+            let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+            let presence = snapshot_presence(&cwd);
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "presence": presence,
+                }));
+            } else {
+                println!("presence:");
+                println!("hostname: {}", presence.hostname);
+                println!("pid: {}", presence.pid);
+                println!("cwd: {}", presence.cwd);
+                println!("ts: {}", presence.ts.to_rfc3339());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_approvals(cli: &Cli, args: ApprovalsArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let store = ApprovalStore::new(paths.approvals_policy_path.clone());
+    let policy = match args.command {
+        ApprovalsCommand::Get => store.load_or_default()?,
+        ApprovalsCommand::Set { mode } => store.set_mode(mode.into())?,
+        ApprovalsCommand::Allowlist { command } => match command {
+            AllowlistCommand::Add { prefix } => store.add_allowlist(&prefix)?,
+            AllowlistCommand::Remove { prefix } => store.remove_allowlist(&prefix)?,
+        },
+    };
+
+    if cli.json {
+        print_json(&json!({
+            "ok": true,
+            "policy": policy,
+            "path": store.path().display().to_string(),
+        }));
+    } else {
+        println!("approvals mode: {:?}", policy.mode);
+        if policy.allowlist.is_empty() {
+            println!("allowlist: <empty>");
+        } else {
+            println!("allowlist:");
+            for item in policy.allowlist {
+                println!("- {item}");
+            }
+        }
+        println!("path: {}", store.path().display());
+    }
+    Ok(())
+}
+
+fn handle_sandbox(cli: &Cli, args: SandboxArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let store = SandboxStore::new(paths.sandbox_policy_path.clone());
+    let policy = store.load_or_default()?;
+    match args.command {
+        SandboxCommand::List => {
+            let profiles = list_profiles();
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "current": policy.profile,
+                    "profiles": profiles,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!("current sandbox profile: {:?}", policy.profile);
+                for profile in profiles {
+                    println!("- {:?}: {}", profile.profile, profile.description);
+                }
+            }
+        }
+        SandboxCommand::Explain { profile } => {
+            let profile = profile.map(Into::into).unwrap_or(policy.profile);
+            let info = mosaic_ops::profile_info(profile);
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "profile": info,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!("sandbox profile: {:?}", info.profile);
+                println!("{}", info.description);
+                if info.blocked_examples.is_empty() {
+                    println!("blocked examples: <none>");
+                } else {
+                    println!("blocked examples:");
+                    for example in info.blocked_examples {
+                        println!("- {example}");
+                    }
                 }
             }
         }
@@ -1111,26 +1730,110 @@ fn run_gateway_http_server(host: &str, port: u16) -> Result<()> {
     let server = Server::http(format!("{host}:{port}"))
         .map_err(|err| MosaicError::Network(format!("failed to bind gateway server: {err}")))?;
     let started_at = Utc::now();
-    for request in server.incoming_requests() {
+    for mut request in server.incoming_requests() {
         let method = request.method().clone();
         let url = request.url().to_string();
         let response = match (method, url.as_str()) {
-            (Method::Get, "/health") => {
-                let body = json!({
+            (Method::Get, "/health") => Response::from_string(
+                json!({
                     "ok": true,
                     "service": "mosaic-gateway",
                     "ts": Utc::now(),
-                });
-                Response::from_string(body.to_string())
-            }
-            (Method::Get, "/status") => {
-                let body = json!({
+                })
+                .to_string(),
+            ),
+            (Method::Get, "/status") => Response::from_string(
+                json!({
                     "ok": true,
                     "service": "mosaic-gateway",
                     "started_at": started_at,
                     "uptime_seconds": (Utc::now() - started_at).num_seconds(),
-                });
-                Response::from_string(body.to_string())
+                })
+                .to_string(),
+            ),
+            (Method::Get, "/discover") => Response::from_string(
+                json!({
+                    "ok": true,
+                    "methods": ["health", "status", "echo"],
+                })
+                .to_string(),
+            ),
+            (Method::Post, "/call") => {
+                let mut body = String::new();
+                if request.as_reader().read_to_string(&mut body).is_err() {
+                    Response::from_string(
+                        json!({
+                            "ok": false,
+                            "error": {
+                                "code": "invalid_request",
+                                "message": "failed to read request body",
+                            }
+                        })
+                        .to_string(),
+                    )
+                    .with_status_code(400)
+                } else {
+                    let parsed = serde_json::from_str::<GatewayRequest>(&body);
+                    match parsed {
+                        Ok(payload) => match payload.method.as_str() {
+                            "health" => Response::from_string(
+                                json!({
+                                    "ok": true,
+                                    "result": {
+                                        "ok": true,
+                                        "service": "mosaic-gateway",
+                                        "ts": Utc::now(),
+                                    }
+                                })
+                                .to_string(),
+                            ),
+                            "status" => Response::from_string(
+                                json!({
+                                    "ok": true,
+                                    "result": {
+                                        "ok": true,
+                                        "service": "mosaic-gateway",
+                                        "started_at": started_at,
+                                        "uptime_seconds": (Utc::now() - started_at).num_seconds(),
+                                    }
+                                })
+                                .to_string(),
+                            ),
+                            "echo" => Response::from_string(
+                                json!({
+                                    "ok": true,
+                                    "result": {
+                                        "ok": true,
+                                        "echo": payload.params,
+                                    }
+                                })
+                                .to_string(),
+                            ),
+                            _ => Response::from_string(
+                                json!({
+                                    "ok": false,
+                                    "error": {
+                                        "code": "method_not_found",
+                                        "message": format!("unknown method '{}'", payload.method),
+                                    }
+                                })
+                                .to_string(),
+                            )
+                            .with_status_code(404),
+                        },
+                        Err(err) => Response::from_string(
+                            json!({
+                                "ok": false,
+                                "error": {
+                                    "code": "invalid_request",
+                                    "message": format!("invalid JSON request: {err}"),
+                                }
+                            })
+                            .to_string(),
+                        )
+                        .with_status_code(400),
+                    }
+                }
             }
             _ => Response::from_string(
                 json!({
@@ -1308,6 +2011,51 @@ async fn handle_doctor(cli: &Cli) -> Result<()> {
         }
     }
 
+    let approval_store = ApprovalStore::new(paths.approvals_policy_path.clone());
+    match approval_store.load_or_default() {
+        Ok(policy) => {
+            checks.push(run_check(
+                "approvals_policy",
+                true,
+                format!(
+                    "mode={:?} allowlist_size={} path={}",
+                    policy.mode,
+                    policy.allowlist.len(),
+                    approval_store.path().display()
+                ),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "approvals_policy",
+                false,
+                format!("failed to load approvals policy: {err}"),
+            ));
+        }
+    }
+
+    let sandbox_store = SandboxStore::new(paths.sandbox_policy_path.clone());
+    match sandbox_store.load_or_default() {
+        Ok(policy) => {
+            checks.push(run_check(
+                "sandbox_policy",
+                true,
+                format!(
+                    "profile={:?} path={}",
+                    policy.profile,
+                    sandbox_store.path().display()
+                ),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "sandbox_policy",
+                false,
+                format!("failed to load sandbox policy: {err}"),
+            ));
+        }
+    }
+
     emit_checks(cli.json, "doctor", checks)
 }
 
@@ -1359,6 +2107,22 @@ fn resolve_state_paths(project_state: bool) -> Result<StatePaths> {
     StatePaths::resolve(mode, &cwd, PROJECT_STATE_DIR)
 }
 
+fn resolve_gateway_target(gateway_path: &std::path::Path) -> Result<(String, u16)> {
+    let state: Option<GatewayState> = load_json_file_opt(gateway_path)?;
+    if let Some(state) = state {
+        return Ok((state.host, state.port));
+    }
+    Ok(("127.0.0.1".to_string(), 8787))
+}
+
+fn parse_json_input(raw: &str, field_name: &str) -> Result<Value> {
+    serde_json::from_str(raw).map_err(|err| {
+        MosaicError::Validation(format!(
+            "{field_name} must be valid JSON, parse error: {err}"
+        ))
+    })
+}
+
 fn build_runtime(cli: &Cli) -> Result<RuntimeContext> {
     let state_paths = resolve_state_paths(cli.project_state)?;
     state_paths.ensure_dirs()?;
@@ -1372,7 +2136,15 @@ fn build_runtime(cli: &Cli) -> Result<RuntimeContext> {
         state_paths.audit_dir.clone(),
         state_paths.audit_log_path.clone(),
     );
-    let tool_executor = ToolExecutor::new(resolved.profile.tools.run.guard_mode.clone());
+    let approval_store = ApprovalStore::new(state_paths.approvals_policy_path.clone());
+    let sandbox_store = SandboxStore::new(state_paths.sandbox_policy_path.clone());
+    let tool_executor = ToolExecutor::new(
+        resolved.profile.tools.run.guard_mode.clone(),
+        Some(RuntimePolicy {
+            approval: approval_store.load_or_default()?,
+            sandbox: sandbox_store.load_or_default()?,
+        }),
+    );
     let agent = AgentRunner::new(
         provider.clone(),
         resolved.profile.clone(),

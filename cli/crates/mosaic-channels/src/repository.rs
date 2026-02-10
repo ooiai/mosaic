@@ -1,6 +1,10 @@
+use std::collections::{BTreeMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use mosaic_core::error::{MosaicError, Result};
@@ -12,22 +16,37 @@ use crate::schema::{
     parse_channels_value, validate_endpoint_for_kind,
 };
 use crate::types::{
-    AddChannelInput, ChannelAuthConfig, ChannelEntry, ChannelEvent, ChannelListItem,
-    ChannelLoginResult, ChannelSendResult, ChannelsFile, DoctorCheck, TEXT_PREVIEW_LIMIT,
-    truncate_text,
+    AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
+    ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendResult, ChannelStatus,
+    ChannelsFile, DoctorCheck, TEXT_PREVIEW_LIMIT, truncate_text,
 };
+
+const CACHE_TTL_SECONDS: i64 = 300;
 
 #[derive(Debug, Clone)]
 pub struct ChannelRepository {
     channels_path: PathBuf,
     events_dir: PathBuf,
+    cache_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CacheEnvelope {
+    cached_at: DateTime<Utc>,
+    value: Value,
 }
 
 impl ChannelRepository {
     pub fn new(channels_path: PathBuf, events_dir: PathBuf) -> Self {
+        let cache_parent = events_dir
+            .parent()
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| events_dir.clone());
+        let cache_dir = cache_parent.join("channel-cache");
         Self {
             channels_path,
             events_dir,
+            cache_dir,
         }
     }
 
@@ -48,6 +67,21 @@ impl ChannelRepository {
             })
             .collect::<Vec<_>>();
         Ok(items)
+    }
+
+    pub fn status(&self) -> Result<ChannelStatus> {
+        let channels = self.list()?;
+        let mut kinds = BTreeMap::new();
+        for channel in &channels {
+            *kinds.entry(channel.kind.clone()).or_insert(0usize) += 1;
+        }
+        Ok(ChannelStatus {
+            total_channels: channels.len(),
+            healthy_channels: channels.iter().filter(|c| c.last_error.is_none()).count(),
+            channels_with_errors: channels.iter().filter(|c| c.last_error.is_some()).count(),
+            kinds,
+            last_send_at: channels.iter().filter_map(|c| c.last_send_at).max(),
+        })
     }
 
     pub fn add(&self, input: AddChannelInput) -> Result<ChannelEntry> {
@@ -117,6 +151,38 @@ impl ChannelRepository {
         })
     }
 
+    pub fn logout(&self, channel_id: &str) -> Result<ChannelEntry> {
+        let mut file = self.load_channels_file()?;
+        let channel = file
+            .channels
+            .iter_mut()
+            .find(|entry| entry.id == channel_id)
+            .ok_or_else(|| MosaicError::Config(format!("channel '{channel_id}' not found")))?;
+        channel.auth.token_env = None;
+        channel.last_login_at = None;
+        let snapshot = channel.clone();
+        self.save_channels_file(&file)?;
+        Ok(snapshot)
+    }
+
+    pub fn remove(&self, channel_id: &str) -> Result<ChannelEntry> {
+        let mut file = self.load_channels_file()?;
+        let idx = file
+            .channels
+            .iter()
+            .position(|entry| entry.id == channel_id)
+            .ok_or_else(|| MosaicError::Config(format!("channel '{channel_id}' not found")))?;
+        let removed = file.channels.remove(idx);
+        self.save_channels_file(&file)?;
+
+        let event_path = self.events_dir.join(format!("{channel_id}.jsonl"));
+        if event_path.exists() {
+            let _ = std::fs::remove_file(event_path);
+        }
+
+        Ok(removed)
+    }
+
     pub async fn send(
         &self,
         channel_id: &str,
@@ -156,7 +222,7 @@ impl ChannelRepository {
         )
         .await?;
 
-        let event = ChannelEvent {
+        let event = ChannelLogEntry {
             ts: Utc::now(),
             channel_id: channel.id.clone(),
             kind: send_kind.to_string(),
@@ -200,6 +266,145 @@ impl ChannelRepository {
                 .error
                 .unwrap_or_else(|| "channel delivery failed".to_string()),
         ))
+    }
+
+    pub fn logs(&self, channel_filter: Option<&str>, tail: usize) -> Result<Vec<ChannelLogEntry>> {
+        if !self.events_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let filter = channel_filter
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "all")
+            .map(ToOwned::to_owned);
+
+        let allowed: Option<HashSet<String>> = if let Some(value) = filter {
+            Some(HashSet::from([value]))
+        } else {
+            None
+        };
+
+        let mut events = Vec::new();
+        for entry in std::fs::read_dir(&self.events_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let raw = std::fs::read_to_string(&path)?;
+            for line in raw.lines() {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let event = serde_json::from_str::<ChannelLogEntry>(line).map_err(|err| {
+                    MosaicError::Validation(format!(
+                        "invalid channel event {}: {err}",
+                        path.display()
+                    ))
+                })?;
+                if let Some(allowed) = &allowed
+                    && !allowed.contains(&event.channel_id)
+                {
+                    continue;
+                }
+                events.push(event);
+            }
+        }
+
+        events.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+        if events.len() > tail {
+            let keep_from = events.len() - tail;
+            events = events.split_off(keep_from);
+        }
+        Ok(events)
+    }
+
+    pub fn capabilities(
+        &self,
+        kind: Option<&str>,
+        target: Option<&str>,
+    ) -> Result<Vec<ChannelCapability>> {
+        if kind.is_some() && target.is_some() {
+            return Err(MosaicError::Validation(
+                "use either --kind or --target for capabilities, not both".to_string(),
+            ));
+        }
+
+        let resolved_kind = if let Some(target) = target {
+            let file = self.load_channels_file()?;
+            let channel = file
+                .channels
+                .into_iter()
+                .find(|entry| entry.id == target)
+                .ok_or_else(|| MosaicError::Config(format!("channel '{target}' not found")))?;
+            Some(channel.kind)
+        } else {
+            kind.map(normalize_kind).transpose()?
+        };
+
+        let cache_key = format!(
+            "capabilities:{}",
+            resolved_kind
+                .as_deref()
+                .unwrap_or("all")
+                .trim()
+                .to_lowercase()
+        );
+        if let Some(cached) = self.read_cache::<Vec<ChannelCapability>>(&cache_key)? {
+            return Ok(cached);
+        }
+
+        let capabilities = providers::capabilities_for_kind(resolved_kind.as_deref())?;
+        self.write_cache(&cache_key, &capabilities)?;
+        Ok(capabilities)
+    }
+
+    pub fn resolve(&self, kind: &str, query: &str) -> Result<Vec<ChannelDirectoryEntry>> {
+        let kind = normalize_kind(kind)?;
+        let query = query.trim().to_lowercase();
+        let cache_key = format!("resolve:{kind}:{query}");
+        if let Some(cached) = self.read_cache::<Vec<ChannelDirectoryEntry>>(&cache_key)? {
+            return Ok(cached);
+        }
+
+        let file = self.load_channels_file()?;
+        let terms = query
+            .split_whitespace()
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>();
+
+        let mut items = file
+            .channels
+            .into_iter()
+            .filter(|entry| entry.kind == kind)
+            .filter(|entry| {
+                if terms.is_empty() {
+                    return true;
+                }
+                let haystack = format!(
+                    "{} {} {}",
+                    entry.id,
+                    entry.name.to_lowercase(),
+                    entry
+                        .endpoint
+                        .as_deref()
+                        .map(str::to_lowercase)
+                        .unwrap_or_default()
+                );
+                terms.iter().all(|term| haystack.contains(term))
+            })
+            .map(|entry| ChannelDirectoryEntry {
+                id: entry.id,
+                name: entry.name,
+                kind: entry.kind,
+                endpoint_masked: mask_optional_endpoint(entry.endpoint.as_deref()),
+                last_send_at: entry.last_send_at,
+                last_error: entry.last_error,
+            })
+            .collect::<Vec<_>>();
+        items.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+
+        self.write_cache(&cache_key, &items)?;
+        Ok(items)
     }
 
     pub fn doctor_checks(&self) -> Result<Vec<DoctorCheck>> {
@@ -288,7 +493,7 @@ impl ChannelRepository {
         Ok(())
     }
 
-    fn append_event(&self, channel_id: &str, event: &ChannelEvent) -> Result<PathBuf> {
+    fn append_event(&self, channel_id: &str, event: &ChannelLogEntry) -> Result<PathBuf> {
         std::fs::create_dir_all(&self.events_dir)?;
         let path = self.events_dir.join(format!("{channel_id}.jsonl"));
         let encoded = serde_json::to_string(event).map_err(|err| {
@@ -302,6 +507,45 @@ impl ChannelRepository {
         file.write_all(encoded.as_bytes())?;
         file.write_all(b"\n")?;
         Ok(path)
+    }
+
+    fn read_cache<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        let path = self.cache_path(key);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = std::fs::read_to_string(path)?;
+        let envelope = serde_json::from_str::<CacheEnvelope>(&raw)
+            .map_err(|err| MosaicError::Validation(format!("invalid channel cache JSON: {err}")))?;
+        if Utc::now() - envelope.cached_at > Duration::seconds(CACHE_TTL_SECONDS) {
+            return Ok(None);
+        }
+        let value = serde_json::from_value::<T>(envelope.value).map_err(|err| {
+            MosaicError::Validation(format!("invalid cached channel payload: {err}"))
+        })?;
+        Ok(Some(value))
+    }
+
+    fn write_cache<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
+        std::fs::create_dir_all(&self.cache_dir)?;
+        let path = self.cache_path(key);
+        let envelope = CacheEnvelope {
+            cached_at: Utc::now(),
+            value: serde_json::to_value(value).map_err(|err| {
+                MosaicError::Validation(format!("failed to encode channel cache payload: {err}"))
+            })?,
+        };
+        let encoded = serde_json::to_string_pretty(&envelope).map_err(|err| {
+            MosaicError::Validation(format!("failed to encode channel cache JSON: {err}"))
+        })?;
+        std::fs::write(path, encoded)?;
+        Ok(())
+    }
+
+    fn cache_path(&self, key: &str) -> PathBuf {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        self.cache_dir.join(format!("{:x}.json", hasher.finish()))
     }
 }
 
@@ -358,5 +602,32 @@ mod tests {
         assert!(result.probe);
         let list = repo.list().expect("list");
         assert!(list[0].last_send_at.is_none());
+    }
+
+    #[test]
+    fn capabilities_and_resolve_work() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let _ = repo
+            .add(AddChannelInput {
+                name: "alerts".to_string(),
+                kind: "slack".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                token_env: None,
+            })
+            .expect("add");
+
+        let capabilities = repo
+            .capabilities(Some("slack"), None)
+            .expect("capabilities");
+        assert_eq!(capabilities.len(), 1);
+        assert_eq!(capabilities[0].kind, "slack_webhook");
+
+        let resolved = repo.resolve("slack_webhook", "alert").expect("resolve");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].name, "alerts");
     }
 }

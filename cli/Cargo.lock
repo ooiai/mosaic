@@ -825,6 +825,8 @@ dependencies = [
  "mosaic-agent",
  "mosaic-channels",
  "mosaic-core",
+ "mosaic-gateway",
+ "mosaic-ops",
  "mosaic-provider-openai",
  "mosaic-tools",
  "predicates",
@@ -852,6 +854,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-gateway"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "mosaic-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "mosaic-memory"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "mosaic-ops"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mosaic-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "mosaic-provider-openai"
 version = "0.1.0"
 dependencies = [
@@ -864,10 +897,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-security"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "mosaic-tools"
 version = "0.1.0"
 dependencies = [
  "mosaic-core",
+ "mosaic-ops",
  "regex",
  "serde",
  "serde_json",

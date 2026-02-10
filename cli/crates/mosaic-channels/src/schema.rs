@@ -116,7 +116,7 @@ pub(crate) fn normalize_channels(channels: &mut [ChannelEntry]) -> Result<()> {
 
 pub(crate) fn normalize_kind(kind: &str) -> Result<String> {
     providers::resolve_kind(kind).ok_or_else(|| {
-        MosaicError::Validation(format!(
+        MosaicError::ChannelUnsupported(format!(
             "unsupported channel kind '{}', expected {}",
             kind.trim(),
             providers::supported_kinds_hint()

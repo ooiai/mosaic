@@ -351,7 +351,7 @@ mod tests {
             temp.path().join("audit"),
             temp.path().join("audit/commands.jsonl"),
         );
-        let tools = ToolExecutor::new(profile.tools.run.guard_mode.clone());
+        let tools = ToolExecutor::new(profile.tools.run.guard_mode.clone(), None);
         AgentRunner::new(provider, profile, store, audit, tools)
     }
 
@@ -376,7 +376,7 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            err.to_string().contains("requires confirmation"),
+            err.to_string().contains("requires approval"),
             "unexpected error: {err}"
         );
     }

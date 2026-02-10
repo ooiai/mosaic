@@ -460,3 +460,256 @@ fn channels_retry_policy_mock_http() {
     assert_eq!(send_timeout["attempts"], 3);
     assert_eq!(send_timeout["http_status"], 200);
 }
+
+#[test]
+#[allow(deprecated)]
+fn gateway_probe_discover_call_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "run",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8787",
+        ])
+        .assert()
+        .success();
+
+    let probe_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "probe"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let probe_json: Value = serde_json::from_slice(&probe_output).expect("probe json");
+    assert_eq!(probe_json["ok"], true);
+    assert_eq!(probe_json["probe"]["ok"], true);
+
+    let discover_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "discover"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let discover_json: Value = serde_json::from_slice(&discover_output).expect("discover json");
+    let methods = discover_json["discovery"]["methods"]
+        .as_array()
+        .expect("methods");
+    assert!(methods.iter().any(|value| value.as_str() == Some("status")));
+
+    let call_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "call", "status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let call_json: Value = serde_json::from_slice(&call_output).expect("call json");
+    assert_eq!(call_json["ok"], true);
+    assert_eq!(call_json["data"]["service"], "mosaic-gateway");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "stop"])
+        .assert()
+        .success();
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_ops_commands_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "ops-alerts",
+            "--kind",
+            "slack",
+            "--endpoint",
+            "mock-http://200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    let send_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "ops message",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_json: Value = serde_json::from_slice(&send_output).expect("send json");
+    assert_eq!(send_json["ok"], true);
+
+    let status_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "channels", "status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_json: Value = serde_json::from_slice(&status_output).expect("status json");
+    assert_eq!(status_json["status"]["total_channels"], 1);
+
+    let logs_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "logs",
+            "--channel",
+            &channel_id,
+            "--tail",
+            "10",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let logs_json: Value = serde_json::from_slice(&logs_output).expect("logs json");
+    assert!(
+        logs_json["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .any(|event| event["channel_id"].as_str() == Some(channel_id.as_str()))
+    );
+
+    let capabilities_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "capabilities",
+            "--target",
+            &channel_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let capabilities_json: Value =
+        serde_json::from_slice(&capabilities_output).expect("capabilities json");
+    assert_eq!(
+        capabilities_json["capabilities"][0]["kind"],
+        "slack_webhook"
+    );
+
+    let resolve_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "resolve",
+            "--channel",
+            "slack",
+            "ops",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let resolve_json: Value = serde_json::from_slice(&resolve_output).expect("resolve json");
+    assert_eq!(resolve_json["entries"][0]["id"], channel_id);
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "logout",
+            &channel_id,
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "remove",
+            &channel_id,
+        ])
+        .assert()
+        .success();
+
+    let list_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "channels", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_json: Value = serde_json::from_slice(&list_output).expect("list json");
+    assert_eq!(
+        list_json["channels"]
+            .as_array()
+            .expect("channels array")
+            .len(),
+        0
+    );
+}

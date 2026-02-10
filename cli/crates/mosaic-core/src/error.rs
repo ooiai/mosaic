@@ -12,6 +12,11 @@ pub enum ErrorCode {
     Tool,
     Io,
     Validation,
+    GatewayUnavailable,
+    GatewayProtocol,
+    ChannelUnsupported,
+    ApprovalRequired,
+    SandboxDenied,
 }
 
 impl ErrorCode {
@@ -24,6 +29,11 @@ impl ErrorCode {
             Self::Tool => 5,
             Self::Io => 6,
             Self::Validation => 7,
+            Self::GatewayUnavailable => 8,
+            Self::GatewayProtocol => 9,
+            Self::ChannelUnsupported => 10,
+            Self::ApprovalRequired => 11,
+            Self::SandboxDenied => 12,
         }
     }
 }
@@ -42,6 +52,16 @@ pub enum MosaicError {
     Io(String),
     #[error("validation error: {0}")]
     Validation(String),
+    #[error("gateway unavailable: {0}")]
+    GatewayUnavailable(String),
+    #[error("gateway protocol error: {0}")]
+    GatewayProtocol(String),
+    #[error("channel unsupported: {0}")]
+    ChannelUnsupported(String),
+    #[error("approval required: {0}")]
+    ApprovalRequired(String),
+    #[error("sandbox denied: {0}")]
+    SandboxDenied(String),
     #[error("unknown error: {0}")]
     Unknown(String),
 }
@@ -55,6 +75,11 @@ impl MosaicError {
             Self::Tool(_) => ErrorCode::Tool,
             Self::Io(_) => ErrorCode::Io,
             Self::Validation(_) => ErrorCode::Validation,
+            Self::GatewayUnavailable(_) => ErrorCode::GatewayUnavailable,
+            Self::GatewayProtocol(_) => ErrorCode::GatewayProtocol,
+            Self::ChannelUnsupported(_) => ErrorCode::ChannelUnsupported,
+            Self::ApprovalRequired(_) => ErrorCode::ApprovalRequired,
+            Self::SandboxDenied(_) => ErrorCode::SandboxDenied,
             Self::Unknown(_) => ErrorCode::Unknown,
         }
     }
@@ -71,6 +96,11 @@ impl MosaicError {
             Self::Tool(msg) => Self::Tool(format!("{context}: {msg}")),
             Self::Io(msg) => Self::Io(format!("{context}: {msg}")),
             Self::Validation(msg) => Self::Validation(format!("{context}: {msg}")),
+            Self::GatewayUnavailable(msg) => Self::GatewayUnavailable(format!("{context}: {msg}")),
+            Self::GatewayProtocol(msg) => Self::GatewayProtocol(format!("{context}: {msg}")),
+            Self::ChannelUnsupported(msg) => Self::ChannelUnsupported(format!("{context}: {msg}")),
+            Self::ApprovalRequired(msg) => Self::ApprovalRequired(format!("{context}: {msg}")),
+            Self::SandboxDenied(msg) => Self::SandboxDenied(format!("{context}: {msg}")),
             Self::Unknown(msg) => Self::Unknown(format!("{context}: {msg}")),
         }
     }
@@ -86,6 +116,11 @@ impl Display for ErrorCode {
             Self::Tool => "tool",
             Self::Io => "io",
             Self::Validation => "validation",
+            Self::GatewayUnavailable => "gateway_unavailable",
+            Self::GatewayProtocol => "gateway_protocol",
+            Self::ChannelUnsupported => "channel_unsupported",
+            Self::ApprovalRequired => "approval_required",
+            Self::SandboxDenied => "sandbox_denied",
         };
         write!(f, "{text}")
     }
