@@ -11,6 +11,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
+- Agents runtime (`agents list|add|show|remove|default|route`)
 - Plugins and skills runtime (`plugins list|info|check`, `skills list|info|check`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
@@ -27,6 +28,7 @@ cli/
     mosaic-cli
     mosaic-core
     mosaic-agent
+    mosaic-agents
     mosaic-channels
     mosaic-gateway
     mosaic-ops
@@ -108,6 +110,7 @@ Gateway ops guide: `docs/gateway-ops.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
 Security audit guide: `docs/security-audit.md`
+Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
 
 ### Ops Runtime
@@ -136,6 +139,16 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state memory status
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --deep
+```
+
+### Agents Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents list
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents add --name Writer --id writer --set-default --route ask
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents show writer
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents route list
+cargo run -p mosaic-cli --bin mosaic -- --project-state ask --agent writer "hello"
 ```
 
 ### Plugins and Skills Runtime

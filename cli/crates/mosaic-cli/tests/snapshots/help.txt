@@ -17,6 +17,7 @@ Commands:
   sandbox    
   memory     
   security   
+  agents     
   plugins    
   skills     
   status     

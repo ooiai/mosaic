@@ -1,0 +1,15 @@
+[package]
+name = "mosaic-agents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mosaic-core = { path = "../mosaic-core" }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

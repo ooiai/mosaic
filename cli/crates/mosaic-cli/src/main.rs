@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tiny_http::{Method, Response, Server};
 
+use mosaic_agents::{AddAgentInput, AgentStore, agent_routes_path, agents_file_path};
 use mosaic_channels::{
     AddChannelInput, ChannelRepository, DEFAULT_CHANNEL_TOKEN_ENV, channels_events_dir,
     channels_file_path, format_channel_for_output,
@@ -76,6 +77,7 @@ enum Commands {
     Sandbox(SandboxArgs),
     Memory(MemoryArgs),
     Security(SecurityArgs),
+    Agents(AgentsArgs),
     Plugins(PluginsArgs),
     Skills(SkillsArgs),
     Status,
@@ -137,6 +139,8 @@ struct AskArgs {
     prompt: String,
     #[arg(long)]
     session: Option<String>,
+    #[arg(long)]
+    agent: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -145,6 +149,8 @@ struct ChatArgs {
     session: Option<String>,
     #[arg(long)]
     prompt: Option<String>,
+    #[arg(long)]
+    agent: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -375,6 +381,68 @@ enum SecurityCommand {
 }
 
 #[derive(Args, Debug, Clone)]
+struct AgentsArgs {
+    #[command(subcommand)]
+    command: AgentsCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum AgentsCommand {
+    List,
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        temperature: Option<f32>,
+        #[arg(long)]
+        max_turns: Option<u32>,
+        #[arg(long)]
+        tools_enabled: Option<bool>,
+        #[arg(long, value_enum)]
+        guard_mode: Option<GuardModeArg>,
+        #[arg(long)]
+        set_default: bool,
+        #[arg(long = "route")]
+        route_keys: Vec<String>,
+    },
+    Show {
+        agent_id: String,
+    },
+    Remove {
+        agent_id: String,
+    },
+    Default {
+        agent_id: Option<String>,
+    },
+    Route {
+        #[command(subcommand)]
+        command: AgentsRouteCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum AgentsRouteCommand {
+    List,
+    Set {
+        route_key: String,
+        agent_id: String,
+    },
+    Remove {
+        route_key: String,
+    },
+    Resolve {
+        #[arg(long)]
+        route: Option<String>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
 struct PluginsArgs {
     #[command(subcommand)]
     command: PluginsCommand,
@@ -467,6 +535,8 @@ impl From<GuardModeArg> for RunGuardMode {
 struct RuntimeContext {
     provider: Arc<dyn Provider>,
     agent: AgentRunner,
+    active_agent_id: Option<String>,
+    active_profile_name: String,
 }
 
 #[tokio::main]
@@ -513,6 +583,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Sandbox(args) => handle_sandbox(&cli, args),
         Commands::Memory(args) => handle_memory(&cli, args),
         Commands::Security(args) => handle_security(&cli, args),
+        Commands::Agents(args) => handle_agents(&cli, args),
         Commands::Plugins(args) => handle_plugins(&cli, args),
         Commands::Skills(args) => handle_skills(&cli, args),
         Commands::Status => handle_status(&cli),
@@ -649,7 +720,7 @@ fn handle_configure(cli: &Cli, args: ConfigureArgs) -> Result<()> {
 async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
     match args.command {
         ModelsCommand::List => {
-            let runtime = build_runtime(cli)?;
+            let runtime = build_runtime(cli, None, None)?;
             let models = runtime.provider.list_models().await?;
             if cli.json {
                 print_json(&json!({ "ok": true, "models": models }));
@@ -669,7 +740,7 @@ async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
 }
 
 async fn handle_ask(cli: &Cli, args: AskArgs) -> Result<()> {
-    let runtime = build_runtime(cli)?;
+    let runtime = build_runtime(cli, args.agent.as_deref(), Some("ask"))?;
     let result = runtime
         .agent
         .ask(
@@ -688,16 +759,21 @@ async fn handle_ask(cli: &Cli, args: AskArgs) -> Result<()> {
             "session_id": result.session_id,
             "response": result.response,
             "turns": result.turns,
+            "agent_id": runtime.active_agent_id,
+            "profile": runtime.active_profile_name,
         }));
     } else {
         println!("{}", result.response.trim());
         println!("session: {}", result.session_id);
+        if let Some(agent_id) = &runtime.active_agent_id {
+            println!("agent: {agent_id}");
+        }
     }
     Ok(())
 }
 
 async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
-    let runtime = build_runtime(cli)?;
+    let runtime = build_runtime(cli, args.agent.as_deref(), Some("chat"))?;
     let mut session_id = args.session;
 
     if let Some(prompt) = args.prompt {
@@ -720,11 +796,16 @@ async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                 "session_id": result.session_id,
                 "response": result.response,
                 "turns": result.turns,
+                "agent_id": runtime.active_agent_id,
+                "profile": runtime.active_profile_name,
             }));
             return Ok(());
         }
         println!("{}", result.response.trim());
         println!("session: {}", result.session_id);
+        if let Some(agent_id) = &runtime.active_agent_id {
+            println!("agent: {agent_id}");
+        }
     } else if cli.json {
         return Err(MosaicError::Validation(
             "chat in --json mode requires --prompt".to_string(),
@@ -734,6 +815,9 @@ async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
     println!("Entering chat mode. Type /help for commands, /exit to quit.");
     if let Some(id) = &session_id {
         println!("Resumed session: {id}");
+    }
+    if let Some(agent_id) = &runtime.active_agent_id {
+        println!("Using agent: {agent_id}");
     }
     loop {
         print!("you> ");
@@ -832,6 +916,7 @@ async fn handle_session(cli: &Cli, args: SessionArgs) -> Result<()> {
                 ChatArgs {
                     session: Some(session_id),
                     prompt: None,
+                    agent: None,
                 },
             )
             .await?;
@@ -1841,6 +1926,290 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
     Ok(())
 }
 
+fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let manager = ConfigManager::new(paths.config_path.clone());
+    let store = AgentStore::new(
+        agents_file_path(&paths.data_dir),
+        agent_routes_path(&paths.data_dir),
+    );
+    store.ensure_dirs()?;
+
+    match args.command {
+        AgentsCommand::List => {
+            let agents = store.list()?;
+            let routes = store.load_routes()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "agents": agents,
+                    "routes": routes,
+                }));
+            } else if agents.is_empty() {
+                println!("No agents found.");
+            } else {
+                println!("agents: {}", agents.len());
+                if let Some(default_agent_id) = &routes.default_agent_id {
+                    println!("default agent: {default_agent_id}");
+                }
+                for agent in agents {
+                    println!(
+                        "- {} ({}) profile={} model={} temperature={} max_turns={}",
+                        agent.id,
+                        agent.name,
+                        agent.profile,
+                        agent.model.unwrap_or_else(|| "-".to_string()),
+                        agent
+                            .temperature
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        agent
+                            .max_turns
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string())
+                    );
+                }
+            }
+        }
+        AgentsCommand::Add {
+            name,
+            id,
+            profile,
+            model,
+            temperature,
+            max_turns,
+            tools_enabled,
+            guard_mode,
+            set_default,
+            route_keys,
+        } => {
+            if !manager.exists() {
+                return Err(MosaicError::Config(
+                    "config file not found. run `mosaic setup` first".to_string(),
+                ));
+            }
+            let config = manager.load()?;
+            let profile = profile.unwrap_or_else(|| cli.profile.clone());
+            let _ = config.resolve_profile(Some(&profile))?;
+
+            let created = store.add(AddAgentInput {
+                id,
+                name,
+                profile,
+                model,
+                temperature,
+                max_turns,
+                tools_enabled,
+                guard_mode: guard_mode.map(Into::into),
+            })?;
+            if set_default {
+                store.set_default(&created.id)?;
+            }
+            for route_key in route_keys {
+                store.set_route(&route_key, &created.id)?;
+            }
+            let routes = store.load_routes()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "agent": created,
+                    "routes": routes,
+                }));
+            } else {
+                println!("Created agent {} ({})", created.id, created.name);
+                println!("profile: {}", created.profile);
+            }
+        }
+        AgentsCommand::Show { agent_id } => {
+            let agent = store
+                .get(&agent_id)?
+                .ok_or_else(|| MosaicError::Validation(format!("agent '{agent_id}' not found")))?;
+            let routes = store.load_routes()?;
+            let route_keys = routes
+                .routes
+                .iter()
+                .filter_map(|(route, id)| {
+                    if id == &agent.id {
+                        Some(route.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "agent": agent,
+                    "is_default": routes.default_agent_id.as_deref() == Some(agent_id.as_str()),
+                    "route_keys": route_keys,
+                }));
+            } else {
+                println!("id: {}", agent.id);
+                println!("name: {}", agent.name);
+                println!("profile: {}", agent.profile);
+                println!("model: {}", agent.model.unwrap_or_else(|| "-".to_string()));
+                println!(
+                    "temperature: {}",
+                    agent
+                        .temperature
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!(
+                    "max_turns: {}",
+                    agent
+                        .max_turns
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!(
+                    "tools_enabled: {}",
+                    agent
+                        .tools_enabled
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!(
+                    "guard_mode: {}",
+                    agent
+                        .guard_mode
+                        .map(|value| format!("{value:?}"))
+                        .unwrap_or_else(|| "-".to_string())
+                );
+                println!(
+                    "default: {}",
+                    routes.default_agent_id.as_deref() == Some(agent_id.as_str())
+                );
+                if route_keys.is_empty() {
+                    println!("routes: <none>");
+                } else {
+                    println!("routes: {}", route_keys.join(", "));
+                }
+            }
+        }
+        AgentsCommand::Remove { agent_id } => {
+            let removed = store.remove(&agent_id)?;
+            if !removed {
+                return Err(MosaicError::Validation(format!(
+                    "agent '{agent_id}' not found"
+                )));
+            }
+            let routes = store.load_routes()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": true,
+                    "agent_id": agent_id,
+                    "routes": routes,
+                }));
+            } else {
+                println!("Removed agent {agent_id}");
+            }
+        }
+        AgentsCommand::Default { agent_id } => match agent_id {
+            Some(agent_id) => {
+                let routes = store.set_default(&agent_id)?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "default_agent_id": routes.default_agent_id,
+                    }));
+                } else {
+                    println!(
+                        "Default agent: {}",
+                        routes.default_agent_id.unwrap_or_default()
+                    );
+                }
+            }
+            None => {
+                let routes = store.load_routes()?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "default_agent_id": routes.default_agent_id,
+                    }));
+                } else {
+                    println!(
+                        "default agent: {}",
+                        routes
+                            .default_agent_id
+                            .unwrap_or_else(|| "<none>".to_string())
+                    );
+                }
+            }
+        },
+        AgentsCommand::Route { command } => match command {
+            AgentsRouteCommand::List => {
+                let routes = store.load_routes()?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "routes": routes.routes,
+                        "default_agent_id": routes.default_agent_id,
+                    }));
+                } else if routes.routes.is_empty() {
+                    println!("No route bindings.");
+                } else {
+                    if let Some(default_agent_id) = routes.default_agent_id {
+                        println!("default: {default_agent_id}");
+                    }
+                    for (route, agent_id) in routes.routes {
+                        println!("{route} -> {agent_id}");
+                    }
+                }
+            }
+            AgentsRouteCommand::Set {
+                route_key,
+                agent_id,
+            } => {
+                let routes = store.set_route(&route_key, &agent_id)?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "route_key": route_key,
+                        "agent_id": agent_id,
+                        "routes": routes,
+                    }));
+                } else {
+                    println!("Bound route {route_key} -> {agent_id}");
+                }
+            }
+            AgentsRouteCommand::Remove { route_key } => {
+                let (routes, removed) = store.remove_route(&route_key)?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "removed": removed,
+                        "route_key": route_key,
+                        "routes": routes,
+                    }));
+                } else if removed {
+                    println!("Removed route {route_key}");
+                } else {
+                    println!("Route {route_key} not found.");
+                }
+            }
+            AgentsRouteCommand::Resolve { route } => {
+                let resolved = store.resolve_for_runtime(None, route.as_deref())?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "route": route,
+                        "agent_id": resolved,
+                    }));
+                } else {
+                    println!(
+                        "resolved agent: {}",
+                        resolved.unwrap_or_else(|| "<none>".to_string())
+                    );
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
 fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
@@ -2247,7 +2616,15 @@ fn handle_status(cli: &Cli) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     let manager = ConfigManager::new(paths.config_path.clone());
     let store = SessionStore::new(paths.sessions_dir.clone());
+    let agent_store = AgentStore::new(
+        agents_file_path(&paths.data_dir),
+        agent_routes_path(&paths.data_dir),
+    );
     let latest_session = store.latest_session_id()?;
+    let (agents_count, default_agent_id) = match (agent_store.list(), agent_store.load_routes()) {
+        (Ok(agents), Ok(routes)) => (agents.len(), routes.default_agent_id),
+        _ => (0, None),
+    };
     if !manager.exists() {
         if cli.json {
             print_json(&json!({
@@ -2256,11 +2633,14 @@ fn handle_status(cli: &Cli) -> Result<()> {
                 "state_mode": paths.mode,
                 "config_path": manager.path().display().to_string(),
                 "latest_session": latest_session,
+                "agents_count": agents_count,
+                "default_agent_id": default_agent_id,
             }));
         } else {
             println!("configured: no");
             println!("config path: {}", manager.path().display());
             println!("state mode: {:?}", paths.mode);
+            println!("agents: {}", agents_count);
         }
         return Ok(());
     }
@@ -2277,6 +2657,8 @@ fn handle_status(cli: &Cli) -> Result<()> {
             "state_mode": paths.mode,
             "config_path": manager.path().display().to_string(),
             "latest_session": latest_session,
+            "agents_count": agents_count,
+            "default_agent_id": default_agent_id,
         }));
     } else {
         println!("configured: yes");
@@ -2285,6 +2667,10 @@ fn handle_status(cli: &Cli) -> Result<()> {
         println!("base url: {}", resolved.profile.provider.base_url);
         println!("model: {}", resolved.profile.provider.model);
         println!("state mode: {:?}", paths.mode);
+        println!("agents: {}", agents_count);
+        if let Some(default_agent_id) = default_agent_id {
+            println!("default agent: {default_agent_id}");
+        }
         if let Some(latest) = latest_session {
             println!("latest session: {latest}");
         }
@@ -2469,6 +2855,32 @@ async fn handle_doctor(cli: &Cli) -> Result<()> {
         }
     }
 
+    let agent_store = AgentStore::new(
+        agents_file_path(&paths.data_dir),
+        agent_routes_path(&paths.data_dir),
+    );
+    match agent_store.check_integrity() {
+        Ok(report) => {
+            checks.push(run_check(
+                "agents_integrity",
+                report.ok,
+                format!(
+                    "agents={} routes={} default={}",
+                    report.agents_count,
+                    report.routes_count,
+                    report.default_agent_id.unwrap_or_else(|| "-".to_string())
+                ),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "agents_integrity",
+                false,
+                format!("failed to inspect agents: {err}"),
+            ));
+        }
+    }
+
     let extension_registry =
         ExtensionRegistry::new(RegistryRoots::from_state_root(paths.root_dir.clone()));
     match extension_registry.check_plugins(None) {
@@ -2602,12 +3014,25 @@ fn parse_json_input(raw: &str, field_name: &str) -> Result<Value> {
     })
 }
 
-fn build_runtime(cli: &Cli) -> Result<RuntimeContext> {
+fn build_runtime(
+    cli: &Cli,
+    requested_agent_id: Option<&str>,
+    route_hint: Option<&str>,
+) -> Result<RuntimeContext> {
     let state_paths = resolve_state_paths(cli.project_state)?;
     state_paths.ensure_dirs()?;
     let manager = ConfigManager::new(state_paths.config_path.clone());
     let config = manager.load()?;
-    let resolved = config.resolve_profile(Some(&cli.profile))?;
+    let agent_store = AgentStore::new(
+        agents_file_path(&state_paths.data_dir),
+        agent_routes_path(&state_paths.data_dir),
+    );
+    let resolved = agent_store.resolve_effective_profile(
+        &config,
+        &cli.profile,
+        requested_agent_id,
+        route_hint,
+    )?;
     let provider: Arc<dyn Provider> =
         Arc::new(OpenAiCompatibleProvider::from_profile(&resolved.profile)?);
     let session_store = SessionStore::new(state_paths.sessions_dir.clone());
@@ -2631,7 +3056,12 @@ fn build_runtime(cli: &Cli) -> Result<RuntimeContext> {
         audit_store,
         tool_executor,
     );
-    Ok(RuntimeContext { provider, agent })
+    Ok(RuntimeContext {
+        provider,
+        agent,
+        active_agent_id: resolved.agent_id,
+        active_profile_name: resolved.profile_name,
+    })
 }
 
 fn load_json_file_opt<T>(path: &std::path::Path) -> Result<Option<T>>

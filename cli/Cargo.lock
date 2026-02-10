@@ -801,6 +801,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-agents"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "mosaic-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "mosaic-channels"
 version = "0.1.0"
 dependencies = [
@@ -823,6 +835,7 @@ dependencies = [
  "chrono",
  "clap",
  "mosaic-agent",
+ "mosaic-agents",
  "mosaic-channels",
  "mosaic-core",
  "mosaic-gateway",
