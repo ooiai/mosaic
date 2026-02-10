@@ -16,6 +16,7 @@ Commands:
   approvals  
   sandbox    
   memory     
+  security   
   status     
   health     
   doctor     
