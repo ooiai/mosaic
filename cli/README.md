@@ -10,6 +10,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Channels runtime (`channels add|list|status|test|send|logs|capabilities|resolve|remove|logout`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
+- Security runtime (`security audit`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
 - Command aliases compatible with OpenClaw-style naming:
@@ -104,6 +105,7 @@ Discord webhook guide: `docs/channels-discord.md`
 Gateway ops guide: `docs/gateway-ops.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
+Security audit guide: `docs/security-audit.md`
 
 ### Ops Runtime
 
@@ -124,6 +126,13 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox explain --profil
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory index --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory search "rust cli"
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory status
+```
+
+### Security Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path .
+cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --deep
 ```
 
 ## Optional Live Smoke Test

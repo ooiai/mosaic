@@ -5,4 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+mosaic-core = { path = "../mosaic-core" }
+chrono.workspace = true
+regex.workspace = true
 serde.workspace = true
+uuid.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

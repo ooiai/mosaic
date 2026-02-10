@@ -34,6 +34,7 @@ use mosaic_ops::{
     collect_logs, list_profiles, snapshot_presence, system_events_path,
 };
 use mosaic_provider_openai::OpenAiCompatibleProvider;
+use mosaic_security::{SecurityAuditOptions, SecurityAuditor};
 use mosaic_tools::ToolExecutor;
 
 const PROJECT_STATE_DIR: &str = ".mosaic";
@@ -73,6 +74,7 @@ enum Commands {
     Approvals(ApprovalsArgs),
     Sandbox(SandboxArgs),
     Memory(MemoryArgs),
+    Security(SecurityArgs),
     Status,
     Health,
     Doctor,
@@ -349,6 +351,26 @@ enum MemoryCommand {
     Status,
 }
 
+#[derive(Args, Debug, Clone)]
+struct SecurityArgs {
+    #[command(subcommand)]
+    command: SecurityCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SecurityCommand {
+    Audit {
+        #[arg(long, default_value = ".")]
+        path: String,
+        #[arg(long)]
+        deep: bool,
+        #[arg(long, default_value_t = 800)]
+        max_files: usize,
+        #[arg(long, default_value_t = 262_144)]
+        max_file_size: usize,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct GatewayState {
     running: bool,
@@ -461,6 +483,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Approvals(args) => handle_approvals(&cli, args),
         Commands::Sandbox(args) => handle_sandbox(&cli, args),
         Commands::Memory(args) => handle_memory(&cli, args),
+        Commands::Security(args) => handle_security(&cli, args),
         Commands::Status => handle_status(&cli),
         Commands::Health => handle_health(&cli).await,
         Commands::Doctor => handle_doctor(&cli).await,
@@ -1720,6 +1743,73 @@ fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
     Ok(())
 }
 
+fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
+    let _paths = resolve_state_paths(cli.project_state)?;
+    let auditor = SecurityAuditor::new();
+
+    match args.command {
+        SecurityCommand::Audit {
+            path,
+            deep,
+            max_files,
+            max_file_size,
+        } => {
+            let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+            let root = {
+                let raw = PathBuf::from(path);
+                if raw.is_absolute() {
+                    raw
+                } else {
+                    cwd.join(raw)
+                }
+            };
+            let report = auditor.audit(SecurityAuditOptions {
+                root,
+                deep,
+                max_files,
+                max_file_size,
+            })?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "report": report,
+                }));
+            } else {
+                println!(
+                    "security audit summary: findings={} high={} medium={} low={} scanned={} skipped={}",
+                    report.summary.findings,
+                    report.summary.high,
+                    report.summary.medium,
+                    report.summary.low,
+                    report.summary.scanned_files,
+                    report.summary.skipped_files
+                );
+                if report.findings.is_empty() {
+                    println!("No security findings.");
+                } else {
+                    for finding in report.findings {
+                        println!(
+                            "[{:?}] {}:{} {} ({})",
+                            finding.severity,
+                            finding.path,
+                            finding
+                                .line
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string()),
+                            finding.title,
+                            finding.category
+                        );
+                        if let Some(suggestion) = finding.suggestion {
+                            println!("  suggestion: {suggestion}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn spawn_gateway_process(cli: &Cli, host: &str, port: u16) -> Result<u32> {
     let exe = std::env::current_exe().map_err(|err| {
         MosaicError::Io(format!("failed to resolve current executable path: {err}"))
@@ -2189,6 +2279,37 @@ async fn handle_doctor(cli: &Cli) -> Result<()> {
                 "memory_index",
                 false,
                 format!("failed to load memory status: {err}"),
+            ));
+        }
+    }
+
+    let security_root = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+    let security_report = SecurityAuditor::new().audit(SecurityAuditOptions {
+        root: security_root,
+        deep: false,
+        max_files: 200,
+        max_file_size: 131_072,
+    });
+    match security_report {
+        Ok(report) => {
+            checks.push(run_check(
+                "security_audit",
+                report.summary.high == 0,
+                format!(
+                    "findings={} high={} medium={} low={} scanned={}",
+                    report.summary.findings,
+                    report.summary.high,
+                    report.summary.medium,
+                    report.summary.low,
+                    report.summary.scanned_files
+                ),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "security_audit",
+                false,
+                format!("failed to run security audit: {err}"),
             ));
         }
     }

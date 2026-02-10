@@ -829,6 +829,7 @@ dependencies = [
  "mosaic-memory",
  "mosaic-ops",
  "mosaic-provider-openai",
+ "mosaic-security",
  "mosaic-tools",
  "predicates",
  "reqwest",
@@ -907,7 +908,13 @@ dependencies = [
 name = "mosaic-security"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "mosaic-core",
+ "regex",
  "serde",
+ "tempfile",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
