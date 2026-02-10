@@ -15,6 +15,7 @@ mosaic-core = { path = "../mosaic-core" }
 mosaic-gateway = { path = "../mosaic-gateway" }
 mosaic-memory = { path = "../mosaic-memory" }
 mosaic-ops = { path = "../mosaic-ops" }
+mosaic-plugins = { path = "../mosaic-plugins" }
 mosaic-provider-openai = { path = "../mosaic-provider-openai" }
 mosaic-security = { path = "../mosaic-security" }
 mosaic-tools = { path = "../mosaic-tools" }

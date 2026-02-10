@@ -17,6 +17,8 @@ Commands:
   sandbox    
   memory     
   security   
+  plugins    
+  skills     
   status     
   health     
   doctor     
