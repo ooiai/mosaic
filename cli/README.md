@@ -139,6 +139,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state memory status
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --deep
+cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --update-baseline
+cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --no-baseline
 ```
 
 ### Agents Runtime

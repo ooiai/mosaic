@@ -38,7 +38,9 @@ use mosaic_ops::{
     collect_logs, list_profiles, snapshot_presence, system_events_path,
 };
 use mosaic_provider_openai::OpenAiCompatibleProvider;
-use mosaic_security::{SecurityAuditOptions, SecurityAuditor};
+use mosaic_security::{
+    SecurityAuditOptions, SecurityAuditor, SecurityBaselineConfig, apply_baseline,
+};
 use mosaic_tools::ToolExecutor;
 
 const PROJECT_STATE_DIR: &str = ".mosaic";
@@ -379,6 +381,12 @@ enum SecurityCommand {
         max_files: usize,
         #[arg(long, default_value_t = 262_144)]
         max_file_size: usize,
+        #[arg(long)]
+        baseline: Option<String>,
+        #[arg(long)]
+        no_baseline: bool,
+        #[arg(long)]
+        update_baseline: bool,
     },
 }
 
@@ -1919,7 +1927,8 @@ fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
 }
 
 fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
-    let _paths = resolve_state_paths(cli.project_state)?;
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
     let auditor = SecurityAuditor::new();
 
     match args.command {
@@ -1928,7 +1937,15 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
             deep,
             max_files,
             max_file_size,
+            baseline,
+            no_baseline,
+            update_baseline,
         } => {
+            if no_baseline && update_baseline {
+                return Err(MosaicError::Validation(
+                    "--no-baseline and --update-baseline cannot be used together".to_string(),
+                ));
+            }
             let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
             let root = {
                 let raw = PathBuf::from(path);
@@ -1938,27 +1955,85 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                     cwd.join(raw)
                 }
             };
-            let report = auditor.audit(SecurityAuditOptions {
+            let mut report = auditor.audit(SecurityAuditOptions {
                 root,
                 deep,
                 max_files,
                 max_file_size,
             })?;
+            let baseline_path = baseline.map_or_else(
+                || paths.root_dir.join("security").join("baseline.toml"),
+                |raw| {
+                    let path = PathBuf::from(raw);
+                    if path.is_absolute() {
+                        path
+                    } else {
+                        cwd.join(path)
+                    }
+                },
+            );
+            let baseline_path_display = baseline_path.display().to_string();
+            let mut baseline_added = 0usize;
+            let mut baseline_enabled = false;
+
+            if !no_baseline || update_baseline {
+                let mut baseline_config =
+                    SecurityBaselineConfig::load_optional(&baseline_path)?.unwrap_or_default();
+                if !no_baseline {
+                    baseline_enabled = true;
+                    let applied = apply_baseline(report, &baseline_config);
+                    report = applied.report;
+                    report.summary.baseline_path = Some(baseline_path_display.clone());
+                }
+                if update_baseline {
+                    baseline_enabled = true;
+                    baseline_added = baseline_config.add_findings(&report.findings);
+                    baseline_config.save_to_path(&baseline_path)?;
+                    if !report.findings.is_empty() {
+                        report.summary.ignored += report.findings.len();
+                        report.findings.clear();
+                        report.summary.findings = 0;
+                        report.summary.high = 0;
+                        report.summary.medium = 0;
+                        report.summary.low = 0;
+                        report.summary.ok = true;
+                    }
+                    report.summary.baseline_path = Some(baseline_path_display.clone());
+                }
+            }
+
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "report": report,
+                    "baseline": {
+                        "enabled": baseline_enabled,
+                        "updated": update_baseline,
+                        "added": baseline_added,
+                        "path": if baseline_enabled {
+                            Some(baseline_path_display.clone())
+                        } else {
+                            None
+                        },
+                    }
                 }));
             } else {
                 println!(
-                    "security audit summary: findings={} high={} medium={} low={} scanned={} skipped={}",
+                    "security audit summary: findings={} high={} medium={} low={} ignored={} scanned={} skipped={}",
                     report.summary.findings,
                     report.summary.high,
                     report.summary.medium,
                     report.summary.low,
+                    report.summary.ignored,
                     report.summary.scanned_files,
                     report.summary.skipped_files
                 );
+                if baseline_enabled {
+                    println!("baseline: {baseline_path_display}");
+                }
+                if update_baseline {
+                    println!("baseline updated: added {baseline_added} fingerprints");
+                }
                 if report.findings.is_empty() {
                     println!("No security findings.");
                 } else {

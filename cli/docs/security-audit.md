@@ -7,6 +7,8 @@
 ```bash
 mosaic --project-state security audit --path .
 mosaic --project-state security audit --path . --deep
+mosaic --project-state security audit --path . --update-baseline
+mosaic --project-state security audit --path . --no-baseline
 ```
 
 ## Output
@@ -17,11 +19,15 @@ mosaic --project-state security audit --path . --deep
   - `ok`
   - `findings`
   - `high`, `medium`, `low`
+  - `ignored`
   - `scanned_files`, `skipped_files`
-  - `generated_at`, `root`
+  - `generated_at`, `root`, `baseline_path`
 - `report.findings[]`
+  - `fingerprint`
   - `severity`, `category`, `title`, `detail`
   - `path`, `line`, `suggestion`
+- `baseline`
+  - `enabled`, `updated`, `added`, `path`
 
 ## Current checks
 
@@ -38,3 +44,11 @@ mosaic --project-state security audit --path . --deep
 - `--max-files` (default `800`)
 - `--max-file-size` (default `262144` bytes)
 - Skips common folders: `.git`, `target`, `node_modules`, `.pnpm-store`, `.mosaic`
+
+## Baseline
+
+- Default baseline path:
+  - project mode: `.mosaic/security/baseline.toml`
+  - xdg mode: `<XDG config>/mosaic/security/baseline.toml`
+- Use `--update-baseline` to add current findings fingerprints into the baseline.
+- Use `--no-baseline` to ignore baseline filtering for one run.

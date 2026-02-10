@@ -10,6 +10,7 @@ use mosaic_core::error::{MosaicError, Result};
 
 const DEFAULT_MAX_FILES: usize = 800;
 const DEFAULT_MAX_FILE_SIZE: usize = 256 * 1024;
+const CURRENT_BASELINE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,6 +23,7 @@ pub enum SecuritySeverity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityFinding {
     pub id: String,
+    pub fingerprint: String,
     pub severity: SecuritySeverity,
     pub category: String,
     pub title: String,
@@ -38,16 +40,32 @@ pub struct SecurityAuditSummary {
     pub high: usize,
     pub medium: usize,
     pub low: usize,
+    pub ignored: usize,
     pub scanned_files: usize,
     pub skipped_files: usize,
     pub generated_at: DateTime<Utc>,
     pub root: String,
+    pub baseline_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityAuditReport {
     pub summary: SecurityAuditSummary,
     pub findings: Vec<SecurityFinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityBaselineConfig {
+    pub version: u32,
+    pub ignored_fingerprints: Vec<String>,
+    pub ignored_paths: Vec<String>,
+    pub ignored_categories: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityBaselineApplyResult {
+    pub report: SecurityAuditReport,
+    pub ignored: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +85,127 @@ impl Default for SecurityAuditOptions {
             max_file_size: DEFAULT_MAX_FILE_SIZE,
         }
     }
+}
+
+impl Default for SecurityBaselineConfig {
+    fn default() -> Self {
+        Self {
+            version: CURRENT_BASELINE_VERSION,
+            ignored_fingerprints: Vec::new(),
+            ignored_paths: Vec::new(),
+            ignored_categories: Vec::new(),
+        }
+    }
+}
+
+impl SecurityBaselineConfig {
+    pub fn load_optional(path: &Path) -> Result<Option<Self>> {
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = std::fs::read_to_string(path)?;
+        let parsed = toml::from_str::<Self>(&raw).map_err(|err| {
+            MosaicError::Validation(format!("invalid baseline TOML {}: {err}", path.display()))
+        })?;
+        parsed.validate()?;
+        Ok(Some(parsed))
+    }
+
+    pub fn save_to_path(&self, path: &Path) -> Result<()> {
+        self.validate()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let raw = toml::to_string_pretty(self).map_err(|err| {
+            MosaicError::Validation(format!("failed to encode baseline TOML: {err}"))
+        })?;
+        std::fs::write(path, raw)?;
+        Ok(())
+    }
+
+    pub fn add_findings(&mut self, findings: &[SecurityFinding]) -> usize {
+        let mut added = 0usize;
+        let mut seen = self
+            .ignored_fingerprints
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        for finding in findings {
+            let fingerprint = finding.fingerprint.trim();
+            if fingerprint.is_empty() {
+                continue;
+            }
+            if seen.insert(fingerprint.to_string()) {
+                self.ignored_fingerprints.push(fingerprint.to_string());
+                added += 1;
+            }
+        }
+        self.ignored_fingerprints.sort();
+        self.ignored_fingerprints.dedup();
+        added
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.version != CURRENT_BASELINE_VERSION {
+            return Err(MosaicError::Validation(format!(
+                "unsupported security baseline version {} expected {}",
+                self.version, CURRENT_BASELINE_VERSION
+            )));
+        }
+        Ok(())
+    }
+
+    fn matches(&self, finding: &SecurityFinding) -> bool {
+        self.ignored_fingerprints
+            .iter()
+            .any(|value| value == &finding.fingerprint)
+            || self
+                .ignored_categories
+                .iter()
+                .any(|value| value == &finding.category)
+            || self
+                .ignored_paths
+                .iter()
+                .any(|pattern| path_match(pattern, &finding.path))
+    }
+}
+
+pub fn apply_baseline(
+    mut report: SecurityAuditReport,
+    baseline: &SecurityBaselineConfig,
+) -> SecurityBaselineApplyResult {
+    let mut kept = Vec::new();
+    let mut ignored = 0usize;
+    for finding in report.findings {
+        if baseline.matches(&finding) {
+            ignored += 1;
+        } else {
+            kept.push(finding);
+        }
+    }
+
+    let high = kept
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::High)
+        .count();
+    let medium = kept
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::Medium)
+        .count();
+    let low = kept
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::Low)
+        .count();
+
+    report.summary.ok = high == 0;
+    report.summary.findings = kept.len();
+    report.summary.high = high;
+    report.summary.medium = medium;
+    report.summary.low = low;
+    report.summary.ignored += ignored;
+    report.findings = kept;
+
+    SecurityBaselineApplyResult { report, ignored }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -148,10 +287,12 @@ impl SecurityAuditor {
             high,
             medium,
             low,
+            ignored: 0,
             scanned_files,
             skipped_files,
             generated_at: Utc::now(),
             root: root.display().to_string(),
+            baseline_path: None,
         };
 
         Ok(SecurityAuditReport { summary, findings })
@@ -202,6 +343,7 @@ fn scan_content(
             keys,
             SecurityFinding {
                 id: format!("sec_{}", uuid::Uuid::new_v4()),
+                fingerprint: String::new(),
                 severity: SecuritySeverity::High,
                 category: "credential_exposure".to_string(),
                 title: "Private key material detected".to_string(),
@@ -223,6 +365,7 @@ fn scan_content(
                 keys,
                 SecurityFinding {
                     id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
                     severity: SecuritySeverity::High,
                     category: "credential_exposure".to_string(),
                     title: "Potential hardcoded secret".to_string(),
@@ -244,6 +387,7 @@ fn scan_content(
                 keys,
                 SecurityFinding {
                     id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
                     severity: SecuritySeverity::High,
                     category: "credential_exposure".to_string(),
                     title: "AWS access key pattern detected".to_string(),
@@ -263,6 +407,7 @@ fn scan_content(
                 keys,
                 SecurityFinding {
                     id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
                     severity: SecuritySeverity::Medium,
                     category: "supply_chain".to_string(),
                     title: "curl pipe to shell detected".to_string(),
@@ -283,6 +428,7 @@ fn scan_content(
                 keys,
                 SecurityFinding {
                     id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
                     severity: SecuritySeverity::Low,
                     category: "transport_security".to_string(),
                     title: "Insecure HTTP endpoint detected".to_string(),
@@ -300,6 +446,7 @@ fn scan_content(
                 keys,
                 SecurityFinding {
                     id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
                     severity: SecuritySeverity::Medium,
                     category: "cors".to_string(),
                     title: "Wildcard CORS policy detected".to_string(),
@@ -319,6 +466,7 @@ fn scan_content(
                 keys,
                 SecurityFinding {
                     id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
                     severity: SecuritySeverity::Medium,
                     category: "code_injection".to_string(),
                     title: "eval() usage detected".to_string(),
@@ -337,15 +485,15 @@ fn scan_content(
 fn push_finding(
     findings: &mut Vec<SecurityFinding>,
     keys: &mut HashSet<String>,
-    finding: SecurityFinding,
+    mut finding: SecurityFinding,
 ) {
-    let key = format!(
-        "{}:{}:{}:{}",
-        finding.path,
-        finding.line.unwrap_or_default(),
-        finding.category,
-        finding.title
+    let key = finding_key(
+        &finding.path,
+        finding.line,
+        &finding.category,
+        &finding.title,
     );
+    finding.fingerprint = key.clone();
     if keys.insert(key) {
         findings.push(finding);
     }
@@ -378,6 +526,68 @@ fn relative_path(root: &Path, path: &Path) -> String {
         .ok()
         .map(|value| value.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+fn finding_key(path: &str, line: Option<usize>, category: &str, title: &str) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        path,
+        line.unwrap_or_default(),
+        category,
+        title
+    )
+}
+
+fn path_match(pattern: &str, path: &str) -> bool {
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return false;
+    }
+    if pattern == path {
+        return true;
+    }
+    if pattern.contains('*') {
+        return wildcard_match(pattern, path);
+    }
+    path.starts_with(&(pattern.to_string() + "/"))
+}
+
+fn wildcard_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    let parts = pattern.split('*').collect::<Vec<_>>();
+    if parts.len() == 1 {
+        return pattern == value;
+    }
+
+    let mut cursor = 0usize;
+    let anchored_start = !pattern.starts_with('*');
+    let anchored_end = !pattern.ends_with('*');
+
+    for (idx, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if idx == 0 && anchored_start {
+            if !value[cursor..].starts_with(part) {
+                return false;
+            }
+            cursor += part.len();
+            continue;
+        }
+        let Some(found) = value[cursor..].find(part) else {
+            return false;
+        };
+        cursor += found + part.len();
+    }
+
+    if anchored_end {
+        if let Some(last) = parts.iter().rev().find(|part| !part.is_empty()) {
+            return value.ends_with(last);
+        }
+    }
+    true
 }
 
 fn should_skip(path: &Path) -> bool {
@@ -469,5 +679,54 @@ mod tests {
 
         assert_eq!(report.summary.findings, 0);
         assert!(report.summary.ok);
+    }
+
+    #[test]
+    fn baseline_filters_known_fingerprints() {
+        let temp = tempdir().expect("tempdir");
+        std::fs::write(
+            temp.path().join("secrets.env"),
+            "API_KEY = \"sk-live-secret-value-123456\"\n",
+        )
+        .expect("write secrets");
+
+        let auditor = SecurityAuditor::new();
+        let report = auditor
+            .audit(SecurityAuditOptions {
+                root: temp.path().to_path_buf(),
+                ..SecurityAuditOptions::default()
+            })
+            .expect("audit report");
+        assert_eq!(report.summary.findings, 1);
+
+        let mut baseline = SecurityBaselineConfig::default();
+        let added = baseline.add_findings(&report.findings);
+        assert_eq!(added, 1);
+
+        let filtered = apply_baseline(report, &baseline);
+        assert_eq!(filtered.ignored, 1);
+        assert_eq!(filtered.report.summary.findings, 0);
+        assert!(filtered.report.summary.ok);
+    }
+
+    #[test]
+    fn baseline_load_and_save_roundtrip() {
+        let temp = tempdir().expect("tempdir");
+        let baseline_path = temp.path().join("baseline.toml");
+        let mut baseline = SecurityBaselineConfig::default();
+        baseline.ignored_fingerprints = vec!["a:b:c:d".to_string()];
+        baseline.ignored_paths = vec!["src/".to_string()];
+        baseline.ignored_categories = vec!["transport_security".to_string()];
+
+        baseline
+            .save_to_path(&baseline_path)
+            .expect("save baseline");
+        let loaded = SecurityBaselineConfig::load_optional(&baseline_path)
+            .expect("load baseline")
+            .expect("baseline exists");
+        assert_eq!(loaded.version, CURRENT_BASELINE_VERSION);
+        assert_eq!(loaded.ignored_fingerprints.len(), 1);
+        assert_eq!(loaded.ignored_paths.len(), 1);
+        assert_eq!(loaded.ignored_categories.len(), 1);
     }
 }
