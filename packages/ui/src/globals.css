@@ -1,0 +1,137 @@
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  cursor: pointer;
+}
+
+.ui-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ui-button--sm {
+  min-height: 30px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.ui-button--md {
+  min-height: 34px;
+  padding: 7px 12px;
+  font-size: 14px;
+}
+
+.ui-button--lg {
+  min-height: 38px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+
+.ui-button--default {
+  border-color: #5d6675;
+  background: #646d7a;
+  color: #ffffff;
+}
+
+.ui-button--default:hover:enabled {
+  background: #535d69;
+  border-color: #515a66;
+}
+
+.ui-button--ghost {
+  border-color: #dbdde2;
+  background: rgba(255, 255, 255, 0.86);
+  color: #3b4048;
+}
+
+.ui-button--ghost:hover:enabled {
+  background: #ffffff;
+  border-color: #cfd3da;
+}
+
+.ui-button--subtle {
+  border-color: transparent;
+  background: transparent;
+  color: #646b75;
+}
+
+.ui-button--subtle:hover:enabled {
+  background: rgba(255, 255, 255, 0.85);
+  color: #2c3138;
+}
+
+.ui-button--primary {
+  border-color: #5d6675;
+  background: #646d7a;
+  color: #ffffff;
+}
+
+.ui-button--primary:hover:enabled {
+  background: #535d69;
+  border-color: #515a66;
+}
+
+.ui-button--secondary {
+  border-color: #d7dae0;
+  background: #eceef1;
+  color: #353b44;
+}
+
+.ui-button--secondary:hover:enabled {
+  background: #e3e6eb;
+}
+
+.ui-button--outline {
+  border-color: #d7dae0;
+  background: transparent;
+  color: #3b424c;
+}
+
+.ui-button--outline:hover:enabled {
+  background: #f4f6f9;
+}
+
+.ui-pill {
+  border: 1px solid #dde0e6;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #ffffff;
+  color: #727883;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.ui-segmented {
+  background: #eceef1;
+  padding: 2px;
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.ui-segmented__item {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: #6e7480;
+  font-size: 12px;
+  padding: 5px 8px;
+  min-width: 64px;
+}
+
+.ui-segmented__item.is-active {
+  background: #ffffff;
+  color: #2b3037;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.ui-icon {
+  flex: 0 0 auto;
+}

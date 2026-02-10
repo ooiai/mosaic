@@ -1,17 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
 import { Button, Icon, Pill, SegmentedTabs } from '@mosaic/ui';
 import {
-  PRIMARY_NAV_ITEMS,
-  WEB_SNAPSHOT,
-  isTauriRuntime,
-  loadShellSnapshot,
-  resolveActiveThread,
-  resolveWorkspaceName,
-  stagePlaceholder,
-  type ChatSection,
-  type ShellSnapshot,
-  type StageTab,
+    PRIMARY_NAV_ITEMS,
+    WEB_SNAPSHOT,
+    isTauriRuntime,
+    loadShellSnapshot,
+    resolveActiveThread,
+    resolveWorkspaceName,
+    stagePlaceholder,
+    type ChatSection,
+    type ShellSnapshot,
+    type StageTab,
 } from '@mosaic/workbench';
+import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 
 const STAGE_OPTIONS: { value: StageTab; label: string }[] = [

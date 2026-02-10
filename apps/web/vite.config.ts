@@ -10,8 +10,9 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@mosaic/ui': path.resolve(appRoot, '../../packages/ui/src/index.ts'),
-      '@mosaic/workbench': path.resolve(appRoot, '../../packages/workbench/src/index.ts'),
+      '@': path.resolve(appRoot, './src'),
+      '@mosaic/ui': path.resolve(appRoot, '../../packages/ui/src'),
+      '@mosaic/workbench': path.resolve(appRoot, '../../packages/workbench/src'),
       react: path.resolve(appRoot, 'node_modules/react'),
       'react/jsx-runtime': path.resolve(appRoot, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime': path.resolve(appRoot, 'node_modules/react/jsx-dev-runtime.js'),
