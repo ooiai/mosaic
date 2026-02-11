@@ -39,7 +39,7 @@ use mosaic_ops::{
 };
 use mosaic_provider_openai::OpenAiCompatibleProvider;
 use mosaic_security::{
-    SecurityAuditOptions, SecurityAuditor, SecurityBaselineConfig, apply_baseline,
+    SecurityAuditOptions, SecurityAuditor, SecurityBaselineConfig, apply_baseline, report_to_sarif,
 };
 use mosaic_tools::ToolExecutor;
 
@@ -387,6 +387,10 @@ enum SecurityCommand {
         no_baseline: bool,
         #[arg(long)]
         update_baseline: bool,
+        #[arg(long)]
+        sarif: bool,
+        #[arg(long)]
+        sarif_output: Option<String>,
     },
     Baseline {
         #[command(subcommand)]
@@ -1977,6 +1981,8 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
             baseline,
             no_baseline,
             update_baseline,
+            sarif,
+            sarif_output,
         } => {
             if no_baseline && update_baseline {
                 return Err(MosaicError::Validation(
@@ -2001,6 +2007,7 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
             let baseline_path_display = baseline_path.display().to_string();
             let mut baseline_added = 0usize;
             let mut baseline_enabled = false;
+            let mut sarif_output_path = None;
 
             if !no_baseline || update_baseline {
                 let mut baseline_config =
@@ -2028,6 +2035,37 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                 }
             }
 
+            let sarif_value = if sarif || sarif_output.is_some() {
+                Some(report_to_sarif(&report))
+            } else {
+                None
+            };
+            if let Some(raw_path) = sarif_output {
+                let output_path = resolve_output_path(&cwd, &raw_path);
+                if let Some(parent) = output_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let encoded = serde_json::to_string_pretty(
+                    sarif_value
+                        .as_ref()
+                        .ok_or_else(|| MosaicError::Unknown("sarif value missing".to_string()))?,
+                )
+                .map_err(|err| {
+                    MosaicError::Validation(format!("failed to encode sarif JSON: {err}"))
+                })?;
+                std::fs::write(&output_path, encoded)?;
+                sarif_output_path = Some(output_path.display().to_string());
+            }
+
+            if sarif {
+                print_json(
+                    sarif_value
+                        .as_ref()
+                        .ok_or_else(|| MosaicError::Unknown("sarif value missing".to_string()))?,
+                );
+                return Ok(());
+            }
+
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -2041,7 +2079,8 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                         } else {
                             None
                         },
-                    }
+                    },
+                    "sarif_output": sarif_output_path,
                 }));
             } else {
                 println!(
@@ -2059,6 +2098,9 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                 }
                 if update_baseline {
                     println!("baseline updated: added {baseline_added} fingerprints");
+                }
+                if let Some(sarif_output_path) = sarif_output_path {
+                    println!("sarif: {sarif_output_path}");
                 }
                 if report.findings.is_empty() {
                     println!("No security findings.");
@@ -3520,6 +3562,15 @@ fn resolve_baseline_path(
             }
         },
     )
+}
+
+fn resolve_output_path(cwd: &std::path::Path, raw: &str) -> PathBuf {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        cwd.join(path)
+    }
 }
 
 fn normalize_non_empty_list(values: Vec<String>, field_name: &str) -> Result<Vec<String>> {

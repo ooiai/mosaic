@@ -938,6 +938,7 @@ dependencies = [
  "mosaic-core",
  "regex",
  "serde",
+ "serde_json",
  "tempfile",
  "toml",
  "uuid",

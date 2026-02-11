@@ -9,6 +9,8 @@ mosaic --project-state security audit --path .
 mosaic --project-state security audit --path . --deep
 mosaic --project-state security audit --path . --update-baseline
 mosaic --project-state security audit --path . --no-baseline
+mosaic --project-state security audit --path . --sarif
+mosaic --project-state security audit --path . --sarif-output scan.sarif
 
 # Baseline management
 mosaic --project-state security baseline show
@@ -35,6 +37,7 @@ mosaic --project-state security baseline clear
   - `path`, `line`, `suggestion`
 - `baseline`
   - `enabled`, `updated`, `added`, `path`
+- `sarif_output` (when `--sarif-output` is used)
 
 ## Current checks
 
@@ -60,3 +63,5 @@ mosaic --project-state security baseline clear
 - Use `--update-baseline` to add current findings fingerprints into the baseline.
 - Use `--no-baseline` to ignore baseline filtering for one run.
 - Use `security baseline show|add|remove|clear` for manual baseline management.
+- Use `--sarif` to print SARIF v2.1.0 to stdout.
+- Use `--sarif-output <path>` to persist SARIF v2.1.0 while keeping normal CLI output.
