@@ -141,6 +141,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --deep
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --update-baseline
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --no-baseline
+cargo run -p mosaic-cli --bin mosaic -- --project-state security baseline show
+cargo run -p mosaic-cli --bin mosaic -- --project-state security baseline add --fingerprint "<fp>"
+cargo run -p mosaic-cli --bin mosaic -- --project-state security baseline clear
 ```
 
 ### Agents Runtime

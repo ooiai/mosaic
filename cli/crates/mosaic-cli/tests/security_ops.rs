@@ -127,3 +127,121 @@ fn security_audit_can_update_and_apply_baseline() {
             >= 1
     );
 }
+
+#[test]
+#[allow(deprecated)]
+fn security_baseline_manage_commands_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let show_initial = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "security", "baseline", "show"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show_initial: Value = serde_json::from_slice(&show_initial).expect("show initial");
+    assert_eq!(show_initial["ok"], true);
+    assert_eq!(show_initial["exists"], false);
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "baseline",
+            "add",
+            "--fingerprint",
+            "foo:1:category:title",
+            "--category",
+            "transport_security",
+            "--match-path",
+            "vendor/*",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_output: Value = serde_json::from_slice(&add_output).expect("add output");
+    assert_eq!(add_output["ok"], true);
+    assert!(add_output["added"].as_u64().unwrap_or(0) >= 3);
+
+    let show_after_add = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "security", "baseline", "show"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show_after_add: Value = serde_json::from_slice(&show_after_add).expect("show after add");
+    assert_eq!(show_after_add["ok"], true);
+    assert_eq!(show_after_add["exists"], true);
+    assert!(
+        show_after_add["baseline"]["ignored_fingerprints"]
+            .as_array()
+            .expect("fingerprints")
+            .iter()
+            .any(|value| value.as_str() == Some("foo:1:category:title"))
+    );
+
+    let remove_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "baseline",
+            "remove",
+            "--category",
+            "transport_security",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let remove_output: Value = serde_json::from_slice(&remove_output).expect("remove output");
+    assert_eq!(remove_output["ok"], true);
+    assert!(remove_output["removed"].as_u64().unwrap_or(0) >= 1);
+
+    let clear_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "security", "baseline", "clear"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let clear_output: Value = serde_json::from_slice(&clear_output).expect("clear output");
+    assert_eq!(clear_output["ok"], true);
+    assert!(clear_output["cleared"].as_u64().unwrap_or(0) >= 1);
+
+    let show_after_clear = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "security", "baseline", "show"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show_after_clear: Value =
+        serde_json::from_slice(&show_after_clear).expect("show after clear");
+    assert_eq!(show_after_clear["ok"], true);
+    assert_eq!(
+        show_after_clear["baseline"]["ignored_fingerprints"]
+            .as_array()
+            .expect("fingerprints")
+            .len(),
+        0
+    );
+}

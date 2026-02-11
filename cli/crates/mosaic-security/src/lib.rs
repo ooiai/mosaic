@@ -104,19 +104,22 @@ impl SecurityBaselineConfig {
             return Ok(None);
         }
         let raw = std::fs::read_to_string(path)?;
-        let parsed = toml::from_str::<Self>(&raw).map_err(|err| {
+        let mut parsed = toml::from_str::<Self>(&raw).map_err(|err| {
             MosaicError::Validation(format!("invalid baseline TOML {}: {err}", path.display()))
         })?;
         parsed.validate()?;
+        parsed.normalize();
         Ok(Some(parsed))
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
-        self.validate()?;
+        let mut normalized = self.clone();
+        normalized.validate()?;
+        normalized.normalize();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let raw = toml::to_string_pretty(self).map_err(|err| {
+        let raw = toml::to_string_pretty(&normalized).map_err(|err| {
             MosaicError::Validation(format!("failed to encode baseline TOML: {err}"))
         })?;
         std::fs::write(path, raw)?;
@@ -140,8 +143,7 @@ impl SecurityBaselineConfig {
                 added += 1;
             }
         }
-        self.ignored_fingerprints.sort();
-        self.ignored_fingerprints.dedup();
+        self.normalize();
         added
     }
 
@@ -153,6 +155,12 @@ impl SecurityBaselineConfig {
             )));
         }
         Ok(())
+    }
+
+    fn normalize(&mut self) {
+        normalize_list(&mut self.ignored_fingerprints);
+        normalize_list(&mut self.ignored_paths);
+        normalize_list(&mut self.ignored_categories);
     }
 
     fn matches(&self, finding: &SecurityFinding) -> bool {
@@ -588,6 +596,16 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
         }
     }
     true
+}
+
+fn normalize_list(values: &mut Vec<String>) {
+    *values = values
+        .drain(..)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    values.sort();
+    values.dedup();
 }
 
 fn should_skip(path: &Path) -> bool {
