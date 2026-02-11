@@ -1636,7 +1636,7 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             } else {
                 for event in events {
                     println!(
-                        "{} channel={} kind={} status={} attempt={} http={} error={} preview={}",
+                        "{} channel={} kind={} status={} attempt={} http={} parse_mode={} idempotency_key={} deduplicated={} rate_limited_ms={} error={} preview={}",
                         event.ts.to_rfc3339(),
                         event.channel_id,
                         event.kind,
@@ -1644,6 +1644,13 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                         event.attempt,
                         event
                             .http_status
+                            .map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        event.parse_mode.unwrap_or_else(|| "-".to_string()),
+                        event.idempotency_key.unwrap_or_else(|| "-".to_string()),
+                        event.deduplicated,
+                        event
+                            .rate_limited_ms
                             .map(|value| value.to_string())
                             .unwrap_or_else(|| "-".to_string()),
                         event.error.unwrap_or_else(|| "-".to_string()),
@@ -1664,7 +1671,7 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             } else {
                 for capability in capabilities {
                     println!(
-                        "{} aliases={} endpoint={} token_env={} probe={} bearer_token={}",
+                        "{} aliases={} endpoint={} token_env={} probe={} bearer_token={} parse_mode={} template={} idempotency={} rate_limit_report={}",
                         capability.kind,
                         if capability.aliases.is_empty() {
                             "-".to_string()
@@ -1674,7 +1681,11 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                         capability.supports_endpoint,
                         capability.supports_token_env,
                         capability.supports_test_probe,
-                        capability.supports_bearer_token
+                        capability.supports_bearer_token,
+                        capability.supports_parse_mode,
+                        capability.supports_message_template,
+                        capability.supports_idempotency_key,
+                        capability.supports_rate_limit_report
                     );
                 }
             }

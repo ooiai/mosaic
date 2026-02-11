@@ -172,6 +172,10 @@ impl ChannelProvider for SlackWebhookProvider {
             supports_token_env: true,
             supports_test_probe: true,
             supports_bearer_token: true,
+            supports_parse_mode: false,
+            supports_message_template: true,
+            supports_idempotency_key: true,
+            supports_rate_limit_report: false,
         }
     }
 
@@ -235,6 +239,10 @@ impl ChannelProvider for GenericWebhookProvider {
             supports_token_env: true,
             supports_test_probe: true,
             supports_bearer_token: true,
+            supports_parse_mode: false,
+            supports_message_template: true,
+            supports_idempotency_key: true,
+            supports_rate_limit_report: false,
         }
     }
 
@@ -305,6 +313,10 @@ impl ChannelProvider for DiscordWebhookProvider {
             supports_token_env: true,
             supports_test_probe: true,
             supports_bearer_token: true,
+            supports_parse_mode: false,
+            supports_message_template: true,
+            supports_idempotency_key: true,
+            supports_rate_limit_report: false,
         }
     }
 
@@ -383,6 +395,10 @@ impl ChannelProvider for TelegramBotProvider {
             supports_token_env: true,
             supports_test_probe: true,
             supports_bearer_token: true,
+            supports_parse_mode: true,
+            supports_message_template: true,
+            supports_idempotency_key: true,
+            supports_rate_limit_report: true,
         }
     }
 
@@ -459,6 +475,10 @@ impl ChannelProvider for TerminalProvider {
             supports_token_env: false,
             supports_test_probe: true,
             supports_bearer_token: false,
+            supports_parse_mode: false,
+            supports_message_template: true,
+            supports_idempotency_key: true,
+            supports_rate_limit_report: false,
         }
     }
 
@@ -499,6 +519,10 @@ impl ChannelProvider for LocalProvider {
             supports_token_env: true,
             supports_test_probe: true,
             supports_bearer_token: true,
+            supports_parse_mode: false,
+            supports_message_template: true,
+            supports_idempotency_key: true,
+            supports_rate_limit_report: false,
         }
     }
 
