@@ -9,6 +9,13 @@ mosaic --project-state security audit --path .
 mosaic --project-state security audit --path . --deep
 mosaic --project-state security audit --path . --update-baseline
 mosaic --project-state security audit --path . --no-baseline
+
+# Baseline management
+mosaic --project-state security baseline show
+mosaic --project-state security baseline add --fingerprint "<fp>"
+mosaic --project-state security baseline add --category transport_security --match-path "vendor/*"
+mosaic --project-state security baseline remove --fingerprint "<fp>"
+mosaic --project-state security baseline clear
 ```
 
 ## Output
@@ -52,3 +59,4 @@ mosaic --project-state security audit --path . --no-baseline
   - xdg mode: `<XDG config>/mosaic/security/baseline.toml`
 - Use `--update-baseline` to add current findings fingerprints into the baseline.
 - Use `--no-baseline` to ignore baseline filtering for one run.
+- Use `security baseline show|add|remove|clear` for manual baseline management.

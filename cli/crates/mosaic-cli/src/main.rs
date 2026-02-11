@@ -388,6 +388,42 @@ enum SecurityCommand {
         #[arg(long)]
         update_baseline: bool,
     },
+    Baseline {
+        #[command(subcommand)]
+        command: SecurityBaselineCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SecurityBaselineCommand {
+    Show {
+        #[arg(long)]
+        path: Option<String>,
+    },
+    Add {
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long = "fingerprint")]
+        fingerprints: Vec<String>,
+        #[arg(long = "category")]
+        categories: Vec<String>,
+        #[arg(long = "match-path")]
+        match_paths: Vec<String>,
+    },
+    Remove {
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long = "fingerprint")]
+        fingerprints: Vec<String>,
+        #[arg(long = "category")]
+        categories: Vec<String>,
+        #[arg(long = "match-path")]
+        match_paths: Vec<String>,
+    },
+    Clear {
+        #[arg(long)]
+        path: Option<String>,
+    },
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1930,6 +1966,7 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
     let auditor = SecurityAuditor::new();
+    let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
 
     match args.command {
         SecurityCommand::Audit {
@@ -1946,7 +1983,6 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                     "--no-baseline and --update-baseline cannot be used together".to_string(),
                 ));
             }
-            let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
             let root = {
                 let raw = PathBuf::from(path);
                 if raw.is_absolute() {
@@ -1961,17 +1997,7 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                 max_files,
                 max_file_size,
             })?;
-            let baseline_path = baseline.map_or_else(
-                || paths.root_dir.join("security").join("baseline.toml"),
-                |raw| {
-                    let path = PathBuf::from(raw);
-                    if path.is_absolute() {
-                        path
-                    } else {
-                        cwd.join(path)
-                    }
-                },
-            );
+            let baseline_path = resolve_baseline_path(&paths, &cwd, baseline);
             let baseline_path_display = baseline_path.display().to_string();
             let mut baseline_added = 0usize;
             let mut baseline_enabled = false;
@@ -2054,6 +2080,163 @@ fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                         }
                     }
                 }
+            }
+        }
+        SecurityCommand::Baseline { command } => {
+            handle_security_baseline(cli, &paths, &cwd, command)?;
+        }
+    }
+    Ok(())
+}
+
+fn handle_security_baseline(
+    cli: &Cli,
+    paths: &StatePaths,
+    cwd: &std::path::Path,
+    command: SecurityBaselineCommand,
+) -> Result<()> {
+    match command {
+        SecurityBaselineCommand::Show { path } => {
+            let baseline_path = resolve_baseline_path(paths, cwd, path);
+            let exists = baseline_path.exists();
+            let baseline = SecurityBaselineConfig::load_optional(&baseline_path)?
+                .unwrap_or_else(SecurityBaselineConfig::default);
+            let stats = json!({
+                "fingerprints": baseline.ignored_fingerprints.len(),
+                "categories": baseline.ignored_categories.len(),
+                "paths": baseline.ignored_paths.len(),
+            });
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "baseline": baseline,
+                    "path": baseline_path.display().to_string(),
+                    "exists": exists,
+                    "stats": stats,
+                }));
+            } else {
+                println!("baseline path: {}", baseline_path.display());
+                println!("exists: {}", exists);
+                println!(
+                    "entries: fingerprints={} categories={} paths={}",
+                    baseline.ignored_fingerprints.len(),
+                    baseline.ignored_categories.len(),
+                    baseline.ignored_paths.len()
+                );
+            }
+        }
+        SecurityBaselineCommand::Add {
+            path,
+            fingerprints,
+            categories,
+            match_paths,
+        } => {
+            let baseline_path = resolve_baseline_path(paths, cwd, path);
+            let mut baseline = SecurityBaselineConfig::load_optional(&baseline_path)?
+                .unwrap_or_else(SecurityBaselineConfig::default);
+            let fingerprints = normalize_non_empty_list(fingerprints, "fingerprint")?;
+            let categories = normalize_non_empty_list(categories, "category")?;
+            let match_paths = normalize_non_empty_list(match_paths, "match-path")?;
+            if fingerprints.is_empty() && categories.is_empty() && match_paths.is_empty() {
+                return Err(MosaicError::Validation(
+                    "baseline add requires at least one of --fingerprint/--category/--match-path"
+                        .to_string(),
+                ));
+            }
+
+            let mut added = 0usize;
+            for value in fingerprints {
+                if !baseline.ignored_fingerprints.contains(&value) {
+                    baseline.ignored_fingerprints.push(value);
+                    added += 1;
+                }
+            }
+            for value in categories {
+                if !baseline.ignored_categories.contains(&value) {
+                    baseline.ignored_categories.push(value);
+                    added += 1;
+                }
+            }
+            for value in match_paths {
+                if !baseline.ignored_paths.contains(&value) {
+                    baseline.ignored_paths.push(value);
+                    added += 1;
+                }
+            }
+            baseline.save_to_path(&baseline_path)?;
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "added": added,
+                    "path": baseline_path.display().to_string(),
+                    "baseline": baseline,
+                }));
+            } else {
+                println!("baseline updated: added {added} entries");
+                println!("path: {}", baseline_path.display());
+            }
+        }
+        SecurityBaselineCommand::Remove {
+            path,
+            fingerprints,
+            categories,
+            match_paths,
+        } => {
+            let baseline_path = resolve_baseline_path(paths, cwd, path);
+            let exists = baseline_path.exists();
+            let mut baseline = SecurityBaselineConfig::load_optional(&baseline_path)?
+                .unwrap_or_else(SecurityBaselineConfig::default);
+            let fingerprints = normalize_non_empty_list(fingerprints, "fingerprint")?;
+            let categories = normalize_non_empty_list(categories, "category")?;
+            let match_paths = normalize_non_empty_list(match_paths, "match-path")?;
+            if fingerprints.is_empty() && categories.is_empty() && match_paths.is_empty() {
+                return Err(MosaicError::Validation(
+                    "baseline remove requires at least one of --fingerprint/--category/--match-path"
+                        .to_string(),
+                ));
+            }
+
+            let mut removed = 0usize;
+            removed += remove_matching(&mut baseline.ignored_fingerprints, &fingerprints);
+            removed += remove_matching(&mut baseline.ignored_categories, &categories);
+            removed += remove_matching(&mut baseline.ignored_paths, &match_paths);
+            if exists {
+                baseline.save_to_path(&baseline_path)?;
+            }
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": removed,
+                    "path": baseline_path.display().to_string(),
+                    "exists": exists,
+                    "baseline": baseline,
+                }));
+            } else {
+                println!("baseline updated: removed {removed} entries");
+                println!("path: {}", baseline_path.display());
+            }
+        }
+        SecurityBaselineCommand::Clear { path } => {
+            let baseline_path = resolve_baseline_path(paths, cwd, path);
+            let old = SecurityBaselineConfig::load_optional(&baseline_path)?
+                .unwrap_or_else(SecurityBaselineConfig::default);
+            let removed = old.ignored_fingerprints.len()
+                + old.ignored_categories.len()
+                + old.ignored_paths.len();
+            let baseline = SecurityBaselineConfig::default();
+            baseline.save_to_path(&baseline_path)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "cleared": removed,
+                    "path": baseline_path.display().to_string(),
+                    "baseline": baseline,
+                }));
+            } else {
+                println!("baseline cleared: removed {removed} entries");
+                println!("path: {}", baseline_path.display());
             }
         }
     }
@@ -3194,6 +3377,36 @@ async fn handle_doctor(cli: &Cli) -> Result<()> {
     }
 
     let security_root = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+    let baseline_path = paths.root_dir.join("security").join("baseline.toml");
+    match SecurityBaselineConfig::load_optional(&baseline_path) {
+        Ok(Some(baseline)) => {
+            checks.push(run_check(
+                "security_baseline",
+                true,
+                format!(
+                    "path={} fingerprints={} categories={} paths={}",
+                    baseline_path.display(),
+                    baseline.ignored_fingerprints.len(),
+                    baseline.ignored_categories.len(),
+                    baseline.ignored_paths.len(),
+                ),
+            ));
+        }
+        Ok(None) => {
+            checks.push(run_check(
+                "security_baseline",
+                true,
+                format!("path={} (not configured)", baseline_path.display()),
+            ));
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "security_baseline",
+                false,
+                format!("failed to load security baseline: {err}"),
+            ));
+        }
+    }
     let security_report = SecurityAuditor::new().audit(SecurityAuditOptions {
         root: security_root,
         deep: false,
@@ -3289,6 +3502,55 @@ fn parse_json_input(raw: &str, field_name: &str) -> Result<Value> {
             "{field_name} must be valid JSON, parse error: {err}"
         ))
     })
+}
+
+fn resolve_baseline_path(
+    paths: &StatePaths,
+    cwd: &std::path::Path,
+    raw: Option<String>,
+) -> PathBuf {
+    raw.map_or_else(
+        || paths.root_dir.join("security").join("baseline.toml"),
+        |value| {
+            let path = PathBuf::from(value);
+            if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            }
+        },
+    )
+}
+
+fn normalize_non_empty_list(values: Vec<String>, field_name: &str) -> Result<Vec<String>> {
+    let mut normalized = values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if normalized.len()
+        != normalized
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+    {
+        normalized.sort();
+        normalized.dedup();
+    }
+    for value in &normalized {
+        if value.trim().is_empty() {
+            return Err(MosaicError::Validation(format!(
+                "{field_name} entry cannot be empty"
+            )));
+        }
+    }
+    Ok(normalized)
+}
+
+fn remove_matching(target: &mut Vec<String>, values: &[String]) -> usize {
+    let before = target.len();
+    target.retain(|item| !values.contains(item));
+    before.saturating_sub(target.len())
 }
 
 fn build_runtime(
