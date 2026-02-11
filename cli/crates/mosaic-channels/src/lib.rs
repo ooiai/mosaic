@@ -13,6 +13,7 @@ pub use schema::{
 pub use types::{
     AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
     ChannelImportSummary, ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions,
-    ChannelSendResult, ChannelStatus, ChannelTemplateDefaults, ChannelsFile, DoctorCheck,
+    ChannelSendResult, ChannelStatus, ChannelTemplateDefaults, ChannelTokenRotationItem,
+    ChannelTokenRotationSummary, ChannelsFile, DoctorCheck, RotateTokenEnvInput,
     UpdateChannelInput,
 };

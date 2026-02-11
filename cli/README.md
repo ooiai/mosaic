@@ -7,7 +7,7 @@ This workspace ships a pure CLI with no frontend dependency.
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway run|status|health|probe|discover|call|stop`)
-- Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|remove|logout`)
+- Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
@@ -133,8 +133,14 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels capabilities --
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels resolve --channel slack_webhook alert
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels export --out .mosaic/channels-backup.json
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json --strict
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json --report-out .mosaic/import-report.json
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json --replace --dry-run
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json --replace
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels rotate-token-env --channel <channel-id> --to MOSAIC_TELEGRAM_BOT_TOKEN_V2 --dry-run
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels rotate-token-env --all --kind telegram_bot --to MOSAIC_TELEGRAM_BOT_TOKEN_V2
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels rotate-token-env --all --kind telegram_bot --from MOSAIC_TELEGRAM_BOT_TOKEN --to MOSAIC_TELEGRAM_BOT_TOKEN_V2
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels rotate-token-env --all --kind telegram_bot --from MOSAIC_TELEGRAM_BOT_TOKEN --to MOSAIC_TELEGRAM_BOT_TOKEN_V2 --report-out .mosaic/rotation-report.json
 ```
 
 Detailed guide: `docs/channels-slack.md`

@@ -344,6 +344,61 @@ fn channels_import_invalid_json_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn channels_rotate_token_env_without_target_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "rotate-token-env",
+            "--to",
+            "MOSAIC_ROTATED_TOKEN",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_rotate_token_env_with_empty_from_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "rotate-token-env",
+            "--all",
+            "--from",
+            "",
+            "--to",
+            "MOSAIC_ROTATED_TOKEN",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
 fn gateway_call_unknown_method_returns_gateway_protocol_exit_code() {
     let temp = tempdir().expect("tempdir");
     Command::cargo_bin("mosaic")

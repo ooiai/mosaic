@@ -178,7 +178,41 @@ pub struct ChannelImportSummary {
     pub updated: usize,
     pub skipped: usize,
     pub replace: bool,
+    pub strict: bool,
     pub dry_run: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RotateTokenEnvInput {
+    pub channel_id: Option<String>,
+    pub all: bool,
+    pub kind: Option<String>,
+    pub from_token_env: Option<String>,
+    pub to_token_env: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChannelTokenRotationItem {
+    pub channel_id: String,
+    pub name: String,
+    pub kind: String,
+    pub previous_token_env: Option<String>,
+    pub next_token_env: Option<String>,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChannelTokenRotationSummary {
+    pub total: usize,
+    pub updated: usize,
+    pub skipped_already_set: usize,
+    pub skipped_unsupported: usize,
+    pub skipped_from_mismatch: usize,
+    pub dry_run: bool,
+    pub from_token_env: Option<String>,
+    pub to_token_env: String,
+    pub items: Vec<ChannelTokenRotationItem>,
 }
 
 pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {
