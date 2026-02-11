@@ -245,3 +245,68 @@ fn security_baseline_manage_commands_flow() {
         0
     );
 }
+
+#[test]
+#[allow(deprecated)]
+fn security_audit_sarif_output_flow() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::write(
+        temp.path().join("secrets.env"),
+        "API_KEY = \"sk-live-secret-value-123456\"\n",
+    )
+    .expect("write secrets");
+
+    let sarif_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "security",
+            "audit",
+            "--path",
+            ".",
+            "--sarif",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let sarif_output: Value = serde_json::from_slice(&sarif_output).expect("sarif json");
+    assert_eq!(sarif_output["version"], "2.1.0");
+    assert!(sarif_output["runs"][0]["results"].is_array());
+
+    let file_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "audit",
+            "--path",
+            ".",
+            "--sarif-output",
+            "scan.sarif",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let file_output: Value = serde_json::from_slice(&file_output).expect("file output json");
+    assert_eq!(file_output["ok"], true);
+    let reported_path = file_output["sarif_output"]
+        .as_str()
+        .expect("sarif output path");
+    let reported_canonical =
+        std::fs::canonicalize(reported_path).expect("canonicalize reported path");
+    let expected_canonical =
+        std::fs::canonicalize(temp.path().join("scan.sarif")).expect("canonicalize expected path");
+    assert_eq!(reported_canonical, expected_canonical);
+
+    let sarif_file =
+        std::fs::read_to_string(temp.path().join("scan.sarif")).expect("read sarif file");
+    let sarif_file: Value = serde_json::from_str(&sarif_file).expect("parse sarif file");
+    assert_eq!(sarif_file["version"], "2.1.0");
+}

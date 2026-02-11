@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use walkdir::WalkDir;
 
 use mosaic_core::error::{MosaicError, Result};
@@ -214,6 +215,64 @@ pub fn apply_baseline(
     report.findings = kept;
 
     SecurityBaselineApplyResult { report, ignored }
+}
+
+pub fn report_to_sarif(report: &SecurityAuditReport) -> Value {
+    let results = report
+        .findings
+        .iter()
+        .map(|finding| {
+            let mut location = json!({
+                "physicalLocation": {
+                    "artifactLocation": {
+                        "uri": finding.path
+                    }
+                }
+            });
+            if let Some(line) = finding.line {
+                location["physicalLocation"]["region"] = json!({ "startLine": line });
+            }
+
+            json!({
+                "ruleId": sarif_rule_id(finding),
+                "level": sarif_level(finding.severity),
+                "message": {
+                    "text": format!("{}: {}", finding.title, finding.detail)
+                },
+                "locations": [location],
+                "partialFingerprints": {
+                    "securityFingerprint": finding.fingerprint
+                },
+                "properties": {
+                    "category": finding.category,
+                    "severity": format!("{:?}", finding.severity).to_lowercase(),
+                    "suggestion": finding.suggestion,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "mosaic-security",
+                        "informationUri": "https://github.com/openclaw/openclaw",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                },
+                "invocations": [
+                    {
+                        "executionSuccessful": true
+                    }
+                ],
+                "results": results
+            }
+        ]
+    })
 }
 
 #[derive(Debug, Default, Clone)]
@@ -608,6 +667,32 @@ fn normalize_list(values: &mut Vec<String>) {
     values.dedup();
 }
 
+fn sarif_level(severity: SecuritySeverity) -> &'static str {
+    match severity {
+        SecuritySeverity::High => "error",
+        SecuritySeverity::Medium => "warning",
+        SecuritySeverity::Low => "note",
+    }
+}
+
+fn sarif_rule_id(finding: &SecurityFinding) -> String {
+    let mut id = format!("mosaic.{}.{}", finding.category, finding.title);
+    id = id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '.' {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while id.contains("--") {
+        id = id.replace("--", "-");
+    }
+    id.trim_matches('-').to_string()
+}
+
 fn should_skip(path: &Path) -> bool {
     let value = path.to_string_lossy();
     value.contains("/.git/")
@@ -746,5 +831,33 @@ mod tests {
         assert_eq!(loaded.ignored_fingerprints.len(), 1);
         assert_eq!(loaded.ignored_paths.len(), 1);
         assert_eq!(loaded.ignored_categories.len(), 1);
+    }
+
+    #[test]
+    fn sarif_conversion_contains_results() {
+        let temp = tempdir().expect("tempdir");
+        std::fs::write(
+            temp.path().join("secrets.env"),
+            "API_KEY = \"sk-live-secret-value-123456\"\n",
+        )
+        .expect("write secrets");
+
+        let auditor = SecurityAuditor::new();
+        let report = auditor
+            .audit(SecurityAuditOptions {
+                root: temp.path().to_path_buf(),
+                ..SecurityAuditOptions::default()
+            })
+            .expect("audit report");
+        let sarif = report_to_sarif(&report);
+        assert_eq!(sarif["version"], "2.1.0");
+        assert!(sarif["runs"][0]["results"].is_array());
+        assert!(
+            sarif["runs"][0]["results"]
+                .as_array()
+                .expect("results")
+                .len()
+                >= 1
+        );
     }
 }
