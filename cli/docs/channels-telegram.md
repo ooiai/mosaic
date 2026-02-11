@@ -64,7 +64,8 @@ Expect:
 - Timeout: 15000ms (override with `MOSAIC_CHANNELS_HTTP_TIMEOUT_MS`)
 - Retry backoff: `200ms`, `500ms`, `1000ms`
 - `2xx`: success only when Telegram JSON body has `"ok": true`
-- `4xx`: fail immediately
+- `429`: retry (uses Telegram `parameters.retry_after` when present)
+- other `4xx`: fail immediately
 - `5xx` / timeout: retry
 - Telegram send throttle: `MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS` (default `800`)
 - Idempotency dedupe window: `MOSAIC_CHANNELS_IDEMPOTENCY_WINDOW_SECONDS` (default `86400`)
