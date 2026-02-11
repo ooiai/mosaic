@@ -98,6 +98,7 @@ impl ChannelRepository {
         &self,
         imported_file: ChannelsFile,
         replace: bool,
+        dry_run: bool,
     ) -> Result<ChannelImportSummary> {
         let mut imported_channels = imported_file.channels;
         normalize_channels(&mut imported_channels)?;
@@ -142,14 +143,17 @@ impl ChannelRepository {
             }
         }
 
-        existing.version = CHANNELS_SCHEMA_VERSION;
-        self.save_channels_file(&existing)?;
+        if !dry_run {
+            existing.version = CHANNELS_SCHEMA_VERSION;
+            self.save_channels_file(&existing)?;
+        }
         Ok(ChannelImportSummary {
             total: imported + updated + skipped,
             imported,
             updated,
             skipped,
             replace,
+            dry_run,
         })
     }
 
@@ -157,9 +161,10 @@ impl ChannelRepository {
         &self,
         value: Value,
         replace: bool,
+        dry_run: bool,
     ) -> Result<ChannelImportSummary> {
         let (file, _) = parse_channels_value(value)?;
-        self.import_channels(file, replace)
+        self.import_channels(file, replace, dry_run)
     }
 
     pub fn status(&self) -> Result<ChannelStatus> {
@@ -1338,18 +1343,56 @@ mod tests {
         };
 
         let no_replace = repo
-            .import_channels(imported.clone(), false)
+            .import_channels(imported.clone(), false, false)
             .expect("import without replace");
         assert_eq!(no_replace.imported, 0);
         assert_eq!(no_replace.updated, 0);
         assert_eq!(no_replace.skipped, 1);
+        assert!(!no_replace.dry_run);
 
         let replaced = repo
-            .import_channels(imported, true)
+            .import_channels(imported, true, false)
             .expect("import with replace");
         assert_eq!(replaced.imported, 0);
         assert_eq!(replaced.updated, 1);
         assert_eq!(replaced.skipped, 0);
+        assert!(!replaced.dry_run);
+    }
+
+    #[test]
+    fn import_channels_dry_run_does_not_persist() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let imported = ChannelsFile {
+            version: CHANNELS_SCHEMA_VERSION,
+            channels: vec![ChannelEntry {
+                id: "ch_import_dry_run".to_string(),
+                name: "dry-run-channel".to_string(),
+                kind: "slack_webhook".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: None,
+                auth: ChannelAuthConfig { token_env: None },
+                template_defaults: None,
+                created_at: Utc::now(),
+                last_login_at: None,
+                last_send_at: None,
+                last_error: None,
+            }],
+        };
+
+        let summary = repo
+            .import_channels(imported, true, true)
+            .expect("dry run import");
+        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.updated, 0);
+        assert_eq!(summary.skipped, 0);
+        assert!(summary.dry_run);
+
+        let channels = repo.list().expect("list");
+        assert_eq!(channels.len(), 0);
     }
 
     #[test]
@@ -1392,7 +1435,7 @@ mod tests {
             ],
         };
         let err = repo
-            .import_channels(imported, false)
+            .import_channels(imported, false, false)
             .expect_err("duplicate names should fail");
         assert!(matches!(err, MosaicError::Validation(_)));
     }

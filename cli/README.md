@@ -133,6 +133,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels capabilities --
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels resolve --channel slack_webhook alert
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels export --out .mosaic/channels-backup.json
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json --replace --dry-run
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json --replace
 ```
 

@@ -1241,6 +1241,7 @@ fn channels_export_import_flow() {
     assert_eq!(first_import["summary"]["imported"], 1);
     assert_eq!(first_import["summary"]["updated"], 0);
     assert_eq!(first_import["summary"]["skipped"], 0);
+    assert_eq!(first_import["summary"]["dry_run"], false);
 
     let second_import = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -1262,12 +1263,59 @@ fn channels_export_import_flow() {
     assert_eq!(second_import["summary"]["imported"], 0);
     assert_eq!(second_import["summary"]["updated"], 0);
     assert_eq!(second_import["summary"]["skipped"], 1);
+    assert_eq!(second_import["summary"]["dry_run"], false);
 
     exported_json["channels_file"]["channels"][0]["endpoint"] =
         Value::String("mock-http://500".to_string());
     let updated_export =
         serde_json::to_string_pretty(&exported_json).expect("serialize updated export");
     std::fs::write(&export_path, updated_export).expect("write updated export");
+
+    let dry_run_import = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(dst.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "import",
+            "--file",
+            export_path.to_str().expect("import path str"),
+            "--replace",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let dry_run_import: Value =
+        serde_json::from_slice(&dry_run_import).expect("dry run import json");
+    assert_eq!(dry_run_import["summary"]["imported"], 0);
+    assert_eq!(dry_run_import["summary"]["updated"], 1);
+    assert_eq!(dry_run_import["summary"]["skipped"], 0);
+    assert_eq!(dry_run_import["summary"]["dry_run"], true);
+
+    let send_after_dry_run = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(dst.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "check dry-run endpoint",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_after_dry_run: Value =
+        serde_json::from_slice(&send_after_dry_run).expect("send after dry run json");
+    assert_eq!(send_after_dry_run["ok"], true);
 
     let replace_import = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -1291,6 +1339,7 @@ fn channels_export_import_flow() {
     assert_eq!(replace_import["summary"]["imported"], 0);
     assert_eq!(replace_import["summary"]["updated"], 1);
     assert_eq!(replace_import["summary"]["skipped"], 0);
+    assert_eq!(replace_import["summary"]["dry_run"], false);
 
     let send = Command::cargo_bin("mosaic")
         .expect("binary")

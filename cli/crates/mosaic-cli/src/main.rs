@@ -326,6 +326,8 @@ enum ChannelsCommand {
         file: PathBuf,
         #[arg(long)]
         replace: bool,
+        #[arg(long)]
+        dry_run: bool,
     },
     Remove {
         channel_id: String,
@@ -1881,7 +1883,11 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 );
             }
         }
-        ChannelsCommand::Import { file, replace } => {
+        ChannelsCommand::Import {
+            file,
+            replace,
+            dry_run,
+        } => {
             let raw = std::fs::read_to_string(&file).map_err(|err| {
                 MosaicError::Config(format!(
                     "failed to read channels import file {}: {err}",
@@ -1899,7 +1905,7 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 .and_then(|obj| obj.get("channels_file"))
                 .cloned()
                 .unwrap_or(value);
-            let summary = repository.import_channels_json(import_value, replace)?;
+            let summary = repository.import_channels_json(import_value, replace, dry_run)?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -1908,7 +1914,8 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 }));
             } else {
                 println!(
-                    "Import complete from {}: total={} imported={} updated={} skipped={} replace={}",
+                    "Import {}from {}: total={} imported={} updated={} skipped={} replace={}",
+                    if summary.dry_run { "(dry-run) " } else { "" },
                     file.display(),
                     summary.total,
                     summary.imported,
