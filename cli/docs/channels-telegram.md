@@ -47,6 +47,18 @@ Success response includes:
 - `deduplicated` indicates idempotency short-circuit
 - `rate_limited_ms` reports wait duration before delivery (when throttled)
 
+Capability discovery:
+
+```bash
+mosaic --project-state --json channels capabilities --channel telegram_bot
+```
+
+Expect:
+- `supports_parse_mode = true`
+- `supports_message_template = true`
+- `supports_idempotency_key = true`
+- `supports_rate_limit_report = true`
+
 ## 4) Retry behavior
 
 - Timeout: 15000ms (override with `MOSAIC_CHANNELS_HTTP_TIMEOUT_MS`)

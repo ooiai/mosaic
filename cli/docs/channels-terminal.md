@@ -31,3 +31,10 @@ mosaic --project-state --json channels send <channel-id> --text "build finished"
 
 - No endpoint is required.
 - No token is required.
+- `--parse-mode` is not supported for terminal channels.
+
+Capability discovery:
+
+```bash
+mosaic --project-state --json channels capabilities --channel terminal
+```

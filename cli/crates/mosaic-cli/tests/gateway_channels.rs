@@ -334,6 +334,33 @@ fn channels_terminal_alias_flow() {
     assert_eq!(send_json["ok"], true);
     assert_eq!(send_json["delivered_via"], "terminal");
     assert_eq!(send_json["target_masked"], "terminal://local");
+
+    let terminal_capabilities = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "capabilities",
+            "--channel",
+            "terminal",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let terminal_capabilities: Value =
+        serde_json::from_slice(&terminal_capabilities).expect("terminal capabilities");
+    assert_eq!(
+        terminal_capabilities["capabilities"][0]["supports_parse_mode"],
+        false
+    );
+    assert_eq!(
+        terminal_capabilities["capabilities"][0]["supports_idempotency_key"],
+        true
+    );
 }
 
 #[test]
@@ -412,6 +439,33 @@ fn channels_telegram_bot_flow() {
     assert_eq!(send_json["idempotency_key"], "release-42");
     assert_eq!(send_json["deduplicated"], false);
     assert!(send_json["rate_limited_ms"].is_number());
+
+    let telegram_capabilities = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "capabilities",
+            "--channel",
+            "telegram_bot",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let telegram_capabilities: Value =
+        serde_json::from_slice(&telegram_capabilities).expect("telegram capabilities");
+    assert_eq!(
+        telegram_capabilities["capabilities"][0]["supports_parse_mode"],
+        true
+    );
+    assert_eq!(
+        telegram_capabilities["capabilities"][0]["supports_rate_limit_report"],
+        true
+    );
 
     let dedup_output = Command::cargo_bin("mosaic")
         .expect("binary")

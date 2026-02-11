@@ -112,6 +112,14 @@ pub struct ChannelCapability {
     pub supports_token_env: bool,
     pub supports_test_probe: bool,
     pub supports_bearer_token: bool,
+    #[serde(default)]
+    pub supports_parse_mode: bool,
+    #[serde(default)]
+    pub supports_message_template: bool,
+    #[serde(default)]
+    pub supports_idempotency_key: bool,
+    #[serde(default)]
+    pub supports_rate_limit_report: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
