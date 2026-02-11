@@ -19,7 +19,8 @@ use crate::schema::{
 use crate::types::{
     AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
     ChannelImportSummary, ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions,
-    ChannelSendResult, ChannelStatus, ChannelTemplateDefaults, ChannelsFile, DoctorCheck,
+    ChannelSendResult, ChannelStatus, ChannelTemplateDefaults, ChannelTokenRotationItem,
+    ChannelTokenRotationSummary, ChannelsFile, DoctorCheck, RotateTokenEnvInput,
     TEXT_PREVIEW_LIMIT, UpdateChannelInput, truncate_text,
 };
 
@@ -98,8 +99,14 @@ impl ChannelRepository {
         &self,
         imported_file: ChannelsFile,
         replace: bool,
+        strict: bool,
         dry_run: bool,
     ) -> Result<ChannelImportSummary> {
+        if strict && replace {
+            return Err(MosaicError::Validation(
+                "import --strict cannot be combined with --replace".to_string(),
+            ));
+        }
         let mut imported_channels = imported_file.channels;
         normalize_channels(&mut imported_channels)?;
         validate_import_uniqueness(&imported_channels)?;
@@ -130,6 +137,12 @@ impl ChannelRepository {
                     )));
                 }
                 (Some(idx), _) | (_, Some(idx)) => {
+                    if strict {
+                        return Err(MosaicError::Validation(format!(
+                            "import conflict for channel '{}' (id/name already exists)",
+                            incoming.name
+                        )));
+                    }
                     if !replace {
                         skipped += 1;
                         continue;
@@ -153,6 +166,7 @@ impl ChannelRepository {
             updated,
             skipped,
             replace,
+            strict,
             dry_run,
         })
     }
@@ -161,10 +175,146 @@ impl ChannelRepository {
         &self,
         value: Value,
         replace: bool,
+        strict: bool,
         dry_run: bool,
     ) -> Result<ChannelImportSummary> {
         let (file, _) = parse_channels_value(value)?;
-        self.import_channels(file, replace, dry_run)
+        self.import_channels(file, replace, strict, dry_run)
+    }
+
+    pub fn rotate_token_env(
+        &self,
+        input: RotateTokenEnvInput,
+    ) -> Result<ChannelTokenRotationSummary> {
+        let RotateTokenEnvInput {
+            channel_id,
+            all,
+            kind,
+            from_token_env,
+            to_token_env,
+            dry_run,
+        } = input;
+        let to_token_env = normalize_optional(Some(to_token_env)).ok_or_else(|| {
+            MosaicError::Validation("rotate target token env cannot be empty".to_string())
+        })?;
+        let from_token_env = match from_token_env {
+            Some(value) => Some(normalize_optional(Some(value)).ok_or_else(|| {
+                MosaicError::Validation("rotate source token env cannot be empty".to_string())
+            })?),
+            None => None,
+        };
+        if !all && channel_id.is_none() {
+            return Err(MosaicError::Validation(
+                "specify --channel <id> or --all for rotate-token-env".to_string(),
+            ));
+        }
+        if !all && kind.is_some() {
+            return Err(MosaicError::Validation(
+                "--kind requires --all for rotate-token-env".to_string(),
+            ));
+        }
+        let normalized_kind = kind.map(|value| normalize_kind(&value)).transpose()?;
+        let target_channel_id = channel_id.as_deref();
+
+        let mut file = self.load_channels_file()?;
+        let mut total = 0usize;
+        let mut updated = 0usize;
+        let mut skipped_already_set = 0usize;
+        let mut skipped_unsupported = 0usize;
+        let mut skipped_from_mismatch = 0usize;
+        let mut items = Vec::new();
+
+        for channel in &mut file.channels {
+            if let Some(target_channel_id) = target_channel_id
+                && channel.id != target_channel_id
+            {
+                continue;
+            }
+            if let Some(ref target_kind) = normalized_kind
+                && &channel.kind != target_kind
+            {
+                continue;
+            }
+
+            total += 1;
+            let supports_token_env = kind_supports_token_env(&channel.kind);
+            if !supports_token_env {
+                skipped_unsupported += 1;
+                items.push(ChannelTokenRotationItem {
+                    channel_id: channel.id.clone(),
+                    name: channel.name.clone(),
+                    kind: channel.kind.clone(),
+                    previous_token_env: channel.auth.token_env.clone(),
+                    next_token_env: channel.auth.token_env.clone(),
+                    status: "skipped_unsupported".to_string(),
+                });
+                continue;
+            }
+
+            if let Some(ref from_token_env) = from_token_env
+                && channel.auth.token_env.as_deref() != Some(from_token_env.as_str())
+            {
+                skipped_from_mismatch += 1;
+                items.push(ChannelTokenRotationItem {
+                    channel_id: channel.id.clone(),
+                    name: channel.name.clone(),
+                    kind: channel.kind.clone(),
+                    previous_token_env: channel.auth.token_env.clone(),
+                    next_token_env: channel.auth.token_env.clone(),
+                    status: "skipped_from_mismatch".to_string(),
+                });
+                continue;
+            }
+
+            if channel.auth.token_env.as_deref() == Some(to_token_env.as_str()) {
+                skipped_already_set += 1;
+                items.push(ChannelTokenRotationItem {
+                    channel_id: channel.id.clone(),
+                    name: channel.name.clone(),
+                    kind: channel.kind.clone(),
+                    previous_token_env: channel.auth.token_env.clone(),
+                    next_token_env: channel.auth.token_env.clone(),
+                    status: "skipped_already_set".to_string(),
+                });
+                continue;
+            }
+
+            let previous = channel.auth.token_env.clone();
+            if !dry_run {
+                channel.auth.token_env = Some(to_token_env.clone());
+            }
+            updated += 1;
+            items.push(ChannelTokenRotationItem {
+                channel_id: channel.id.clone(),
+                name: channel.name.clone(),
+                kind: channel.kind.clone(),
+                previous_token_env: previous,
+                next_token_env: Some(to_token_env.clone()),
+                status: "updated".to_string(),
+            });
+        }
+
+        if total == 0 && target_channel_id.is_some() {
+            return Err(MosaicError::Config(format!(
+                "channel '{}' not found",
+                target_channel_id.unwrap_or_default()
+            )));
+        }
+        if updated > 0 && !dry_run {
+            self.save_channels_file(&file)?;
+        }
+
+        Ok(ChannelTokenRotationSummary {
+            total,
+            updated,
+            skipped_already_set,
+            skipped_unsupported,
+            skipped_from_mismatch,
+            dry_run,
+            from_token_env,
+            to_token_env,
+            items,
+        })
     }
 
     pub fn status(&self) -> Result<ChannelStatus> {
@@ -989,6 +1139,16 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
     })
 }
 
+fn kind_supports_token_env(kind: &str) -> bool {
+    match providers::capabilities_for_kind(Some(kind)) {
+        Ok(values) => values
+            .first()
+            .map(|value| value.supports_token_env)
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
 fn validate_import_uniqueness(channels: &[ChannelEntry]) -> Result<()> {
     let mut ids = HashSet::new();
     let mut names = HashSet::new();
@@ -1343,20 +1503,22 @@ mod tests {
         };
 
         let no_replace = repo
-            .import_channels(imported.clone(), false, false)
+            .import_channels(imported.clone(), false, false, false)
             .expect("import without replace");
         assert_eq!(no_replace.imported, 0);
         assert_eq!(no_replace.updated, 0);
         assert_eq!(no_replace.skipped, 1);
         assert!(!no_replace.dry_run);
+        assert!(!no_replace.strict);
 
         let replaced = repo
-            .import_channels(imported, true, false)
+            .import_channels(imported, true, false, false)
             .expect("import with replace");
         assert_eq!(replaced.imported, 0);
         assert_eq!(replaced.updated, 1);
         assert_eq!(replaced.skipped, 0);
         assert!(!replaced.dry_run);
+        assert!(!replaced.strict);
     }
 
     #[test]
@@ -1384,12 +1546,13 @@ mod tests {
         };
 
         let summary = repo
-            .import_channels(imported, true, true)
+            .import_channels(imported, true, false, true)
             .expect("dry run import");
         assert_eq!(summary.imported, 1);
         assert_eq!(summary.updated, 0);
         assert_eq!(summary.skipped, 0);
         assert!(summary.dry_run);
+        assert!(!summary.strict);
 
         let channels = repo.list().expect("list");
         assert_eq!(channels.len(), 0);
@@ -1435,8 +1598,191 @@ mod tests {
             ],
         };
         let err = repo
-            .import_channels(imported, false, false)
+            .import_channels(imported, false, false, false)
             .expect_err("duplicate names should fail");
         assert!(matches!(err, MosaicError::Validation(_)));
+    }
+
+    #[test]
+    fn import_channels_strict_fails_on_existing_conflict() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let existing = repo
+            .add(AddChannelInput {
+                name: "alerts".to_string(),
+                kind: "slack_webhook".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: None,
+                token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add");
+        let imported = ChannelsFile {
+            version: CHANNELS_SCHEMA_VERSION,
+            channels: vec![ChannelEntry {
+                id: existing.id,
+                name: existing.name,
+                kind: "slack_webhook".to_string(),
+                endpoint: Some("mock-http://500".to_string()),
+                target: None,
+                auth: ChannelAuthConfig { token_env: None },
+                template_defaults: None,
+                created_at: Utc::now(),
+                last_login_at: None,
+                last_send_at: None,
+                last_error: None,
+            }],
+        };
+        let err = repo
+            .import_channels(imported, false, true, false)
+            .expect_err("strict conflict should fail");
+        assert!(matches!(err, MosaicError::Validation(_)));
+    }
+
+    #[test]
+    fn rotate_token_env_dry_run_does_not_persist() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let telegram = repo
+            .add(AddChannelInput {
+                name: "tg".to_string(),
+                kind: "telegram_bot".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: Some("-1001234567890".to_string()),
+                token_env: Some("MOSAIC_TELEGRAM_BOT_TOKEN".to_string()),
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add telegram");
+
+        let summary = repo
+            .rotate_token_env(RotateTokenEnvInput {
+                channel_id: Some(telegram.id.clone()),
+                all: false,
+                kind: None,
+                from_token_env: None,
+                to_token_env: "MOSAIC_ROTATED_TOKEN".to_string(),
+                dry_run: true,
+            })
+            .expect("rotate dry run");
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.updated, 1);
+        assert_eq!(summary.skipped_unsupported, 0);
+        assert_eq!(summary.skipped_already_set, 0);
+        assert!(summary.dry_run);
+
+        let logged_in = repo.login(&telegram.id, None).expect("login");
+        assert_eq!(
+            logged_in.channel.auth.token_env.as_deref(),
+            Some("MOSAIC_TELEGRAM_BOT_TOKEN")
+        );
+    }
+
+    #[test]
+    fn rotate_token_env_all_skips_unsupported_channels() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let telegram = repo
+            .add(AddChannelInput {
+                name: "tg".to_string(),
+                kind: "telegram_bot".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: Some("-1001234567890".to_string()),
+                token_env: Some("MOSAIC_TELEGRAM_BOT_TOKEN".to_string()),
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add telegram");
+        let _terminal = repo
+            .add(AddChannelInput {
+                name: "term".to_string(),
+                kind: "terminal".to_string(),
+                endpoint: None,
+                target: None,
+                token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add terminal");
+
+        let summary = repo
+            .rotate_token_env(RotateTokenEnvInput {
+                channel_id: None,
+                all: true,
+                kind: None,
+                from_token_env: None,
+                to_token_env: "MOSAIC_ROTATED_TOKEN".to_string(),
+                dry_run: false,
+            })
+            .expect("rotate all");
+        assert_eq!(summary.total, 2);
+        assert_eq!(summary.updated, 1);
+        assert_eq!(summary.skipped_unsupported, 1);
+        assert_eq!(summary.skipped_already_set, 0);
+        assert_eq!(summary.skipped_from_mismatch, 0);
+        assert_eq!(summary.from_token_env, None);
+
+        let logged_in = repo.login(&telegram.id, None).expect("login");
+        assert_eq!(
+            logged_in.channel.auth.token_env.as_deref(),
+            Some("MOSAIC_ROTATED_TOKEN")
+        );
+    }
+
+    #[test]
+    fn rotate_token_env_with_source_filter() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let tg_a = repo
+            .add(AddChannelInput {
+                name: "tg-a".to_string(),
+                kind: "telegram_bot".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: Some("-1001234567890".to_string()),
+                token_env: Some("OLD_A".to_string()),
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add tg-a");
+        let tg_b = repo
+            .add(AddChannelInput {
+                name: "tg-b".to_string(),
+                kind: "telegram_bot".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: Some("-1001234567891".to_string()),
+                token_env: Some("OLD_B".to_string()),
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add tg-b");
+
+        let summary = repo
+            .rotate_token_env(RotateTokenEnvInput {
+                channel_id: None,
+                all: true,
+                kind: Some("telegram_bot".to_string()),
+                from_token_env: Some("OLD_A".to_string()),
+                to_token_env: "NEW_ENV".to_string(),
+                dry_run: false,
+            })
+            .expect("rotate with source");
+        assert_eq!(summary.total, 2);
+        assert_eq!(summary.updated, 1);
+        assert_eq!(summary.skipped_from_mismatch, 1);
+        assert_eq!(summary.skipped_already_set, 0);
+        assert_eq!(summary.skipped_unsupported, 0);
+        assert_eq!(summary.from_token_env.as_deref(), Some("OLD_A"));
+
+        let login_a = repo.login(&tg_a.id, None).expect("login a");
+        let login_b = repo.login(&tg_b.id, None).expect("login b");
+        assert_eq!(login_a.channel.auth.token_env.as_deref(), Some("NEW_ENV"));
+        assert_eq!(login_b.channel.auth.token_env.as_deref(), Some("OLD_B"));
     }
 }

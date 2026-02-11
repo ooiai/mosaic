@@ -1170,6 +1170,8 @@ fn channels_export_import_flow() {
     let src = tempdir().expect("source tempdir");
     let dst = tempdir().expect("destination tempdir");
     let export_path = src.path().join("channels-export.json");
+    let import_report_path = dst.path().join("import-report.json");
+    let strict_report_path = dst.path().join("strict-import-report.json");
 
     let add_output = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -1231,6 +1233,8 @@ fn channels_export_import_flow() {
             "import",
             "--file",
             export_path.to_str().expect("import path str"),
+            "--report-out",
+            import_report_path.to_str().expect("report path str"),
         ])
         .assert()
         .success()
@@ -1241,7 +1245,21 @@ fn channels_export_import_flow() {
     assert_eq!(first_import["summary"]["imported"], 1);
     assert_eq!(first_import["summary"]["updated"], 0);
     assert_eq!(first_import["summary"]["skipped"], 0);
+    assert_eq!(first_import["summary"]["strict"], false);
     assert_eq!(first_import["summary"]["dry_run"], false);
+    assert_eq!(
+        first_import["report_path"],
+        import_report_path.to_str().expect("report path str")
+    );
+    let import_report_raw = std::fs::read_to_string(&import_report_path).expect("import report");
+    let import_report_json: Value =
+        serde_json::from_str(&import_report_raw).expect("import report json");
+    assert_eq!(
+        import_report_json["schema"],
+        "mosaic.channels.import-report.v1"
+    );
+    assert_eq!(import_report_json["result"]["ok"], true);
+    assert_eq!(import_report_json["result"]["summary"]["imported"], 1);
 
     let second_import = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -1263,7 +1281,42 @@ fn channels_export_import_flow() {
     assert_eq!(second_import["summary"]["imported"], 0);
     assert_eq!(second_import["summary"]["updated"], 0);
     assert_eq!(second_import["summary"]["skipped"], 1);
+    assert_eq!(second_import["summary"]["strict"], false);
     assert_eq!(second_import["summary"]["dry_run"], false);
+
+    let strict_import = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(dst.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "import",
+            "--file",
+            export_path.to_str().expect("import path str"),
+            "--strict",
+            "--report-out",
+            strict_report_path.to_str().expect("strict report path"),
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let strict_import: Value = serde_json::from_slice(&strict_import).expect("strict import json");
+    assert_eq!(strict_import["ok"], false);
+    assert_eq!(strict_import["error"]["code"], "validation");
+    let strict_report_raw =
+        std::fs::read_to_string(&strict_report_path).expect("strict report file");
+    let strict_report_json: Value =
+        serde_json::from_str(&strict_report_raw).expect("strict report json");
+    assert_eq!(
+        strict_report_json["schema"],
+        "mosaic.channels.import-report.v1"
+    );
+    assert_eq!(strict_report_json["result"]["ok"], false);
+    assert_eq!(strict_report_json["result"]["error"]["code"], "validation");
 
     exported_json["channels_file"]["channels"][0]["endpoint"] =
         Value::String("mock-http://500".to_string());
@@ -1294,6 +1347,7 @@ fn channels_export_import_flow() {
     assert_eq!(dry_run_import["summary"]["imported"], 0);
     assert_eq!(dry_run_import["summary"]["updated"], 1);
     assert_eq!(dry_run_import["summary"]["skipped"], 0);
+    assert_eq!(dry_run_import["summary"]["strict"], false);
     assert_eq!(dry_run_import["summary"]["dry_run"], true);
 
     let send_after_dry_run = Command::cargo_bin("mosaic")
@@ -1339,6 +1393,7 @@ fn channels_export_import_flow() {
     assert_eq!(replace_import["summary"]["imported"], 0);
     assert_eq!(replace_import["summary"]["updated"], 1);
     assert_eq!(replace_import["summary"]["skipped"], 0);
+    assert_eq!(replace_import["summary"]["strict"], false);
     assert_eq!(replace_import["summary"]["dry_run"], false);
 
     let send = Command::cargo_bin("mosaic")
@@ -1361,4 +1416,199 @@ fn channels_export_import_flow() {
         .clone();
     let send_json: Value = serde_json::from_slice(&send).expect("send json");
     assert_eq!(send_json["error"]["code"], "network");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_rotate_token_env_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_telegram = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "tg-rotate",
+            "--kind",
+            "telegram_bot",
+            "--chat-id=-1001234567890",
+            "--endpoint",
+            "mock-http://200",
+            "--token-env",
+            "MOSAIC_TELEGRAM_BOT_TOKEN_OLD",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_telegram: Value = serde_json::from_slice(&add_telegram).expect("add telegram json");
+    let telegram_id = add_telegram["channel"]["id"]
+        .as_str()
+        .expect("telegram id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "term-rotate",
+            "--kind",
+            "terminal",
+        ])
+        .assert()
+        .success();
+
+    let dry_run = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "rotate-token-env",
+            "--all",
+            "--to",
+            "MOSAIC_TELEGRAM_BOT_TOKEN_NEW",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let dry_run: Value = serde_json::from_slice(&dry_run).expect("dry run json");
+    assert_eq!(dry_run["summary"]["total"], 2);
+    assert_eq!(dry_run["summary"]["updated"], 1);
+    assert_eq!(dry_run["summary"]["skipped_unsupported"], 1);
+    assert_eq!(dry_run["summary"]["dry_run"], true);
+
+    let login_after_dry_run = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "login",
+            &telegram_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let login_after_dry_run: Value =
+        serde_json::from_slice(&login_after_dry_run).expect("login dry run json");
+    assert_eq!(
+        login_after_dry_run["token_env"],
+        "MOSAIC_TELEGRAM_BOT_TOKEN_OLD"
+    );
+    let report_path = temp.path().join("rotate-token-report.json");
+
+    let apply = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "rotate-token-env",
+            "--all",
+            "--kind",
+            "telegram_bot",
+            "--from",
+            "MOSAIC_TELEGRAM_BOT_TOKEN_OLD",
+            "--to",
+            "MOSAIC_TELEGRAM_BOT_TOKEN_NEW",
+            "--report-out",
+            report_path.to_str().expect("report path"),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let apply: Value = serde_json::from_slice(&apply).expect("apply json");
+    assert_eq!(apply["summary"]["total"], 1);
+    assert_eq!(apply["summary"]["updated"], 1);
+    assert_eq!(apply["summary"]["skipped_unsupported"], 0);
+    assert_eq!(apply["summary"]["skipped_from_mismatch"], 0);
+    assert_eq!(apply["summary"]["dry_run"], false);
+    assert_eq!(
+        apply["summary"]["from_token_env"],
+        "MOSAIC_TELEGRAM_BOT_TOKEN_OLD"
+    );
+    assert_eq!(
+        apply["report_path"],
+        report_path.to_str().expect("report path")
+    );
+    let report_raw = std::fs::read_to_string(&report_path).expect("read rotation report");
+    let report_json: Value = serde_json::from_str(&report_raw).expect("parse rotation report");
+    assert_eq!(
+        report_json["schema"],
+        "mosaic.channels.token-rotation-report.v1"
+    );
+    assert_eq!(report_json["summary"]["updated"], 1);
+    assert_eq!(
+        report_json["summary"]["to_token_env"],
+        "MOSAIC_TELEGRAM_BOT_TOKEN_NEW"
+    );
+
+    let login_after_apply = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "login",
+            &telegram_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let login_after_apply: Value =
+        serde_json::from_slice(&login_after_apply).expect("login apply json");
+    assert_eq!(
+        login_after_apply["token_env"],
+        "MOSAIC_TELEGRAM_BOT_TOKEN_NEW"
+    );
+
+    let mismatch = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "rotate-token-env",
+            "--all",
+            "--kind",
+            "telegram_bot",
+            "--from",
+            "MOSAIC_TELEGRAM_BOT_TOKEN_OLD",
+            "--to",
+            "MOSAIC_TELEGRAM_BOT_TOKEN_NEXT",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let mismatch: Value = serde_json::from_slice(&mismatch).expect("mismatch json");
+    assert_eq!(mismatch["summary"]["total"], 1);
+    assert_eq!(mismatch["summary"]["updated"], 0);
+    assert_eq!(mismatch["summary"]["skipped_from_mismatch"], 1);
 }

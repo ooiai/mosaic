@@ -18,7 +18,8 @@ use mosaic_agents::{
 };
 use mosaic_channels::{
     AddChannelInput, ChannelRepository, ChannelSendOptions, ChannelTemplateDefaults,
-    UpdateChannelInput, channels_events_dir, channels_file_path, format_channel_for_output,
+    RotateTokenEnvInput, UpdateChannelInput, channels_events_dir, channels_file_path,
+    format_channel_for_output,
 };
 use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
 use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
@@ -326,8 +327,28 @@ enum ChannelsCommand {
         file: PathBuf,
         #[arg(long)]
         replace: bool,
+        #[arg(long, conflicts_with = "replace")]
+        strict: bool,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        report_out: Option<PathBuf>,
+    },
+    RotateTokenEnv {
+        #[arg(long, conflicts_with = "all")]
+        channel: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long, requires = "all")]
+        kind: Option<String>,
+        #[arg(long = "from")]
+        from_token_env: Option<String>,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        report_out: Option<PathBuf>,
     },
     Remove {
         channel_id: String,
@@ -1886,7 +1907,9 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
         ChannelsCommand::Import {
             file,
             replace,
+            strict,
             dry_run,
+            report_out,
         } => {
             let raw = std::fs::read_to_string(&file).map_err(|err| {
                 MosaicError::Config(format!(
@@ -1905,24 +1928,130 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 .and_then(|obj| obj.get("channels_file"))
                 .cloned()
                 .unwrap_or(value);
-            let summary = repository.import_channels_json(import_value, replace, dry_run)?;
+            let import_result =
+                repository.import_channels_json(import_value, replace, strict, dry_run);
+            let report_path = if let Some(path) = report_out.as_ref() {
+                let report = match &import_result {
+                    Ok(summary) => json!({
+                        "schema": "mosaic.channels.import-report.v1",
+                        "generated_at": Utc::now(),
+                        "request": {
+                            "file": file.display().to_string(),
+                            "replace": replace,
+                            "strict": strict,
+                            "dry_run": dry_run,
+                        },
+                        "result": {
+                            "ok": true,
+                            "summary": summary,
+                        }
+                    }),
+                    Err(err) => json!({
+                        "schema": "mosaic.channels.import-report.v1",
+                        "generated_at": Utc::now(),
+                        "request": {
+                            "file": file.display().to_string(),
+                            "replace": replace,
+                            "strict": strict,
+                            "dry_run": dry_run,
+                        },
+                        "result": {
+                            "ok": false,
+                            "error": {
+                                "code": err.code(),
+                                "message": err.to_string(),
+                                "exit_code": err.exit_code(),
+                            },
+                        }
+                    }),
+                };
+                save_json_file(path, &report)?;
+                Some(path.display().to_string())
+            } else {
+                None
+            };
+            let summary = import_result?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "file": file.display().to_string(),
                     "summary": summary,
+                    "report_path": report_path,
                 }));
             } else {
                 println!(
-                    "Import {}from {}: total={} imported={} updated={} skipped={} replace={}",
+                    "Import {}from {}: total={} imported={} updated={} skipped={} replace={} strict={}",
                     if summary.dry_run { "(dry-run) " } else { "" },
                     file.display(),
                     summary.total,
                     summary.imported,
                     summary.updated,
                     summary.skipped,
-                    summary.replace
+                    summary.replace,
+                    summary.strict
                 );
+                if let Some(path) = report_path {
+                    println!("report: {path}");
+                }
+            }
+        }
+        ChannelsCommand::RotateTokenEnv {
+            channel,
+            all,
+            kind,
+            from_token_env,
+            to,
+            dry_run,
+            report_out,
+        } => {
+            let summary = repository.rotate_token_env(RotateTokenEnvInput {
+                channel_id: channel,
+                all,
+                kind,
+                from_token_env,
+                to_token_env: to,
+                dry_run,
+            })?;
+            let report_path = if let Some(path) = report_out {
+                if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let report = json!({
+                    "schema": "mosaic.channels.token-rotation-report.v1",
+                    "generated_at": Utc::now(),
+                    "summary": summary.clone(),
+                });
+                let rendered = serde_json::to_string_pretty(&report).map_err(|err| {
+                    MosaicError::Validation(format!(
+                        "failed to encode token rotation report JSON: {err}"
+                    ))
+                })?;
+                std::fs::write(&path, rendered)?;
+                Some(path.display().to_string())
+            } else {
+                None
+            };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "summary": summary,
+                    "report_path": report_path,
+                }));
+            } else {
+                println!(
+                    "Token env rotation {}complete: total={} updated={} skipped_already_set={} skipped_unsupported={} skipped_from_mismatch={} source={} target={}",
+                    if summary.dry_run { "(dry-run) " } else { "" },
+                    summary.total,
+                    summary.updated,
+                    summary.skipped_already_set,
+                    summary.skipped_unsupported,
+                    summary.skipped_from_mismatch,
+                    summary.from_token_env.as_deref().unwrap_or("*"),
+                    summary.to_token_env
+                );
+                if let Some(path) = report_path {
+                    println!("report: {path}");
+                }
             }
         }
         ChannelsCommand::Remove { channel_id } => {
