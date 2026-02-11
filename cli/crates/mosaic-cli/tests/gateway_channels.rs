@@ -557,6 +557,55 @@ fn channels_telegram_bot_flow() {
         serde_json::from_slice(&retry_send_output).expect("retry telegram json");
     assert_eq!(retry_send_json["attempts"], 3);
     assert_eq!(retry_send_json["http_status"], 200);
+
+    let add_429_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "tg-429",
+            "--kind",
+            "telegram_bot",
+            "--chat-id=-1000000000002",
+            "--endpoint",
+            "mock-http://429,200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_429_json: Value = serde_json::from_slice(&add_429_output).expect("add 429 json");
+    let channel_429_id = add_429_json["channel"]["id"]
+        .as_str()
+        .expect("429 channel id")
+        .to_string();
+
+    let send_429_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token")
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_429_id,
+            "--text",
+            "tg 429 recover",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_429_json: Value = serde_json::from_slice(&send_429_output).expect("429 send json");
+    assert_eq!(send_429_json["attempts"], 2);
+    assert_eq!(send_429_json["http_status"], 200);
 }
 
 #[test]

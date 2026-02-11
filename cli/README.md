@@ -135,6 +135,7 @@ Plugins and skills guide: `docs/plugins-skills.md`
 Telegram default token env: `MOSAIC_TELEGRAM_BOT_TOKEN`.
 Telegram min send interval env: `MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS` (default `800`).
 Idempotency dedupe window env: `MOSAIC_CHANNELS_IDEMPOTENCY_WINDOW_SECONDS` (default `86400`).
+Telegram 429 fallback retry env: `MOSAIC_CHANNELS_TELEGRAM_RETRY_AFTER_DEFAULT_SECONDS` (default `1`).
 
 ### Ops Runtime
 

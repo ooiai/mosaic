@@ -674,7 +674,7 @@ async fn send_telegram_with_retry(
     policy: &RetryPolicy,
 ) -> Result<DeliveryAttemptResult> {
     if endpoint.starts_with("mock-http://") {
-        return simulate_mock_http(endpoint, policy).await;
+        return simulate_mock_http_telegram(endpoint, policy).await;
     }
 
     let base_url = reqwest::Url::parse(endpoint)
@@ -737,13 +737,34 @@ async fn send_telegram_with_retry(
                 }
 
                 if response.status().is_client_error() {
+                    let body = response.json::<Value>().await.unwrap_or(Value::Null);
+                    if status == 429 {
+                        let retry_after_seconds = telegram_retry_after_seconds(&body)
+                            .unwrap_or_else(default_telegram_retry_after_seconds);
+                        last_error = Some(format!(
+                            "telegram API rate limited (429), retry_after={}s",
+                            retry_after_seconds
+                        ));
+                        if attempt_idx + 1 >= policy.max_attempts() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(retry_after_seconds))
+                            .await;
+                        continue;
+                    }
+                    let description = telegram_error_description(&body);
                     return Ok(DeliveryAttemptResult {
                         ok: false,
                         attempts,
                         http_status: Some(status),
-                        error: Some(format!(
-                            "telegram API returned client error status {status}"
-                        )),
+                        error: Some(match description {
+                            Some(message) => {
+                                format!(
+                                    "telegram API returned client error status {status}: {message}"
+                                )
+                            }
+                            None => format!("telegram API returned client error status {status}"),
+                        }),
                         endpoint_masked: Some(mask_endpoint(endpoint)),
                     });
                 }
@@ -794,6 +815,115 @@ fn parse_telegram_success_response(body: &Value) -> std::result::Result<(), Stri
     } else {
         Err("telegram API returned ok=false".to_string())
     }
+}
+
+fn telegram_retry_after_seconds(body: &Value) -> Option<u64> {
+    body.get("parameters")
+        .and_then(Value::as_object)
+        .and_then(|parameters| parameters.get("retry_after"))
+        .and_then(Value::as_u64)
+        .map(|seconds| seconds.max(1))
+}
+
+fn default_telegram_retry_after_seconds() -> u64 {
+    std::env::var("MOSAIC_CHANNELS_TELEGRAM_RETRY_AFTER_DEFAULT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(1)
+        .max(1)
+}
+
+fn telegram_error_description(body: &Value) -> Option<String> {
+    body.get("description")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+async fn simulate_mock_http_telegram(
+    endpoint: &str,
+    policy: &RetryPolicy,
+) -> Result<DeliveryAttemptResult> {
+    let sequence = endpoint.trim_start_matches("mock-http://");
+    if sequence.trim().is_empty() {
+        return Ok(DeliveryAttemptResult {
+            ok: true,
+            attempts: 1,
+            http_status: Some(200),
+            error: None,
+            endpoint_masked: Some(mask_endpoint(endpoint)),
+        });
+    }
+
+    let steps = sequence
+        .split(',')
+        .map(|value| value.trim().to_lowercase())
+        .collect::<Vec<_>>();
+
+    let mut attempts = 0usize;
+    let mut last_status: Option<u16> = None;
+    let mut last_error: Option<String> = None;
+
+    for (idx, step) in steps.iter().enumerate() {
+        attempts += 1;
+        if let Some(delay) = policy.backoff_before_attempt(idx) {
+            tokio::time::sleep(delay).await;
+        }
+
+        if step == "timeout" {
+            last_error = Some("telegram request timed out".to_string());
+            continue;
+        }
+
+        let status = step.parse::<u16>().map_err(|_| {
+            MosaicError::Validation(format!(
+                "invalid mock-http response step '{}' in endpoint {}",
+                step, endpoint
+            ))
+        })?;
+        last_status = Some(status);
+
+        if (200..300).contains(&status) {
+            return Ok(DeliveryAttemptResult {
+                ok: true,
+                attempts,
+                http_status: Some(status),
+                error: None,
+                endpoint_masked: Some(mask_endpoint(endpoint)),
+            });
+        }
+
+        if status == 429 {
+            last_error = Some("telegram API rate limited (429)".to_string());
+            if idx + 1 >= policy.max_attempts() {
+                break;
+            }
+            continue;
+        }
+
+        if (400..500).contains(&status) {
+            return Ok(DeliveryAttemptResult {
+                ok: false,
+                attempts,
+                http_status: Some(status),
+                error: Some(format!(
+                    "telegram API returned client error status {status}"
+                )),
+                endpoint_masked: Some(mask_endpoint(endpoint)),
+            });
+        }
+
+        last_error = Some(format!(
+            "telegram API returned server error status {status}"
+        ));
+    }
+
+    Ok(DeliveryAttemptResult {
+        ok: false,
+        attempts,
+        http_status: last_status,
+        error: Some(last_error.unwrap_or_else(|| "mock-http failed".to_string())),
+        endpoint_masked: Some(mask_endpoint(endpoint)),
+    })
 }
 
 async fn simulate_mock_http(endpoint: &str, policy: &RetryPolicy) -> Result<DeliveryAttemptResult> {
@@ -927,6 +1057,32 @@ mod tests {
         .expect("send");
         assert!(result.ok);
         assert_eq!(result.attempts, 3);
+        assert_eq!(result.http_status, Some(200));
+    }
+
+    #[tokio::test]
+    async fn telegram_mock_http_retries_on_429() {
+        let policy = RetryPolicy {
+            timeout: Duration::from_millis(10),
+            backoff_ms: vec![1, 1, 1],
+        };
+        let result = dispatch_send(
+            "telegram_bot",
+            ChannelDispatchRequest {
+                channel_id: "ch_tg_1",
+                channel_name: "tg",
+                endpoint: Some("mock-http://429,200"),
+                target: Some("-100123"),
+                text: "hello",
+                parse_mode: Some("MarkdownV2"),
+                bearer_token: Some("test-token"),
+            },
+            &policy,
+        )
+        .await
+        .expect("telegram send");
+        assert!(result.ok);
+        assert_eq!(result.attempts, 2);
         assert_eq!(result.http_status, Some(200));
     }
 
