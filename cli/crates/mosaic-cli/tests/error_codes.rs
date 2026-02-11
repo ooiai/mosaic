@@ -183,6 +183,167 @@ fn channels_send_parse_mode_on_non_telegram_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn channels_add_default_parse_mode_on_non_telegram_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "term-default-parse",
+            "--kind",
+            "terminal",
+            "--default-parse-mode",
+            "markdown",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_update_without_fields_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "slack-updatable",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "update",
+            &channel_id,
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_update_default_parse_mode_on_non_telegram_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "term-updatable",
+            "--kind",
+            "terminal",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "update",
+            &channel_id,
+            "--default-parse-mode",
+            "markdown",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_import_invalid_json_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let broken = temp.path().join("broken-channels.json");
+    std::fs::write(&broken, "{not-valid-json").expect("write broken json");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "import",
+            "--file",
+            broken.to_str().expect("broken path"),
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
 fn gateway_call_unknown_method_returns_gateway_protocol_exit_code() {
     let temp = tempdir().expect("tempdir");
     Command::cargo_bin("mosaic")

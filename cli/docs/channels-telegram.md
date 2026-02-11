@@ -18,13 +18,18 @@ You can also override with `--token-env <ENV>` at `add/send/test`.
 mosaic --project-state channels add \
   --name tg-alerts \
   --kind telegram_bot \
-  --chat-id=-1001234567890
+  --chat-id=-1001234567890 \
+  --default-parse-mode markdown_v2 \
+  --default-title "Release Notice" \
+  --default-block "service=mosaic" \
+  --default-metadata '{"env":"staging"}'
 ```
 
 Notes:
 - `--chat-id` is required and persisted as channel target.
 - For negative chat IDs, pass as `--chat-id=-100...` (single argument form).
 - Optional `--endpoint` can override Telegram API base URL (default `https://api.telegram.org`).
+- Optional default template fields (`--default-*`) are persisted on channel and used when `send` does not override them.
 
 ## 3) Test and send
 
@@ -37,6 +42,16 @@ mosaic --project-state --json channels send <channel-id> \
   --block "build=42" \
   --metadata '{"env":"staging"}' \
   --idempotency-key release-42
+```
+
+Update persisted target/default template:
+
+```bash
+mosaic --project-state channels update <channel-id> \
+  --chat-id=-1009876543210 \
+  --default-title "Prod Notice"
+
+mosaic --project-state channels update <channel-id> --clear-defaults
 ```
 
 Success response includes:

@@ -10,6 +10,15 @@ pub struct ChannelAuthConfig {
     pub token_env: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ChannelTemplateDefaults {
+    pub parse_mode: Option<String>,
+    pub title: Option<String>,
+    #[serde(default)]
+    pub blocks: Vec<String>,
+    pub metadata: Option<Value>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelEntry {
     pub id: String,
@@ -18,6 +27,8 @@ pub struct ChannelEntry {
     pub endpoint: Option<String>,
     pub target: Option<String>,
     pub auth: ChannelAuthConfig,
+    #[serde(default)]
+    pub template_defaults: Option<ChannelTemplateDefaults>,
     pub created_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
     pub last_send_at: Option<DateTime<Utc>>,
@@ -37,6 +48,7 @@ pub struct ChannelListItem {
     pub kind: String,
     pub endpoint_masked: Option<String>,
     pub target_masked: Option<String>,
+    pub has_template_defaults: bool,
     pub created_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
     pub last_send_at: Option<DateTime<Utc>>,
@@ -50,6 +62,18 @@ pub struct AddChannelInput {
     pub endpoint: Option<String>,
     pub target: Option<String>,
     pub token_env: Option<String>,
+    pub template_defaults: ChannelTemplateDefaults,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct UpdateChannelInput {
+    pub name: Option<String>,
+    pub endpoint: Option<String>,
+    pub target: Option<String>,
+    pub token_env: Option<String>,
+    pub clear_token_env: bool,
+    pub template_defaults: Option<ChannelTemplateDefaults>,
+    pub clear_template_defaults: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -145,6 +169,15 @@ pub struct DoctorCheck {
     pub name: String,
     pub ok: bool,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChannelImportSummary {
+    pub total: usize,
+    pub imported: usize,
+    pub updated: usize,
+    pub skipped: usize,
+    pub replace: bool,
 }
 
 pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {

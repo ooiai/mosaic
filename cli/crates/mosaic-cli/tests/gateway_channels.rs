@@ -508,6 +508,82 @@ fn channels_telegram_bot_flow() {
     assert_eq!(dedup_last["delivery_status"], "deduplicated");
     assert_eq!(dedup_last["idempotency_key"], "release-42");
 
+    let add_defaults_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "tg-defaults",
+            "--kind",
+            "telegram_bot",
+            "--chat-id=-1000000000009",
+            "--endpoint",
+            "mock-http://200",
+            "--default-parse-mode",
+            "markdown",
+            "--default-title",
+            "Default Header",
+            "--default-block",
+            "service=mosaic",
+            "--default-metadata",
+            "{\"env\":\"prod\"}",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_defaults_json: Value =
+        serde_json::from_slice(&add_defaults_output).expect("add defaults json");
+    let defaults_channel_id = add_defaults_json["channel"]["id"]
+        .as_str()
+        .expect("defaults channel id")
+        .to_string();
+    assert_eq!(add_defaults_json["channel"]["has_template_defaults"], true);
+
+    let send_defaults_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token")
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &defaults_channel_id,
+            "--text",
+            "from defaults",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_defaults_json: Value =
+        serde_json::from_slice(&send_defaults_output).expect("send defaults json");
+    assert_eq!(send_defaults_json["parse_mode"], "Markdown");
+    let defaults_event_path = send_defaults_json["event_path"]
+        .as_str()
+        .expect("defaults event path");
+    let defaults_events =
+        std::fs::read_to_string(defaults_event_path).expect("defaults event file content");
+    let defaults_last = defaults_events
+        .lines()
+        .last()
+        .expect("defaults event line")
+        .to_string();
+    let defaults_last: Value = serde_json::from_str(&defaults_last).expect("defaults event json");
+    assert!(
+        defaults_last["text_preview"]
+            .as_str()
+            .expect("defaults preview")
+            .contains("Default Header")
+    );
+
     let add_retry_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -893,6 +969,33 @@ fn channels_ops_commands_flow() {
         .expect("channel id")
         .to_string();
 
+    let update_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "update",
+            &channel_id,
+            "--name",
+            "ops-alerts-v2",
+            "--default-title",
+            "Ops Header",
+            "--default-block",
+            "region=us-east-1",
+            "--default-metadata",
+            "{\"service\":\"mosaic\"}",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let update_json: Value = serde_json::from_slice(&update_output).expect("update json");
+    assert_eq!(update_json["channel"]["name"], "ops-alerts-v2");
+    assert_eq!(update_json["channel"]["has_template_defaults"], true);
+
     let send_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -912,6 +1015,27 @@ fn channels_ops_commands_flow() {
         .clone();
     let send_json: Value = serde_json::from_slice(&send_output).expect("send json");
     assert_eq!(send_json["ok"], true);
+    let event_path = send_json["event_path"].as_str().expect("event path");
+    let event_text = std::fs::read_to_string(event_path).expect("event file");
+    let last_line = event_text.lines().last().expect("event line");
+    let last_event: Value = serde_json::from_str(last_line).expect("event json");
+    let preview = last_event["text_preview"].as_str().expect("preview");
+    assert!(preview.contains("Ops Header"));
+    assert!(preview.contains("region=us-east-1"));
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "update",
+            &channel_id,
+            "--clear-defaults",
+        ])
+        .assert()
+        .success();
 
     let status_output = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -1038,4 +1162,154 @@ fn channels_ops_commands_flow() {
             .len(),
         0
     );
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_export_import_flow() {
+    let src = tempdir().expect("source tempdir");
+    let dst = tempdir().expect("destination tempdir");
+    let export_path = src.path().join("channels-export.json");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(src.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "src-slack",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(src.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "export",
+            "--out",
+            export_path.to_str().expect("export path str"),
+        ])
+        .assert()
+        .success();
+    let exported_raw = std::fs::read_to_string(&export_path).expect("read export");
+    let mut exported_json: Value = serde_json::from_str(&exported_raw).expect("parse export");
+    assert_eq!(exported_json["schema"], "mosaic.channels.export.v1");
+    assert_eq!(
+        exported_json["channels_file"]["channels"]
+            .as_array()
+            .expect("channels array")
+            .len(),
+        1
+    );
+
+    let first_import = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(dst.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "import",
+            "--file",
+            export_path.to_str().expect("import path str"),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first_import: Value = serde_json::from_slice(&first_import).expect("first import json");
+    assert_eq!(first_import["summary"]["imported"], 1);
+    assert_eq!(first_import["summary"]["updated"], 0);
+    assert_eq!(first_import["summary"]["skipped"], 0);
+
+    let second_import = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(dst.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "import",
+            "--file",
+            export_path.to_str().expect("import path str"),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second_import: Value = serde_json::from_slice(&second_import).expect("second import json");
+    assert_eq!(second_import["summary"]["imported"], 0);
+    assert_eq!(second_import["summary"]["updated"], 0);
+    assert_eq!(second_import["summary"]["skipped"], 1);
+
+    exported_json["channels_file"]["channels"][0]["endpoint"] =
+        Value::String("mock-http://500".to_string());
+    let updated_export =
+        serde_json::to_string_pretty(&exported_json).expect("serialize updated export");
+    std::fs::write(&export_path, updated_export).expect("write updated export");
+
+    let replace_import = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(dst.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "import",
+            "--file",
+            export_path.to_str().expect("import path str"),
+            "--replace",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replace_import: Value =
+        serde_json::from_slice(&replace_import).expect("replace import json");
+    assert_eq!(replace_import["summary"]["imported"], 0);
+    assert_eq!(replace_import["summary"]["updated"], 1);
+    assert_eq!(replace_import["summary"]["skipped"], 0);
+
+    let send = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(dst.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "check replaced endpoint",
+        ])
+        .assert()
+        .failure()
+        .code(4)
+        .get_output()
+        .stdout
+        .clone();
+    let send_json: Value = serde_json::from_slice(&send).expect("send json");
+    assert_eq!(send_json["error"]["code"], "network");
 }

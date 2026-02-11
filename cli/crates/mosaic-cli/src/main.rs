@@ -17,8 +17,8 @@ use mosaic_agents::{
     AddAgentInput, AgentStore, UpdateAgentInput, agent_routes_path, agents_file_path,
 };
 use mosaic_channels::{
-    AddChannelInput, ChannelRepository, ChannelSendOptions, channels_events_dir,
-    channels_file_path, format_channel_for_output,
+    AddChannelInput, ChannelRepository, ChannelSendOptions, ChannelTemplateDefaults,
+    UpdateChannelInput, channels_events_dir, channels_file_path, format_channel_for_output,
 };
 use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
 use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
@@ -233,6 +233,45 @@ enum ChannelsCommand {
         chat_id: Option<String>,
         #[arg(long)]
         token_env: Option<String>,
+        #[arg(long)]
+        default_parse_mode: Option<String>,
+        #[arg(long)]
+        default_title: Option<String>,
+        #[arg(long)]
+        default_block: Vec<String>,
+        #[arg(long)]
+        default_metadata: Option<String>,
+    },
+    Update {
+        channel_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        endpoint: Option<String>,
+        #[arg(long)]
+        chat_id: Option<String>,
+        #[arg(long)]
+        token_env: Option<String>,
+        #[arg(long, conflicts_with = "token_env")]
+        clear_token_env: bool,
+        #[arg(long)]
+        default_parse_mode: Option<String>,
+        #[arg(long)]
+        default_title: Option<String>,
+        #[arg(long)]
+        default_block: Vec<String>,
+        #[arg(long)]
+        default_metadata: Option<String>,
+        #[arg(
+            long,
+            conflicts_with_all = [
+                "default_parse_mode",
+                "default_title",
+                "default_block",
+                "default_metadata"
+            ]
+        )]
+        clear_defaults: bool,
     },
     Login {
         channel_id: String,
@@ -277,6 +316,16 @@ enum ChannelsCommand {
         #[arg(long)]
         channel: String,
         query: Vec<String>,
+    },
+    Export {
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    Import {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long)]
+        replace: bool,
     },
     Remove {
         channel_id: String,
@@ -1465,12 +1514,13 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             } else {
                 for channel in channels {
                     println!(
-                        "{} name={} kind={} endpoint={} target={} last_login={} last_send={} last_error={}",
+                        "{} name={} kind={} endpoint={} target={} defaults={} last_login={} last_send={} last_error={}",
                         channel.id,
                         channel.name,
                         channel.kind,
                         channel.endpoint_masked.unwrap_or_else(|| "-".to_string()),
                         channel.target_masked.unwrap_or_else(|| "-".to_string()),
+                        channel.has_template_defaults,
                         channel
                             .last_login_at
                             .map(|v| v.to_rfc3339())
@@ -1512,13 +1562,26 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             endpoint,
             chat_id,
             token_env,
+            default_parse_mode,
+            default_title,
+            default_block,
+            default_metadata,
         } => {
+            let default_metadata = default_metadata
+                .map(|value| parse_json_input(&value, "channels add default metadata"))
+                .transpose()?;
             let entry = repository.add(AddChannelInput {
                 name,
                 kind,
                 endpoint,
                 target: chat_id,
                 token_env,
+                template_defaults: ChannelTemplateDefaults {
+                    parse_mode: default_parse_mode,
+                    title: default_title,
+                    blocks: default_block,
+                    metadata: default_metadata,
+                },
             })?;
             let rendered = format_channel_for_output(&entry);
             if cli.json {
@@ -1529,6 +1592,58 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 }));
             } else {
                 println!("Channel added: {}", rendered.id);
+            }
+        }
+        ChannelsCommand::Update {
+            channel_id,
+            name,
+            endpoint,
+            chat_id,
+            token_env,
+            clear_token_env,
+            default_parse_mode,
+            default_title,
+            default_block,
+            default_metadata,
+            clear_defaults,
+        } => {
+            let default_metadata = default_metadata
+                .map(|value| parse_json_input(&value, "channels update default metadata"))
+                .transpose()?;
+            let template_defaults = if default_parse_mode.is_some()
+                || default_title.is_some()
+                || !default_block.is_empty()
+                || default_metadata.is_some()
+            {
+                Some(ChannelTemplateDefaults {
+                    parse_mode: default_parse_mode,
+                    title: default_title,
+                    blocks: default_block,
+                    metadata: default_metadata,
+                })
+            } else {
+                None
+            };
+            let updated = repository.update(
+                &channel_id,
+                UpdateChannelInput {
+                    name,
+                    endpoint,
+                    target: chat_id,
+                    token_env,
+                    clear_token_env,
+                    template_defaults,
+                    clear_template_defaults: clear_defaults,
+                },
+            )?;
+            let rendered = format_channel_for_output(&updated);
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "channel": rendered,
+                }));
+            } else {
+                println!("Channel updated: {}", rendered.id);
             }
         }
         ChannelsCommand::Login {
@@ -1718,6 +1833,89 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                         entry.last_error.unwrap_or_else(|| "-".to_string())
                     );
                 }
+            }
+        }
+        ChannelsCommand::Export { out } => {
+            let file = repository.export_channels()?;
+            let payload = json!({
+                "schema": "mosaic.channels.export.v1",
+                "exported_at": Utc::now(),
+                "channels_file": file,
+            });
+            if let Some(path) = out {
+                if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let rendered = serde_json::to_string_pretty(&payload).map_err(|err| {
+                    MosaicError::Validation(format!("failed to encode channels export JSON: {err}"))
+                })?;
+                std::fs::write(&path, rendered)?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "path": path.display().to_string(),
+                        "channels": payload["channels_file"]["channels"].as_array().map_or(0usize, |v| v.len()),
+                    }));
+                } else {
+                    println!(
+                        "Exported {} channels to {}",
+                        payload["channels_file"]["channels"]
+                            .as_array()
+                            .map_or(0usize, |items| items.len()),
+                        path.display()
+                    );
+                }
+            } else if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "export": payload,
+                }));
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload).map_err(|err| {
+                        MosaicError::Validation(format!(
+                            "failed to render channels export JSON: {err}"
+                        ))
+                    })?
+                );
+            }
+        }
+        ChannelsCommand::Import { file, replace } => {
+            let raw = std::fs::read_to_string(&file).map_err(|err| {
+                MosaicError::Config(format!(
+                    "failed to read channels import file {}: {err}",
+                    file.display()
+                ))
+            })?;
+            let value = serde_json::from_str::<Value>(&raw).map_err(|err| {
+                MosaicError::Validation(format!(
+                    "invalid channels import JSON {}: {err}",
+                    file.display()
+                ))
+            })?;
+            let import_value = value
+                .as_object()
+                .and_then(|obj| obj.get("channels_file"))
+                .cloned()
+                .unwrap_or(value);
+            let summary = repository.import_channels_json(import_value, replace)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "file": file.display().to_string(),
+                    "summary": summary,
+                }));
+            } else {
+                println!(
+                    "Import complete from {}: total={} imported={} updated={} skipped={} replace={}",
+                    file.display(),
+                    summary.total,
+                    summary.imported,
+                    summary.updated,
+                    summary.skipped,
+                    summary.replace
+                );
             }
         }
         ChannelsCommand::Remove { channel_id } => {

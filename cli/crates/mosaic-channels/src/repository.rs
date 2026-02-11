@@ -18,8 +18,9 @@ use crate::schema::{
 };
 use crate::types::{
     AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
-    ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions, ChannelSendResult,
-    ChannelStatus, ChannelsFile, DoctorCheck, TEXT_PREVIEW_LIMIT, truncate_text,
+    ChannelImportSummary, ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions,
+    ChannelSendResult, ChannelStatus, ChannelTemplateDefaults, ChannelsFile, DoctorCheck,
+    TEXT_PREVIEW_LIMIT, UpdateChannelInput, truncate_text,
 };
 
 const CACHE_TTL_SECONDS: i64 = 300;
@@ -78,6 +79,7 @@ impl ChannelRepository {
                     kind: channel.kind,
                     endpoint_masked: mask_optional_endpoint(channel.endpoint.as_deref()),
                     target_masked,
+                    has_template_defaults: channel.template_defaults.is_some(),
                     created_at: channel.created_at,
                     last_login_at: channel.last_login_at,
                     last_send_at: channel.last_send_at,
@@ -86,6 +88,78 @@ impl ChannelRepository {
             })
             .collect::<Vec<_>>();
         Ok(items)
+    }
+
+    pub fn export_channels(&self) -> Result<ChannelsFile> {
+        self.load_channels_file()
+    }
+
+    pub fn import_channels(
+        &self,
+        imported_file: ChannelsFile,
+        replace: bool,
+    ) -> Result<ChannelImportSummary> {
+        let mut imported_channels = imported_file.channels;
+        normalize_channels(&mut imported_channels)?;
+        validate_import_uniqueness(&imported_channels)?;
+
+        let mut existing = self.load_channels_file()?;
+        let mut imported = 0usize;
+        let mut updated = 0usize;
+        let mut skipped = 0usize;
+
+        for mut incoming in imported_channels {
+            let by_id = existing
+                .channels
+                .iter()
+                .position(|entry| entry.id == incoming.id);
+            let by_name = existing
+                .channels
+                .iter()
+                .position(|entry| entry.name.eq_ignore_ascii_case(&incoming.name));
+            match (by_id, by_name) {
+                (None, None) => {
+                    existing.channels.push(incoming);
+                    imported += 1;
+                }
+                (Some(id_idx), Some(name_idx)) if id_idx != name_idx => {
+                    return Err(MosaicError::Validation(format!(
+                        "import channel '{}' conflicts with different existing id/name entries",
+                        incoming.name
+                    )));
+                }
+                (Some(idx), _) | (_, Some(idx)) => {
+                    if !replace {
+                        skipped += 1;
+                        continue;
+                    }
+                    if by_id.is_none() {
+                        incoming.id = existing.channels[idx].id.clone();
+                    }
+                    existing.channels[idx] = incoming;
+                    updated += 1;
+                }
+            }
+        }
+
+        existing.version = CHANNELS_SCHEMA_VERSION;
+        self.save_channels_file(&existing)?;
+        Ok(ChannelImportSummary {
+            total: imported + updated + skipped,
+            imported,
+            updated,
+            skipped,
+            replace,
+        })
+    }
+
+    pub fn import_channels_json(
+        &self,
+        value: Value,
+        replace: bool,
+    ) -> Result<ChannelImportSummary> {
+        let (file, _) = parse_channels_value(value)?;
+        self.import_channels(file, replace)
     }
 
     pub fn status(&self) -> Result<ChannelStatus> {
@@ -110,6 +184,7 @@ impl ChannelRepository {
             endpoint,
             target,
             token_env,
+            template_defaults,
         } = input;
         let mut file = self.load_channels_file()?;
         let name = name.trim();
@@ -122,6 +197,7 @@ impl ChannelRepository {
         let endpoint = normalize_optional(endpoint);
         let target = normalize_optional(target);
         validate_channel_for_kind(&kind, endpoint.as_deref(), target.as_deref())?;
+        let template_defaults = normalize_template_defaults_for_kind(&kind, template_defaults)?;
         if file
             .channels
             .iter()
@@ -143,6 +219,7 @@ impl ChannelRepository {
             endpoint,
             target,
             auth: ChannelAuthConfig { token_env },
+            template_defaults,
             created_at: now,
             last_login_at: None,
             last_send_at: None,
@@ -151,6 +228,117 @@ impl ChannelRepository {
         file.channels.push(channel.clone());
         self.save_channels_file(&file)?;
         Ok(channel)
+    }
+
+    pub fn update(&self, channel_id: &str, input: UpdateChannelInput) -> Result<ChannelEntry> {
+        let UpdateChannelInput {
+            name,
+            endpoint,
+            target,
+            token_env,
+            clear_token_env,
+            template_defaults,
+            clear_template_defaults,
+        } = input;
+
+        if clear_token_env && token_env.is_some() {
+            return Err(MosaicError::Validation(
+                "use either --token-env or --clear-token-env".to_string(),
+            ));
+        }
+        if clear_template_defaults && template_defaults.is_some() {
+            return Err(MosaicError::Validation(
+                "use either default template fields or --clear-defaults".to_string(),
+            ));
+        }
+
+        let mut file = self.load_channels_file()?;
+        let idx = file
+            .channels
+            .iter()
+            .position(|entry| entry.id == channel_id)
+            .ok_or_else(|| MosaicError::Config(format!("channel '{channel_id}' not found")))?;
+        let mut next = file.channels[idx].clone();
+        let mut changed = false;
+
+        if let Some(name) = name {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                return Err(MosaicError::Validation(
+                    "channel name cannot be empty".to_string(),
+                ));
+            }
+            if file.channels.iter().any(|channel| {
+                channel.id != channel_id && channel.name.eq_ignore_ascii_case(trimmed)
+            }) {
+                return Err(MosaicError::Validation(format!(
+                    "channel name '{}' already exists",
+                    trimmed
+                )));
+            }
+            if next.name != trimmed {
+                next.name = trimmed.to_string();
+                changed = true;
+            }
+        }
+
+        if let Some(endpoint) = endpoint {
+            let endpoint = normalize_optional(Some(endpoint));
+            if next.endpoint != endpoint {
+                next.endpoint = endpoint;
+                changed = true;
+            }
+        }
+
+        if let Some(target) = target {
+            let target = normalize_optional(Some(target));
+            if next.target != target {
+                next.target = target;
+                changed = true;
+            }
+        }
+
+        if clear_token_env {
+            if next.auth.token_env.is_some() {
+                next.auth.token_env = None;
+                next.last_login_at = None;
+                changed = true;
+            }
+        } else if let Some(token_env) = token_env {
+            let token_env = normalize_optional(Some(token_env));
+            if next.auth.token_env != token_env {
+                next.auth.token_env = token_env;
+                changed = true;
+            }
+        }
+
+        if clear_template_defaults {
+            if next.template_defaults.is_some() {
+                next.template_defaults = None;
+                changed = true;
+            }
+        } else if let Some(defaults_patch) = template_defaults {
+            let merged_defaults = merge_template_defaults(
+                next.template_defaults.clone().unwrap_or_default(),
+                defaults_patch,
+            );
+            let normalized = normalize_template_defaults_for_kind(&next.kind, merged_defaults)?;
+            if next.template_defaults != normalized {
+                next.template_defaults = normalized;
+                changed = true;
+            }
+        }
+
+        if !changed {
+            return Err(MosaicError::Validation(
+                "no channel update fields were provided".to_string(),
+            ));
+        }
+
+        validate_channel_for_kind(&next.kind, next.endpoint.as_deref(), next.target.as_deref())?;
+        file.channels[idx] = next.clone();
+        self.save_channels_file(&file)?;
+        Ok(next)
     }
 
     pub fn login(&self, channel_id: &str, token_env: Option<&str>) -> Result<ChannelLoginResult> {
@@ -257,13 +445,22 @@ impl ChannelRepository {
             .or_else(|| providers::default_token_env_for_kind(&channel.kind).map(str::to_string));
         let token = resolve_token_value(token_env.as_deref())?;
         let send_kind = if probe { "test_probe" } else { "message" };
-        let parse_mode = normalize_parse_mode(options.parse_mode, &channel.kind)?;
+        let default_template = channel.template_defaults.clone().unwrap_or_default();
+        let merged_parse_mode = options.parse_mode.or(default_template.parse_mode);
+        let parse_mode = normalize_parse_mode(merged_parse_mode, &channel.kind)?;
         let idempotency_key = normalize_optional(options.idempotency_key);
+        let merged_title = options.title.or(default_template.title);
+        let merged_blocks = if options.blocks.is_empty() {
+            default_template.blocks
+        } else {
+            options.blocks
+        };
+        let merged_metadata = options.metadata.or(default_template.metadata);
         let rendered_text = render_message_template(
             text,
-            options.title.as_deref(),
-            &options.blocks,
-            options.metadata.as_ref(),
+            merged_title.as_deref(),
+            &merged_blocks,
+            merged_metadata.as_ref(),
         );
         let text_preview = truncate_text(&rendered_text, TEXT_PREVIEW_LIMIT);
         if !probe
@@ -787,6 +984,77 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
     })
 }
 
+fn validate_import_uniqueness(channels: &[ChannelEntry]) -> Result<()> {
+    let mut ids = HashSet::new();
+    let mut names = HashSet::new();
+    for channel in channels {
+        if !ids.insert(channel.id.clone()) {
+            return Err(MosaicError::Validation(format!(
+                "duplicate channel id '{}' in import payload",
+                channel.id
+            )));
+        }
+        if !names.insert(channel.name.to_lowercase()) {
+            return Err(MosaicError::Validation(format!(
+                "duplicate channel name '{}' in import payload",
+                channel.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_template_defaults_for_kind(
+    kind: &str,
+    defaults: ChannelTemplateDefaults,
+) -> Result<Option<ChannelTemplateDefaults>> {
+    let parse_mode = normalize_parse_mode(defaults.parse_mode, kind)?;
+    let title = normalize_optional(defaults.title);
+    let blocks = defaults
+        .blocks
+        .into_iter()
+        .filter_map(|value| normalize_optional(Some(value)))
+        .collect::<Vec<_>>();
+    let metadata = defaults.metadata.and_then(|value| {
+        if value.is_null() || value.as_object().is_some_and(|object| object.is_empty()) {
+            None
+        } else {
+            Some(value)
+        }
+    });
+
+    if parse_mode.is_none() && title.is_none() && blocks.is_empty() && metadata.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(ChannelTemplateDefaults {
+        parse_mode,
+        title,
+        blocks,
+        metadata,
+    }))
+}
+
+fn merge_template_defaults(
+    current: ChannelTemplateDefaults,
+    patch: ChannelTemplateDefaults,
+) -> ChannelTemplateDefaults {
+    let parse_mode = patch.parse_mode.or(current.parse_mode);
+    let title = patch.title.or(current.title);
+    let blocks = if patch.blocks.is_empty() {
+        current.blocks
+    } else {
+        patch.blocks
+    };
+    let metadata = patch.metadata.or(current.metadata);
+    ChannelTemplateDefaults {
+        parse_mode,
+        title,
+        blocks,
+        metadata,
+    }
+}
+
 fn normalize_parse_mode(parse_mode: Option<String>, kind: &str) -> Result<Option<String>> {
     let Some(parse_mode) = normalize_optional(parse_mode) else {
         return Ok(None);
@@ -887,6 +1155,7 @@ pub fn channels_events_dir(data_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;
@@ -905,6 +1174,7 @@ mod tests {
                 endpoint: Some("mock-http://200".to_string()),
                 target: None,
                 token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
             })
             .expect("add");
 
@@ -931,6 +1201,7 @@ mod tests {
                 endpoint: Some("mock-http://200".to_string()),
                 target: None,
                 token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
             })
             .expect("add");
 
@@ -943,5 +1214,186 @@ mod tests {
         let resolved = repo.resolve("slack_webhook", "alert").expect("resolve");
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "alerts");
+    }
+
+    #[test]
+    fn update_channel_merges_template_defaults() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let channel = repo
+            .add(AddChannelInput {
+                name: "telegram".to_string(),
+                kind: "telegram_bot".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: Some("-10000001".to_string()),
+                token_env: Some("TG_TOKEN".to_string()),
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add");
+
+        let first_update = repo
+            .update(
+                &channel.id,
+                UpdateChannelInput {
+                    name: Some("telegram-alerts".to_string()),
+                    target: Some("-10000009".to_string()),
+                    template_defaults: Some(ChannelTemplateDefaults {
+                        parse_mode: Some("markdown_v2".to_string()),
+                        title: Some("Release".to_string()),
+                        blocks: vec!["service=mosaic".to_string()],
+                        metadata: Some(json!({ "env": "staging" })),
+                    }),
+                    ..UpdateChannelInput::default()
+                },
+            )
+            .expect("first update");
+        assert_eq!(first_update.name, "telegram-alerts");
+        assert_eq!(first_update.target.as_deref(), Some("-10000009"));
+        let defaults = first_update
+            .template_defaults
+            .clone()
+            .expect("template defaults");
+        assert_eq!(defaults.parse_mode.as_deref(), Some("MarkdownV2"));
+        assert_eq!(defaults.title.as_deref(), Some("Release"));
+
+        let second_update = repo
+            .update(
+                &channel.id,
+                UpdateChannelInput {
+                    template_defaults: Some(ChannelTemplateDefaults {
+                        title: Some("Ops".to_string()),
+                        metadata: Some(Value::Null),
+                        ..ChannelTemplateDefaults::default()
+                    }),
+                    ..UpdateChannelInput::default()
+                },
+            )
+            .expect("second update");
+        let defaults = second_update.template_defaults.expect("updated defaults");
+        assert_eq!(defaults.parse_mode.as_deref(), Some("MarkdownV2"));
+        assert_eq!(defaults.title.as_deref(), Some("Ops"));
+        assert_eq!(defaults.blocks, vec!["service=mosaic".to_string()]);
+        assert!(defaults.metadata.is_none());
+    }
+
+    #[test]
+    fn update_channel_requires_changes() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let channel = repo
+            .add(AddChannelInput {
+                name: "slack".to_string(),
+                kind: "slack_webhook".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: None,
+                token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add");
+        let err = repo
+            .update(&channel.id, UpdateChannelInput::default())
+            .expect_err("missing updates should fail");
+        assert!(matches!(err, MosaicError::Validation(_)));
+    }
+
+    #[test]
+    fn import_channels_replace_and_skip_behavior() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let existing = repo
+            .add(AddChannelInput {
+                name: "alerts".to_string(),
+                kind: "slack_webhook".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: None,
+                token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add");
+
+        let imported = ChannelsFile {
+            version: CHANNELS_SCHEMA_VERSION,
+            channels: vec![ChannelEntry {
+                id: existing.id.clone(),
+                name: existing.name.clone(),
+                kind: existing.kind.clone(),
+                endpoint: Some("mock-http://500".to_string()),
+                target: None,
+                auth: ChannelAuthConfig { token_env: None },
+                template_defaults: None,
+                created_at: existing.created_at,
+                last_login_at: None,
+                last_send_at: None,
+                last_error: None,
+            }],
+        };
+
+        let no_replace = repo
+            .import_channels(imported.clone(), false)
+            .expect("import without replace");
+        assert_eq!(no_replace.imported, 0);
+        assert_eq!(no_replace.updated, 0);
+        assert_eq!(no_replace.skipped, 1);
+
+        let replaced = repo
+            .import_channels(imported, true)
+            .expect("import with replace");
+        assert_eq!(replaced.imported, 0);
+        assert_eq!(replaced.updated, 1);
+        assert_eq!(replaced.skipped, 0);
+    }
+
+    #[test]
+    fn import_channels_rejects_duplicate_names_in_payload() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let now = Utc::now();
+        let imported = ChannelsFile {
+            version: CHANNELS_SCHEMA_VERSION,
+            channels: vec![
+                ChannelEntry {
+                    id: "ch_a".to_string(),
+                    name: "dup".to_string(),
+                    kind: "slack_webhook".to_string(),
+                    endpoint: Some("mock-http://200".to_string()),
+                    target: None,
+                    auth: ChannelAuthConfig { token_env: None },
+                    template_defaults: None,
+                    created_at: now,
+                    last_login_at: None,
+                    last_send_at: None,
+                    last_error: None,
+                },
+                ChannelEntry {
+                    id: "ch_b".to_string(),
+                    name: "Dup".to_string(),
+                    kind: "slack_webhook".to_string(),
+                    endpoint: Some("mock-http://200".to_string()),
+                    target: None,
+                    auth: ChannelAuthConfig { token_env: None },
+                    template_defaults: None,
+                    created_at: now,
+                    last_login_at: None,
+                    last_send_at: None,
+                    last_error: None,
+                },
+            ],
+        };
+        let err = repo
+            .import_channels(imported, false)
+            .expect_err("duplicate names should fail");
+        assert!(matches!(err, MosaicError::Validation(_)));
     }
 }

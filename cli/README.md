@@ -7,7 +7,7 @@ This workspace ships a pure CLI with no frontend dependency.
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway run|status|health|probe|discover|call|stop`)
-- Channels runtime (`channels add|list|status|test|send|logs|capabilities|resolve|remove|logout`)
+- Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|remove|logout`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
@@ -102,7 +102,19 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels add \
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels add \
   --name tg-alerts \
   --kind telegram_bot \
-  --chat-id=-1001234567890
+  --chat-id=-1001234567890 \
+  --default-parse-mode markdown_v2 \
+  --default-title "Release Notice" \
+  --default-block "service=mosaic" \
+  --default-metadata '{"env":"staging"}'
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels update <channel-id> \
+  --name tg-alerts-prod \
+  --chat-id=-1009876543210 \
+  --default-title "Prod Notice"
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels update <channel-id> \
+  --clear-defaults
 
 export MOSAIC_TELEGRAM_BOT_TOKEN="<bot-token>"
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels send <channel-id> \
@@ -119,6 +131,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels status
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels logs --channel <channel-id> --tail 20
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels capabilities --channel slack_webhook
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels resolve --channel slack_webhook alert
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels export --out .mosaic/channels-backup.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels import --file .mosaic/channels-backup.json --replace
 ```
 
 Detailed guide: `docs/channels-slack.md`
