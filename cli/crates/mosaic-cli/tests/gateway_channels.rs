@@ -284,6 +284,173 @@ fn channels_discord_webhook_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn channels_terminal_alias_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "term-stdout",
+            "--kind",
+            "stdout",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add terminal json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+    assert_eq!(add_json["channel"]["kind"], "terminal");
+    assert_eq!(add_json["channel"]["target_masked"], "terminal://local");
+
+    let send_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "hello terminal",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_json: Value = serde_json::from_slice(&send_output).expect("send terminal json");
+    assert_eq!(send_json["ok"], true);
+    assert_eq!(send_json["delivered_via"], "terminal");
+    assert_eq!(send_json["target_masked"], "terminal://local");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_telegram_bot_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "tg-alerts",
+            "--kind",
+            "telegram",
+            "--chat-id=-1001234567890",
+            "--endpoint",
+            "mock-http://200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add telegram json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+    assert_eq!(add_json["channel"]["kind"], "telegram_bot");
+    assert!(
+        add_json["channel"]["target_masked"]
+            .as_str()
+            .expect("target masked")
+            .starts_with("telegram://***")
+    );
+
+    let send_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token")
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "hello telegram",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let send_json: Value = serde_json::from_slice(&send_output).expect("send telegram json");
+    assert_eq!(send_json["ok"], true);
+    assert_eq!(send_json["delivered_via"], "telegram_bot");
+    assert_eq!(send_json["attempts"], 1);
+
+    let add_retry_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "tg-retry",
+            "--kind",
+            "telegram_bot",
+            "--chat-id=-1000000000001",
+            "--endpoint",
+            "mock-http://500,500,200",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_retry_json: Value = serde_json::from_slice(&add_retry_output).expect("add retry json");
+    let retry_channel_id = add_retry_json["channel"]["id"]
+        .as_str()
+        .expect("retry channel id")
+        .to_string();
+
+    let retry_send_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token")
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &retry_channel_id,
+            "--text",
+            "retry telegram",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let retry_send_json: Value =
+        serde_json::from_slice(&retry_send_output).expect("retry telegram json");
+    assert_eq!(retry_send_json["attempts"], 3);
+    assert_eq!(retry_send_json["http_status"], 200);
+}
+
+#[test]
+#[allow(deprecated)]
 fn channels_retry_policy_mock_http() {
     let temp = tempdir().expect("tempdir");
 

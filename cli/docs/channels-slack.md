@@ -41,6 +41,7 @@ Response shape (success):
   "attempts": 1,
   "http_status": 200,
   "endpoint_masked": "https://hooks.slack.com/***XXXX",
+  "target_masked": "https://hooks.slack.com/***XXXX",
   "event_path": "/abs/path/.mosaic/data/channel-events/ch_xxx.jsonl"
 }
 ```
@@ -67,6 +68,7 @@ mosaic --project-state --json channels list
 Each entry includes:
 - `kind`
 - `endpoint_masked`
+- `target_masked`
 - `last_send_at`
 - `last_error`
 

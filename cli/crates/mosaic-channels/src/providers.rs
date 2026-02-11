@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use mosaic_core::error::{MosaicError, Result};
 
 use crate::policy::{RetryPolicy, should_retry_http_status};
-use crate::schema::mask_endpoint;
+use crate::schema::{DEFAULT_TELEGRAM_TOKEN_ENV, mask_endpoint};
 use crate::types::ChannelCapability;
 
 #[derive(Debug, Clone)]
@@ -25,6 +25,7 @@ pub(crate) struct ChannelDispatchRequest<'a> {
     pub channel_id: &'a str,
     pub channel_name: &'a str,
     pub endpoint: Option<&'a str>,
+    pub target: Option<&'a str>,
     pub text: &'a str,
     pub bearer_token: Option<&'a str>,
 }
@@ -37,9 +38,13 @@ trait ChannelProvider: Send + Sync {
         &[]
     }
 
+    fn default_token_env(&self) -> Option<&'static str> {
+        None
+    }
+
     fn capability(&self) -> ChannelCapability;
 
-    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()>;
+    fn validate_channel(&self, endpoint: Option<&str>, target: Option<&str>) -> Result<()>;
 
     async fn send(
         &self,
@@ -60,9 +65,9 @@ impl ChannelProviderRegistry {
         registry.register(Arc::new(SlackWebhookProvider));
         registry.register(Arc::new(DiscordWebhookProvider));
         registry.register(Arc::new(GenericWebhookProvider));
+        registry.register(Arc::new(TelegramBotProvider));
         registry.register(Arc::new(LocalProvider { kind: "mock" }));
-        registry.register(Arc::new(LocalProvider { kind: "local" }));
-        registry.register(Arc::new(LocalProvider { kind: "stdout" }));
+        registry.register(Arc::new(TerminalProvider));
         registry
     }
 
@@ -80,9 +85,14 @@ impl ChannelProviderRegistry {
         self.aliases.get(&normalize_kind_token(kind)).cloned()
     }
 
-    fn validate_endpoint_for_kind(&self, kind: &str, endpoint: Option<&str>) -> Result<()> {
+    fn validate_channel_for_kind(
+        &self,
+        kind: &str,
+        endpoint: Option<&str>,
+        target: Option<&str>,
+    ) -> Result<()> {
         let provider = self.provider_for_kind(kind)?;
-        provider.validate_endpoint(endpoint)
+        provider.validate_channel(endpoint, target)
     }
 
     async fn dispatch(
@@ -103,6 +113,11 @@ impl ChannelProviderRegistry {
 
     fn supported_kinds_hint(&self) -> String {
         self.supported_kinds().join("|")
+    }
+
+    fn default_token_env_for_kind(&self, kind: &str) -> Result<Option<&'static str>> {
+        let provider = self.provider_for_kind(kind)?;
+        Ok(provider.default_token_env())
     }
 
     fn capabilities_for_kind(&self, kind: Option<&str>) -> Result<Vec<ChannelCapability>> {
@@ -159,7 +174,12 @@ impl ChannelProvider for SlackWebhookProvider {
         }
     }
 
-    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
+    fn validate_channel(&self, endpoint: Option<&str>, target: Option<&str>) -> Result<()> {
+        if target.is_some() {
+            return Err(MosaicError::Validation(
+                "slack_webhook channel does not support --chat-id".to_string(),
+            ));
+        }
         let endpoint = endpoint.ok_or_else(|| {
             MosaicError::Validation("slack_webhook channel requires --endpoint".to_string())
         })?;
@@ -217,7 +237,12 @@ impl ChannelProvider for GenericWebhookProvider {
         }
     }
 
-    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
+    fn validate_channel(&self, endpoint: Option<&str>, target: Option<&str>) -> Result<()> {
+        if target.is_some() {
+            return Err(MosaicError::Validation(
+                "webhook channel does not support --chat-id".to_string(),
+            ));
+        }
         let endpoint = endpoint.ok_or_else(|| {
             MosaicError::Validation("webhook channel requires --endpoint".to_string())
         })?;
@@ -282,7 +307,12 @@ impl ChannelProvider for DiscordWebhookProvider {
         }
     }
 
-    fn validate_endpoint(&self, endpoint: Option<&str>) -> Result<()> {
+    fn validate_channel(&self, endpoint: Option<&str>, target: Option<&str>) -> Result<()> {
+        if target.is_some() {
+            return Err(MosaicError::Validation(
+                "discord_webhook channel does not support --chat-id".to_string(),
+            ));
+        }
         let endpoint = endpoint.ok_or_else(|| {
             MosaicError::Validation("discord_webhook channel requires --endpoint".to_string())
         })?;
@@ -328,6 +358,120 @@ impl ChannelProvider for DiscordWebhookProvider {
     }
 }
 
+struct TelegramBotProvider;
+
+#[async_trait]
+impl ChannelProvider for TelegramBotProvider {
+    fn canonical_kind(&self) -> &'static str {
+        "telegram_bot"
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["telegram", "telegram-bot"]
+    }
+
+    fn default_token_env(&self) -> Option<&'static str> {
+        Some(DEFAULT_TELEGRAM_TOKEN_ENV)
+    }
+
+    fn capability(&self) -> ChannelCapability {
+        ChannelCapability {
+            kind: self.canonical_kind().to_string(),
+            aliases: self.aliases().iter().map(ToString::to_string).collect(),
+            supports_endpoint: true,
+            supports_token_env: true,
+            supports_test_probe: true,
+            supports_bearer_token: true,
+        }
+    }
+
+    fn validate_channel(&self, endpoint: Option<&str>, target: Option<&str>) -> Result<()> {
+        let target = target.ok_or_else(|| {
+            MosaicError::Validation("telegram_bot channel requires --chat-id".to_string())
+        })?;
+        if target.trim().is_empty() {
+            return Err(MosaicError::Validation(
+                "telegram_bot channel requires non-empty --chat-id".to_string(),
+            ));
+        }
+        let Some(endpoint) = endpoint else {
+            return Ok(());
+        };
+        if endpoint.starts_with("mock-http://") {
+            return Ok(());
+        }
+        let url = reqwest::Url::parse(endpoint).map_err(|err| {
+            MosaicError::Validation(format!("invalid telegram endpoint URL: {err}"))
+        })?;
+        match url.scheme() {
+            "http" | "https" => Ok(()),
+            scheme => Err(MosaicError::Validation(format!(
+                "unsupported telegram endpoint scheme '{scheme}', expected http/https"
+            ))),
+        }
+    }
+
+    async fn send(
+        &self,
+        request: ChannelDispatchRequest<'_>,
+        policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult> {
+        let chat_id = request.target.ok_or_else(|| {
+            MosaicError::Validation("telegram_bot channel requires configured chat id".to_string())
+        })?;
+        let token = request.bearer_token.ok_or_else(|| {
+            MosaicError::Auth(format!(
+                "telegram_bot channel requires bot token via --token-env or {}",
+                DEFAULT_TELEGRAM_TOKEN_ENV
+            ))
+        })?;
+        let endpoint = request.endpoint.unwrap_or("https://api.telegram.org");
+        send_telegram_with_retry(endpoint, chat_id, request.text, token, policy).await
+    }
+}
+
+struct TerminalProvider;
+
+#[async_trait]
+impl ChannelProvider for TerminalProvider {
+    fn canonical_kind(&self) -> &'static str {
+        "terminal"
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        &["local", "stdout"]
+    }
+
+    fn capability(&self) -> ChannelCapability {
+        ChannelCapability {
+            kind: self.canonical_kind().to_string(),
+            aliases: self.aliases().iter().map(ToString::to_string).collect(),
+            supports_endpoint: false,
+            supports_token_env: false,
+            supports_test_probe: true,
+            supports_bearer_token: false,
+        }
+    }
+
+    fn validate_channel(&self, endpoint: Option<&str>, target: Option<&str>) -> Result<()> {
+        let _ = endpoint;
+        if target.is_some() {
+            return Err(MosaicError::Validation(
+                "terminal channel does not support --chat-id".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn send(
+        &self,
+        _request: ChannelDispatchRequest<'_>,
+        _policy: &RetryPolicy,
+    ) -> Result<DeliveryAttemptResult> {
+        Ok(local_delivery_success())
+    }
+}
+
 struct LocalProvider {
     kind: &'static str,
 }
@@ -349,7 +493,7 @@ impl ChannelProvider for LocalProvider {
         }
     }
 
-    fn validate_endpoint(&self, _endpoint: Option<&str>) -> Result<()> {
+    fn validate_channel(&self, _endpoint: Option<&str>, _target: Option<&str>) -> Result<()> {
         Ok(())
     }
 
@@ -379,12 +523,22 @@ pub(crate) fn supported_kinds_hint() -> String {
     default_registry().supported_kinds_hint()
 }
 
-pub(crate) fn validate_endpoint_for_kind(kind: &str, endpoint: Option<&str>) -> Result<()> {
-    default_registry().validate_endpoint_for_kind(kind, endpoint)
+pub(crate) fn validate_channel_for_kind(
+    kind: &str,
+    endpoint: Option<&str>,
+    target: Option<&str>,
+) -> Result<()> {
+    default_registry().validate_channel_for_kind(kind, endpoint, target)
 }
 
 pub(crate) fn capabilities_for_kind(kind: Option<&str>) -> Result<Vec<ChannelCapability>> {
     default_registry().capabilities_for_kind(kind)
+}
+
+pub(crate) fn default_token_env_for_kind(kind: &str) -> Option<&'static str> {
+    default_registry()
+        .default_token_env_for_kind(kind)
+        .unwrap_or_default()
 }
 
 pub(crate) async fn dispatch_send(
@@ -478,6 +632,133 @@ async fn send_with_retry(
     })
 }
 
+async fn send_telegram_with_retry(
+    endpoint: &str,
+    chat_id: &str,
+    text: &str,
+    token: &str,
+    policy: &RetryPolicy,
+) -> Result<DeliveryAttemptResult> {
+    if endpoint.starts_with("mock-http://") {
+        return simulate_mock_http(endpoint, policy).await;
+    }
+
+    let base_url = reqwest::Url::parse(endpoint)
+        .map_err(|err| MosaicError::Validation(format!("invalid telegram endpoint URL: {err}")))?;
+    let scheme = base_url.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(MosaicError::Validation(format!(
+            "unsupported telegram endpoint scheme '{scheme}', expected http/https"
+        )));
+    }
+    let base_endpoint = endpoint.trim_end_matches('/');
+    let url = format!("{base_endpoint}/bot{token}/sendMessage");
+    let payload = json!({
+        "chat_id": chat_id,
+        "text": text,
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(policy.timeout)
+        .build()
+        .map_err(|err| MosaicError::Network(format!("failed to build HTTP client: {err}")))?;
+
+    let mut attempts = 0usize;
+    let mut last_error: Option<String> = None;
+    let mut last_status: Option<u16> = None;
+
+    for attempt_idx in 0..policy.max_attempts() {
+        attempts += 1;
+        if let Some(delay) = policy.backoff_before_attempt(attempt_idx) {
+            tokio::time::sleep(delay).await;
+        }
+
+        match client.post(&url).json(&payload).send().await {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                last_status = Some(status);
+                if response.status().is_success() {
+                    let body = response.json::<Value>().await.map_err(|err| {
+                        MosaicError::Network(format!("failed to parse telegram response: {err}"))
+                    })?;
+                    return match parse_telegram_success_response(&body) {
+                        Ok(()) => Ok(DeliveryAttemptResult {
+                            ok: true,
+                            attempts,
+                            http_status: Some(status),
+                            error: None,
+                            endpoint_masked: Some(mask_endpoint(endpoint)),
+                        }),
+                        Err(message) => Ok(DeliveryAttemptResult {
+                            ok: false,
+                            attempts,
+                            http_status: Some(status),
+                            error: Some(message),
+                            endpoint_masked: Some(mask_endpoint(endpoint)),
+                        }),
+                    };
+                }
+
+                if response.status().is_client_error() {
+                    return Ok(DeliveryAttemptResult {
+                        ok: false,
+                        attempts,
+                        http_status: Some(status),
+                        error: Some(format!(
+                            "telegram API returned client error status {status}"
+                        )),
+                        endpoint_masked: Some(mask_endpoint(endpoint)),
+                    });
+                }
+
+                last_error = Some(format!(
+                    "telegram API returned server error status {status}"
+                ));
+                if !should_retry_http_status(status) || attempt_idx + 1 >= policy.max_attempts() {
+                    break;
+                }
+            }
+            Err(err) => {
+                last_error = Some(if err.is_timeout() {
+                    "telegram request timed out".to_string()
+                } else {
+                    format!("telegram request failed: {err}")
+                });
+                if attempt_idx + 1 >= policy.max_attempts() {
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(DeliveryAttemptResult {
+        ok: false,
+        attempts,
+        http_status: last_status,
+        error: Some(
+            last_error.unwrap_or_else(|| "telegram request failed after retries".to_string()),
+        ),
+        endpoint_masked: Some(mask_endpoint(endpoint)),
+    })
+}
+
+fn parse_telegram_success_response(body: &Value) -> std::result::Result<(), String> {
+    let object = body
+        .as_object()
+        .ok_or_else(|| "telegram API response is not a JSON object".to_string())?;
+    let ok = object
+        .get("ok")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "telegram API response missing boolean 'ok'".to_string())?;
+    if ok {
+        Ok(())
+    } else if let Some(description) = object.get("description").and_then(Value::as_str) {
+        Err(format!("telegram API error: {description}"))
+    } else {
+        Err("telegram API returned ok=false".to_string())
+    }
+}
+
 async fn simulate_mock_http(endpoint: &str, policy: &RetryPolicy) -> Result<DeliveryAttemptResult> {
     let sequence = endpoint.trim_start_matches("mock-http://");
     if sequence.trim().is_empty() {
@@ -564,6 +845,8 @@ fn local_delivery_success() -> DeliveryAttemptResult {
 mod tests {
     use std::time::Duration;
 
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -578,9 +861,10 @@ mod tests {
             resolve_kind("discord-webhook"),
             Some("discord_webhook".to_string())
         );
-        assert_eq!(resolve_kind("local"), Some("local".to_string()));
-        assert_eq!(resolve_kind("stdout"), Some("stdout".to_string()));
-        assert!(resolve_kind("telegram").is_none());
+        assert_eq!(resolve_kind("local"), Some("terminal".to_string()));
+        assert_eq!(resolve_kind("stdout"), Some("terminal".to_string()));
+        assert_eq!(resolve_kind("terminal"), Some("terminal".to_string()));
+        assert_eq!(resolve_kind("telegram"), Some("telegram_bot".to_string()));
     }
 
     #[tokio::test]
@@ -595,6 +879,7 @@ mod tests {
                 channel_id: "ch_1",
                 channel_name: "demo",
                 endpoint: Some("mock-http://500,500,200"),
+                target: None,
                 text: "hello",
                 bearer_token: None,
             },
@@ -605,5 +890,12 @@ mod tests {
         assert!(result.ok);
         assert_eq!(result.attempts, 3);
         assert_eq!(result.http_status, Some(200));
+    }
+
+    #[test]
+    fn parse_telegram_response_checks_ok_flag() {
+        assert!(parse_telegram_success_response(&json!({"ok": true})).is_ok());
+        assert!(parse_telegram_success_response(&json!({"ok": false})).is_err());
+        assert!(parse_telegram_success_response(&json!({"description": "missing"})).is_err());
     }
 }

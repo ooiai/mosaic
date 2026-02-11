@@ -95,6 +95,15 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels add \
   --kind slack_webhook \
   --endpoint https://hooks.slack.com/services/T000/B000/XXXXX
 
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels add \
+  --name local-terminal \
+  --kind terminal
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels add \
+  --name tg-alerts \
+  --kind telegram_bot \
+  --chat-id=-1001234567890
+
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels test <channel-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels send <channel-id> --text "hello"
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels list
@@ -106,12 +115,16 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels resolve --chann
 
 Detailed guide: `docs/channels-slack.md`
 Discord webhook guide: `docs/channels-discord.md`
+Terminal channel guide: `docs/channels-terminal.md`
+Telegram channel guide: `docs/channels-telegram.md`
 Gateway ops guide: `docs/gateway-ops.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
 Security audit guide: `docs/security-audit.md`
 Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
+
+Telegram default token env: `MOSAIC_TELEGRAM_BOT_TOKEN`.
 
 ### Ops Runtime
 

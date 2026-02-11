@@ -9,6 +9,7 @@ use crate::types::{ChannelAuthConfig, ChannelEntry, ChannelListItem, ChannelsFil
 
 pub const CHANNELS_SCHEMA_VERSION: u32 = 2;
 pub const DEFAULT_CHANNEL_TOKEN_ENV: &str = "CHANNEL_TOKEN";
+pub const DEFAULT_TELEGRAM_TOKEN_ENV: &str = "MOSAIC_TELEGRAM_BOT_TOKEN";
 
 #[derive(Debug, Clone, Deserialize)]
 struct LegacyChannelEntry {
@@ -34,6 +35,7 @@ pub(crate) fn parse_channels_value(value: Value) -> Result<(ChannelsFile, bool)>
                 name: entry.name,
                 kind: normalize_kind(&entry.kind).unwrap_or_else(|_| "mock".to_string()),
                 endpoint: entry.endpoint,
+                target: None,
                 auth: ChannelAuthConfig {
                     token_env: entry.last_login_token_env,
                 },
@@ -80,6 +82,7 @@ pub(crate) fn parse_channels_value(value: Value) -> Result<(ChannelsFile, bool)>
             name: entry.name,
             kind: normalize_kind(&entry.kind).unwrap_or_else(|_| "mock".to_string()),
             endpoint: entry.endpoint,
+            target: None,
             auth: ChannelAuthConfig {
                 token_env: entry.last_login_token_env,
             },
@@ -109,7 +112,18 @@ pub(crate) fn normalize_channels(channels: &mut [ChannelEntry]) -> Result<()> {
         {
             channel.auth.token_env = None;
         }
-        validate_endpoint_for_kind(&channel.kind, channel.endpoint.as_deref())?;
+        if channel
+            .target
+            .as_ref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            channel.target = None;
+        }
+        validate_channel_for_kind(
+            &channel.kind,
+            channel.endpoint.as_deref(),
+            channel.target.as_deref(),
+        )?;
     }
     Ok(())
 }
@@ -124,12 +138,54 @@ pub(crate) fn normalize_kind(kind: &str) -> Result<String> {
     })
 }
 
-pub(crate) fn validate_endpoint_for_kind(kind: &str, endpoint: Option<&str>) -> Result<()> {
-    providers::validate_endpoint_for_kind(kind, endpoint)
+pub(crate) fn validate_channel_for_kind(
+    kind: &str,
+    endpoint: Option<&str>,
+    target: Option<&str>,
+) -> Result<()> {
+    providers::validate_channel_for_kind(kind, endpoint, target)
 }
 
 pub(crate) fn mask_optional_endpoint(endpoint: Option<&str>) -> Option<String> {
     endpoint.map(mask_endpoint)
+}
+
+pub(crate) fn mask_optional_target(
+    kind: &str,
+    target: Option<&str>,
+    endpoint: Option<&str>,
+) -> Option<String> {
+    if kind == "terminal" {
+        return Some("terminal://local".to_string());
+    }
+    if let Some(target) = target {
+        return Some(mask_target(kind, target));
+    }
+    mask_optional_endpoint(endpoint)
+}
+
+pub(crate) fn mask_target(kind: &str, target: &str) -> String {
+    let target = target.trim();
+    if target.is_empty() {
+        return "***".to_string();
+    }
+    if kind == "telegram_bot" {
+        return format!("telegram://{}", mask_tail(target, 4));
+    }
+    mask_tail(target, 4)
+}
+
+fn mask_tail(value: &str, keep_tail_chars: usize) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= keep_tail_chars {
+        "***".to_string()
+    } else {
+        let tail = chars
+            .into_iter()
+            .skip(value.chars().count() - keep_tail_chars)
+            .collect::<String>();
+        format!("***{tail}")
+    }
 }
 
 pub(crate) fn mask_endpoint(endpoint: &str) -> String {
@@ -160,6 +216,11 @@ pub fn format_channel_for_output(channel: &ChannelEntry) -> ChannelListItem {
         name: channel.name.clone(),
         kind: channel.kind.clone(),
         endpoint_masked: mask_optional_endpoint(channel.endpoint.as_deref()),
+        target_masked: mask_optional_target(
+            &channel.kind,
+            channel.target.as_deref(),
+            channel.endpoint.as_deref(),
+        ),
         created_at: channel.created_at,
         last_login_at: channel.last_login_at,
         last_send_at: channel.last_send_at,
@@ -194,39 +255,53 @@ mod tests {
             file.channels[0].auth.token_env.as_deref(),
             Some("LEGACY_TOKEN")
         );
+        assert!(file.channels[0].target.is_none());
         assert!(file.channels[0].last_send_at.is_none());
     }
 
     #[test]
     fn endpoint_validation_for_slack_webhook() {
         assert!(
-            validate_endpoint_for_kind(
+            validate_channel_for_kind(
                 "slack_webhook",
-                Some("https://hooks.slack.com/services/T/B/X")
+                Some("https://hooks.slack.com/services/T/B/X"),
+                None,
             )
             .is_ok()
         );
-        assert!(validate_endpoint_for_kind("slack_webhook", Some("https://example.com")).is_err());
+        assert!(
+            validate_channel_for_kind("slack_webhook", Some("https://example.com"), None).is_err()
+        );
     }
 
     #[test]
     fn endpoint_validation_for_discord_webhook() {
         assert!(
-            validate_endpoint_for_kind(
+            validate_channel_for_kind(
                 "discord_webhook",
-                Some("https://discord.com/api/webhooks/1/abc")
+                Some("https://discord.com/api/webhooks/1/abc"),
+                None,
             )
             .is_ok()
         );
         assert!(
-            validate_endpoint_for_kind(
+            validate_channel_for_kind(
                 "discord",
-                Some("https://canary.discord.com/api/webhooks/1/abc")
+                Some("https://canary.discord.com/api/webhooks/1/abc"),
+                None,
             )
             .is_ok()
         );
         assert!(
-            validate_endpoint_for_kind("discord_webhook", Some("https://example.com/abc")).is_err()
+            validate_channel_for_kind("discord_webhook", Some("https://example.com/abc"), None)
+                .is_err()
         );
+    }
+
+    #[test]
+    fn mask_target_for_telegram() {
+        let masked = mask_optional_target("telegram_bot", Some("-10012345678"), None)
+            .expect("masked target");
+        assert!(masked.starts_with("telegram://***"));
     }
 }
