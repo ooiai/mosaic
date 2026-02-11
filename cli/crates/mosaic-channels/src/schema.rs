@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 use mosaic_core::error::{MosaicError, Result};
 
 use crate::providers;
-use crate::types::{ChannelAuthConfig, ChannelEntry, ChannelListItem, ChannelsFile};
+use crate::types::{
+    ChannelAuthConfig, ChannelEntry, ChannelListItem, ChannelTemplateDefaults, ChannelsFile,
+};
 
 pub const CHANNELS_SCHEMA_VERSION: u32 = 2;
 pub const DEFAULT_CHANNEL_TOKEN_ENV: &str = "CHANNEL_TOKEN";
@@ -39,6 +41,7 @@ pub(crate) fn parse_channels_value(value: Value) -> Result<(ChannelsFile, bool)>
                 auth: ChannelAuthConfig {
                     token_env: entry.last_login_token_env,
                 },
+                template_defaults: None,
                 created_at: entry.created_at,
                 last_login_at: entry.last_login_at,
                 last_send_at: None,
@@ -86,6 +89,7 @@ pub(crate) fn parse_channels_value(value: Value) -> Result<(ChannelsFile, bool)>
             auth: ChannelAuthConfig {
                 token_env: entry.last_login_token_env,
             },
+            template_defaults: None,
             created_at: entry.created_at,
             last_login_at: entry.last_login_at,
             last_send_at: None,
@@ -124,6 +128,7 @@ pub(crate) fn normalize_channels(channels: &mut [ChannelEntry]) -> Result<()> {
             channel.endpoint.as_deref(),
             channel.target.as_deref(),
         )?;
+        normalize_template_defaults(&channel.kind, &mut channel.template_defaults)?;
     }
     Ok(())
 }
@@ -221,11 +226,79 @@ pub fn format_channel_for_output(channel: &ChannelEntry) -> ChannelListItem {
             channel.target.as_deref(),
             channel.endpoint.as_deref(),
         ),
+        has_template_defaults: channel.template_defaults.is_some(),
         created_at: channel.created_at,
         last_login_at: channel.last_login_at,
         last_send_at: channel.last_send_at,
         last_error: channel.last_error.clone(),
     }
+}
+
+fn normalize_template_defaults(
+    channel_kind: &str,
+    defaults: &mut Option<ChannelTemplateDefaults>,
+) -> Result<()> {
+    let Some(mut template) = defaults.clone() else {
+        return Ok(());
+    };
+    template.parse_mode = template
+        .parse_mode
+        .and_then(|value| normalize_optional_string(Some(value)));
+    template.title = normalize_optional_string(template.title);
+    template.blocks = template
+        .blocks
+        .into_iter()
+        .filter_map(|value| normalize_optional_string(Some(value)))
+        .collect::<Vec<_>>();
+    if template.metadata.as_ref().is_some_and(|value| {
+        value.is_null() || value.as_object().is_some_and(|object| object.is_empty())
+    }) {
+        template.metadata = None;
+    }
+    if let Some(parse_mode) = template.parse_mode.clone() {
+        if channel_kind != "telegram_bot" {
+            return Err(MosaicError::Validation(
+                "channel template parse_mode is only supported for telegram_bot".to_string(),
+            ));
+        }
+        template.parse_mode = Some(normalize_parse_mode(&parse_mode)?);
+    }
+    if template.parse_mode.is_none()
+        && template.title.is_none()
+        && template.blocks.is_empty()
+        && template.metadata.is_none()
+    {
+        *defaults = None;
+    } else {
+        *defaults = Some(template);
+    }
+    Ok(())
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn normalize_parse_mode(parse_mode: &str) -> Result<String> {
+    let normalized = match parse_mode.to_lowercase().as_str() {
+        "markdown" => "Markdown",
+        "markdownv2" | "markdown_v2" | "mdv2" => "MarkdownV2",
+        "html" => "HTML",
+        _ => {
+            return Err(MosaicError::Validation(format!(
+                "unsupported parse mode '{}', expected markdown|markdown_v2|html",
+                parse_mode
+            )));
+        }
+    };
+    Ok(normalized.to_string())
 }
 
 #[cfg(test)]
