@@ -17,8 +17,8 @@ use mosaic_agents::{
     AddAgentInput, AgentStore, UpdateAgentInput, agent_routes_path, agents_file_path,
 };
 use mosaic_channels::{
-    AddChannelInput, ChannelRepository, DEFAULT_CHANNEL_TOKEN_ENV, channels_events_dir,
-    channels_file_path, format_channel_for_output,
+    AddChannelInput, ChannelRepository, channels_events_dir, channels_file_path,
+    format_channel_for_output,
 };
 use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
 use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
@@ -229,6 +229,8 @@ enum ChannelsCommand {
         kind: String,
         #[arg(long)]
         endpoint: Option<String>,
+        #[arg(long)]
+        chat_id: Option<String>,
         #[arg(long)]
         token_env: Option<String>,
     },
@@ -1453,11 +1455,12 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             } else {
                 for channel in channels {
                     println!(
-                        "{} name={} kind={} endpoint={} last_login={} last_send={} last_error={}",
+                        "{} name={} kind={} endpoint={} target={} last_login={} last_send={} last_error={}",
                         channel.id,
                         channel.name,
                         channel.kind,
                         channel.endpoint_masked.unwrap_or_else(|| "-".to_string()),
+                        channel.target_masked.unwrap_or_else(|| "-".to_string()),
                         channel
                             .last_login_at
                             .map(|v| v.to_rfc3339())
@@ -1497,12 +1500,14 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             name,
             kind,
             endpoint,
+            chat_id,
             token_env,
         } => {
             let entry = repository.add(AddChannelInput {
                 name,
                 kind,
                 endpoint,
+                target: chat_id,
                 token_env,
             })?;
             let rendered = format_channel_for_output(&entry);
@@ -1520,8 +1525,7 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             channel_id,
             token_env,
         } => {
-            let token_env = token_env.unwrap_or_else(|| DEFAULT_CHANNEL_TOKEN_ENV.to_string());
-            let login = repository.login(&channel_id, &token_env)?;
+            let login = repository.login(&channel_id, token_env.as_deref())?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -1560,12 +1564,16 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                     "attempts": result.attempts,
                     "http_status": result.http_status,
                     "endpoint_masked": result.endpoint_masked,
+                    "target_masked": result.target_masked,
                     "event_path": result.event_path,
                 }));
             } else {
                 println!("Message sent via {}", result.delivered_via);
                 if let Some(endpoint) = result.endpoint_masked {
                     println!("endpoint: {endpoint}");
+                }
+                if let Some(target) = result.target_masked {
+                    println!("target: {target}");
                 }
             }
         }
@@ -1640,11 +1648,12 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
             } else {
                 for entry in entries {
                     println!(
-                        "{} name={} kind={} endpoint={} last_send={} last_error={}",
+                        "{} name={} kind={} endpoint={} target={} last_send={} last_error={}",
                         entry.id,
                         entry.name,
                         entry.kind,
                         entry.endpoint_masked.unwrap_or_else(|| "-".to_string()),
+                        entry.target_masked.unwrap_or_else(|| "-".to_string()),
                         entry
                             .last_send_at
                             .map(|value| value.to_rfc3339())
@@ -1693,6 +1702,7 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                     "attempts": result.attempts,
                     "http_status": result.http_status,
                     "endpoint_masked": result.endpoint_masked,
+                    "target_masked": result.target_masked,
                     "event_path": result.event_path,
                 }));
             } else {
@@ -1700,6 +1710,9 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 println!("attempts: {}", result.attempts);
                 if let Some(endpoint) = result.endpoint_masked {
                     println!("endpoint: {endpoint}");
+                }
+                if let Some(target) = result.target_masked {
+                    println!("target: {target}");
                 }
             }
         }

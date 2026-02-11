@@ -28,6 +28,7 @@ mosaic --project-state --json channels send <channel-id> --text "deploy complete
 ```
 
 Discord payload uses `content` internally. CLI response shape is the same as other channels.
+JSON output includes both `endpoint_masked` and `target_masked` (same value for webhook-based channels).
 
 ## 4) Endpoint rules
 

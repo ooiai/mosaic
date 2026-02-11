@@ -12,8 +12,9 @@ use mosaic_core::error::{MosaicError, Result};
 use crate::policy::RetryPolicy;
 use crate::providers;
 use crate::schema::{
-    CHANNELS_SCHEMA_VERSION, mask_optional_endpoint, normalize_channels, normalize_kind,
-    parse_channels_value, validate_endpoint_for_kind,
+    CHANNELS_SCHEMA_VERSION, DEFAULT_CHANNEL_TOKEN_ENV, mask_optional_endpoint,
+    mask_optional_target, normalize_channels, normalize_kind, parse_channels_value,
+    validate_channel_for_kind,
 };
 use crate::types::{
     AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
@@ -55,15 +56,23 @@ impl ChannelRepository {
         let items = file
             .channels
             .into_iter()
-            .map(|channel| ChannelListItem {
-                id: channel.id,
-                name: channel.name,
-                kind: channel.kind,
-                endpoint_masked: mask_optional_endpoint(channel.endpoint.as_deref()),
-                created_at: channel.created_at,
-                last_login_at: channel.last_login_at,
-                last_send_at: channel.last_send_at,
-                last_error: channel.last_error,
+            .map(|channel| {
+                let target_masked = mask_optional_target(
+                    &channel.kind,
+                    channel.target.as_deref(),
+                    channel.endpoint.as_deref(),
+                );
+                ChannelListItem {
+                    id: channel.id,
+                    name: channel.name,
+                    kind: channel.kind,
+                    endpoint_masked: mask_optional_endpoint(channel.endpoint.as_deref()),
+                    target_masked,
+                    created_at: channel.created_at,
+                    last_login_at: channel.last_login_at,
+                    last_send_at: channel.last_send_at,
+                    last_error: channel.last_error,
+                }
             })
             .collect::<Vec<_>>();
         Ok(items)
@@ -85,15 +94,24 @@ impl ChannelRepository {
     }
 
     pub fn add(&self, input: AddChannelInput) -> Result<ChannelEntry> {
+        let AddChannelInput {
+            name,
+            kind: raw_kind,
+            endpoint,
+            target,
+            token_env,
+        } = input;
         let mut file = self.load_channels_file()?;
-        let name = input.name.trim();
+        let name = name.trim();
         if name.is_empty() {
             return Err(MosaicError::Validation(
                 "channel name cannot be empty".to_string(),
             ));
         }
-        let kind = normalize_kind(&input.kind)?;
-        validate_endpoint_for_kind(&kind, input.endpoint.as_deref())?;
+        let kind = normalize_kind(&raw_kind)?;
+        let endpoint = normalize_optional(endpoint);
+        let target = normalize_optional(target);
+        validate_channel_for_kind(&kind, endpoint.as_deref(), target.as_deref())?;
         if file
             .channels
             .iter()
@@ -106,14 +124,15 @@ impl ChannelRepository {
         }
 
         let now = Utc::now();
+        let token_env = normalize_optional(token_env)
+            .or_else(|| providers::default_token_env_for_kind(&kind).map(str::to_string));
         let channel = ChannelEntry {
             id: format!("ch_{}", uuid::Uuid::new_v4()),
             name: name.to_string(),
             kind,
-            endpoint: input.endpoint,
-            auth: ChannelAuthConfig {
-                token_env: input.token_env,
-            },
+            endpoint,
+            target,
+            auth: ChannelAuthConfig { token_env },
             created_at: now,
             last_login_at: None,
             last_send_at: None,
@@ -124,28 +143,29 @@ impl ChannelRepository {
         Ok(channel)
     }
 
-    pub fn login(&self, channel_id: &str, token_env: &str) -> Result<ChannelLoginResult> {
-        if token_env.trim().is_empty() {
-            return Err(MosaicError::Validation(
-                "token env cannot be empty".to_string(),
-            ));
-        }
-
+    pub fn login(&self, channel_id: &str, token_env: Option<&str>) -> Result<ChannelLoginResult> {
         let mut file = self.load_channels_file()?;
         let channel = file
             .channels
             .iter_mut()
             .find(|entry| entry.id == channel_id)
             .ok_or_else(|| MosaicError::Config(format!("channel '{channel_id}' not found")))?;
+        let token_env = token_env
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .or_else(|| channel.auth.token_env.clone())
+            .or_else(|| providers::default_token_env_for_kind(&channel.kind).map(str::to_string))
+            .unwrap_or_else(|| DEFAULT_CHANNEL_TOKEN_ENV.to_string());
 
         channel.last_login_at = Some(Utc::now());
-        channel.auth.token_env = Some(token_env.to_string());
-        let token_present = std::env::var(token_env).is_ok();
+        channel.auth.token_env = Some(token_env.clone());
+        let token_present = std::env::var(&token_env).is_ok();
         let channel_cloned = channel.clone();
         self.save_channels_file(&file)?;
 
         Ok(ChannelLoginResult {
-            token_env: token_env.to_string(),
+            token_env,
             token_present,
             channel: channel_cloned,
         })
@@ -204,7 +224,9 @@ impl ChannelRepository {
             .ok_or_else(|| MosaicError::Config(format!("channel '{channel_id}' not found")))?;
         let channel = file.channels[idx].clone();
 
-        let token_env = token_env_override.or_else(|| channel.auth.token_env.clone());
+        let token_env = token_env_override
+            .or_else(|| channel.auth.token_env.clone())
+            .or_else(|| providers::default_token_env_for_kind(&channel.kind).map(str::to_string));
         let token = resolve_token_value(token_env.as_deref())?;
         let send_kind = if probe { "test_probe" } else { "message" };
         let text_preview = truncate_text(text, TEXT_PREVIEW_LIMIT);
@@ -215,6 +237,7 @@ impl ChannelRepository {
                 channel_id: &channel.id,
                 channel_name: &channel.name,
                 endpoint: channel.endpoint.as_deref(),
+                target: channel.target.as_deref(),
                 text,
                 bearer_token: token.as_deref(),
             },
@@ -249,6 +272,11 @@ impl ChannelRepository {
         self.save_channels_file(&file)?;
 
         if delivery.ok {
+            let target_masked = mask_optional_target(
+                &channel.kind,
+                channel.target.as_deref(),
+                channel.endpoint.as_deref(),
+            );
             return Ok(ChannelSendResult {
                 channel_id: channel.id,
                 delivered_via: channel.kind,
@@ -256,6 +284,7 @@ impl ChannelRepository {
                 attempts: delivery.attempts,
                 http_status: delivery.http_status,
                 endpoint_masked: delivery.endpoint_masked,
+                target_masked,
                 event_path: event_path.display().to_string(),
                 probe,
             });
@@ -381,24 +410,37 @@ impl ChannelRepository {
                     return true;
                 }
                 let haystack = format!(
-                    "{} {} {}",
+                    "{} {} {} {}",
                     entry.id,
                     entry.name.to_lowercase(),
                     entry
                         .endpoint
                         .as_deref()
                         .map(str::to_lowercase)
+                        .unwrap_or_default(),
+                    entry
+                        .target
+                        .as_deref()
+                        .map(str::to_lowercase)
                         .unwrap_or_default()
                 );
                 terms.iter().all(|term| haystack.contains(term))
             })
-            .map(|entry| ChannelDirectoryEntry {
-                id: entry.id,
-                name: entry.name,
-                kind: entry.kind,
-                endpoint_masked: mask_optional_endpoint(entry.endpoint.as_deref()),
-                last_send_at: entry.last_send_at,
-                last_error: entry.last_error,
+            .map(|entry| {
+                let target_masked = mask_optional_target(
+                    &entry.kind,
+                    entry.target.as_deref(),
+                    entry.endpoint.as_deref(),
+                );
+                ChannelDirectoryEntry {
+                    id: entry.id,
+                    name: entry.name,
+                    kind: entry.kind,
+                    endpoint_masked: mask_optional_endpoint(entry.endpoint.as_deref()),
+                    target_masked,
+                    last_send_at: entry.last_send_at,
+                    last_error: entry.last_error,
+                }
             })
             .collect::<Vec<_>>();
         items.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
@@ -420,31 +462,43 @@ impl ChannelRepository {
         }];
 
         for channel in file.channels {
-            let endpoint_valid =
-                validate_endpoint_for_kind(&channel.kind, channel.endpoint.as_deref()).is_ok();
+            let endpoint_valid = validate_channel_for_kind(
+                &channel.kind,
+                channel.endpoint.as_deref(),
+                channel.target.as_deref(),
+            )
+            .is_ok();
             checks.push(DoctorCheck {
-                name: format!("channel_{}_endpoint", channel.id),
+                name: format!("channel_{}_target", channel.id),
                 ok: endpoint_valid,
                 detail: if endpoint_valid {
                     format!(
-                        "{} endpoint looks valid ({})",
+                        "{} target looks valid ({})",
                         channel.kind,
-                        mask_optional_endpoint(channel.endpoint.as_deref())
-                            .unwrap_or_else(|| "-".to_string())
+                        mask_optional_target(
+                            &channel.kind,
+                            channel.target.as_deref(),
+                            channel.endpoint.as_deref(),
+                        )
+                        .unwrap_or_else(|| "-".to_string())
                     )
                 } else {
-                    format!("{} endpoint invalid", channel.kind)
+                    format!("{} target invalid", channel.kind)
                 },
             });
 
-            if let Some(token_env) = &channel.auth.token_env {
+            let token_env = channel.auth.token_env.clone().or_else(|| {
+                providers::default_token_env_for_kind(&channel.kind).map(str::to_string)
+            });
+            if let Some(token_env) = token_env {
+                let token_present = std::env::var(&token_env).is_ok();
                 checks.push(DoctorCheck {
                     name: format!("channel_{}_token_env", channel.id),
-                    ok: std::env::var(token_env).is_ok(),
+                    ok: token_present,
                     detail: format!(
                         "{} {}",
                         token_env,
-                        if std::env::var(token_env).is_ok() {
+                        if token_present {
                             "is set"
                         } else {
                             "is missing"
@@ -549,6 +603,17 @@ impl ChannelRepository {
     }
 }
 
+fn normalize_optional(value: Option<String>) -> Option<String> {
+    value.and_then(|raw| {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
 fn resolve_token_value(token_env: Option<&str>) -> Result<Option<String>> {
     let Some(token_env) = token_env else {
         return Ok(None);
@@ -591,6 +656,7 @@ mod tests {
                 name: "slack".to_string(),
                 kind: "slack_webhook".to_string(),
                 endpoint: Some("mock-http://200".to_string()),
+                target: None,
                 token_env: None,
             })
             .expect("add");
@@ -616,6 +682,7 @@ mod tests {
                 name: "alerts".to_string(),
                 kind: "slack".to_string(),
                 endpoint: Some("mock-http://200".to_string()),
+                target: None,
                 token_env: None,
             })
             .expect("add");

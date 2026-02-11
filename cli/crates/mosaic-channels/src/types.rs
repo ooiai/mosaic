@@ -15,6 +15,7 @@ pub struct ChannelEntry {
     pub name: String,
     pub kind: String,
     pub endpoint: Option<String>,
+    pub target: Option<String>,
     pub auth: ChannelAuthConfig,
     pub created_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
@@ -34,6 +35,7 @@ pub struct ChannelListItem {
     pub name: String,
     pub kind: String,
     pub endpoint_masked: Option<String>,
+    pub target_masked: Option<String>,
     pub created_at: DateTime<Utc>,
     pub last_login_at: Option<DateTime<Utc>>,
     pub last_send_at: Option<DateTime<Utc>>,
@@ -45,6 +47,7 @@ pub struct AddChannelInput {
     pub name: String,
     pub kind: String,
     pub endpoint: Option<String>,
+    pub target: Option<String>,
     pub token_env: Option<String>,
 }
 
@@ -56,6 +59,7 @@ pub struct ChannelSendResult {
     pub attempts: usize,
     pub http_status: Option<u16>,
     pub endpoint_masked: Option<String>,
+    pub target_masked: Option<String>,
     pub event_path: String,
     pub probe: bool,
 }
@@ -97,6 +101,7 @@ pub struct ChannelDirectoryEntry {
     pub name: String,
     pub kind: String,
     pub endpoint_masked: Option<String>,
+    pub target_masked: Option<String>,
     pub last_send_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
 }
