@@ -379,6 +379,7 @@ fn channels_telegram_bot_flow() {
         .expect("binary")
         .current_dir(temp.path())
         .env("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token")
+        .env("MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS", "300")
         .args([
             "--project-state",
             "--json",
@@ -387,6 +388,16 @@ fn channels_telegram_bot_flow() {
             &channel_id,
             "--text",
             "hello telegram",
+            "--parse-mode",
+            "markdown_v2",
+            "--title",
+            "Release Notice",
+            "--block",
+            "build=42",
+            "--metadata",
+            "{\"env\":\"staging\"}",
+            "--idempotency-key",
+            "release-42",
         ])
         .assert()
         .success()
@@ -397,6 +408,51 @@ fn channels_telegram_bot_flow() {
     assert_eq!(send_json["ok"], true);
     assert_eq!(send_json["delivered_via"], "telegram_bot");
     assert_eq!(send_json["attempts"], 1);
+    assert_eq!(send_json["parse_mode"], "MarkdownV2");
+    assert_eq!(send_json["idempotency_key"], "release-42");
+    assert_eq!(send_json["deduplicated"], false);
+    assert!(send_json["rate_limited_ms"].is_number());
+
+    let dedup_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token")
+        .env("MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS", "300")
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "hello telegram",
+            "--parse-mode",
+            "markdown_v2",
+            "--title",
+            "Release Notice",
+            "--block",
+            "build=42",
+            "--idempotency-key",
+            "release-42",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let dedup_json: Value = serde_json::from_slice(&dedup_output).expect("dedup telegram json");
+    assert_eq!(dedup_json["deduplicated"], true);
+    assert_eq!(dedup_json["attempts"], 0);
+    let dedup_event_path = dedup_json["event_path"].as_str().expect("dedup event path");
+    let dedup_events = std::fs::read_to_string(dedup_event_path).expect("dedup event file");
+    let dedup_last = dedup_events
+        .lines()
+        .last()
+        .expect("dedup last line")
+        .to_string();
+    let dedup_last: Value = serde_json::from_str(&dedup_last).expect("dedup event json");
+    assert_eq!(dedup_last["delivery_status"], "deduplicated");
+    assert_eq!(dedup_last["idempotency_key"], "release-42");
 
     let add_retry_output = Command::cargo_bin("mosaic")
         .expect("binary")

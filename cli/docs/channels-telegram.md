@@ -30,13 +30,22 @@ Notes:
 
 ```bash
 mosaic --project-state --json channels test <channel-id>
-mosaic --project-state --json channels send <channel-id> --text "deploy complete"
+mosaic --project-state --json channels send <channel-id> \
+  --text "deploy complete" \
+  --parse-mode markdown_v2 \
+  --title "Release Notice" \
+  --block "build=42" \
+  --metadata '{"env":"staging"}' \
+  --idempotency-key release-42
 ```
 
 Success response includes:
 - `delivered_via = "telegram_bot"`
 - `target_masked` like `telegram://***7890`
 - `endpoint_masked` for API base URL
+- `parse_mode` canonicalized (`Markdown`, `MarkdownV2`, `HTML`)
+- `deduplicated` indicates idempotency short-circuit
+- `rate_limited_ms` reports wait duration before delivery (when throttled)
 
 ## 4) Retry behavior
 
@@ -45,6 +54,8 @@ Success response includes:
 - `2xx`: success only when Telegram JSON body has `"ok": true`
 - `4xx`: fail immediately
 - `5xx` / timeout: retry
+- Telegram send throttle: `MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS` (default `800`)
+- Idempotency dedupe window: `MOSAIC_CHANNELS_IDEMPOTENCY_WINDOW_SECONDS` (default `86400`)
 
 ## 5) Troubleshooting
 
@@ -52,5 +63,7 @@ Success response includes:
   - missing or empty `--chat-id`
 - `auth` error on send/test:
   - token env variable missing
+- `validation` error on send:
+  - `--parse-mode` used on non-Telegram channels or unsupported parse mode value
 - `network` error:
   - transport issue, timeout, or non-success HTTP response

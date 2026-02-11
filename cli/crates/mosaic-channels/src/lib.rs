@@ -12,6 +12,6 @@ pub use schema::{
 };
 pub use types::{
     AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
-    ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendResult, ChannelStatus,
-    ChannelsFile, DoctorCheck,
+    ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions, ChannelSendResult,
+    ChannelStatus, ChannelsFile, DoctorCheck,
 };
