@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 pub(crate) const TEXT_PREVIEW_LIMIT: usize = 120;
@@ -51,6 +52,15 @@ pub struct AddChannelInput {
     pub token_env: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ChannelSendOptions {
+    pub parse_mode: Option<String>,
+    pub title: Option<String>,
+    pub blocks: Vec<String>,
+    pub idempotency_key: Option<String>,
+    pub metadata: Option<Value>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ChannelSendResult {
     pub channel_id: String,
@@ -60,6 +70,10 @@ pub struct ChannelSendResult {
     pub http_status: Option<u16>,
     pub endpoint_masked: Option<String>,
     pub target_masked: Option<String>,
+    pub parse_mode: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub deduplicated: bool,
+    pub rate_limited_ms: Option<u64>,
     pub event_path: String,
     pub probe: bool,
 }
@@ -83,6 +97,11 @@ pub struct ChannelLogEntry {
     pub http_status: Option<u16>,
     pub error: Option<String>,
     pub text_preview: String,
+    pub parse_mode: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub rate_limited_ms: Option<u64>,
+    #[serde(default)]
+    pub deduplicated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

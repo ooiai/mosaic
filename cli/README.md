@@ -104,6 +104,14 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels add \
   --kind telegram_bot \
   --chat-id=-1001234567890
 
+export MOSAIC_TELEGRAM_BOT_TOKEN="<bot-token>"
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels send <channel-id> \
+  --text "deploy complete" \
+  --parse-mode markdown_v2 \
+  --title "Release Notice" \
+  --block "build=42" \
+  --idempotency-key release-42
+
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels test <channel-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels send <channel-id> --text "hello"
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels list
@@ -125,6 +133,8 @@ Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
 
 Telegram default token env: `MOSAIC_TELEGRAM_BOT_TOKEN`.
+Telegram min send interval env: `MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS` (default `800`).
+Idempotency dedupe window env: `MOSAIC_CHANNELS_IDEMPOTENCY_WINDOW_SECONDS` (default `86400`).
 
 ### Ops Runtime
 

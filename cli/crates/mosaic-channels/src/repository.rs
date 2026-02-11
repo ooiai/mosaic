@@ -18,23 +18,31 @@ use crate::schema::{
 };
 use crate::types::{
     AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
-    ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendResult, ChannelStatus,
-    ChannelsFile, DoctorCheck, TEXT_PREVIEW_LIMIT, truncate_text,
+    ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions, ChannelSendResult,
+    ChannelStatus, ChannelsFile, DoctorCheck, TEXT_PREVIEW_LIMIT, truncate_text,
 };
 
 const CACHE_TTL_SECONDS: i64 = 300;
+const DEFAULT_TELEGRAM_MIN_INTERVAL_MS: u64 = 800;
+const DEFAULT_IDEMPOTENCY_WINDOW_SECONDS: i64 = 86_400;
 
 #[derive(Debug, Clone)]
 pub struct ChannelRepository {
     channels_path: PathBuf,
     events_dir: PathBuf,
     cache_dir: PathBuf,
+    rate_dir: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEnvelope {
     cached_at: DateTime<Utc>,
     value: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChannelRateState {
+    last_sent_at: DateTime<Utc>,
 }
 
 impl ChannelRepository {
@@ -44,10 +52,12 @@ impl ChannelRepository {
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| events_dir.clone());
         let cache_dir = cache_parent.join("channel-cache");
+        let rate_dir = cache_parent.join("channel-rate");
         Self {
             channels_path,
             events_dir,
             cache_dir,
+            rate_dir,
         }
     }
 
@@ -210,6 +220,24 @@ impl ChannelRepository {
         token_env_override: Option<String>,
         probe: bool,
     ) -> Result<ChannelSendResult> {
+        self.send_with_options(
+            channel_id,
+            text,
+            token_env_override,
+            probe,
+            ChannelSendOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn send_with_options(
+        &self,
+        channel_id: &str,
+        text: &str,
+        token_env_override: Option<String>,
+        probe: bool,
+        options: ChannelSendOptions,
+    ) -> Result<ChannelSendResult> {
         if text.trim().is_empty() {
             return Err(MosaicError::Validation(
                 "send text cannot be empty".to_string(),
@@ -229,7 +257,61 @@ impl ChannelRepository {
             .or_else(|| providers::default_token_env_for_kind(&channel.kind).map(str::to_string));
         let token = resolve_token_value(token_env.as_deref())?;
         let send_kind = if probe { "test_probe" } else { "message" };
-        let text_preview = truncate_text(text, TEXT_PREVIEW_LIMIT);
+        let parse_mode = normalize_parse_mode(options.parse_mode, &channel.kind)?;
+        let idempotency_key = normalize_optional(options.idempotency_key);
+        let rendered_text = render_message_template(
+            text,
+            options.title.as_deref(),
+            &options.blocks,
+            options.metadata.as_ref(),
+        );
+        let text_preview = truncate_text(&rendered_text, TEXT_PREVIEW_LIMIT);
+        if !probe
+            && let Some(key) = idempotency_key.as_deref()
+            && let Some(previous_http_status) =
+                self.find_recent_successful_idempotent(&channel.id, key)?
+        {
+            let event = ChannelLogEntry {
+                ts: Utc::now(),
+                channel_id: channel.id.clone(),
+                kind: send_kind.to_string(),
+                delivery_status: "deduplicated".to_string(),
+                attempt: 0,
+                http_status: previous_http_status,
+                error: None,
+                text_preview,
+                parse_mode: parse_mode.clone(),
+                idempotency_key: Some(key.to_string()),
+                rate_limited_ms: Some(0),
+                deduplicated: true,
+            };
+            let event_path = self.append_event(&channel.id, &event)?;
+            file.channels[idx].last_send_at = Some(Utc::now());
+            file.channels[idx].last_error = None;
+            self.save_channels_file(&file)?;
+
+            return Ok(ChannelSendResult {
+                channel_id: channel.id,
+                delivered_via: channel.kind.clone(),
+                kind: send_kind.to_string(),
+                attempts: 0,
+                http_status: previous_http_status,
+                endpoint_masked: mask_optional_endpoint(channel.endpoint.as_deref()),
+                target_masked: mask_optional_target(
+                    &channel.kind,
+                    channel.target.as_deref(),
+                    channel.endpoint.as_deref(),
+                ),
+                parse_mode,
+                idempotency_key: Some(key.to_string()),
+                deduplicated: true,
+                rate_limited_ms: Some(0),
+                event_path: event_path.display().to_string(),
+                probe,
+            });
+        }
+
+        let rate_limited_ms = self.apply_telegram_rate_limit(&channel, probe).await?;
         let retry_policy = RetryPolicy::from_env();
         let delivery = providers::dispatch_send(
             &channel.kind,
@@ -238,7 +320,8 @@ impl ChannelRepository {
                 channel_name: &channel.name,
                 endpoint: channel.endpoint.as_deref(),
                 target: channel.target.as_deref(),
-                text,
+                text: &rendered_text,
+                parse_mode: parse_mode.as_deref(),
                 bearer_token: token.as_deref(),
             },
             &retry_policy,
@@ -258,6 +341,10 @@ impl ChannelRepository {
             http_status: delivery.http_status,
             error: delivery.error.clone(),
             text_preview,
+            parse_mode: parse_mode.clone(),
+            idempotency_key: idempotency_key.clone(),
+            rate_limited_ms,
+            deduplicated: false,
         };
         let event_path = self.append_event(&channel.id, &event)?;
 
@@ -285,6 +372,10 @@ impl ChannelRepository {
                 http_status: delivery.http_status,
                 endpoint_masked: delivery.endpoint_masked,
                 target_masked,
+                parse_mode,
+                idempotency_key,
+                deduplicated: false,
+                rate_limited_ms,
                 event_path: event_path.display().to_string(),
                 probe,
             });
@@ -563,6 +654,88 @@ impl ChannelRepository {
         Ok(path)
     }
 
+    fn find_recent_successful_idempotent(
+        &self,
+        channel_id: &str,
+        idempotency_key: &str,
+    ) -> Result<Option<Option<u16>>> {
+        let path = self.events_dir.join(format!("{channel_id}.jsonl"));
+        if !path.exists() {
+            return Ok(None);
+        }
+        let window_seconds = std::env::var("MOSAIC_CHANNELS_IDEMPOTENCY_WINDOW_SECONDS")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .unwrap_or(DEFAULT_IDEMPOTENCY_WINDOW_SECONDS)
+            .max(1);
+        let now = Utc::now();
+        let raw = std::fs::read_to_string(path)?;
+        let mut latest_status: Option<Option<u16>> = None;
+        for line in raw.lines() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let event = serde_json::from_str::<ChannelLogEntry>(line).map_err(|err| {
+                MosaicError::Validation(format!("invalid channel event entry: {err}"))
+            })?;
+            if event.kind != "message" {
+                continue;
+            }
+            if event.idempotency_key.as_deref() != Some(idempotency_key) {
+                continue;
+            }
+            if event.delivery_status != "success" && event.delivery_status != "deduplicated" {
+                continue;
+            }
+            if now - event.ts > Duration::seconds(window_seconds) {
+                continue;
+            }
+            latest_status = Some(event.http_status);
+        }
+        Ok(latest_status)
+    }
+
+    async fn apply_telegram_rate_limit(
+        &self,
+        channel: &ChannelEntry,
+        probe: bool,
+    ) -> Result<Option<u64>> {
+        if probe || channel.kind != "telegram_bot" {
+            return Ok(None);
+        }
+
+        let interval_ms = std::env::var("MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(DEFAULT_TELEGRAM_MIN_INTERVAL_MS);
+        if interval_ms == 0 {
+            return Ok(Some(0));
+        }
+
+        std::fs::create_dir_all(&self.rate_dir)?;
+        let path = self.rate_dir.join(format!("{}.json", channel.id));
+        let mut waited_ms = 0u64;
+        if path.exists() {
+            let raw = std::fs::read_to_string(&path)?;
+            let state = serde_json::from_str::<ChannelRateState>(&raw).map_err(|err| {
+                MosaicError::Validation(format!("invalid channel rate state: {err}"))
+            })?;
+            let elapsed = (Utc::now() - state.last_sent_at).num_milliseconds().max(0) as u64;
+            if elapsed < interval_ms {
+                waited_ms = interval_ms - elapsed;
+                tokio::time::sleep(std::time::Duration::from_millis(waited_ms)).await;
+            }
+        }
+
+        let next = ChannelRateState {
+            last_sent_at: Utc::now(),
+        };
+        let rendered = serde_json::to_string(&next)
+            .map_err(|err| MosaicError::Validation(format!("invalid channel rate JSON: {err}")))?;
+        std::fs::write(path, rendered)?;
+        Ok(Some(waited_ms))
+    }
+
     fn read_cache<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         let path = self.cache_path(key);
         if !path.exists() {
@@ -612,6 +785,80 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn normalize_parse_mode(parse_mode: Option<String>, kind: &str) -> Result<Option<String>> {
+    let Some(parse_mode) = normalize_optional(parse_mode) else {
+        return Ok(None);
+    };
+    if kind != "telegram_bot" {
+        return Err(MosaicError::Validation(
+            "--parse-mode is only supported for telegram_bot channels".to_string(),
+        ));
+    }
+    let normalized = match parse_mode.to_lowercase().as_str() {
+        "markdown" => "Markdown",
+        "markdownv2" | "markdown_v2" | "mdv2" => "MarkdownV2",
+        "html" => "HTML",
+        _ => {
+            return Err(MosaicError::Validation(format!(
+                "unsupported parse mode '{}', expected markdown|markdown_v2|html",
+                parse_mode
+            )));
+        }
+    };
+    Ok(Some(normalized.to_string()))
+}
+
+fn render_message_template(
+    text: &str,
+    title: Option<&str>,
+    blocks: &[String],
+    metadata: Option<&Value>,
+) -> String {
+    let mut segments = Vec::new();
+    if let Some(title) = title.map(str::trim).filter(|value| !value.is_empty()) {
+        segments.push(title.to_string());
+    }
+    for block in blocks {
+        let block = block.trim();
+        if !block.is_empty() {
+            segments.push(block.to_string());
+        }
+    }
+    if let Some(metadata) = metadata
+        && let Some(object) = metadata.as_object()
+        && !object.is_empty()
+    {
+        let mut keys = object.keys().cloned().collect::<Vec<_>>();
+        keys.sort();
+        let lines = keys
+            .into_iter()
+            .map(|key| {
+                let value = object
+                    .get(&key)
+                    .map(format_metadata_value)
+                    .unwrap_or_else(|| "null".to_string());
+                format!("{key}: {value}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        if !lines.is_empty() {
+            segments.push(lines);
+        }
+    }
+    segments.push(text.trim().to_string());
+    segments.join("\n\n")
+}
+
+fn format_metadata_value(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(v) => v.to_string(),
+        Value::Number(v) => v.to_string(),
+        Value::String(v) => v.clone(),
+        Value::Array(_) | Value::Object(_) => value.to_string(),
+    }
 }
 
 fn resolve_token_value(token_env: Option<&str>) -> Result<Option<String>> {

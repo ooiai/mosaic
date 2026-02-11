@@ -27,6 +27,7 @@ pub(crate) struct ChannelDispatchRequest<'a> {
     pub endpoint: Option<&'a str>,
     pub target: Option<&'a str>,
     pub text: &'a str,
+    pub parse_mode: Option<&'a str>,
     pub bearer_token: Option<&'a str>,
 }
 
@@ -426,7 +427,15 @@ impl ChannelProvider for TelegramBotProvider {
             ))
         })?;
         let endpoint = request.endpoint.unwrap_or("https://api.telegram.org");
-        send_telegram_with_retry(endpoint, chat_id, request.text, token, policy).await
+        send_telegram_with_retry(
+            endpoint,
+            chat_id,
+            request.text,
+            request.parse_mode,
+            token,
+            policy,
+        )
+        .await
     }
 }
 
@@ -636,6 +645,7 @@ async fn send_telegram_with_retry(
     endpoint: &str,
     chat_id: &str,
     text: &str,
+    parse_mode: Option<&str>,
     token: &str,
     policy: &RetryPolicy,
 ) -> Result<DeliveryAttemptResult> {
@@ -653,10 +663,13 @@ async fn send_telegram_with_retry(
     }
     let base_endpoint = endpoint.trim_end_matches('/');
     let url = format!("{base_endpoint}/bot{token}/sendMessage");
-    let payload = json!({
+    let mut payload = json!({
         "chat_id": chat_id,
         "text": text,
     });
+    if let Some(parse_mode) = parse_mode {
+        payload["parse_mode"] = Value::String(parse_mode.to_string());
+    }
 
     let client = reqwest::Client::builder()
         .timeout(policy.timeout)
@@ -881,6 +894,7 @@ mod tests {
                 endpoint: Some("mock-http://500,500,200"),
                 target: None,
                 text: "hello",
+                parse_mode: None,
                 bearer_token: None,
             },
             &policy,

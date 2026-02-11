@@ -17,8 +17,8 @@ use mosaic_agents::{
     AddAgentInput, AgentStore, UpdateAgentInput, agent_routes_path, agents_file_path,
 };
 use mosaic_channels::{
-    AddChannelInput, ChannelRepository, channels_events_dir, channels_file_path,
-    format_channel_for_output,
+    AddChannelInput, ChannelRepository, ChannelSendOptions, channels_events_dir,
+    channels_file_path, format_channel_for_output,
 };
 use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
 use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
@@ -243,6 +243,16 @@ enum ChannelsCommand {
         channel_id: String,
         #[arg(long)]
         text: String,
+        #[arg(long)]
+        parse_mode: Option<String>,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        block: Vec<String>,
+        #[arg(long)]
+        metadata: Option<String>,
+        #[arg(long)]
+        idempotency_key: Option<String>,
         #[arg(long)]
         token_env: Option<String>,
     },
@@ -1550,10 +1560,30 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
         ChannelsCommand::Send {
             channel_id,
             text,
+            parse_mode,
+            title,
+            block,
+            metadata,
+            idempotency_key,
             token_env,
         } => {
+            let metadata = metadata
+                .map(|value| parse_json_input(&value, "channels send metadata"))
+                .transpose()?;
             let result = repository
-                .send(&channel_id, &text, token_env, false)
+                .send_with_options(
+                    &channel_id,
+                    &text,
+                    token_env,
+                    false,
+                    ChannelSendOptions {
+                        parse_mode,
+                        title,
+                        blocks: block,
+                        idempotency_key,
+                        metadata,
+                    },
+                )
                 .await?;
             if cli.json {
                 print_json(&json!({
@@ -1565,6 +1595,10 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                     "http_status": result.http_status,
                     "endpoint_masked": result.endpoint_masked,
                     "target_masked": result.target_masked,
+                    "parse_mode": result.parse_mode,
+                    "idempotency_key": result.idempotency_key,
+                    "deduplicated": result.deduplicated,
+                    "rate_limited_ms": result.rate_limited_ms,
                     "event_path": result.event_path,
                 }));
             } else {
@@ -1574,6 +1608,18 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 }
                 if let Some(target) = result.target_masked {
                     println!("target: {target}");
+                }
+                if let Some(parse_mode) = result.parse_mode {
+                    println!("parse_mode: {parse_mode}");
+                }
+                if let Some(key) = result.idempotency_key {
+                    println!("idempotency_key: {key}");
+                }
+                if result.deduplicated {
+                    println!("deduplicated: true");
+                }
+                if let Some(waited) = result.rate_limited_ms {
+                    println!("rate_limited_ms: {waited}");
                 }
             }
         }
@@ -1703,6 +1749,10 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                     "http_status": result.http_status,
                     "endpoint_masked": result.endpoint_masked,
                     "target_masked": result.target_masked,
+                    "parse_mode": result.parse_mode,
+                    "idempotency_key": result.idempotency_key,
+                    "deduplicated": result.deduplicated,
+                    "rate_limited_ms": result.rate_limited_ms,
                     "event_path": result.event_path,
                 }));
             } else {
@@ -1713,6 +1763,9 @@ async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
                 }
                 if let Some(target) = result.target_masked {
                     println!("target: {target}");
+                }
+                if let Some(waited) = result.rate_limited_ms {
+                    println!("rate_limited_ms: {waited}");
                 }
             }
         }
