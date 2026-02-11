@@ -178,6 +178,7 @@ pub struct ChannelImportSummary {
     pub updated: usize,
     pub skipped: usize,
     pub replace: bool,
+    pub dry_run: bool,
 }
 
 pub(crate) fn truncate_text(text: &str, max_chars: usize) -> String {
