@@ -5,14 +5,23 @@ This document covers the V2 gateway operations commands.
 ## Commands
 
 ```bash
-mosaic --project-state gateway run --host 127.0.0.1 --port 8787
-mosaic --project-state gateway status
-mosaic --project-state gateway health
+mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway restart --port 8788
+mosaic --project-state gateway status --deep
+mosaic --project-state gateway health --verbose
 mosaic --project-state gateway probe
 mosaic --project-state gateway discover
 mosaic --project-state gateway call <method> --params '<json>'
 mosaic --project-state gateway stop
+mosaic --project-state gateway uninstall
 ```
+
+Notes:
+
+- `gateway start` keeps backward compatibility with `gateway run` alias.
+- `gateway install` stores desired host/port in `.mosaic/data/gateway-service.json`.
+- `gateway status --deep` includes process/endpoint diagnostics and resolved target.
 
 ## `gateway call`
 

@@ -75,6 +75,135 @@ fn gateway_skeleton_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn gateway_service_lifecycle_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let status_before = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "status", "--deep"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_before: Value = serde_json::from_slice(&status_before).expect("status before");
+    assert_eq!(status_before["running"], false);
+    assert_eq!(status_before["installed"], false);
+    assert_eq!(status_before["deep"]["service_file_exists"], false);
+
+    let install_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "install",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "9898",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let install_json: Value = serde_json::from_slice(&install_output).expect("install");
+    assert_eq!(install_json["ok"], true);
+    assert_eq!(install_json["service"]["installed"], true);
+    assert_eq!(install_json["service"]["port"], 9898);
+
+    let start_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "start"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let start_json: Value = serde_json::from_slice(&start_output).expect("start");
+    assert_eq!(start_json["ok"], true);
+    assert_eq!(start_json["gateway"]["port"], 9898);
+    assert_eq!(start_json["service"]["port"], 9898);
+
+    let status_started = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "status", "--deep"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_started: Value = serde_json::from_slice(&status_started).expect("status started");
+    assert_eq!(status_started["running"], true);
+    assert_eq!(status_started["installed"], true);
+    assert_eq!(status_started["deep"]["target_port"], 9898);
+    assert_eq!(status_started["deep"]["service_file_exists"], true);
+
+    let restart_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "restart",
+            "--port",
+            "9899",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let restart_json: Value = serde_json::from_slice(&restart_output).expect("restart");
+    assert_eq!(restart_json["ok"], true);
+    assert_eq!(restart_json["gateway"]["port"], 9899);
+    assert_eq!(restart_json["service"]["port"], 9899);
+
+    let uninstall_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "uninstall"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let uninstall_json: Value = serde_json::from_slice(&uninstall_output).expect("uninstall");
+    assert_eq!(uninstall_json["ok"], true);
+    assert_eq!(uninstall_json["removed_state_file"], true);
+    assert_eq!(uninstall_json["removed_service_file"], true);
+
+    let status_after = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "status", "--deep"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_after: Value = serde_json::from_slice(&status_after).expect("status after");
+    assert_eq!(status_after["running"], false);
+    assert_eq!(status_after["installed"], false);
+    assert_eq!(status_after["deep"]["state_file_exists"], false);
+    assert_eq!(status_after["deep"]["service_file_exists"], false);
+}
+
+#[test]
+#[allow(deprecated)]
 fn channels_real_send_flow() {
     let temp = tempdir().expect("tempdir");
 
