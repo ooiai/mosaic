@@ -1,0 +1,2 @@
+{"id":"620d14da-16cf-4035-b59f-febeac44c61e","ts":"2026-02-22T09:58:23.154637Z","session_id":"f72711a3-90a1-49b3-9855-edf3459fc7cd","type":"user","payload":{"text":"你好"}}
+{"id":"87b85ef7-8ec8-484c-9824-0a8054128b8c","ts":"2026-02-22T09:58:26.002201Z","session_id":"f72711a3-90a1-49b3-9855-edf3459fc7cd","type":"assistant","payload":{"text":"你好！我可以帮你做什么？"}}

@@ -61,7 +61,12 @@ impl OpenAiCompatibleProvider {
     }
 
     fn endpoint(&self, path: &str) -> String {
-        format!("{}/{}", self.base_url, path.trim_start_matches('/'))
+        let normalized_path = path.trim_start_matches('/');
+        if self.base_url.ends_with("/v1") && normalized_path.starts_with("v1/") {
+            let without_v1 = normalized_path.trim_start_matches("v1/");
+            return format!("{}/{}", self.base_url, without_v1);
+        }
+        format!("{}/{}", self.base_url, normalized_path)
     }
 
     async fn request_json<T: for<'de> Deserialize<'de>>(
@@ -258,5 +263,34 @@ mod tests {
             { "type": "text", "text": "b" }
         ]);
         assert_eq!(content_to_text(value), "a\nb");
+    }
+
+    #[test]
+    fn endpoint_avoids_duplicate_v1_when_base_url_already_has_v1() {
+        let provider = OpenAiCompatibleProvider {
+            client: None,
+            base_url: "https://example.openai.azure.com/openai/v1".to_string(),
+            api_key: "mock".to_string(),
+            mock_mode: false,
+        };
+        assert_eq!(
+            provider.endpoint("/v1/models"),
+            "https://example.openai.azure.com/openai/v1/models"
+        );
+        assert_eq!(
+            provider.endpoint("/v1/chat/completions"),
+            "https://example.openai.azure.com/openai/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn endpoint_keeps_v1_when_base_url_without_v1() {
+        let provider = OpenAiCompatibleProvider {
+            client: None,
+            base_url: "https://api.openai.com".to_string(),
+            api_key: "mock".to_string(),
+            mock_mode: false,
+        };
+        assert_eq!(provider.endpoint("/v1/models"), "https://api.openai.com/v1/models");
     }
 }

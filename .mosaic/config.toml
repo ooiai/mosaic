@@ -7,9 +7,9 @@ project_dir = ".mosaic"
 
 [profiles.az-openai.provider]
 kind = "openai_compatible"
-base_url = "https://smartapi1.cognitiveservices.azure.com/openai/v1/"
+base_url = "https://smartapi1.openai.azure.com/openai"
 api_key_env = "AZURE_OPENAI_API_KEY"
-model = "gpt5.2"
+model = "gpt-5.2"
 
 [profiles.az-openai.agent]
 temperature = 0.20000000298023224
