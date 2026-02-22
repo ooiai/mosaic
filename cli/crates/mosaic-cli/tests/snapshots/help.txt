@@ -15,6 +15,7 @@ Commands:
   devices    
   pairing    
   hooks      
+  cron       
   logs       
   system     
   approvals  

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -38,8 +38,8 @@ use mosaic_core::session::SessionStore;
 use mosaic_core::state::{StateMode, StatePaths};
 use mosaic_ops::{
     ApprovalDecision, ApprovalMode, ApprovalStore, RuntimePolicy, SandboxProfile, SandboxStore,
-    SystemEventStore, collect_logs, evaluate_approval, evaluate_sandbox, list_profiles,
-    snapshot_presence, system_events_path,
+    SystemEvent, SystemEventStore, collect_logs, evaluate_approval, evaluate_sandbox,
+    list_profiles, snapshot_presence, system_events_path,
 };
 use mosaic_provider_openai::OpenAiCompatibleProvider;
 use mosaic_security::{
@@ -50,6 +50,7 @@ use mosaic_tools::{RunCommandOutput, ToolContext, ToolExecutor};
 const PROJECT_STATE_DIR: &str = ".mosaic";
 static PAIRING_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
 static HOOK_SEQ: AtomicU64 = AtomicU64::new(1);
+static CRON_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Parser, Debug)]
 #[command(name = "mosaic", version, about = "Mosaic local agent CLI")]
@@ -85,6 +86,7 @@ enum Commands {
     Devices(DevicesArgs),
     Pairing(PairingArgs),
     Hooks(HooksArgs),
+    Cron(CronArgs),
     Logs(LogsArgs),
     System(SystemArgs),
     Approvals(ApprovalsArgs),
@@ -389,6 +391,56 @@ enum HooksCommand {
     Logs {
         #[arg(long)]
         hook: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        tail: usize,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct CronArgs {
+    #[command(subcommand)]
+    command: CronCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum CronCommand {
+    List {
+        #[arg(long)]
+        event: Option<String>,
+    },
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        event: String,
+        #[arg(long)]
+        every: u64,
+        #[arg(long)]
+        data: Option<String>,
+        #[arg(long)]
+        disabled: bool,
+    },
+    Remove {
+        job_id: String,
+    },
+    Enable {
+        job_id: String,
+    },
+    Disable {
+        job_id: String,
+    },
+    Run {
+        job_id: String,
+        #[arg(long)]
+        data: Option<String>,
+    },
+    Tick {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    Logs {
+        #[arg(long)]
+        job: Option<String>,
         #[arg(long, default_value_t = 50)]
         tail: usize,
     },
@@ -1000,6 +1052,66 @@ struct HookExecutionReport {
     stderr: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CronJobRecord {
+    id: String,
+    name: String,
+    event: String,
+    every_seconds: u64,
+    data: Value,
+    enabled: bool,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    last_run_at: Option<DateTime<Utc>>,
+    next_run_at: DateTime<Utc>,
+    run_count: u64,
+    last_result: Option<CronLastResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CronLastResult {
+    ok: bool,
+    hooks_triggered: usize,
+    hooks_ok: usize,
+    hooks_failed: usize,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CronEventRecord {
+    ts: DateTime<Utc>,
+    job_id: String,
+    job_name: String,
+    trigger: String,
+    event: String,
+    data: Value,
+    ok: bool,
+    hooks_triggered: usize,
+    hooks_ok: usize,
+    hooks_failed: usize,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CronExecutionReport {
+    job_id: String,
+    job_name: String,
+    trigger: String,
+    event: String,
+    ok: bool,
+    hooks_triggered: usize,
+    hooks_ok: usize,
+    hooks_failed: usize,
+    error: Option<String>,
+    system_event: Option<SystemEvent>,
+}
+
+#[derive(Debug, Clone)]
+struct SystemEventDispatch {
+    event: SystemEvent,
+    hook_reports: Vec<HookExecutionReport>,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "snake_case")]
 enum GuardModeArg {
@@ -1179,6 +1291,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Devices(args) => handle_devices(&cli, args),
         Commands::Pairing(args) => handle_pairing(&cli, args),
         Commands::Hooks(args) => handle_hooks(&cli, args),
+        Commands::Cron(args) => handle_cron(&cli, args),
         Commands::Logs(args) => handle_logs(&cli, args).await,
         Commands::System(args) => handle_system(&cli, args),
         Commands::Approvals(args) => handle_approvals(&cli, args),
@@ -2975,6 +3088,266 @@ fn handle_hooks(cli: &Cli, args: HooksArgs) -> Result<()> {
     Ok(())
 }
 
+fn handle_cron(cli: &Cli, args: CronArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let jobs_path = cron_jobs_file_path(&paths.data_dir);
+    let mut jobs = load_cron_jobs_or_default(&jobs_path)?;
+    match args.command {
+        CronCommand::List { event } => {
+            let event_filter = event.map(|value| value.trim().to_string());
+            let filtered = jobs
+                .into_iter()
+                .filter(|job| {
+                    if let Some(filter) = &event_filter {
+                        job.event == *filter
+                    } else {
+                        true
+                    }
+                })
+                .collect::<Vec<_>>();
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "jobs": filtered,
+                    "path": jobs_path.display().to_string(),
+                }));
+            } else if filtered.is_empty() {
+                println!("No cron jobs configured.");
+            } else {
+                for job in filtered {
+                    let status = if job.enabled { "enabled" } else { "disabled" };
+                    println!(
+                        "{} [{}] every={}s event={} next={} name={}",
+                        job.id,
+                        status,
+                        job.every_seconds,
+                        job.event,
+                        job.next_run_at.to_rfc3339(),
+                        job.name
+                    );
+                }
+            }
+        }
+        CronCommand::Add {
+            name,
+            event,
+            every,
+            data,
+            disabled,
+        } => {
+            if every == 0 {
+                return Err(MosaicError::Validation(
+                    "--every must be greater than 0 seconds".to_string(),
+                ));
+            }
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err(MosaicError::Validation(
+                    "cron job name cannot be empty".to_string(),
+                ));
+            }
+            let event = event.trim().to_string();
+            if event.is_empty() {
+                return Err(MosaicError::Validation(
+                    "cron event cannot be empty".to_string(),
+                ));
+            }
+            let data = data
+                .as_deref()
+                .map(|value| parse_json_input(value, "cron data"))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            let now = Utc::now();
+            let job = CronJobRecord {
+                id: generate_cron_job_id(),
+                name,
+                event,
+                every_seconds: every,
+                data,
+                enabled: !disabled,
+                created_at: now,
+                updated_at: now,
+                last_run_at: None,
+                next_run_at: now,
+                run_count: 0,
+                last_result: None,
+            };
+            jobs.push(job.clone());
+            save_cron_jobs(&jobs_path, &jobs)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "job": job,
+                    "path": jobs_path.display().to_string(),
+                }));
+            } else {
+                println!("cron job added: {}", job.id);
+                println!("event: {}", job.event);
+                println!("every: {}s", job.every_seconds);
+                println!("enabled: {}", job.enabled);
+            }
+        }
+        CronCommand::Remove { job_id } => {
+            let before = jobs.len();
+            jobs.retain(|job| job.id != job_id);
+            let removed = jobs.len() != before;
+            if removed {
+                save_cron_jobs(&jobs_path, &jobs)?;
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": removed,
+                    "job_id": job_id,
+                }));
+            } else if removed {
+                println!("removed cron job {job_id}");
+            } else {
+                println!("cron job {job_id} not found");
+            }
+        }
+        CronCommand::Enable { job_id } => {
+            let job = jobs
+                .iter_mut()
+                .find(|item| item.id == job_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("cron job '{}' not found", job_id))
+                })?;
+            job.enabled = true;
+            job.updated_at = Utc::now();
+            let job = job.clone();
+            save_cron_jobs(&jobs_path, &jobs)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "job": job,
+                    "path": jobs_path.display().to_string(),
+                }));
+            } else {
+                println!("cron job enabled: {}", job.id);
+            }
+        }
+        CronCommand::Disable { job_id } => {
+            let job = jobs
+                .iter_mut()
+                .find(|item| item.id == job_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("cron job '{}' not found", job_id))
+                })?;
+            job.enabled = false;
+            job.updated_at = Utc::now();
+            let job = job.clone();
+            save_cron_jobs(&jobs_path, &jobs)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "job": job,
+                    "path": jobs_path.display().to_string(),
+                }));
+            } else {
+                println!("cron job disabled: {}", job.id);
+            }
+        }
+        CronCommand::Run { job_id, data } => {
+            let index = jobs
+                .iter()
+                .position(|item| item.id == job_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("cron job '{}' not found", job_id))
+                })?;
+            let payload_override = data
+                .as_deref()
+                .map(|value| parse_json_input(value, "cron data"))
+                .transpose()?;
+            let snapshot = jobs[index].clone();
+            let report = execute_cron_job(cli, &paths, &snapshot, "manual", payload_override)?;
+            apply_cron_result(&mut jobs[index], &report, Utc::now())?;
+            save_cron_jobs(&jobs_path, &jobs)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "job": jobs[index].clone(),
+                    "result": report,
+                }));
+            } else {
+                println!("cron job executed: {}", jobs[index].id);
+                println!("ok: {}", report.ok);
+                if let Some(error) = report.error {
+                    println!("error: {error}");
+                }
+            }
+        }
+        CronCommand::Tick { limit } => {
+            if limit == 0 {
+                return Err(MosaicError::Validation(
+                    "--limit must be greater than 0".to_string(),
+                ));
+            }
+            let now = Utc::now();
+            let mut due = jobs
+                .iter()
+                .enumerate()
+                .filter(|(_, job)| job.enabled && job.next_run_at <= now)
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>();
+            due.sort_by_key(|index| jobs[*index].next_run_at);
+            let mut reports = Vec::new();
+            for index in due.into_iter().take(limit) {
+                let snapshot = jobs[index].clone();
+                let report = execute_cron_job(cli, &paths, &snapshot, "tick", None)?;
+                apply_cron_result(&mut jobs[index], &report, Utc::now())?;
+                reports.push(report);
+            }
+            if !reports.is_empty() {
+                save_cron_jobs(&jobs_path, &jobs)?;
+            }
+            let ok_count = reports.iter().filter(|item| item.ok).count();
+            let failed_count = reports.len().saturating_sub(ok_count);
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "triggered": reports.len(),
+                    "ok_count": ok_count,
+                    "failed_count": failed_count,
+                    "results": reports,
+                }));
+            } else {
+                println!("cron tick triggered: {}", reports.len());
+                println!("ok: {ok_count}");
+                println!("failed: {failed_count}");
+            }
+        }
+        CronCommand::Logs { job, tail } => {
+            let events = read_cron_events(&paths.data_dir, job.as_deref(), tail)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "events": events,
+                }));
+            } else if events.is_empty() {
+                println!("No cron events found.");
+            } else {
+                for item in events {
+                    let status = if item.ok { "ok" } else { "error" };
+                    println!(
+                        "{} [{}] job={} trigger={} event={} hooks={}/{} error={}",
+                        item.ts.to_rfc3339(),
+                        status,
+                        item.job_id,
+                        item.trigger,
+                        item.event,
+                        item.hooks_ok,
+                        item.hooks_triggered,
+                        item.error.unwrap_or_default(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
@@ -3637,8 +4010,9 @@ fn handle_system(cli: &Cli, args: SystemArgs) -> Result<()> {
                 .map(|value| parse_json_input(value, "system event data"))
                 .transpose()?
                 .unwrap_or(Value::Null);
-            let event = store.append_event(&name, data.clone())?;
-            let hook_reports = run_hooks_for_system_event(cli, &paths, &name, data)?;
+            let dispatch = dispatch_system_event(cli, &paths, &name, data)?;
+            let event = dispatch.event;
+            let hook_reports = dispatch.hook_reports;
             let hooks_ok = hook_reports.iter().filter(|item| item.ok).count();
             let hooks_failed = hook_reports.len().saturating_sub(hooks_ok);
             if cli.json {
@@ -5738,6 +6112,18 @@ fn hook_events_file_path(data_dir: &std::path::Path, hook_id: &str) -> PathBuf {
     hook_events_dir(data_dir).join(format!("{hook_id}.jsonl"))
 }
 
+fn cron_jobs_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("cron-jobs.json")
+}
+
+fn cron_events_dir(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("cron-events")
+}
+
+fn cron_events_file_path(data_dir: &std::path::Path, job_id: &str) -> PathBuf {
+    cron_events_dir(data_dir).join(format!("{job_id}.jsonl"))
+}
+
 fn load_nodes_or_default(path: &std::path::Path) -> Result<Vec<NodeRecord>> {
     let nodes =
         load_json_file_opt::<Vec<NodeRecord>>(path)?.unwrap_or_else(|| vec![default_local_node()]);
@@ -5775,6 +6161,14 @@ fn save_hooks(path: &std::path::Path, hooks: &[HookRecord]) -> Result<()> {
     save_json_file(path, &hooks.to_vec())
 }
 
+fn load_cron_jobs_or_default(path: &std::path::Path) -> Result<Vec<CronJobRecord>> {
+    Ok(load_json_file_opt::<Vec<CronJobRecord>>(path)?.unwrap_or_default())
+}
+
+fn save_cron_jobs(path: &std::path::Path, jobs: &[CronJobRecord]) -> Result<()> {
+    save_json_file(path, &jobs.to_vec())
+}
+
 fn default_local_node() -> NodeRecord {
     let now = Utc::now();
     NodeRecord {
@@ -5807,6 +6201,30 @@ fn next_hook_seq() -> u64 {
 fn generate_hook_id() -> String {
     let ts = Utc::now().timestamp_millis();
     format!("hk-{ts}-{}", next_hook_seq())
+}
+
+fn next_cron_seq() -> u64 {
+    CRON_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+fn generate_cron_job_id() -> String {
+    let ts = Utc::now().timestamp_millis();
+    format!("cj-{ts}-{}", next_cron_seq())
+}
+
+fn dispatch_system_event(
+    cli: &Cli,
+    paths: &StatePaths,
+    event_name: &str,
+    data: Value,
+) -> Result<SystemEventDispatch> {
+    let store = SystemEventStore::new(system_events_path(&paths.data_dir));
+    let event = store.append_event(event_name, data.clone())?;
+    let hook_reports = run_hooks_for_system_event(cli, paths, event_name, data)?;
+    Ok(SystemEventDispatch {
+        event,
+        hook_reports,
+    })
 }
 
 fn run_hooks_for_system_event(
@@ -6048,6 +6466,175 @@ fn load_hook_events_file(path: &std::path::Path, events: &mut Vec<HookEventRecor
         let event = serde_json::from_str::<HookEventRecord>(line).map_err(|err| {
             MosaicError::Validation(format!(
                 "invalid hook event format {}: {err}",
+                path.display()
+            ))
+        })?;
+        events.push(event);
+    }
+    Ok(())
+}
+
+fn execute_cron_job(
+    cli: &Cli,
+    paths: &StatePaths,
+    job: &CronJobRecord,
+    trigger: &str,
+    payload_override: Option<Value>,
+) -> Result<CronExecutionReport> {
+    let payload = payload_override.unwrap_or_else(|| job.data.clone());
+    let dispatch = dispatch_system_event(cli, paths, &job.event, payload.clone());
+    let report = match dispatch {
+        Ok(dispatch) => {
+            let hooks_triggered = dispatch.hook_reports.len();
+            let hooks_ok = dispatch.hook_reports.iter().filter(|item| item.ok).count();
+            let hooks_failed = hooks_triggered.saturating_sub(hooks_ok);
+            let error = if hooks_failed > 0 {
+                Some(format!("{hooks_failed} hook execution(s) failed"))
+            } else {
+                None
+            };
+            CronExecutionReport {
+                job_id: job.id.clone(),
+                job_name: job.name.clone(),
+                trigger: trigger.to_string(),
+                event: job.event.clone(),
+                ok: hooks_failed == 0,
+                hooks_triggered,
+                hooks_ok,
+                hooks_failed,
+                error,
+                system_event: Some(dispatch.event),
+            }
+        }
+        Err(err) => CronExecutionReport {
+            job_id: job.id.clone(),
+            job_name: job.name.clone(),
+            trigger: trigger.to_string(),
+            event: job.event.clone(),
+            ok: false,
+            hooks_triggered: 0,
+            hooks_ok: 0,
+            hooks_failed: 0,
+            error: Some(err.to_string()),
+            system_event: None,
+        },
+    };
+    append_cron_event(&paths.data_dir, job, trigger, payload, &report)?;
+    Ok(report)
+}
+
+fn append_cron_event(
+    data_dir: &std::path::Path,
+    job: &CronJobRecord,
+    trigger: &str,
+    payload: Value,
+    report: &CronExecutionReport,
+) -> Result<()> {
+    let event = CronEventRecord {
+        ts: Utc::now(),
+        job_id: job.id.clone(),
+        job_name: job.name.clone(),
+        trigger: trigger.to_string(),
+        event: job.event.clone(),
+        data: payload,
+        ok: report.ok,
+        hooks_triggered: report.hooks_triggered,
+        hooks_ok: report.hooks_ok,
+        hooks_failed: report.hooks_failed,
+        error: report.error.clone(),
+    };
+    let path = cron_events_file_path(data_dir, &job.id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let encoded = serde_json::to_string(&event).map_err(|err| {
+        MosaicError::Validation(format!(
+            "failed to encode cron event {}: {err}",
+            path.display()
+        ))
+    })?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    use std::io::Write as _;
+    file.write_all(encoded.as_bytes())?;
+    file.write_all(b"\n")?;
+    Ok(())
+}
+
+fn apply_cron_result(
+    job: &mut CronJobRecord,
+    report: &CronExecutionReport,
+    ran_at: DateTime<Utc>,
+) -> Result<()> {
+    job.updated_at = ran_at;
+    job.last_run_at = Some(ran_at);
+    job.run_count = job.run_count.saturating_add(1);
+    job.next_run_at = next_cron_run_at(ran_at, job.every_seconds)?;
+    job.last_result = Some(CronLastResult {
+        ok: report.ok,
+        hooks_triggered: report.hooks_triggered,
+        hooks_ok: report.hooks_ok,
+        hooks_failed: report.hooks_failed,
+        error: report.error.clone(),
+    });
+    Ok(())
+}
+
+fn next_cron_run_at(from: DateTime<Utc>, every_seconds: u64) -> Result<DateTime<Utc>> {
+    if every_seconds == 0 {
+        return Err(MosaicError::Validation(
+            "cron interval must be greater than 0 seconds".to_string(),
+        ));
+    }
+    let every_seconds = i64::try_from(every_seconds).map_err(|_| {
+        MosaicError::Validation("cron interval is too large to schedule".to_string())
+    })?;
+    Ok(from + ChronoDuration::seconds(every_seconds))
+}
+
+fn read_cron_events(
+    data_dir: &std::path::Path,
+    job_id: Option<&str>,
+    tail: usize,
+) -> Result<Vec<CronEventRecord>> {
+    let mut events = Vec::new();
+    if let Some(job_id) = job_id {
+        let path = cron_events_file_path(data_dir, job_id);
+        load_cron_events_file(&path, &mut events)?;
+    } else {
+        let dir = cron_events_dir(data_dir);
+        if dir.exists() {
+            for entry in std::fs::read_dir(&dir)? {
+                let path = entry?.path();
+                if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                load_cron_events_file(&path, &mut events)?;
+            }
+        }
+    }
+    events.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+    if events.len() > tail {
+        let keep_from = events.len() - tail;
+        events = events.split_off(keep_from);
+    }
+    Ok(events)
+}
+
+fn load_cron_events_file(path: &std::path::Path, events: &mut Vec<CronEventRecord>) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let raw = std::fs::read_to_string(path)?;
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event = serde_json::from_str::<CronEventRecord>(line).map_err(|err| {
+            MosaicError::Validation(format!(
+                "invalid cron event format {}: {err}",
                 path.display()
             ))
         })?;
