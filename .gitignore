@@ -51,3 +51,6 @@ zxxk.json*
 
 # config
 config.yml
+
+# mosaic
+.mosaic/
