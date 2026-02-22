@@ -4,6 +4,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -31,20 +32,24 @@ use mosaic_core::config::{
     ConfigManager, DEFAULT_PROFILE, ProfileConfig, RunGuardMode, StateConfig,
 };
 use mosaic_core::error::{MosaicError, Result};
-use mosaic_core::provider::Provider;
+use mosaic_core::models::{ModelProfileConfig, ModelRoutingStore};
+use mosaic_core::provider::{ChatRequest, ChatResponse, ModelInfo, Provider, ProviderHealth};
 use mosaic_core::session::SessionStore;
 use mosaic_core::state::{StateMode, StatePaths};
 use mosaic_ops::{
-    ApprovalMode, ApprovalStore, RuntimePolicy, SandboxProfile, SandboxStore, SystemEventStore,
-    collect_logs, list_profiles, snapshot_presence, system_events_path,
+    ApprovalDecision, ApprovalMode, ApprovalStore, RuntimePolicy, SandboxProfile, SandboxStore,
+    SystemEventStore, collect_logs, evaluate_approval, evaluate_sandbox, list_profiles,
+    snapshot_presence, system_events_path,
 };
 use mosaic_provider_openai::OpenAiCompatibleProvider;
 use mosaic_security::{
     SecurityAuditOptions, SecurityAuditor, SecurityBaselineConfig, apply_baseline, report_to_sarif,
 };
-use mosaic_tools::ToolExecutor;
+use mosaic_tools::{RunCommandOutput, ToolContext, ToolExecutor};
 
 const PROJECT_STATE_DIR: &str = ".mosaic";
+static PAIRING_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
+static HOOK_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Parser, Debug)]
 #[command(name = "mosaic", version, about = "Mosaic local agent CLI")]
@@ -76,6 +81,10 @@ enum Commands {
     Session(SessionArgs),
     Gateway(GatewayArgs),
     Channels(ChannelsArgs),
+    Nodes(NodesArgs),
+    Devices(DevicesArgs),
+    Pairing(PairingArgs),
+    Hooks(HooksArgs),
     Logs(LogsArgs),
     System(SystemArgs),
     Approvals(ApprovalsArgs),
@@ -137,6 +146,34 @@ struct ModelsArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum ModelsCommand {
     List,
+    Status,
+    Set {
+        model: String,
+    },
+    Aliases {
+        #[command(subcommand)]
+        command: ModelAliasesCommand,
+    },
+    Fallbacks {
+        #[command(subcommand)]
+        command: ModelFallbacksCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ModelAliasesCommand {
+    List,
+    Set { alias: String, model: String },
+    Remove { alias: String },
+    Clear,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ModelFallbacksCommand {
+    List,
+    Add { model: String },
+    Remove { model: String },
+    Clear,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -188,14 +225,33 @@ struct GatewayArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 enum GatewayCommand {
-    Run {
+    Install {
         #[arg(long, default_value = "127.0.0.1")]
         host: String,
         #[arg(long, default_value_t = 8787)]
         port: u16,
     },
-    Status,
-    Health,
+    #[command(visible_alias = "run")]
+    Start {
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    Restart {
+        #[arg(long)]
+        host: Option<String>,
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    Status {
+        #[arg(long)]
+        deep: bool,
+    },
+    Health {
+        #[arg(long)]
+        verbose: bool,
+    },
     Call {
         method: String,
         #[arg(long)]
@@ -204,12 +260,137 @@ enum GatewayCommand {
     Probe,
     Discover,
     Stop,
+    Uninstall,
     #[command(hide = true)]
     Serve {
         #[arg(long)]
         host: String,
         #[arg(long)]
         port: u16,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct NodesArgs {
+    #[command(subcommand)]
+    command: NodesCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum NodesCommand {
+    List,
+    Status {
+        node_id: Option<String>,
+    },
+    Run {
+        node_id: String,
+        #[arg(long)]
+        command: String,
+    },
+    Invoke {
+        node_id: String,
+        method: String,
+        #[arg(long)]
+        params: Option<String>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct DevicesArgs {
+    #[command(subcommand)]
+    command: DevicesCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum DevicesCommand {
+    List,
+    Approve {
+        device_id: String,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Reject {
+        device_id: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    Rotate {
+        device_id: String,
+    },
+    Revoke {
+        device_id: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct PairingArgs {
+    #[command(subcommand)]
+    command: PairingCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum PairingCommand {
+    List {
+        #[arg(long, value_enum)]
+        status: Option<PairingStatusArg>,
+    },
+    Approve {
+        request_id: String,
+    },
+    #[command(hide = true)]
+    Request {
+        #[arg(long)]
+        device: String,
+        #[arg(long, default_value = "local")]
+        node: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct HooksArgs {
+    #[command(subcommand)]
+    command: HooksCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum HooksCommand {
+    List {
+        #[arg(long)]
+        event: Option<String>,
+    },
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        event: String,
+        #[arg(long)]
+        command: String,
+        #[arg(long)]
+        disabled: bool,
+    },
+    Remove {
+        hook_id: String,
+    },
+    Enable {
+        hook_id: String,
+    },
+    Disable {
+        hook_id: String,
+    },
+    Run {
+        hook_id: String,
+        #[arg(long)]
+        data: Option<String>,
+    },
+    Logs {
+        #[arg(long)]
+        hook: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        tail: usize,
     },
 }
 
@@ -669,6 +850,156 @@ struct GatewayState {
     updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GatewayServiceState {
+    installed: bool,
+    host: String,
+    port: u16,
+    installed_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+struct GatewayRuntimeStatus {
+    running: bool,
+    process_alive: bool,
+    endpoint_healthy: bool,
+    state: Option<GatewayState>,
+    service: Option<GatewayServiceState>,
+    target_host: String,
+    target_port: u16,
+}
+
+#[derive(Debug, Clone)]
+struct GatewayStartResult {
+    state: GatewayState,
+    already_running: bool,
+}
+
+#[derive(Debug, Clone)]
+struct GatewayStopResult {
+    was_running: bool,
+    stopped: bool,
+    state: Option<GatewayState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum NodeRuntimeStatus {
+    Online,
+    Offline,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct NodeRecord {
+    id: String,
+    name: String,
+    status: NodeRuntimeStatus,
+    capabilities: Vec<String>,
+    last_seen_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum DeviceStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Revoked,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DeviceRecord {
+    id: String,
+    name: String,
+    fingerprint: String,
+    status: DeviceStatus,
+    token_version: u32,
+    last_seen_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum PairingStatus {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PairingRequestRecord {
+    id: String,
+    device_id: String,
+    node_id: String,
+    status: PairingStatus,
+    reason: Option<String>,
+    requested_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HookRecord {
+    id: String,
+    name: String,
+    event: String,
+    command: String,
+    enabled: bool,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    last_triggered_at: Option<DateTime<Utc>>,
+    last_result: Option<HookLastResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HookLastResult {
+    ok: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    approved_by: Option<String>,
+    error_code: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HookEventRecord {
+    ts: DateTime<Utc>,
+    hook_id: String,
+    hook_name: String,
+    event: String,
+    trigger: String,
+    command: String,
+    delivery_status: String,
+    ok: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    approved_by: Option<String>,
+    error_code: Option<String>,
+    error: Option<String>,
+    stdout_preview: Option<String>,
+    stderr_preview: Option<String>,
+    data: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct HookExecutionReport {
+    hook_id: String,
+    hook_name: String,
+    event: String,
+    trigger: String,
+    command: String,
+    ok: bool,
+    exit_code: Option<i32>,
+    duration_ms: Option<u64>,
+    approved_by: Option<String>,
+    error_code: Option<String>,
+    error: Option<String>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 #[value(rename_all = "snake_case")]
 enum GuardModeArg {
@@ -703,6 +1034,24 @@ enum SandboxProfileArg {
     Elevated,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum PairingStatusArg {
+    Pending,
+    Approved,
+    Rejected,
+}
+
+impl From<PairingStatusArg> for PairingStatus {
+    fn from(value: PairingStatusArg) -> Self {
+        match value {
+            PairingStatusArg::Pending => Self::Pending,
+            PairingStatusArg::Approved => Self::Approved,
+            PairingStatusArg::Rejected => Self::Rejected,
+        }
+    }
+}
+
 impl From<SandboxProfileArg> for SandboxProfile {
     fn from(value: SandboxProfileArg) -> Self {
         match value {
@@ -728,6 +1077,64 @@ struct RuntimeContext {
     agent: AgentRunner,
     active_agent_id: Option<String>,
     active_profile_name: String,
+}
+
+struct ModelRoutingProvider {
+    inner: Arc<dyn Provider>,
+    fallback_models: Vec<String>,
+}
+
+impl ModelRoutingProvider {
+    fn new(inner: Arc<dyn Provider>, fallback_models: Vec<String>) -> Self {
+        Self {
+            inner,
+            fallback_models,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for ModelRoutingProvider {
+    async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+        self.inner.list_models().await
+    }
+
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
+        if self.fallback_models.is_empty() {
+            return self.inner.chat(request).await;
+        }
+
+        let mut attempts = vec![request.model.clone()];
+        for model in &self.fallback_models {
+            if !attempts.iter().any(|candidate| candidate == model) {
+                attempts.push(model.clone());
+            }
+        }
+
+        let mut last_error: Option<MosaicError> = None;
+        for model in &attempts {
+            let mut retry_request = request.clone();
+            retry_request.model = model.clone();
+            match self.inner.chat(retry_request).await {
+                Ok(response) => return Ok(response),
+                Err(err) => {
+                    if matches!(err, MosaicError::Auth(_)) {
+                        return Err(err);
+                    }
+                    last_error = Some(err);
+                }
+            }
+        }
+
+        let chain = attempts.join(" -> ");
+        Err(last_error
+            .unwrap_or_else(|| MosaicError::Unknown("model fallback failed".to_string()))
+            .with_context(format!("chat failed across model chain [{chain}]")))
+    }
+
+    async fn health(&self) -> Result<ProviderHealth> {
+        self.inner.health().await
+    }
 }
 
 #[tokio::main]
@@ -768,6 +1175,10 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Session(args) => handle_session(&cli, args).await,
         Commands::Gateway(args) => handle_gateway(&cli, args).await,
         Commands::Channels(args) => handle_channels(&cli, args).await,
+        Commands::Nodes(args) => handle_nodes(&cli, args).await,
+        Commands::Devices(args) => handle_devices(&cli, args),
+        Commands::Pairing(args) => handle_pairing(&cli, args),
+        Commands::Hooks(args) => handle_hooks(&cli, args),
         Commands::Logs(args) => handle_logs(&cli, args).await,
         Commands::System(args) => handle_system(&cli, args),
         Commands::Approvals(args) => handle_approvals(&cli, args),
@@ -926,8 +1337,188 @@ async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
                 println!("Total models: {}", models.len());
             }
         }
+        ModelsCommand::Status => {
+            let paths = resolve_state_paths(cli.project_state)?;
+            paths.ensure_dirs()?;
+            let manager = ConfigManager::new(paths.config_path.clone());
+            let config = manager.load()?;
+            let resolved = config.resolve_profile(Some(&cli.profile))?;
+            let model_store = ModelRoutingStore::new(paths.models_path.clone());
+            let profile_models = model_store.profile(&resolved.profile_name)?;
+            let current_model = resolved.profile.provider.model.clone();
+            let (effective_model, used_alias) =
+                resolve_effective_model(&profile_models, &current_model);
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "profile": resolved.profile_name,
+                    "base_url": resolved.profile.provider.base_url,
+                    "api_key_env": resolved.profile.provider.api_key_env,
+                    "current_model": current_model,
+                    "effective_model": effective_model,
+                    "used_alias": used_alias,
+                    "aliases": profile_models.aliases,
+                    "fallbacks": profile_models.fallbacks,
+                    "models_path": model_store.path().display().to_string(),
+                }));
+            } else {
+                println!("profile: {}", resolved.profile_name);
+                println!("base url: {}", resolved.profile.provider.base_url);
+                println!("api key env: {}", resolved.profile.provider.api_key_env);
+                println!("current model: {}", current_model);
+                if let Some(alias) = used_alias {
+                    println!("effective model: {} (alias: {alias})", effective_model);
+                } else {
+                    println!("effective model: {}", effective_model);
+                }
+                if profile_models.aliases.is_empty() {
+                    println!("aliases: <empty>");
+                } else {
+                    println!("aliases:");
+                    for (alias, target) in profile_models.aliases {
+                        println!("- {alias} => {target}");
+                    }
+                }
+                if profile_models.fallbacks.is_empty() {
+                    println!("fallbacks: <empty>");
+                } else {
+                    println!("fallbacks:");
+                    for fallback in profile_models.fallbacks {
+                        println!("- {fallback}");
+                    }
+                }
+                println!("models path: {}", model_store.path().display());
+            }
+        }
+        ModelsCommand::Set { model } => {
+            let requested_model = model.trim();
+            if requested_model.is_empty() {
+                return Err(MosaicError::Validation("model cannot be empty".to_string()));
+            }
+            let paths = resolve_state_paths(cli.project_state)?;
+            paths.ensure_dirs()?;
+            let manager = ConfigManager::new(paths.config_path.clone());
+            let mut config = manager.load()?;
+            let model_store = ModelRoutingStore::new(paths.models_path.clone());
+            let profile_models = model_store.profile(&cli.profile)?;
+            let (effective_model, used_alias) =
+                resolve_effective_model(&profile_models, requested_model);
+
+            let profile = config.profiles.get_mut(&cli.profile).ok_or_else(|| {
+                MosaicError::Config(format!("profile '{}' not found", cli.profile))
+            })?;
+            let previous_model = profile.provider.model.clone();
+            profile.provider.model = effective_model.clone();
+            config.active_profile = cli.profile.clone();
+            manager.save(&config)?;
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "profile": cli.profile,
+                    "requested_model": requested_model,
+                    "effective_model": effective_model,
+                    "used_alias": used_alias,
+                    "previous_model": previous_model,
+                }));
+            } else {
+                if let Some(alias) = used_alias {
+                    println!(
+                        "updated profile '{}' model: {} -> {} (from alias '{}')",
+                        cli.profile, previous_model, effective_model, alias
+                    );
+                } else {
+                    println!(
+                        "updated profile '{}' model: {} -> {}",
+                        cli.profile, previous_model, effective_model
+                    );
+                }
+            }
+        }
+        ModelsCommand::Aliases { command } => {
+            let paths = resolve_state_paths(cli.project_state)?;
+            paths.ensure_dirs()?;
+            let manager = ConfigManager::new(paths.config_path.clone());
+            let config = manager.load()?;
+            let _ = config.resolve_profile(Some(&cli.profile))?;
+            let model_store = ModelRoutingStore::new(paths.models_path.clone());
+            let profile_models = match command {
+                ModelAliasesCommand::List => model_store.profile(&cli.profile)?,
+                ModelAliasesCommand::Set { alias, model } => {
+                    model_store.set_alias(&cli.profile, &alias, &model)?
+                }
+                ModelAliasesCommand::Remove { alias } => {
+                    model_store.remove_alias(&cli.profile, &alias)?
+                }
+                ModelAliasesCommand::Clear => model_store.clear_aliases(&cli.profile)?,
+            };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "profile": cli.profile,
+                    "aliases": profile_models.aliases,
+                    "models_path": model_store.path().display().to_string(),
+                }));
+            } else if profile_models.aliases.is_empty() {
+                println!("aliases: <empty>");
+                println!("models path: {}", model_store.path().display());
+            } else {
+                println!("aliases:");
+                for (alias, target) in profile_models.aliases {
+                    println!("- {alias} => {target}");
+                }
+                println!("models path: {}", model_store.path().display());
+            }
+        }
+        ModelsCommand::Fallbacks { command } => {
+            let paths = resolve_state_paths(cli.project_state)?;
+            paths.ensure_dirs()?;
+            let manager = ConfigManager::new(paths.config_path.clone());
+            let config = manager.load()?;
+            let _ = config.resolve_profile(Some(&cli.profile))?;
+            let model_store = ModelRoutingStore::new(paths.models_path.clone());
+            let profile_models = match command {
+                ModelFallbacksCommand::List => model_store.profile(&cli.profile)?,
+                ModelFallbacksCommand::Add { model } => {
+                    model_store.add_fallback(&cli.profile, &model)?
+                }
+                ModelFallbacksCommand::Remove { model } => {
+                    model_store.remove_fallback(&cli.profile, &model)?
+                }
+                ModelFallbacksCommand::Clear => model_store.clear_fallbacks(&cli.profile)?,
+            };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "profile": cli.profile,
+                    "fallbacks": profile_models.fallbacks,
+                    "models_path": model_store.path().display().to_string(),
+                }));
+            } else if profile_models.fallbacks.is_empty() {
+                println!("fallbacks: <empty>");
+                println!("models path: {}", model_store.path().display());
+            } else {
+                println!("fallbacks:");
+                for fallback in profile_models.fallbacks {
+                    println!("- {fallback}");
+                }
+                println!("models path: {}", model_store.path().display());
+            }
+        }
     }
     Ok(())
+}
+
+fn resolve_effective_model(
+    profile_models: &ModelProfileConfig,
+    requested_model: &str,
+) -> (String, Option<String>) {
+    let normalized_requested = requested_model.trim().to_ascii_lowercase();
+    if let Some(target) = profile_models.aliases.get(&normalized_requested) {
+        return (target.clone(), Some(normalized_requested));
+    }
+    (requested_model.trim().to_string(), None)
 }
 
 async fn handle_ask(cli: &Cli, args: AskArgs) -> Result<()> {
@@ -1142,134 +1733,182 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
     let gateway_path = paths.data_dir.join("gateway.json");
+    let gateway_service_path = paths.data_dir.join("gateway-service.json");
     match args.command {
-        GatewayCommand::Run { host, port } => {
-            if let Some(existing) = load_json_file_opt::<GatewayState>(&gateway_path)?
-                && is_process_alive(existing.pid)
-                && probe_gateway_health(&existing.host, existing.port).await
-            {
-                if cli.json {
-                    print_json(&json!({
-                        "ok": true,
-                        "gateway": existing,
-                        "message": "gateway already running",
-                    }));
-                } else {
-                    println!(
-                        "Gateway already running on {}:{}",
-                        existing.host, existing.port
-                    );
-                }
-                return Ok(());
-            }
-
-            let pid = if gateway_test_mode() {
-                0
-            } else {
-                spawn_gateway_process(cli, &host, port)?
-            };
-
-            if !gateway_test_mode() {
-                let mut ready = false;
-                for _ in 0..40 {
-                    if probe_gateway_health(&host, port).await {
-                        ready = true;
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-                if !ready {
-                    return Err(MosaicError::Network(format!(
-                        "gateway did not become healthy at http://{host}:{port}/health"
-                    )));
-                }
-            }
-
-            let now = Utc::now();
-            let state = GatewayState {
-                running: true,
-                host,
-                port,
-                pid,
-                started_at: now,
-                updated_at: now,
-            };
-            save_json_file(&gateway_path, &state)?;
+        GatewayCommand::Install { host, port } => {
+            let service =
+                upsert_gateway_service(&gateway_service_path, Some(host), Some(port), true)?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
-                    "gateway": state,
-                    "path": gateway_path.display().to_string(),
+                    "service": service,
+                    "path": gateway_service_path.display().to_string(),
                 }));
             } else {
+                println!("gateway service installed");
+                println!("host: {}", service.host);
+                println!("port: {}", service.port);
+                println!("path: {}", gateway_service_path.display());
+            }
+        }
+        GatewayCommand::Start { host, port } => {
+            let (resolved_host, resolved_port) =
+                resolve_gateway_start_target(&gateway_service_path, host, port, "127.0.0.1", 8787)?;
+            let service = upsert_gateway_service(
+                &gateway_service_path,
+                Some(resolved_host.clone()),
+                Some(resolved_port),
+                true,
+            )?;
+            let start =
+                start_gateway_runtime(cli, &gateway_path, resolved_host, resolved_port).await?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "already_running": start.already_running,
+                    "gateway": start.state,
+                    "service": service,
+                    "path": gateway_path.display().to_string(),
+                }));
+            } else if start.already_running {
+                println!(
+                    "Gateway already running on {}:{}",
+                    start.state.host, start.state.port
+                );
+            } else {
                 println!("Gateway is running.");
-                println!("host: {}", state.host);
-                println!("port: {}", state.port);
-                println!("pid: {}", state.pid);
+                println!("host: {}", start.state.host);
+                println!("port: {}", start.state.port);
+                println!("pid: {}", start.state.pid);
                 println!("state: {}", gateway_path.display());
             }
         }
-        GatewayCommand::Status => {
-            let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
-            let running = match &state {
-                Some(value) => {
-                    if gateway_test_mode() {
-                        value.running
-                    } else {
-                        is_process_alive(value.pid)
-                            && probe_gateway_health(&value.host, value.port).await
-                    }
-                }
-                None => false,
-            };
+        GatewayCommand::Restart { host, port } => {
+            let (resolved_host, resolved_port) =
+                resolve_gateway_start_target(&gateway_service_path, host, port, "127.0.0.1", 8787)?;
+            let service = upsert_gateway_service(
+                &gateway_service_path,
+                Some(resolved_host.clone()),
+                Some(resolved_port),
+                true,
+            )?;
+            let stop = stop_gateway_runtime(&gateway_path, false)?;
+            let start =
+                start_gateway_runtime(cli, &gateway_path, resolved_host, resolved_port).await?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
-                    "running": running,
-                    "gateway": state,
+                    "was_running": stop.was_running,
+                    "stopped": stop.stopped,
+                    "gateway": start.state,
+                    "service": service,
                     "path": gateway_path.display().to_string(),
                 }));
-            } else if let Some(state) = state {
+            } else {
                 println!(
-                    "gateway: running={} host={} port={} pid={} updated={}",
-                    running,
+                    "gateway restarted (previous_running={} stopped={})",
+                    stop.was_running, stop.stopped
+                );
+                println!("host: {}", start.state.host);
+                println!("port: {}", start.state.port);
+                println!("pid: {}", start.state.pid);
+            }
+        }
+        GatewayCommand::Status { deep } => {
+            let status =
+                collect_gateway_runtime_status(&gateway_path, &gateway_service_path).await?;
+            if cli.json {
+                let mut payload = json!({
+                    "ok": true,
+                    "running": status.running,
+                    "installed": status
+                        .service
+                        .as_ref()
+                        .map(|service| service.installed)
+                        .unwrap_or(false),
+                    "gateway": status.state,
+                    "service": status.service,
+                    "path": gateway_path.display().to_string(),
+                    "service_path": gateway_service_path.display().to_string(),
+                });
+                if deep {
+                    payload["deep"] = json!({
+                        "process_alive": status.process_alive,
+                        "endpoint_healthy": status.endpoint_healthy,
+                        "target_host": status.target_host,
+                        "target_port": status.target_port,
+                        "state_file_exists": gateway_path.exists(),
+                        "service_file_exists": gateway_service_path.exists(),
+                    });
+                }
+                print_json(&payload);
+            } else if let Some(state) = status.state {
+                println!(
+                    "gateway: running={} installed={} host={} port={} pid={} updated={}",
+                    status.running,
+                    status
+                        .service
+                        .as_ref()
+                        .map(|service| service.installed)
+                        .unwrap_or(false),
                     state.host,
                     state.port,
                     state.pid,
                     state.updated_at.to_rfc3339()
                 );
+                if deep {
+                    println!("process_alive: {}", status.process_alive);
+                    println!("endpoint_healthy: {}", status.endpoint_healthy);
+                    println!("target: {}:{}", status.target_host, status.target_port);
+                }
             } else {
-                println!("gateway: not running");
+                println!(
+                    "gateway: not running (installed={})",
+                    status
+                        .service
+                        .as_ref()
+                        .map(|service| service.installed)
+                        .unwrap_or(false)
+                );
+                if deep {
+                    println!("process_alive: {}", status.process_alive);
+                    println!("endpoint_healthy: {}", status.endpoint_healthy);
+                    println!("target: {}:{}", status.target_host, status.target_port);
+                }
             }
         }
-        GatewayCommand::Health => {
-            let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
-            let process_alive = state.as_ref().is_some_and(|v| {
-                if gateway_test_mode() {
-                    v.running
-                } else {
-                    is_process_alive(v.pid)
-                }
-            });
-            let endpoint_healthy = if let Some(value) = &state {
-                if gateway_test_mode() {
-                    value.running
-                } else {
-                    probe_gateway_health(&value.host, value.port).await
-                }
-            } else {
-                false
-            };
+        GatewayCommand::Health { verbose } => {
+            let status =
+                collect_gateway_runtime_status(&gateway_path, &gateway_service_path).await?;
+            let installed = status
+                .service
+                .as_ref()
+                .map(|service| service.installed)
+                .unwrap_or(false);
             let mut checks = vec![
+                run_check(
+                    "gateway_service_file",
+                    gateway_service_path.exists(),
+                    "gateway service file",
+                ),
+                run_check(
+                    "gateway_installed",
+                    installed,
+                    if installed {
+                        "gateway service installed"
+                    } else {
+                        "gateway service not installed"
+                    },
+                ),
                 run_check(
                     "gateway_state_file",
                     gateway_path.exists(),
-                    "gateway state file",
+                    "gateway runtime state file",
                 ),
                 run_check(
                     "gateway_process",
-                    process_alive,
-                    if process_alive {
+                    status.process_alive,
+                    if status.process_alive {
                         "gateway process is alive"
                     } else {
                         "gateway process is not alive"
@@ -1277,22 +1916,41 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                 ),
                 run_check(
                     "gateway_endpoint",
-                    endpoint_healthy,
-                    if endpoint_healthy {
+                    status.endpoint_healthy,
+                    if status.endpoint_healthy {
                         "GET /health reachable"
                     } else {
                         "GET /health unreachable"
                     },
                 ),
             ];
-            if let Some(state) = state {
+            if let Some(state) = status.state {
                 checks.push(run_check(
                     "gateway_target",
                     true,
                     format!("{}:{} (pid={})", state.host, state.port, state.pid),
                 ));
+            } else {
+                checks.push(run_check(
+                    "gateway_target",
+                    installed,
+                    format!("{}:{}", status.target_host, status.target_port),
+                ));
+            }
+            if verbose {
+                checks.push(run_check(
+                    "gateway_runtime_running",
+                    status.running,
+                    format!("running={}", status.running),
+                ));
             }
             emit_checks(cli.json, "gateway_health", checks)?;
+            if verbose && !cli.json {
+                println!(
+                    "target endpoint: http://{}:{}",
+                    status.target_host, status.target_port
+                );
+            }
         }
         GatewayCommand::Call { method, params } => {
             if gateway_test_mode() {
@@ -1323,6 +1981,21 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                         "echo": params,
                         "test_mode": true,
                     }),
+                    "nodes.run" => json!({
+                        "ok": true,
+                        "status": "accepted",
+                        "mode": "test_mode",
+                        "node_id": params.get("node_id").cloned().unwrap_or(Value::Null),
+                        "command": params.get("command").cloned().unwrap_or(Value::Null),
+                    }),
+                    "nodes.invoke" => json!({
+                        "ok": true,
+                        "status": "accepted",
+                        "mode": "test_mode",
+                        "node_id": params.get("node_id").cloned().unwrap_or(Value::Null),
+                        "method": params.get("method").cloned().unwrap_or(Value::Null),
+                        "params": params.get("params").cloned().unwrap_or(Value::Null),
+                    }),
                     _ => {
                         return Err(MosaicError::GatewayProtocol(format!(
                             "unknown gateway method '{}' in test mode",
@@ -1348,7 +2021,7 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                 return Ok(());
             }
 
-            let (host, port) = resolve_gateway_target(&gateway_path)?;
+            let (host, port) = resolve_gateway_target(&gateway_path, &gateway_service_path)?;
             let client = HttpGatewayClient::new(&host, port)?;
             let params = params
                 .as_deref()
@@ -1403,7 +2076,7 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                 return Ok(());
             }
 
-            let (host, port) = resolve_gateway_target(&gateway_path)?;
+            let (host, port) = resolve_gateway_target(&gateway_path, &gateway_service_path)?;
             let client = HttpGatewayClient::new(&host, port)?;
             let probe = client.probe().await?;
             if cli.json {
@@ -1424,7 +2097,7 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
         }
         GatewayCommand::Discover => {
             if gateway_test_mode() {
-                let methods = vec!["health", "status", "echo"];
+                let methods = vec!["health", "status", "echo", "nodes.run", "nodes.invoke"];
                 if cli.json {
                     print_json(&json!({
                         "ok": true,
@@ -1440,11 +2113,13 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     println!("- health");
                     println!("- status");
                     println!("- echo");
+                    println!("- nodes.run");
+                    println!("- nodes.invoke");
                 }
                 return Ok(());
             }
 
-            let (host, port) = resolve_gateway_target(&gateway_path)?;
+            let (host, port) = resolve_gateway_target(&gateway_path, &gateway_service_path)?;
             let client = HttpGatewayClient::new(&host, port)?;
             let discovery = client.discover().await?;
             if cli.json {
@@ -1466,52 +2141,835 @@ async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             }
         }
         GatewayCommand::Stop => {
-            let state: GatewayState = load_json_file_opt(&gateway_path)?.ok_or_else(|| {
+            let stop = stop_gateway_runtime(&gateway_path, true)?;
+            let next = stop.state.ok_or_else(|| {
                 MosaicError::Config("gateway state file not found; not running".to_string())
             })?;
-            let was_alive = if gateway_test_mode() {
-                state.running
-            } else {
-                is_process_alive(state.pid)
-            };
-            let stopped = if was_alive && !gateway_test_mode() {
-                stop_process(state.pid)?
-            } else {
-                false
-            };
-            let now = Utc::now();
-            let next = GatewayState {
-                running: false,
-                host: state.host.clone(),
-                port: state.port,
-                pid: state.pid,
-                started_at: state.started_at,
-                updated_at: now,
-            };
-            save_json_file(&gateway_path, &next)?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
-                    "was_running": was_alive,
-                    "stopped": stopped || !was_alive,
+                    "was_running": stop.was_running,
+                    "stopped": stop.stopped,
                     "gateway": next,
                 }));
-            } else if was_alive {
+            } else if stop.was_running {
                 println!(
                     "Gateway {} (pid={})",
-                    if stopped {
+                    if stop.stopped {
                         "stopped"
                     } else {
                         "stop signal sent"
                     },
-                    state.pid
+                    next.pid
                 );
             } else {
                 println!("Gateway process was not running.");
             }
         }
+        GatewayCommand::Uninstall => {
+            let stop = stop_gateway_runtime(&gateway_path, false)?;
+            let removed_state_file = if gateway_path.exists() {
+                std::fs::remove_file(&gateway_path)?;
+                true
+            } else {
+                false
+            };
+            let removed_service_file = if gateway_service_path.exists() {
+                std::fs::remove_file(&gateway_service_path)?;
+                true
+            } else {
+                false
+            };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "was_running": stop.was_running,
+                    "stopped": stop.stopped,
+                    "removed_state_file": removed_state_file,
+                    "removed_service_file": removed_service_file,
+                }));
+            } else {
+                println!(
+                    "gateway uninstalled (was_running={} stopped={} removed_state={} removed_service={})",
+                    stop.was_running, stop.stopped, removed_state_file, removed_service_file
+                );
+            }
+        }
         GatewayCommand::Serve { host, port } => {
             run_gateway_http_server(&host, port)?;
+        }
+    }
+    Ok(())
+}
+
+async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let nodes_path = nodes_file_path(&paths.data_dir);
+    let devices_path = devices_file_path(&paths.data_dir);
+    let pairings_path = pairing_requests_file_path(&paths.data_dir);
+    let mut nodes = load_nodes_or_default(&nodes_path)?;
+
+    match args.command {
+        NodesCommand::List => {
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "nodes": nodes,
+                    "path": nodes_path.display().to_string(),
+                }));
+            } else {
+                for node in nodes {
+                    println!(
+                        "{} name={} status={:?} capabilities={} last_seen={}",
+                        node.id,
+                        node.name,
+                        node.status,
+                        if node.capabilities.is_empty() {
+                            "-".to_string()
+                        } else {
+                            node.capabilities.join(",")
+                        },
+                        node.last_seen_at.to_rfc3339()
+                    );
+                }
+            }
+        }
+        NodesCommand::Status { node_id } => {
+            let devices = load_devices_or_default(&devices_path)?;
+            let pairings = load_pairing_requests_or_default(&pairings_path)?;
+            if let Some(node_id) = node_id {
+                let node = nodes
+                    .iter()
+                    .find(|item| item.id == node_id)
+                    .ok_or_else(|| {
+                        MosaicError::Validation(format!("node '{}' not found", node_id))
+                    })?;
+                let node_pairings = pairings
+                    .iter()
+                    .filter(|item| item.node_id == node.id)
+                    .collect::<Vec<_>>();
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "node": node,
+                        "pairings": {
+                            "total": node_pairings.len(),
+                            "pending": node_pairings
+                                .iter()
+                                .filter(|item| item.status == PairingStatus::Pending)
+                                .count(),
+                        },
+                        "approved_devices": devices
+                            .iter()
+                            .filter(|item| item.status == DeviceStatus::Approved)
+                            .count(),
+                    }));
+                } else {
+                    println!("node: {} ({})", node.id, node.name);
+                    println!("status: {:?}", node.status);
+                    println!(
+                        "capabilities: {}",
+                        if node.capabilities.is_empty() {
+                            "-".to_string()
+                        } else {
+                            node.capabilities.join(",")
+                        }
+                    );
+                    println!("last seen: {}", node.last_seen_at.to_rfc3339());
+                    println!(
+                        "pairings: total={} pending={}",
+                        node_pairings.len(),
+                        node_pairings
+                            .iter()
+                            .filter(|item| item.status == PairingStatus::Pending)
+                            .count()
+                    );
+                }
+            } else if cli.json {
+                let summary = json!({
+                    "total": nodes.len(),
+                    "online": nodes
+                        .iter()
+                        .filter(|item| item.status == NodeRuntimeStatus::Online)
+                        .count(),
+                    "approved_devices": devices
+                        .iter()
+                        .filter(|item| item.status == DeviceStatus::Approved)
+                        .count(),
+                    "pending_pairings": pairings
+                        .iter()
+                        .filter(|item| item.status == PairingStatus::Pending)
+                        .count(),
+                });
+                print_json(&json!({
+                    "ok": true,
+                    "summary": summary,
+                    "nodes": nodes,
+                }));
+            } else {
+                println!("nodes total: {}", nodes.len());
+                println!(
+                    "online: {}",
+                    nodes
+                        .iter()
+                        .filter(|item| item.status == NodeRuntimeStatus::Online)
+                        .count()
+                );
+            }
+        }
+        NodesCommand::Run { node_id, command } => {
+            let now = Utc::now();
+            let run_id = format!("run-{}-{}", now.timestamp_millis(), next_pairing_seq());
+            let node = nodes
+                .iter_mut()
+                .find(|item| item.id == node_id)
+                .ok_or_else(|| MosaicError::Validation(format!("node '{}' not found", node_id)))?;
+            node.last_seen_at = now;
+            node.updated_at = now;
+            let node_id = node.id.clone();
+            save_nodes(&nodes_path, &nodes)?;
+
+            let approval_store = ApprovalStore::new(paths.approvals_policy_path.clone());
+            let sandbox_store = SandboxStore::new(paths.sandbox_policy_path.clone());
+            let approval_policy = approval_store.load_or_default()?;
+            let sandbox_policy = sandbox_store.load_or_default()?;
+            if let Some(reason) = evaluate_sandbox(&command, sandbox_policy.profile) {
+                return Err(MosaicError::SandboxDenied(reason));
+            }
+            let approved_by = match evaluate_approval(&command, &approval_policy) {
+                ApprovalDecision::Auto { approved_by } => approved_by,
+                ApprovalDecision::NeedsConfirmation { reason } => {
+                    if cli.yes {
+                        "flag_yes".to_string()
+                    } else {
+                        return Err(MosaicError::ApprovalRequired(format!(
+                            "{reason}. rerun with --yes"
+                        )));
+                    }
+                }
+                ApprovalDecision::Deny { reason } => {
+                    return Err(MosaicError::ApprovalRequired(reason));
+                }
+            };
+            let gateway_path = paths.data_dir.join("gateway.json");
+            let gateway_service_path = paths.data_dir.join("gateway-service.json");
+            let gateway = dispatch_gateway_call(
+                &gateway_path,
+                &gateway_service_path,
+                "nodes.run",
+                json!({
+                    "node_id": node_id.clone(),
+                    "command": command.clone(),
+                    "approved_by": approved_by.clone(),
+                }),
+            )
+            .await?;
+            let accepted = gateway
+                .result
+                .get("ok")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let status = gateway
+                .result
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or(if accepted { "accepted" } else { "failed" });
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "run_id": run_id,
+                    "node_id": node_id.clone(),
+                    "accepted": accepted,
+                    "status": status,
+                    "gateway": {
+                        "host": gateway.host,
+                        "port": gateway.port,
+                        "request_id": gateway.request_id,
+                    },
+                    "result": gateway.result,
+                }));
+            } else {
+                println!("run submitted");
+                println!("run id: {run_id}");
+                println!("node: {}", node_id);
+                println!("status: {status}");
+                println!(
+                    "gateway: {}:{} request_id={}",
+                    gateway.host, gateway.port, gateway.request_id
+                );
+            }
+        }
+        NodesCommand::Invoke {
+            node_id,
+            method,
+            params,
+        } => {
+            let now = Utc::now();
+            let invoke_id = format!("invoke-{}-{}", now.timestamp_millis(), next_pairing_seq());
+            let node = nodes
+                .iter_mut()
+                .find(|item| item.id == node_id)
+                .ok_or_else(|| MosaicError::Validation(format!("node '{}' not found", node_id)))?;
+            node.last_seen_at = now;
+            node.updated_at = now;
+            let node_id = node.id.clone();
+            save_nodes(&nodes_path, &nodes)?;
+
+            let parsed_params = params
+                .as_deref()
+                .map(|value| parse_json_input(value, "invoke params"))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            let gateway_path = paths.data_dir.join("gateway.json");
+            let gateway_service_path = paths.data_dir.join("gateway-service.json");
+            let gateway = dispatch_gateway_call(
+                &gateway_path,
+                &gateway_service_path,
+                "nodes.invoke",
+                json!({
+                    "node_id": node_id.clone(),
+                    "method": method.clone(),
+                    "params": parsed_params.clone(),
+                }),
+            )
+            .await?;
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "invoke_id": invoke_id,
+                    "node_id": node_id.clone(),
+                    "method": method.clone(),
+                    "gateway": {
+                        "host": gateway.host,
+                        "port": gateway.port,
+                        "request_id": gateway.request_id,
+                    },
+                    "result": gateway.result,
+                }));
+            } else {
+                println!("invoke accepted");
+                println!("invoke id: {invoke_id}");
+                println!("node: {}", node_id);
+                println!("method: {method}");
+                println!(
+                    "gateway: {}:{} request_id={}",
+                    gateway.host, gateway.port, gateway.request_id
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_devices(cli: &Cli, args: DevicesArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let devices_path = devices_file_path(&paths.data_dir);
+    let mut devices = load_devices_or_default(&devices_path)?;
+
+    match args.command {
+        DevicesCommand::List => {
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "devices": devices,
+                    "path": devices_path.display().to_string(),
+                }));
+            } else if devices.is_empty() {
+                println!("No devices found.");
+            } else {
+                for device in devices {
+                    println!(
+                        "{} name={} status={:?} token_v={} last_seen={} last_error={}",
+                        device.id,
+                        device.name,
+                        device.status,
+                        device.token_version,
+                        device.last_seen_at.to_rfc3339(),
+                        device.last_error.unwrap_or_else(|| "-".to_string())
+                    );
+                }
+            }
+        }
+        DevicesCommand::Approve { device_id, name } => {
+            let now = Utc::now();
+            let fingerprint = format!("fp-{}-{}", now.timestamp_millis(), next_pairing_seq());
+            let device =
+                if let Some(existing) = devices.iter_mut().find(|item| item.id == device_id) {
+                    existing.status = DeviceStatus::Approved;
+                    if let Some(name) = name {
+                        existing.name = name.trim().to_string();
+                    }
+                    existing.updated_at = now;
+                    existing.last_seen_at = now;
+                    existing.last_error = None;
+                    existing.clone()
+                } else {
+                    let device = DeviceRecord {
+                        id: device_id.clone(),
+                        name: name.unwrap_or_else(|| device_id.clone()),
+                        fingerprint,
+                        status: DeviceStatus::Approved,
+                        token_version: 1,
+                        last_seen_at: now,
+                        updated_at: now,
+                        last_error: None,
+                    };
+                    devices.push(device.clone());
+                    device
+                };
+            save_devices(&devices_path, &devices)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "device": device,
+                }));
+            } else {
+                println!("device approved: {}", device.id);
+            }
+        }
+        DevicesCommand::Reject { device_id, reason } => {
+            let now = Utc::now();
+            let device = devices
+                .iter_mut()
+                .find(|item| item.id == device_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("device '{}' not found", device_id))
+                })?;
+            device.status = DeviceStatus::Rejected;
+            device.last_error = reason.clone();
+            device.updated_at = now;
+            let device = device.clone();
+            save_devices(&devices_path, &devices)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "device": device,
+                }));
+            } else {
+                println!("device rejected: {}", device.id);
+            }
+        }
+        DevicesCommand::Rotate { device_id } => {
+            let now = Utc::now();
+            let device = devices
+                .iter_mut()
+                .find(|item| item.id == device_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("device '{}' not found", device_id))
+                })?;
+            if device.status != DeviceStatus::Approved {
+                return Err(MosaicError::Validation(format!(
+                    "device '{}' must be approved before rotate",
+                    device_id
+                )));
+            }
+            device.token_version = device.token_version.saturating_add(1);
+            device.updated_at = now;
+            device.last_seen_at = now;
+            let device = device.clone();
+            save_devices(&devices_path, &devices)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "device": device,
+                }));
+            } else {
+                println!(
+                    "device rotated: {} token_v={}",
+                    device.id, device.token_version
+                );
+            }
+        }
+        DevicesCommand::Revoke { device_id, reason } => {
+            let now = Utc::now();
+            let device = devices
+                .iter_mut()
+                .find(|item| item.id == device_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("device '{}' not found", device_id))
+                })?;
+            device.status = DeviceStatus::Revoked;
+            device.last_error = reason.clone();
+            device.updated_at = now;
+            let device = device.clone();
+            save_devices(&devices_path, &devices)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "device": device,
+                }));
+            } else {
+                println!("device revoked: {}", device.id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_pairing(cli: &Cli, args: PairingArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let pairings_path = pairing_requests_file_path(&paths.data_dir);
+    let devices_path = devices_file_path(&paths.data_dir);
+    let nodes_path = nodes_file_path(&paths.data_dir);
+    let mut pairings = load_pairing_requests_or_default(&pairings_path)?;
+    let mut devices = load_devices_or_default(&devices_path)?;
+    let mut nodes = load_nodes_or_default(&nodes_path)?;
+
+    match args.command {
+        PairingCommand::List { status } => {
+            let filtered = if let Some(status) = status {
+                let status: PairingStatus = status.into();
+                pairings
+                    .into_iter()
+                    .filter(|item| item.status == status)
+                    .collect::<Vec<_>>()
+            } else {
+                pairings
+            };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "requests": filtered,
+                    "path": pairings_path.display().to_string(),
+                }));
+            } else if filtered.is_empty() {
+                println!("No pairing requests.");
+            } else {
+                for request in filtered {
+                    println!(
+                        "{} device={} node={} status={:?} requested={}",
+                        request.id,
+                        request.device_id,
+                        request.node_id,
+                        request.status,
+                        request.requested_at.to_rfc3339()
+                    );
+                }
+            }
+        }
+        PairingCommand::Approve { request_id } => {
+            let now = Utc::now();
+            let request = pairings
+                .iter_mut()
+                .find(|item| item.id == request_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("pairing request '{}' not found", request_id))
+                })?;
+            if request.status != PairingStatus::Pending {
+                return Err(MosaicError::Validation(format!(
+                    "pairing request '{}' is not pending",
+                    request_id
+                )));
+            }
+            request.status = PairingStatus::Approved;
+            request.updated_at = now;
+            let request_device_id = request.device_id.clone();
+            let request_node_id = request.node_id.clone();
+
+            let device = if let Some(device) =
+                devices.iter_mut().find(|item| item.id == request_device_id)
+            {
+                device.status = DeviceStatus::Approved;
+                device.updated_at = now;
+                device.last_seen_at = now;
+                device.last_error = None;
+                device.clone()
+            } else {
+                let device = DeviceRecord {
+                    id: request_device_id.clone(),
+                    name: request_device_id.clone(),
+                    fingerprint: format!("fp-{}-{}", now.timestamp_millis(), next_pairing_seq()),
+                    status: DeviceStatus::Approved,
+                    token_version: 1,
+                    last_seen_at: now,
+                    updated_at: now,
+                    last_error: None,
+                };
+                devices.push(device.clone());
+                device
+            };
+
+            let node = nodes
+                .iter_mut()
+                .find(|item| item.id == request_node_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("node '{}' not found", request_node_id))
+                })?;
+            node.status = NodeRuntimeStatus::Online;
+            node.last_seen_at = now;
+            node.updated_at = now;
+            let request = request.clone();
+
+            save_pairing_requests(&pairings_path, &pairings)?;
+            save_devices(&devices_path, &devices)?;
+            save_nodes(&nodes_path, &nodes)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "request": request,
+                    "device": device,
+                }));
+            } else {
+                println!("pairing approved: {}", request.id);
+                println!("device: {}", device.id);
+            }
+        }
+        PairingCommand::Request {
+            device,
+            node,
+            reason,
+        } => {
+            let now = Utc::now();
+            if !nodes.iter().any(|item| item.id == node) {
+                return Err(MosaicError::Validation(format!(
+                    "node '{}' not found",
+                    node
+                )));
+            }
+            if !devices.iter().any(|item| item.id == device) {
+                devices.push(DeviceRecord {
+                    id: device.clone(),
+                    name: device.clone(),
+                    fingerprint: format!("fp-{}-{}", now.timestamp_millis(), next_pairing_seq()),
+                    status: DeviceStatus::Pending,
+                    token_version: 1,
+                    last_seen_at: now,
+                    updated_at: now,
+                    last_error: None,
+                });
+                save_devices(&devices_path, &devices)?;
+            }
+            let request = PairingRequestRecord {
+                id: generate_pairing_request_id(),
+                device_id: device,
+                node_id: node,
+                status: PairingStatus::Pending,
+                reason,
+                requested_at: now,
+                updated_at: now,
+            };
+            pairings.push(request.clone());
+            save_pairing_requests(&pairings_path, &pairings)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "request": request,
+                }));
+            } else {
+                println!("pairing request created: {}", request.id);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_hooks(cli: &Cli, args: HooksArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let hooks_path = hooks_file_path(&paths.data_dir);
+    let mut hooks = load_hooks_or_default(&hooks_path)?;
+    match args.command {
+        HooksCommand::List { event } => {
+            let event_filter = event.map(|value| value.trim().to_string());
+            let filtered = hooks
+                .into_iter()
+                .filter(|hook| {
+                    if let Some(filter) = &event_filter {
+                        hook.event == *filter
+                    } else {
+                        true
+                    }
+                })
+                .collect::<Vec<_>>();
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "hooks": filtered,
+                    "path": hooks_path.display().to_string(),
+                }));
+            } else if filtered.is_empty() {
+                println!("No hooks configured.");
+            } else {
+                for hook in filtered {
+                    let status = if hook.enabled { "enabled" } else { "disabled" };
+                    println!(
+                        "{} [{}] {} -> {}",
+                        hook.id, status, hook.event, hook.command
+                    );
+                }
+            }
+        }
+        HooksCommand::Add {
+            name,
+            event,
+            command,
+            disabled,
+        } => {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err(MosaicError::Validation(
+                    "hook name cannot be empty".to_string(),
+                ));
+            }
+            let event = event.trim().to_string();
+            if event.is_empty() {
+                return Err(MosaicError::Validation(
+                    "hook event cannot be empty".to_string(),
+                ));
+            }
+            let command = command.trim().to_string();
+            if command.is_empty() {
+                return Err(MosaicError::Validation(
+                    "hook command cannot be empty".to_string(),
+                ));
+            }
+            let now = Utc::now();
+            let hook = HookRecord {
+                id: generate_hook_id(),
+                name,
+                event,
+                command,
+                enabled: !disabled,
+                created_at: now,
+                updated_at: now,
+                last_triggered_at: None,
+                last_result: None,
+            };
+            hooks.push(hook.clone());
+            save_hooks(&hooks_path, &hooks)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "hook": hook,
+                    "path": hooks_path.display().to_string(),
+                }));
+            } else {
+                println!("hook added: {}", hook.id);
+                println!("event: {}", hook.event);
+                println!("enabled: {}", hook.enabled);
+            }
+        }
+        HooksCommand::Remove { hook_id } => {
+            let before = hooks.len();
+            hooks.retain(|hook| hook.id != hook_id);
+            let removed = hooks.len() != before;
+            if removed {
+                save_hooks(&hooks_path, &hooks)?;
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": removed,
+                    "hook_id": hook_id,
+                }));
+            } else if removed {
+                println!("removed hook {hook_id}");
+            } else {
+                println!("hook {hook_id} not found");
+            }
+        }
+        HooksCommand::Enable { hook_id } => {
+            let hook = hooks
+                .iter_mut()
+                .find(|item| item.id == hook_id)
+                .ok_or_else(|| MosaicError::Validation(format!("hook '{}' not found", hook_id)))?;
+            hook.enabled = true;
+            hook.updated_at = Utc::now();
+            let hook = hook.clone();
+            save_hooks(&hooks_path, &hooks)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "hook": hook,
+                    "path": hooks_path.display().to_string(),
+                }));
+            } else {
+                println!("hook enabled: {}", hook.id);
+            }
+        }
+        HooksCommand::Disable { hook_id } => {
+            let hook = hooks
+                .iter_mut()
+                .find(|item| item.id == hook_id)
+                .ok_or_else(|| MosaicError::Validation(format!("hook '{}' not found", hook_id)))?;
+            hook.enabled = false;
+            hook.updated_at = Utc::now();
+            let hook = hook.clone();
+            save_hooks(&hooks_path, &hooks)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "hook": hook,
+                    "path": hooks_path.display().to_string(),
+                }));
+            } else {
+                println!("hook disabled: {}", hook.id);
+            }
+        }
+        HooksCommand::Run { hook_id, data } => {
+            let hook = hooks
+                .iter()
+                .find(|item| item.id == hook_id)
+                .ok_or_else(|| MosaicError::Validation(format!("hook '{}' not found", hook_id)))?
+                .clone();
+            let payload = data
+                .as_deref()
+                .map(|value| parse_json_input(value, "hook data"))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            let report = execute_hook_command(cli, &paths, &hook, "manual", payload)?;
+            apply_hook_last_result(&mut hooks, &hook.id, &report);
+            save_hooks(&hooks_path, &hooks)?;
+            if !report.ok {
+                return Err(hook_execution_error(&hook.id, &report));
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "hook": hook,
+                    "result": report,
+                }));
+            } else {
+                println!("hook executed: {}", hook.id);
+                println!("status: success");
+                if let Some(code) = report.exit_code {
+                    println!("exit_code: {code}");
+                }
+            }
+        }
+        HooksCommand::Logs { hook, tail } => {
+            let events = read_hook_events(&paths.data_dir, hook.as_deref(), tail)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "events": events,
+                }));
+            } else if events.is_empty() {
+                println!("No hook events found.");
+            } else {
+                for item in events {
+                    let status = if item.ok { "ok" } else { "error" };
+                    let code = item
+                        .exit_code
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    println!(
+                        "{} [{}] hook={} event={} trigger={} code={} msg={}",
+                        item.ts.to_rfc3339(),
+                        status,
+                        item.hook_id,
+                        item.event,
+                        item.trigger,
+                        code,
+                        item.error.unwrap_or_default(),
+                    );
+                }
+            }
         }
     }
     Ok(())
@@ -2179,16 +3637,32 @@ fn handle_system(cli: &Cli, args: SystemArgs) -> Result<()> {
                 .map(|value| parse_json_input(value, "system event data"))
                 .transpose()?
                 .unwrap_or(Value::Null);
-            let event = store.append_event(&name, data)?;
+            let event = store.append_event(&name, data.clone())?;
+            let hook_reports = run_hooks_for_system_event(cli, &paths, &name, data)?;
+            let hooks_ok = hook_reports.iter().filter(|item| item.ok).count();
+            let hooks_failed = hook_reports.len().saturating_sub(hooks_ok);
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "event": event,
                     "path": store.path().display().to_string(),
+                    "hooks": {
+                        "triggered": hook_reports.len(),
+                        "ok": hooks_ok,
+                        "failed": hooks_failed,
+                        "results": hook_reports,
+                    }
                 }));
             } else {
                 println!("event recorded: {}", event.name);
                 println!("path: {}", store.path().display());
+                if hook_reports.is_empty() {
+                    println!("hooks triggered: 0");
+                } else {
+                    println!("hooks triggered: {}", hook_reports.len());
+                    println!("hooks ok: {hooks_ok}");
+                    println!("hooks failed: {hooks_failed}");
+                }
             }
         }
         SystemCommand::Presence => {
@@ -3278,6 +4752,265 @@ fn handle_skills(cli: &Cli, args: SkillsArgs) -> Result<()> {
     Ok(())
 }
 
+fn upsert_gateway_service(
+    service_path: &std::path::Path,
+    host: Option<String>,
+    port: Option<u16>,
+    installed: bool,
+) -> Result<GatewayServiceState> {
+    let existing: Option<GatewayServiceState> = load_json_file_opt(service_path)?;
+    let now = Utc::now();
+    let service = GatewayServiceState {
+        installed,
+        host: host
+            .or_else(|| existing.as_ref().map(|item| item.host.clone()))
+            .unwrap_or_else(|| "127.0.0.1".to_string()),
+        port: port
+            .or_else(|| existing.as_ref().map(|item| item.port))
+            .unwrap_or(8787),
+        installed_at: existing
+            .as_ref()
+            .map(|item| item.installed_at)
+            .unwrap_or(now),
+        updated_at: now,
+    };
+    save_json_file(service_path, &service)?;
+    Ok(service)
+}
+
+fn resolve_gateway_start_target(
+    service_path: &std::path::Path,
+    host: Option<String>,
+    port: Option<u16>,
+    default_host: &str,
+    default_port: u16,
+) -> Result<(String, u16)> {
+    let service: Option<GatewayServiceState> = load_json_file_opt(service_path)?;
+    let resolved_host = host
+        .or_else(|| service.as_ref().map(|item| item.host.clone()))
+        .unwrap_or_else(|| default_host.to_string());
+    let resolved_port = port
+        .or_else(|| service.as_ref().map(|item| item.port))
+        .unwrap_or(default_port);
+    Ok((resolved_host, resolved_port))
+}
+
+async fn start_gateway_runtime(
+    cli: &Cli,
+    gateway_path: &std::path::Path,
+    host: String,
+    port: u16,
+) -> Result<GatewayStartResult> {
+    if let Some(existing) = load_json_file_opt::<GatewayState>(gateway_path)? {
+        let alive = if gateway_test_mode() {
+            existing.running
+        } else {
+            is_process_alive(existing.pid)
+                && probe_gateway_health(&existing.host, existing.port).await
+        };
+        if alive {
+            return Ok(GatewayStartResult {
+                state: existing,
+                already_running: true,
+            });
+        }
+    }
+
+    let pid = if gateway_test_mode() {
+        0
+    } else {
+        spawn_gateway_process(cli, &host, port)?
+    };
+    if !gateway_test_mode() {
+        let mut ready = false;
+        for _ in 0..40 {
+            if probe_gateway_health(&host, port).await {
+                ready = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if !ready {
+            return Err(MosaicError::Network(format!(
+                "gateway did not become healthy at http://{host}:{port}/health"
+            )));
+        }
+    }
+    let now = Utc::now();
+    let state = GatewayState {
+        running: true,
+        host,
+        port,
+        pid,
+        started_at: now,
+        updated_at: now,
+    };
+    save_json_file(gateway_path, &state)?;
+    Ok(GatewayStartResult {
+        state,
+        already_running: false,
+    })
+}
+
+fn stop_gateway_runtime(
+    gateway_path: &std::path::Path,
+    required: bool,
+) -> Result<GatewayStopResult> {
+    let Some(state) = load_json_file_opt::<GatewayState>(gateway_path)? else {
+        if required {
+            return Err(MosaicError::Config(
+                "gateway state file not found; not running".to_string(),
+            ));
+        }
+        return Ok(GatewayStopResult {
+            was_running: false,
+            stopped: false,
+            state: None,
+        });
+    };
+
+    let was_alive = if gateway_test_mode() {
+        state.running
+    } else {
+        is_process_alive(state.pid)
+    };
+    let stopped = if was_alive {
+        if gateway_test_mode() {
+            true
+        } else {
+            stop_process(state.pid)?
+        }
+    } else {
+        false
+    };
+
+    let next = GatewayState {
+        running: false,
+        host: state.host,
+        port: state.port,
+        pid: state.pid,
+        started_at: state.started_at,
+        updated_at: Utc::now(),
+    };
+    save_json_file(gateway_path, &next)?;
+    Ok(GatewayStopResult {
+        was_running: was_alive,
+        stopped: stopped || !was_alive,
+        state: Some(next),
+    })
+}
+
+async fn collect_gateway_runtime_status(
+    gateway_path: &std::path::Path,
+    gateway_service_path: &std::path::Path,
+) -> Result<GatewayRuntimeStatus> {
+    let state: Option<GatewayState> = load_json_file_opt(gateway_path)?;
+    let service: Option<GatewayServiceState> = load_json_file_opt(gateway_service_path)?;
+    let process_alive = state.as_ref().is_some_and(|value| {
+        if gateway_test_mode() {
+            value.running
+        } else {
+            is_process_alive(value.pid)
+        }
+    });
+    let endpoint_healthy = if let Some(value) = &state {
+        if gateway_test_mode() {
+            value.running
+        } else {
+            probe_gateway_health(&value.host, value.port).await
+        }
+    } else {
+        false
+    };
+    let running = match &state {
+        Some(value) => {
+            if gateway_test_mode() {
+                value.running
+            } else {
+                process_alive && endpoint_healthy
+            }
+        }
+        None => false,
+    };
+    let (target_host, target_port) = resolve_gateway_target(gateway_path, gateway_service_path)?;
+    Ok(GatewayRuntimeStatus {
+        running,
+        process_alive,
+        endpoint_healthy,
+        state,
+        service,
+        target_host,
+        target_port,
+    })
+}
+
+#[derive(Debug, Clone)]
+struct GatewayCallDispatch {
+    request_id: String,
+    host: String,
+    port: u16,
+    result: Value,
+}
+
+async fn dispatch_gateway_call(
+    gateway_path: &std::path::Path,
+    gateway_service_path: &std::path::Path,
+    method: &str,
+    params: Value,
+) -> Result<GatewayCallDispatch> {
+    if gateway_test_mode() {
+        let state: GatewayState = load_json_file_opt(gateway_path)?.ok_or_else(|| {
+            MosaicError::GatewayUnavailable("gateway is not running in test mode".to_string())
+        })?;
+        if !state.running {
+            return Err(MosaicError::GatewayUnavailable(
+                "gateway is not running in test mode".to_string(),
+            ));
+        }
+        let result = match method {
+            "nodes.run" => json!({
+                "ok": true,
+                "status": "accepted",
+                "mode": "test_mode",
+                "node_id": params.get("node_id").cloned().unwrap_or(Value::Null),
+                "command": params.get("command").cloned().unwrap_or(Value::Null),
+            }),
+            "nodes.invoke" => json!({
+                "ok": true,
+                "status": "accepted",
+                "mode": "test_mode",
+                "node_id": params.get("node_id").cloned().unwrap_or(Value::Null),
+                "method": params.get("method").cloned().unwrap_or(Value::Null),
+                "params": params.get("params").cloned().unwrap_or(Value::Null),
+            }),
+            _ => {
+                return Err(MosaicError::GatewayProtocol(format!(
+                    "gateway test mode does not support method '{}'",
+                    method
+                )));
+            }
+        };
+        return Ok(GatewayCallDispatch {
+            request_id: "gateway-test-mode".to_string(),
+            host: state.host,
+            port: state.port,
+            result,
+        });
+    }
+
+    let (host, port) = resolve_gateway_target(gateway_path, gateway_service_path)?;
+    let client = HttpGatewayClient::new(&host, port)?;
+    let request = GatewayRequest::new(method.to_string(), Some(params));
+    let request_id = request.id.clone();
+    let response = client.call(request).await?;
+    Ok(GatewayCallDispatch {
+        request_id,
+        host,
+        port,
+        result: response.result.unwrap_or(Value::Null),
+    })
+}
+
 fn spawn_gateway_process(cli: &Cli, host: &str, port: u16) -> Result<u32> {
     let exe = std::env::current_exe().map_err(|err| {
         MosaicError::Io(format!("failed to resolve current executable path: {err}"))
@@ -3425,7 +5158,7 @@ fn run_gateway_http_server(host: &str, port: u16) -> Result<()> {
             (Method::Get, "/discover") => Response::from_string(
                 json!({
                     "ok": true,
-                    "methods": ["health", "status", "echo"],
+                    "methods": ["health", "status", "echo", "nodes.run", "nodes.invoke"],
                 })
                 .to_string(),
             ),
@@ -3476,6 +5209,31 @@ fn run_gateway_http_server(host: &str, port: u16) -> Result<()> {
                                     "result": {
                                         "ok": true,
                                         "echo": payload.params,
+                                    }
+                                })
+                                .to_string(),
+                            ),
+                            "nodes.run" => Response::from_string(
+                                json!({
+                                    "ok": true,
+                                    "result": {
+                                        "ok": true,
+                                        "status": "accepted",
+                                        "node_id": payload.params.get("node_id").cloned().unwrap_or(Value::Null),
+                                        "command": payload.params.get("command").cloned().unwrap_or(Value::Null),
+                                    }
+                                })
+                                .to_string(),
+                            ),
+                            "nodes.invoke" => Response::from_string(
+                                json!({
+                                    "ok": true,
+                                    "result": {
+                                        "ok": true,
+                                        "status": "accepted",
+                                        "node_id": payload.params.get("node_id").cloned().unwrap_or(Value::Null),
+                                        "method": payload.params.get("method").cloned().unwrap_or(Value::Null),
+                                        "params": payload.params.get("params").cloned().unwrap_or(Value::Null),
                                     }
                                 })
                                 .to_string(),
@@ -3941,12 +5699,374 @@ fn resolve_state_paths(project_state: bool) -> Result<StatePaths> {
     StatePaths::resolve(mode, &cwd, PROJECT_STATE_DIR)
 }
 
-fn resolve_gateway_target(gateway_path: &std::path::Path) -> Result<(String, u16)> {
+fn resolve_gateway_target(
+    gateway_path: &std::path::Path,
+    gateway_service_path: &std::path::Path,
+) -> Result<(String, u16)> {
     let state: Option<GatewayState> = load_json_file_opt(gateway_path)?;
     if let Some(state) = state {
         return Ok((state.host, state.port));
     }
+    let service: Option<GatewayServiceState> = load_json_file_opt(gateway_service_path)?;
+    if let Some(service) = service {
+        return Ok((service.host, service.port));
+    }
     Ok(("127.0.0.1".to_string(), 8787))
+}
+
+fn nodes_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("nodes.json")
+}
+
+fn devices_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("devices.json")
+}
+
+fn pairing_requests_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("pairing-requests.json")
+}
+
+fn hooks_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("hooks.json")
+}
+
+fn hook_events_dir(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("hook-events")
+}
+
+fn hook_events_file_path(data_dir: &std::path::Path, hook_id: &str) -> PathBuf {
+    hook_events_dir(data_dir).join(format!("{hook_id}.jsonl"))
+}
+
+fn load_nodes_or_default(path: &std::path::Path) -> Result<Vec<NodeRecord>> {
+    let nodes =
+        load_json_file_opt::<Vec<NodeRecord>>(path)?.unwrap_or_else(|| vec![default_local_node()]);
+    if nodes.is_empty() {
+        return Ok(vec![default_local_node()]);
+    }
+    Ok(nodes)
+}
+
+fn save_nodes(path: &std::path::Path, nodes: &[NodeRecord]) -> Result<()> {
+    save_json_file(path, &nodes.to_vec())
+}
+
+fn load_devices_or_default(path: &std::path::Path) -> Result<Vec<DeviceRecord>> {
+    Ok(load_json_file_opt::<Vec<DeviceRecord>>(path)?.unwrap_or_default())
+}
+
+fn save_devices(path: &std::path::Path, devices: &[DeviceRecord]) -> Result<()> {
+    save_json_file(path, &devices.to_vec())
+}
+
+fn load_pairing_requests_or_default(path: &std::path::Path) -> Result<Vec<PairingRequestRecord>> {
+    Ok(load_json_file_opt::<Vec<PairingRequestRecord>>(path)?.unwrap_or_default())
+}
+
+fn save_pairing_requests(path: &std::path::Path, requests: &[PairingRequestRecord]) -> Result<()> {
+    save_json_file(path, &requests.to_vec())
+}
+
+fn load_hooks_or_default(path: &std::path::Path) -> Result<Vec<HookRecord>> {
+    Ok(load_json_file_opt::<Vec<HookRecord>>(path)?.unwrap_or_default())
+}
+
+fn save_hooks(path: &std::path::Path, hooks: &[HookRecord]) -> Result<()> {
+    save_json_file(path, &hooks.to_vec())
+}
+
+fn default_local_node() -> NodeRecord {
+    let now = Utc::now();
+    NodeRecord {
+        id: "local".to_string(),
+        name: "Local Node".to_string(),
+        status: NodeRuntimeStatus::Online,
+        capabilities: vec![
+            "invoke".to_string(),
+            "run".to_string(),
+            "status".to_string(),
+        ],
+        last_seen_at: now,
+        updated_at: now,
+    }
+}
+
+fn next_pairing_seq() -> u64 {
+    PAIRING_REQUEST_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+fn generate_pairing_request_id() -> String {
+    let ts = Utc::now().timestamp_millis();
+    format!("pr-{ts}-{}", next_pairing_seq())
+}
+
+fn next_hook_seq() -> u64 {
+    HOOK_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+fn generate_hook_id() -> String {
+    let ts = Utc::now().timestamp_millis();
+    format!("hk-{ts}-{}", next_hook_seq())
+}
+
+fn run_hooks_for_system_event(
+    cli: &Cli,
+    paths: &StatePaths,
+    event_name: &str,
+    data: Value,
+) -> Result<Vec<HookExecutionReport>> {
+    let hooks_path = hooks_file_path(&paths.data_dir);
+    let mut hooks = load_hooks_or_default(&hooks_path)?;
+    let mut reports = Vec::new();
+    let mut changed = false;
+
+    for index in 0..hooks.len() {
+        if !hooks[index].enabled || hooks[index].event != event_name {
+            continue;
+        }
+        let hook = hooks[index].clone();
+        let report = execute_hook_command(cli, paths, &hook, "system_event", data.clone())?;
+        apply_hook_last_result(&mut hooks, &hook.id, &report);
+        reports.push(report);
+        changed = true;
+    }
+
+    if changed {
+        save_hooks(&hooks_path, &hooks)?;
+    }
+    Ok(reports)
+}
+
+fn execute_hook_command(
+    cli: &Cli,
+    paths: &StatePaths,
+    hook: &HookRecord,
+    trigger: &str,
+    payload: Value,
+) -> Result<HookExecutionReport> {
+    let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+    let approval_store = ApprovalStore::new(paths.approvals_policy_path.clone());
+    let sandbox_store = SandboxStore::new(paths.sandbox_policy_path.clone());
+    let runtime_policy = RuntimePolicy {
+        approval: approval_store.load_or_default()?,
+        sandbox: sandbox_store.load_or_default()?,
+    };
+    let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, Some(runtime_policy));
+    let context = ToolContext {
+        cwd,
+        yes: cli.yes,
+        interactive: false,
+    };
+    let execution = executor.execute(
+        "run_cmd",
+        json!({
+            "command": hook.command.clone(),
+        }),
+        &context,
+    );
+
+    let report = match execution {
+        Ok(value) => {
+            let output: RunCommandOutput = serde_json::from_value(value)?;
+            let ok = output.exit_code == 0;
+            HookExecutionReport {
+                hook_id: hook.id.clone(),
+                hook_name: hook.name.clone(),
+                event: hook.event.clone(),
+                trigger: trigger.to_string(),
+                command: output.command,
+                ok,
+                exit_code: Some(output.exit_code),
+                duration_ms: Some(u64::try_from(output.duration_ms).unwrap_or(u64::MAX)),
+                approved_by: Some(output.approved_by),
+                error_code: if ok { None } else { Some("tool".to_string()) },
+                error: if ok {
+                    None
+                } else {
+                    Some(format!("command exited with status {}", output.exit_code))
+                },
+                stdout: Some(output.stdout),
+                stderr: Some(output.stderr),
+            }
+        }
+        Err(err) => HookExecutionReport {
+            hook_id: hook.id.clone(),
+            hook_name: hook.name.clone(),
+            event: hook.event.clone(),
+            trigger: trigger.to_string(),
+            command: hook.command.clone(),
+            ok: false,
+            exit_code: None,
+            duration_ms: None,
+            approved_by: None,
+            error_code: Some(err.code().to_string()),
+            error: Some(err.to_string()),
+            stdout: None,
+            stderr: None,
+        },
+    };
+
+    append_hook_event(&paths.data_dir, hook, trigger, &report, payload)?;
+    Ok(report)
+}
+
+fn append_hook_event(
+    data_dir: &std::path::Path,
+    hook: &HookRecord,
+    trigger: &str,
+    report: &HookExecutionReport,
+    payload: Value,
+) -> Result<()> {
+    let event = HookEventRecord {
+        ts: Utc::now(),
+        hook_id: hook.id.clone(),
+        hook_name: hook.name.clone(),
+        event: hook.event.clone(),
+        trigger: trigger.to_string(),
+        command: hook.command.clone(),
+        delivery_status: if report.ok {
+            "success".to_string()
+        } else {
+            "failed".to_string()
+        },
+        ok: report.ok,
+        exit_code: report.exit_code,
+        duration_ms: report.duration_ms,
+        approved_by: report.approved_by.clone(),
+        error_code: report.error_code.clone(),
+        error: report.error.clone(),
+        stdout_preview: report
+            .stdout
+            .as_deref()
+            .and_then(|value| preview_text(value, 240)),
+        stderr_preview: report
+            .stderr
+            .as_deref()
+            .and_then(|value| preview_text(value, 240)),
+        data: payload,
+    };
+    let path = hook_events_file_path(data_dir, &hook.id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let encoded = serde_json::to_string(&event).map_err(|err| {
+        MosaicError::Validation(format!(
+            "failed to encode hook event {}: {err}",
+            path.display()
+        ))
+    })?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    use std::io::Write as _;
+    file.write_all(encoded.as_bytes())?;
+    file.write_all(b"\n")?;
+    Ok(())
+}
+
+fn apply_hook_last_result(hooks: &mut [HookRecord], hook_id: &str, report: &HookExecutionReport) {
+    if let Some(hook) = hooks.iter_mut().find(|item| item.id == hook_id) {
+        let now = Utc::now();
+        hook.updated_at = now;
+        hook.last_triggered_at = Some(now);
+        hook.last_result = Some(HookLastResult {
+            ok: report.ok,
+            exit_code: report.exit_code,
+            duration_ms: report.duration_ms,
+            approved_by: report.approved_by.clone(),
+            error_code: report.error_code.clone(),
+            error: report.error.clone(),
+        });
+    }
+}
+
+fn hook_execution_error(hook_id: &str, report: &HookExecutionReport) -> MosaicError {
+    let message = report
+        .error
+        .clone()
+        .unwrap_or_else(|| format!("hook '{}' execution failed", hook_id));
+    match report.error_code.as_deref() {
+        Some("config") => MosaicError::Config(message),
+        Some("auth") => MosaicError::Auth(message),
+        Some("network") => MosaicError::Network(message),
+        Some("io") => MosaicError::Io(message),
+        Some("validation") => MosaicError::Validation(message),
+        Some("gateway_unavailable") => MosaicError::GatewayUnavailable(message),
+        Some("gateway_protocol") => MosaicError::GatewayProtocol(message),
+        Some("channel_unsupported") => MosaicError::ChannelUnsupported(message),
+        Some("approval_required") => MosaicError::ApprovalRequired(message),
+        Some("sandbox_denied") => MosaicError::SandboxDenied(message),
+        _ => {
+            if let Some(code) = report.exit_code {
+                MosaicError::Tool(format!("hook '{}' exited with status {}", hook_id, code))
+            } else {
+                MosaicError::Tool(message)
+            }
+        }
+    }
+}
+
+fn read_hook_events(
+    data_dir: &std::path::Path,
+    hook_id: Option<&str>,
+    tail: usize,
+) -> Result<Vec<HookEventRecord>> {
+    let mut events = Vec::new();
+    if let Some(hook_id) = hook_id {
+        let path = hook_events_file_path(data_dir, hook_id);
+        load_hook_events_file(&path, &mut events)?;
+    } else {
+        let dir = hook_events_dir(data_dir);
+        if dir.exists() {
+            for entry in std::fs::read_dir(&dir)? {
+                let path = entry?.path();
+                if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                load_hook_events_file(&path, &mut events)?;
+            }
+        }
+    }
+    events.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+    if events.len() > tail {
+        let keep_from = events.len() - tail;
+        events = events.split_off(keep_from);
+    }
+    Ok(events)
+}
+
+fn load_hook_events_file(path: &std::path::Path, events: &mut Vec<HookEventRecord>) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let raw = std::fs::read_to_string(path)?;
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event = serde_json::from_str::<HookEventRecord>(line).map_err(|err| {
+            MosaicError::Validation(format!(
+                "invalid hook event format {}: {err}",
+                path.display()
+            ))
+        })?;
+        events.push(event);
+    }
+    Ok(())
+}
+
+fn preview_text(value: &str, max_len: usize) -> Option<String> {
+    let text = value.trim();
+    if text.is_empty() {
+        return None;
+    }
+    if text.len() <= max_len {
+        return Some(text.to_string());
+    }
+    let mut clipped = text.chars().take(max_len).collect::<String>();
+    clipped.push_str("...");
+    Some(clipped)
 }
 
 fn parse_json_input(raw: &str, field_name: &str) -> Result<Value> {
@@ -4028,14 +6148,32 @@ fn build_runtime(
         agents_file_path(&state_paths.data_dir),
         agent_routes_path(&state_paths.data_dir),
     );
-    let resolved = agent_store.resolve_effective_profile(
+    let mut resolved = agent_store.resolve_effective_profile(
         &config,
         &cli.profile,
         requested_agent_id,
         route_hint,
     )?;
-    let provider: Arc<dyn Provider> =
+    let model_store = ModelRoutingStore::new(state_paths.models_path.clone());
+    let profile_models = model_store.profile(&resolved.profile_name)?;
+    resolved.profile.provider.model =
+        profile_models.resolve_model_ref(&resolved.profile.provider.model);
+    let fallback_models = profile_models
+        .fallbacks
+        .iter()
+        .map(|model| profile_models.resolve_model_ref(model))
+        .filter(|model| model != &resolved.profile.provider.model)
+        .fold(Vec::<String>::new(), |mut acc, model| {
+            if !acc.iter().any(|item| item == &model) {
+                acc.push(model);
+            }
+            acc
+        });
+    let mut provider: Arc<dyn Provider> =
         Arc::new(OpenAiCompatibleProvider::from_profile(&resolved.profile)?);
+    if !fallback_models.is_empty() {
+        provider = Arc::new(ModelRoutingProvider::new(provider, fallback_models));
+    }
     let session_store = SessionStore::new(state_paths.sessions_dir.clone());
     let audit_store = AuditStore::new(
         state_paths.audit_dir.clone(),
@@ -4118,6 +6256,46 @@ fn binary_in_path(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex};
+
+    struct StubProvider {
+        network_fail_models: HashSet<String>,
+        auth_fail_models: HashSet<String>,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for StubProvider {
+        async fn list_models(&self) -> Result<Vec<ModelInfo>> {
+            Ok(Vec::new())
+        }
+
+        async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
+            self.calls
+                .lock()
+                .expect("calls lock")
+                .push(request.model.clone());
+            if self.auth_fail_models.contains(&request.model) {
+                return Err(MosaicError::Auth("invalid api key".to_string()));
+            }
+            if self.network_fail_models.contains(&request.model) {
+                return Err(MosaicError::Network("upstream unavailable".to_string()));
+            }
+            Ok(ChatResponse {
+                content: request.model,
+            })
+        }
+
+        async fn health(&self) -> Result<ProviderHealth> {
+            Ok(ProviderHealth {
+                ok: true,
+                latency_ms: Some(1),
+                detail: "ok".to_string(),
+            })
+        }
+    }
 
     #[test]
     fn cli_accepts_openclaw_aliases() {
@@ -4129,5 +6307,74 @@ mod tests {
 
         let alias_setup = Cli::try_parse_from(["mosaic", "onboard"]).unwrap();
         assert!(matches!(alias_setup.command, Commands::Setup(_)));
+    }
+
+    #[test]
+    fn resolve_effective_model_uses_alias_mapping() {
+        let mut profile = ModelProfileConfig {
+            aliases: BTreeMap::new(),
+            fallbacks: vec![],
+        };
+        profile
+            .aliases
+            .insert("fast".to_string(), "gpt-4o-mini".to_string());
+        let (effective, used_alias) = resolve_effective_model(&profile, "FAST");
+        assert_eq!(effective, "gpt-4o-mini");
+        assert_eq!(used_alias.as_deref(), Some("fast"));
+    }
+
+    #[tokio::test]
+    async fn model_routing_provider_falls_back_on_network_error() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let provider = StubProvider {
+            network_fail_models: ["primary".to_string()].into_iter().collect(),
+            auth_fail_models: HashSet::new(),
+            calls: calls.clone(),
+        };
+        let provider = ModelRoutingProvider::new(
+            Arc::new(provider),
+            vec!["backup".to_string(), "backup".to_string()],
+        );
+
+        let response = provider
+            .chat(ChatRequest {
+                model: "primary".to_string(),
+                temperature: 0.2,
+                messages: Vec::new(),
+            })
+            .await
+            .expect("fallback succeeds");
+
+        assert_eq!(response.content, "backup");
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["primary".to_string(), "backup".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn model_routing_provider_does_not_retry_auth_error() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let provider = StubProvider {
+            network_fail_models: HashSet::new(),
+            auth_fail_models: ["primary".to_string()].into_iter().collect(),
+            calls: calls.clone(),
+        };
+        let provider = ModelRoutingProvider::new(Arc::new(provider), vec!["backup".to_string()]);
+
+        let err = provider
+            .chat(ChatRequest {
+                model: "primary".to_string(),
+                temperature: 0.2,
+                messages: Vec::new(),
+            })
+            .await
+            .expect_err("auth should fail without fallback");
+
+        assert!(matches!(err, MosaicError::Auth(_)));
+        assert_eq!(
+            calls.lock().expect("calls lock").as_slice(),
+            &["primary".to_string()]
+        );
     }
 }

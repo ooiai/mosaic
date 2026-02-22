@@ -291,6 +291,9 @@ mod tests {
             api_key: "mock".to_string(),
             mock_mode: false,
         };
-        assert_eq!(provider.endpoint("/v1/models"), "https://api.openai.com/v1/models");
+        assert_eq!(
+            provider.endpoint("/v1/models"),
+            "https://api.openai.com/v1/models"
+        );
     }
 }

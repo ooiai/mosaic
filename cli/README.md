@@ -6,8 +6,10 @@ This workspace ships a pure CLI with no frontend dependency.
 ## Scope (V1 + V2)
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `status`, `health`, `doctor`)
-- Gateway control plane (`gateway run|status|health|probe|discover|call|stop`)
+- Gateway control plane (`gateway install|start|restart|status|health|probe|discover|call|stop|uninstall`)
 - Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
+- Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|approve`)
+- Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
@@ -59,6 +61,13 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state setup \
 ```bash
 OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
   --project-state models list
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state models status
+cargo run -p mosaic-cli --bin mosaic -- --project-state models set gpt-4o-mini
+cargo run -p mosaic-cli --bin mosaic -- --project-state models aliases set fast gpt-4o-mini
+cargo run -p mosaic-cli --bin mosaic -- --project-state models aliases list
+cargo run -p mosaic-cli --bin mosaic -- --project-state models fallbacks add gpt-4.1-mini
+cargo run -p mosaic-cli --bin mosaic -- --project-state models fallbacks list
 ```
 
 ### Ask
@@ -78,13 +87,53 @@ OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
 ### Gateway Runtime
 
 ```bash
-cargo run -p mosaic-cli --bin mosaic -- --project-state gateway run --host 127.0.0.1 --port 8787
-cargo run -p mosaic-cli --bin mosaic -- --project-state gateway status
-cargo run -p mosaic-cli --bin mosaic -- --project-state gateway health
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway install --host 127.0.0.1 --port 8787
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway start
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway restart --port 8788
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway status --deep
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway health --verbose
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway probe
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway discover
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway call status
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway stop
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway uninstall
+```
+
+### Nodes/Devices/Pairing Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state nodes list
+cargo run -p mosaic-cli --bin mosaic -- --project-state nodes status local
+# run/invoke go through gateway; start gateway first
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway start
+# default approvals policy is confirm, so run needs --yes (or allowlist policy)
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes nodes run local --command "echo hello"
+cargo run -p mosaic-cli --bin mosaic -- --project-state nodes invoke local status --params '{"detail":true}'
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state devices list
+cargo run -p mosaic-cli --bin mosaic -- --project-state devices approve dev-1 --name "Jerry Mac"
+cargo run -p mosaic-cli --bin mosaic -- --project-state devices rotate dev-1
+cargo run -p mosaic-cli --bin mosaic -- --project-state devices revoke dev-1 --reason "device replaced"
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state pairing list --status pending
+cargo run -p mosaic-cli --bin mosaic -- --project-state pairing approve <request-id>
+```
+
+### Hooks Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state hooks add \
+  --name deploy-notify \
+  --event deploy \
+  --command "echo deploy-hook-fired"
+
+# default approvals mode is confirm, so non-interactive runs usually need --yes
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes hooks run <hook-id> --data '{"source":"manual"}'
+
+# system event auto-triggers enabled hooks that match event name
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes system event deploy --data '{"version":"1.0.0"}'
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state hooks logs --tail 20
 ```
 
 ### Channels Runtime
@@ -148,6 +197,8 @@ Discord webhook guide: `docs/channels-discord.md`
 Terminal channel guide: `docs/channels-terminal.md`
 Telegram channel guide: `docs/channels-telegram.md`
 Gateway ops guide: `docs/gateway-ops.md`
+Nodes/devices/pairing guide: `docs/nodes-devices-pairing.md`
+Hooks guide: `docs/hooks.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
 Security audit guide: `docs/security-audit.md`

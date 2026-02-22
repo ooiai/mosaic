@@ -44,6 +44,23 @@ pub fn collect_logs(data_dir: &Path, tail: usize) -> Result<Vec<UnifiedLogEntry>
         }
     }
 
+    let hook_events_dir = data_dir.join("hook-events");
+    if hook_events_dir.exists() {
+        for entry in std::fs::read_dir(&hook_events_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let source = format!(
+                "hook:{}",
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown")
+            );
+            load_jsonl_file(&mut entries, &path, &source)?;
+        }
+    }
+
     entries.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
     if entries.len() > tail {
         let keep_from = entries.len() - tail;
@@ -81,6 +98,9 @@ fn parse_ts(value: &str) -> Option<DateTime<Utc>> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;
@@ -90,5 +110,30 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let logs = collect_logs(temp.path(), 50).expect("collect logs");
         assert!(logs.is_empty());
+    }
+
+    #[test]
+    fn collect_logs_includes_hook_events() {
+        let temp = tempdir().expect("tempdir");
+        let hooks_dir = temp.path().join("hook-events");
+        fs::create_dir_all(&hooks_dir).expect("create hook-events dir");
+        let path = hooks_dir.join("hk-1.jsonl");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                json!({
+                    "ts": "2026-02-22T00:00:00Z",
+                    "hook_id": "hk-1",
+                    "ok": true,
+                    "event": "deploy",
+                })
+            ),
+        )
+        .expect("write hook event");
+
+        let logs = collect_logs(temp.path(), 50).expect("collect logs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].source, "hook:hk-1");
     }
 }

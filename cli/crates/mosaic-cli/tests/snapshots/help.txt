@@ -11,6 +11,10 @@ Commands:
   session    
   gateway    
   channels   
+  nodes      
+  devices    
+  pairing    
+  hooks      
   logs       
   system     
   approvals  

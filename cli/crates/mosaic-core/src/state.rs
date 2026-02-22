@@ -17,6 +17,7 @@ pub struct StatePaths {
     pub mode: StateMode,
     pub root_dir: PathBuf,
     pub config_path: PathBuf,
+    pub models_path: PathBuf,
     pub data_dir: PathBuf,
     pub policy_dir: PathBuf,
     pub approvals_policy_path: PathBuf,
@@ -45,6 +46,7 @@ impl StatePaths {
 
         let root_dir = config_home.join("mosaic");
         let config_path = root_dir.join("config.toml");
+        let models_path = root_dir.join("models.toml");
         let data_dir = data_home.join("mosaic");
         let policy_dir = root_dir.join("policy");
         let approvals_policy_path = policy_dir.join("approvals.toml");
@@ -58,6 +60,7 @@ impl StatePaths {
             mode: StateMode::Xdg,
             root_dir,
             config_path,
+            models_path,
             data_dir,
             policy_dir,
             approvals_policy_path,
@@ -72,6 +75,7 @@ impl StatePaths {
     fn resolve_project(cwd: &Path, project_dir_name: &str) -> Self {
         let root_dir = cwd.join(project_dir_name);
         let config_path = root_dir.join("config.toml");
+        let models_path = root_dir.join("models.toml");
         let data_dir = root_dir.join("data");
         let policy_dir = root_dir.join("policy");
         let approvals_policy_path = policy_dir.join("approvals.toml");
@@ -85,6 +89,7 @@ impl StatePaths {
             mode: StateMode::Project,
             root_dir,
             config_path,
+            models_path,
             data_dir,
             policy_dir,
             approvals_policy_path,
