@@ -54,3 +54,4 @@ config.yml
 
 # mosaic
 .mosaic/
+cli/scripts/run-command.sh
