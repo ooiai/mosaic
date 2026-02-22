@@ -26,18 +26,18 @@ mosaic --project-state --profile az-openai models list
 mosaic --project-state --profile az-openai ask "你好"
 
 
-## o
+## other profiles
 mosaic --project-state --profile az-openai configure \
-  --base-url "$BASE_URL" \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
   --api_key_env AZURE_OPENAI_API_KEY \
   --model <gpt_deployment_name>
 
 mosaic --project-state --profile az-deepseek configure \
-  --base-url "$BASE_URL" \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
   --api_key_env AZURE_OPENAI_API_KEY \
   --model <deepseek_deployment_name>
 
 mosaic --project-state --profile az-kimi configure \
-  --base-url "$BASE_URL" \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
   --api_key_env AZURE_OPENAI_API_KEY \
   --model <kimi_deployment_name>
