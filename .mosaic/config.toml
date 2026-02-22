@@ -1,0 +1,38 @@
+version = 1
+active_profile = "az-openai"
+
+[state]
+mode = "project"
+project_dir = ".mosaic"
+
+[profiles.az-openai.provider]
+kind = "openai_compatible"
+base_url = "https://smartapi1.cognitiveservices.azure.com/openai/v1/"
+api_key_env = "AZURE_OPENAI_API_KEY"
+model = "gpt5.2"
+
+[profiles.az-openai.agent]
+temperature = 0.20000000298023224
+max_turns = 8
+
+[profiles.az-openai.tools]
+enabled = true
+
+[profiles.az-openai.tools.run]
+guard_mode = "confirm_dangerous"
+
+[profiles.default.provider]
+kind = "openai_compatible"
+base_url = "https://api.openai.com"
+api_key_env = "OPENAI_API_KEY"
+model = "gpt-4o-mini"
+
+[profiles.default.agent]
+temperature = 0.20000000298023224
+max_turns = 8
+
+[profiles.default.tools]
+enabled = true
+
+[profiles.default.tools.run]
+guard_mode = "confirm_dangerous"
