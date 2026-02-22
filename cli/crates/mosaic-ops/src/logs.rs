@@ -61,6 +61,23 @@ pub fn collect_logs(data_dir: &Path, tail: usize) -> Result<Vec<UnifiedLogEntry>
         }
     }
 
+    let cron_events_dir = data_dir.join("cron-events");
+    if cron_events_dir.exists() {
+        for entry in std::fs::read_dir(&cron_events_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let source = format!(
+                "cron:{}",
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown")
+            );
+            load_jsonl_file(&mut entries, &path, &source)?;
+        }
+    }
+
     entries.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
     if entries.len() > tail {
         let keep_from = entries.len() - tail;
@@ -135,5 +152,30 @@ mod tests {
         let logs = collect_logs(temp.path(), 50).expect("collect logs");
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].source, "hook:hk-1");
+    }
+
+    #[test]
+    fn collect_logs_includes_cron_events() {
+        let temp = tempdir().expect("tempdir");
+        let cron_dir = temp.path().join("cron-events");
+        fs::create_dir_all(&cron_dir).expect("create cron-events dir");
+        let path = cron_dir.join("cj-1.jsonl");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                json!({
+                    "ts": "2026-02-22T00:00:00Z",
+                    "job_id": "cj-1",
+                    "ok": true,
+                    "event": "deploy",
+                })
+            ),
+        )
+        .expect("write cron event");
+
+        let logs = collect_logs(temp.path(), 50).expect("collect logs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].source, "cron:cj-1");
     }
 }

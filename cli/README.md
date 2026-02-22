@@ -10,6 +10,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
 - Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|approve`)
 - Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
+- Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
@@ -136,6 +137,24 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --yes system event deplo
 cargo run -p mosaic-cli --bin mosaic -- --project-state hooks logs --tail 20
 ```
 
+### Cron Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state cron add \
+  --name deploy-cron \
+  --event deploy \
+  --every 60 \
+  --data '{"source":"cron"}'
+
+# execute due jobs (job.next_run_at <= now)
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes cron tick
+
+# run one job immediately
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes cron run <job-id>
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state cron logs --tail 20
+```
+
 ### Channels Runtime
 
 ```bash
@@ -199,6 +218,7 @@ Telegram channel guide: `docs/channels-telegram.md`
 Gateway ops guide: `docs/gateway-ops.md`
 Nodes/devices/pairing guide: `docs/nodes-devices-pairing.md`
 Hooks guide: `docs/hooks.md`
+Cron guide: `docs/cron.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
 Security audit guide: `docs/security-audit.md`
