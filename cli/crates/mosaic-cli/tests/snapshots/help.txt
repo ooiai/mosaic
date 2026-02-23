@@ -16,6 +16,8 @@ Commands:
   pairing    
   hooks      
   cron       
+  webhooks   
+  browser    
   logs       
   system     
   approvals  

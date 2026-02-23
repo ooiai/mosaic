@@ -132,9 +132,213 @@ require_contains "$TMP_ROOT/rotation-report.json" '"to_token_env"[[:space:]]*:[[
 (cd "$DST_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels login "$TG_CHANNEL_ID" >"$TMP_ROOT/login_after_rotate.json")
 require_contains "$TMP_ROOT/login_after_rotate.json" '"token_env"[[:space:]]*:[[:space:]]*"MOSAIC_TELEGRAM_BOT_TOKEN_NEW"'
 
+log "Step 4: channels runtime ops (status/capabilities/resolve/send/test/logs)"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels add --name src-terminal --kind terminal >"$TMP_ROOT/add_src_terminal.json")
+TERMINAL_CHANNEL_ID="$(extract_first_match "$TMP_ROOT/add_src_terminal.json" 'ch_[0-9a-f-]{8,}')"
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels send "$TERMINAL_CHANNEL_ID" --text "terminal smoke" >"$TMP_ROOT/channels_send_terminal.json")
+require_contains "$TMP_ROOT/channels_send_terminal.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels test "$SRC_CHANNEL_ID" >"$TMP_ROOT/channels_test_src.json")
+require_contains "$TMP_ROOT/channels_test_src.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels status >"$TMP_ROOT/channels_status.json")
+require_contains "$TMP_ROOT/channels_status.json" '"total_channels"[[:space:]]*:[[:space:]]*2'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels capabilities --target "$SRC_CHANNEL_ID" >"$TMP_ROOT/channels_capabilities.json")
+require_contains "$TMP_ROOT/channels_capabilities.json" '"slack_webhook"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels resolve --channel slack_webhook src >"$TMP_ROOT/channels_resolve.json")
+require_contains "$TMP_ROOT/channels_resolve.json" "$SRC_CHANNEL_ID"
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels logs --channel "$SRC_CHANNEL_ID" --tail 20 >"$TMP_ROOT/channels_logs.json")
+require_contains "$TMP_ROOT/channels_logs.json" '"events"'
+
+log "Step 5: gateway/nodes/devices/pairing control plane"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json nodes list >"$TMP_ROOT/nodes_list.json")
+require_contains "$TMP_ROOT/nodes_list.json" '"id"[[:space:]]*:[[:space:]]*"local"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json pairing request --device dev-smoke --node local --reason "smoke pairing" >"$TMP_ROOT/pairing_request.json")
+PAIRING_REQUEST_ID="$(extract_first_match "$TMP_ROOT/pairing_request.json" 'pr-[0-9-]+')"
+require_contains "$TMP_ROOT/pairing_request.json" '"status"[[:space:]]*:[[:space:]]*"pending"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json pairing approve "$PAIRING_REQUEST_ID" >"$TMP_ROOT/pairing_approve.json")
+require_contains "$TMP_ROOT/pairing_approve.json" '"status"[[:space:]]*:[[:space:]]*"approved"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json devices rotate dev-smoke >"$TMP_ROOT/devices_rotate.json")
+require_contains "$TMP_ROOT/devices_rotate.json" '"token_version"[[:space:]]*:[[:space:]]*2'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway start >"$TMP_ROOT/gateway_start.json")
+require_contains "$TMP_ROOT/gateway_start.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway probe >"$TMP_ROOT/gateway_probe.json")
+require_contains "$TMP_ROOT/gateway_probe.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway discover >"$TMP_ROOT/gateway_discover.json")
+require_contains "$TMP_ROOT/gateway_discover.json" '"nodes.run"'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway call status >"$TMP_ROOT/gateway_call_status.json")
+require_contains "$TMP_ROOT/gateway_call_status.json" '"service"[[:space:]]*:[[:space:]]*"mosaic-gateway"'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json nodes run local --command "echo smoke-run" >"$TMP_ROOT/nodes_run.json")
+require_contains "$TMP_ROOT/nodes_run.json" '"accepted"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json nodes invoke local status --params '{"detail":true}' >"$TMP_ROOT/nodes_invoke.json")
+require_contains "$TMP_ROOT/nodes_invoke.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway stop >"$TMP_ROOT/gateway_stop.json")
+require_contains "$TMP_ROOT/gateway_stop.json" '"stopped"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json nodes status local >"$TMP_ROOT/nodes_status.json")
+require_contains "$TMP_ROOT/nodes_status.json" '"total"[[:space:]]*:[[:space:]]*1'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json devices revoke dev-smoke --reason "smoke cleanup" >"$TMP_ROOT/devices_revoke.json")
+require_contains "$TMP_ROOT/devices_revoke.json" '"status"[[:space:]]*:[[:space:]]*"revoked"'
+
+log "Step 6: hooks/webhooks/cron/system/logs"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json hooks add --name deploy-hook --event deploy --command "echo hook-smoke-ok" >"$TMP_ROOT/hooks_add.json")
+require_contains "$TMP_ROOT/hooks_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json system event deploy --data '{"release":"smoke"}' >"$TMP_ROOT/system_event_deploy.json")
+require_contains "$TMP_ROOT/system_event_deploy.json" '"hooks"'
+require_contains "$TMP_ROOT/system_event_deploy.json" '"triggered"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json webhooks add --name deploy-wh --event deploy --path /inbound/deploy --method post >"$TMP_ROOT/webhooks_add.json")
+require_contains "$TMP_ROOT/webhooks_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json webhooks resolve --path /inbound/deploy --method post --data '{"source":"webhook"}' >"$TMP_ROOT/webhooks_resolve.json")
+require_contains "$TMP_ROOT/webhooks_resolve.json" '"result"'
+require_contains "$TMP_ROOT/webhooks_resolve.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json cron add --name deploy-cron --event deploy --every 1 --data '{"source":"cron"}' >"$TMP_ROOT/cron_add.json")
+require_contains "$TMP_ROOT/cron_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json cron tick >"$TMP_ROOT/cron_tick.json")
+require_contains "$TMP_ROOT/cron_tick.json" '"triggered"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json cron logs --tail 20 >"$TMP_ROOT/cron_logs.json")
+require_contains "$TMP_ROOT/cron_logs.json" '"events"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json hooks logs --tail 20 >"$TMP_ROOT/hooks_logs.json")
+require_contains "$TMP_ROOT/hooks_logs.json" '"events"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json webhooks logs --tail 20 >"$TMP_ROOT/webhooks_logs.json")
+require_contains "$TMP_ROOT/webhooks_logs.json" '"events"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 50 >"$TMP_ROOT/logs_tail.json")
+require_contains "$TMP_ROOT/logs_tail.json" '"source"[[:space:]]*:[[:space:]]*"system"'
+
+log "Step 7: browser/runtime presence"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser open --url "mock://ok?title=Smoke+Docs" >"$TMP_ROOT/browser_open.json")
+require_contains "$TMP_ROOT/browser_open.json" '"http_status"[[:space:]]*:[[:space:]]*200'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser history --tail 10 >"$TMP_ROOT/browser_history.json")
+require_contains "$TMP_ROOT/browser_history.json" '"visits"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json system presence >"$TMP_ROOT/system_presence.json")
+require_contains "$TMP_ROOT/system_presence.json" '"presence"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 100 >"$TMP_ROOT/logs_after_browser.json")
+require_contains "$TMP_ROOT/logs_after_browser.json" '"source"[[:space:]]*:[[:space:]]*"browser"'
+
+log "Step 8: approvals/sandbox policies"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals get >"$TMP_ROOT/approvals_get.json")
+require_contains "$TMP_ROOT/approvals_get.json" '"mode"[[:space:]]*:[[:space:]]*"confirm"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals set deny >"$TMP_ROOT/approvals_set_deny.json")
+require_contains "$TMP_ROOT/approvals_set_deny.json" '"mode"[[:space:]]*:[[:space:]]*"deny"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals allowlist add "echo" >"$TMP_ROOT/approvals_allowlist_add.json")
+require_contains "$TMP_ROOT/approvals_allowlist_add.json" '"allowlist"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox list >"$TMP_ROOT/sandbox_list.json")
+require_contains "$TMP_ROOT/sandbox_list.json" '"profiles"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox explain --profile restricted >"$TMP_ROOT/sandbox_explain.json")
+require_contains "$TMP_ROOT/sandbox_explain.json" '"profile"'
+
+log "Step 9: agents routing + ask"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json agents add --id writer --name Writer --model mock-model --set-default --route ask >"$TMP_ROOT/agents_add.json")
+require_contains "$TMP_ROOT/agents_add.json" '"id"[[:space:]]*:[[:space:]]*"writer"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json agents route resolve --route ask >"$TMP_ROOT/agents_resolve.json")
+require_contains "$TMP_ROOT/agents_resolve.json" '"agent_id"[[:space:]]*:[[:space:]]*"writer"'
+
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="agents-smoke-ok" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json ask "hello agents" >"$TMP_ROOT/agents_ask.json")
+require_contains "$TMP_ROOT/agents_ask.json" '"response"[[:space:]]*:[[:space:]]*"agents-smoke-ok"'
+
+log "Step 10: memory index/search/status"
+printf "Rust memory smoke test document\n" >"$SRC_DIR/memory-smoke.txt"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json memory index --path . --max-files 200 >"$TMP_ROOT/memory_index.json")
+require_contains "$TMP_ROOT/memory_index.json" '"indexed_documents"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json memory search rust --limit 5 >"$TMP_ROOT/memory_search.json")
+require_contains "$TMP_ROOT/memory_search.json" '"total_hits"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json memory status >"$TMP_ROOT/memory_status.json")
+require_contains "$TMP_ROOT/memory_status.json" '"indexed_documents"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
+
+log "Step 11: security audit + baseline + sarif"
+printf "API_KEY = \"sk-live-secret-value-123456\"\n" >"$SRC_DIR/secrets.env"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json security audit --path . --deep >"$TMP_ROOT/security_audit.json")
+require_contains "$TMP_ROOT/security_audit.json" '"findings"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json security audit --path . --update-baseline >"$TMP_ROOT/security_update_baseline.json")
+require_contains "$TMP_ROOT/security_update_baseline.json" '"updated"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json security baseline show >"$TMP_ROOT/security_baseline_show.json")
+require_contains "$TMP_ROOT/security_baseline_show.json" '"exists"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json security audit --path . --sarif-output scan.sarif >"$TMP_ROOT/security_sarif_output.json")
+require_contains "$TMP_ROOT/security_sarif_output.json" '"sarif_output"'
+require_contains "$SRC_DIR/scan.sarif" '"version"[[:space:]]*:[[:space:]]*"2\.1\.0"'
+
+log "Step 12: plugins/skills install/list/check/remove"
+mkdir -p "$SRC_DIR/sample-plugin" "$SRC_DIR/writer"
+cat >"$SRC_DIR/sample-plugin/plugin.toml" <<'EOF'
+[plugin]
+id = "sample_plugin"
+name = "Sample Plugin"
+version = "0.1.0"
+EOF
+cat >"$SRC_DIR/writer/SKILL.md" <<'EOF'
+# Writer
+Generate concise release notes.
+EOF
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json plugins install --path sample-plugin >"$TMP_ROOT/plugins_install.json")
+require_contains "$TMP_ROOT/plugins_install.json" '"id"[[:space:]]*:[[:space:]]*"sample_plugin"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json skills install --path writer >"$TMP_ROOT/skills_install.json")
+require_contains "$TMP_ROOT/skills_install.json" '"id"[[:space:]]*:[[:space:]]*"writer"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json plugins check sample_plugin >"$TMP_ROOT/plugins_check.json")
+require_contains "$TMP_ROOT/plugins_check.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json skills check writer >"$TMP_ROOT/skills_check.json")
+require_contains "$TMP_ROOT/skills_check.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json plugins remove sample_plugin >"$TMP_ROOT/plugins_remove.json")
+require_contains "$TMP_ROOT/plugins_remove.json" '"removed"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json skills remove writer >"$TMP_ROOT/skills_remove.json")
+require_contains "$TMP_ROOT/skills_remove.json" '"removed"[[:space:]]*:[[:space:]]*true'
+
+log "Step 13: status/health/doctor"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json status >"$TMP_ROOT/status.json")
+require_contains "$TMP_ROOT/status.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json health >"$TMP_ROOT/health.json")
+require_contains "$TMP_ROOT/health.json" '"type"[[:space:]]*:[[:space:]]*"health"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json doctor >"$TMP_ROOT/doctor.json")
+require_contains "$TMP_ROOT/doctor.json" '"type"[[:space:]]*:[[:space:]]*"doctor"'
+
 log "Smoke test completed successfully"
 echo "session_id=$SESSION_ID"
 echo "src_channel_id=$SRC_CHANNEL_ID"
 echo "telegram_channel_id=$TG_CHANNEL_ID"
+echo "terminal_channel_id=$TERMINAL_CHANNEL_ID"
+echo "pairing_request_id=$PAIRING_REQUEST_ID"
 echo "tmp_dir=$TMP_ROOT"
 echo "Use KEEP_TMP=1 to keep artifacts."

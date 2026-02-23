@@ -51,6 +51,8 @@ const PROJECT_STATE_DIR: &str = ".mosaic";
 static PAIRING_REQUEST_SEQ: AtomicU64 = AtomicU64::new(1);
 static HOOK_SEQ: AtomicU64 = AtomicU64::new(1);
 static CRON_SEQ: AtomicU64 = AtomicU64::new(1);
+static WEBHOOK_SEQ: AtomicU64 = AtomicU64::new(1);
+static BROWSER_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Parser, Debug)]
 #[command(name = "mosaic", version, about = "Mosaic local agent CLI")]
@@ -87,6 +89,8 @@ enum Commands {
     Pairing(PairingArgs),
     Hooks(HooksArgs),
     Cron(CronArgs),
+    Webhooks(WebhooksArgs),
+    Browser(BrowserArgs),
     Logs(LogsArgs),
     System(SystemArgs),
     Approvals(ApprovalsArgs),
@@ -341,7 +345,6 @@ enum PairingCommand {
     Approve {
         request_id: String,
     },
-    #[command(hide = true)]
     Request {
         #[arg(long)]
         device: String,
@@ -443,6 +446,95 @@ enum CronCommand {
         job: Option<String>,
         #[arg(long, default_value_t = 50)]
         tail: usize,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct WebhooksArgs {
+    #[command(subcommand)]
+    command: WebhooksCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum WebhooksCommand {
+    List {
+        #[arg(long)]
+        event: Option<String>,
+    },
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        event: String,
+        #[arg(long)]
+        path: String,
+        #[arg(long, value_enum, default_value_t = WebhookMethodArg::Post)]
+        method: WebhookMethodArg,
+        #[arg(long)]
+        secret_env: Option<String>,
+        #[arg(long)]
+        disabled: bool,
+    },
+    Remove {
+        webhook_id: String,
+    },
+    Enable {
+        webhook_id: String,
+    },
+    Disable {
+        webhook_id: String,
+    },
+    Trigger {
+        webhook_id: String,
+        #[arg(long)]
+        data: Option<String>,
+        #[arg(long)]
+        secret: Option<String>,
+    },
+    Resolve {
+        #[arg(long)]
+        path: String,
+        #[arg(long, value_enum, default_value_t = WebhookMethodArg::Post)]
+        method: WebhookMethodArg,
+        #[arg(long)]
+        data: Option<String>,
+        #[arg(long)]
+        secret: Option<String>,
+    },
+    Logs {
+        #[arg(long)]
+        webhook: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        tail: usize,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct BrowserArgs {
+    #[command(subcommand)]
+    command: BrowserCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum BrowserCommand {
+    #[command(visible_alias = "visit")]
+    Open {
+        #[arg(long)]
+        url: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+    },
+    History {
+        #[arg(long, default_value_t = 20)]
+        tail: usize,
+    },
+    Show {
+        visit_id: String,
+    },
+    Clear {
+        visit_id: Option<String>,
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -1106,6 +1198,103 @@ struct CronExecutionReport {
     system_event: Option<SystemEvent>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum WebhookMethod {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
+impl std::fmt::Display for WebhookMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+            Self::Delete => "DELETE",
+        };
+        write!(f, "{value}")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WebhookRecord {
+    id: String,
+    name: String,
+    event: String,
+    path: String,
+    method: WebhookMethod,
+    secret_env: Option<String>,
+    enabled: bool,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    last_triggered_at: Option<DateTime<Utc>>,
+    last_result: Option<WebhookLastResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WebhookLastResult {
+    ok: bool,
+    hooks_triggered: usize,
+    hooks_ok: usize,
+    hooks_failed: usize,
+    error_code: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WebhookEventRecord {
+    ts: DateTime<Utc>,
+    webhook_id: String,
+    webhook_name: String,
+    trigger: String,
+    event: String,
+    path: String,
+    method: WebhookMethod,
+    data: Value,
+    ok: bool,
+    hooks_triggered: usize,
+    hooks_ok: usize,
+    hooks_failed: usize,
+    error_code: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WebhookExecutionReport {
+    webhook_id: String,
+    webhook_name: String,
+    trigger: String,
+    event: String,
+    path: String,
+    method: WebhookMethod,
+    ok: bool,
+    hooks_triggered: usize,
+    hooks_ok: usize,
+    hooks_failed: usize,
+    error_code: Option<String>,
+    error: Option<String>,
+    system_event: Option<SystemEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserVisitRecord {
+    id: String,
+    ts: DateTime<Utc>,
+    url: String,
+    ok: bool,
+    http_status: Option<u16>,
+    title: Option<String>,
+    content_type: Option<String>,
+    content_length: Option<usize>,
+    preview: Option<String>,
+    error: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct SystemEventDispatch {
     event: SystemEvent,
@@ -1154,6 +1343,16 @@ enum PairingStatusArg {
     Rejected,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+#[value(rename_all = "lower")]
+enum WebhookMethodArg {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+}
+
 impl From<PairingStatusArg> for PairingStatus {
     fn from(value: PairingStatusArg) -> Self {
         match value {
@@ -1170,6 +1369,18 @@ impl From<SandboxProfileArg> for SandboxProfile {
             SandboxProfileArg::Restricted => Self::Restricted,
             SandboxProfileArg::Standard => Self::Standard,
             SandboxProfileArg::Elevated => Self::Elevated,
+        }
+    }
+}
+
+impl From<WebhookMethodArg> for WebhookMethod {
+    fn from(value: WebhookMethodArg) -> Self {
+        match value {
+            WebhookMethodArg::Get => Self::Get,
+            WebhookMethodArg::Post => Self::Post,
+            WebhookMethodArg::Put => Self::Put,
+            WebhookMethodArg::Patch => Self::Patch,
+            WebhookMethodArg::Delete => Self::Delete,
         }
     }
 }
@@ -1292,6 +1503,8 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Pairing(args) => handle_pairing(&cli, args),
         Commands::Hooks(args) => handle_hooks(&cli, args),
         Commands::Cron(args) => handle_cron(&cli, args),
+        Commands::Webhooks(args) => handle_webhooks(&cli, args),
+        Commands::Browser(args) => handle_browser(&cli, args).await,
         Commands::Logs(args) => handle_logs(&cli, args).await,
         Commands::System(args) => handle_system(&cli, args),
         Commands::Approvals(args) => handle_approvals(&cli, args),
@@ -3342,6 +3555,425 @@ fn handle_cron(cli: &Cli, args: CronArgs) -> Result<()> {
                         item.error.unwrap_or_default(),
                     );
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_webhooks(cli: &Cli, args: WebhooksArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let webhooks_path = webhooks_file_path(&paths.data_dir);
+    let mut webhooks = load_webhooks_or_default(&webhooks_path)?;
+    match args.command {
+        WebhooksCommand::List { event } => {
+            let event_filter = event.map(|value| value.trim().to_string());
+            let filtered = webhooks
+                .into_iter()
+                .filter(|webhook| {
+                    if let Some(filter) = &event_filter {
+                        webhook.event == *filter
+                    } else {
+                        true
+                    }
+                })
+                .collect::<Vec<_>>();
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "webhooks": filtered,
+                    "path": webhooks_path.display().to_string(),
+                }));
+            } else if filtered.is_empty() {
+                println!("No webhooks configured.");
+            } else {
+                for webhook in filtered {
+                    let status = if webhook.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
+                    println!(
+                        "{} [{}] {} {} -> {} ({})",
+                        webhook.id,
+                        status,
+                        webhook.method,
+                        webhook.path,
+                        webhook.event,
+                        webhook.name
+                    );
+                }
+            }
+        }
+        WebhooksCommand::Add {
+            name,
+            event,
+            path,
+            method,
+            secret_env,
+            disabled,
+        } => {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err(MosaicError::Validation(
+                    "webhook name cannot be empty".to_string(),
+                ));
+            }
+            let event = event.trim().to_string();
+            if event.is_empty() {
+                return Err(MosaicError::Validation(
+                    "webhook event cannot be empty".to_string(),
+                ));
+            }
+            let path = normalize_webhook_path(&path)?;
+            let secret_env = normalize_optional_secret_env(secret_env)?;
+            let now = Utc::now();
+            let webhook = WebhookRecord {
+                id: generate_webhook_id(),
+                name,
+                event,
+                path,
+                method: method.into(),
+                secret_env,
+                enabled: !disabled,
+                created_at: now,
+                updated_at: now,
+                last_triggered_at: None,
+                last_result: None,
+            };
+            webhooks.push(webhook.clone());
+            save_webhooks(&webhooks_path, &webhooks)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "webhook": webhook,
+                    "path": webhooks_path.display().to_string(),
+                }));
+            } else {
+                println!("webhook added: {}", webhook.id);
+                println!("route: {} {}", webhook.method, webhook.path);
+                println!("event: {}", webhook.event);
+            }
+        }
+        WebhooksCommand::Remove { webhook_id } => {
+            let before = webhooks.len();
+            webhooks.retain(|item| item.id != webhook_id);
+            let removed = webhooks.len() != before;
+            if removed {
+                save_webhooks(&webhooks_path, &webhooks)?;
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": removed,
+                    "webhook_id": webhook_id,
+                }));
+            } else if removed {
+                println!("removed webhook {webhook_id}");
+            } else {
+                println!("webhook {webhook_id} not found");
+            }
+        }
+        WebhooksCommand::Enable { webhook_id } => {
+            let webhook = webhooks
+                .iter_mut()
+                .find(|item| item.id == webhook_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("webhook '{}' not found", webhook_id))
+                })?;
+            webhook.enabled = true;
+            webhook.updated_at = Utc::now();
+            let webhook = webhook.clone();
+            save_webhooks(&webhooks_path, &webhooks)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "webhook": webhook,
+                    "path": webhooks_path.display().to_string(),
+                }));
+            } else {
+                println!("webhook enabled: {}", webhook.id);
+            }
+        }
+        WebhooksCommand::Disable { webhook_id } => {
+            let webhook = webhooks
+                .iter_mut()
+                .find(|item| item.id == webhook_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("webhook '{}' not found", webhook_id))
+                })?;
+            webhook.enabled = false;
+            webhook.updated_at = Utc::now();
+            let webhook = webhook.clone();
+            save_webhooks(&webhooks_path, &webhooks)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "webhook": webhook,
+                    "path": webhooks_path.display().to_string(),
+                }));
+            } else {
+                println!("webhook disabled: {}", webhook.id);
+            }
+        }
+        WebhooksCommand::Trigger {
+            webhook_id,
+            data,
+            secret,
+        } => {
+            let index = webhooks
+                .iter()
+                .position(|item| item.id == webhook_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("webhook '{}' not found", webhook_id))
+                })?;
+            let payload = data
+                .as_deref()
+                .map(|value| parse_json_input(value, "webhook data"))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            let snapshot = webhooks[index].clone();
+            let report =
+                execute_webhook(cli, &paths, &snapshot, "manual", payload, secret.as_deref())?;
+            apply_webhook_last_result(&mut webhooks[index], &report);
+            save_webhooks(&webhooks_path, &webhooks)?;
+            if !report.ok {
+                return Err(webhook_execution_error(&snapshot.id, &report));
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "webhook": webhooks[index].clone(),
+                    "result": report,
+                }));
+            } else {
+                println!("webhook triggered: {}", snapshot.id);
+                println!("event: {}", snapshot.event);
+            }
+        }
+        WebhooksCommand::Resolve {
+            path,
+            method,
+            data,
+            secret,
+        } => {
+            let path = normalize_webhook_path(&path)?;
+            let method: WebhookMethod = method.into();
+            let index = webhooks
+                .iter()
+                .position(|item| item.enabled && item.path == path && item.method == method)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!(
+                        "no enabled webhook matched {} {}",
+                        method, path
+                    ))
+                })?;
+            let payload = data
+                .as_deref()
+                .map(|value| parse_json_input(value, "webhook data"))
+                .transpose()?
+                .unwrap_or(Value::Null);
+            let snapshot = webhooks[index].clone();
+            let report = execute_webhook(
+                cli,
+                &paths,
+                &snapshot,
+                "resolve",
+                payload,
+                secret.as_deref(),
+            )?;
+            apply_webhook_last_result(&mut webhooks[index], &report);
+            save_webhooks(&webhooks_path, &webhooks)?;
+            if !report.ok {
+                return Err(webhook_execution_error(&snapshot.id, &report));
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "webhook": webhooks[index].clone(),
+                    "result": report,
+                }));
+            } else {
+                println!("webhook resolved: {}", snapshot.id);
+                println!("route: {} {}", snapshot.method, snapshot.path);
+                println!("event: {}", snapshot.event);
+            }
+        }
+        WebhooksCommand::Logs { webhook, tail } => {
+            let events = read_webhook_events(&paths.data_dir, webhook.as_deref(), tail)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "events": events,
+                }));
+            } else if events.is_empty() {
+                println!("No webhook events found.");
+            } else {
+                for event in events {
+                    let status = if event.ok { "ok" } else { "error" };
+                    println!(
+                        "{} [{}] webhook={} trigger={} route={} {} event={} hooks={}/{} error={}",
+                        event.ts.to_rfc3339(),
+                        status,
+                        event.webhook_id,
+                        event.trigger,
+                        event.method,
+                        event.path,
+                        event.event,
+                        event.hooks_ok,
+                        event.hooks_triggered,
+                        event.error.unwrap_or_default(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let history_path = browser_history_file_path(&paths.data_dir);
+    let mut history = load_browser_history_or_default(&history_path)?;
+    match args.command {
+        BrowserCommand::Open { url, timeout_ms } => {
+            if timeout_ms == 0 {
+                return Err(MosaicError::Validation(
+                    "--timeout-ms must be greater than 0".to_string(),
+                ));
+            }
+            let visit = browser_open_visit(&url, timeout_ms).await?;
+            history.push(visit.clone());
+            save_browser_history(&history_path, &history)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "visit": visit,
+                    "path": history_path.display().to_string(),
+                }));
+            } else {
+                let status = visit
+                    .http_status
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".to_string());
+                println!("browser open: {}", visit.url);
+                println!("visit id: {}", visit.id);
+                println!("ok: {}", visit.ok);
+                println!("status: {status}");
+                if let Some(title) = visit.title {
+                    println!("title: {title}");
+                }
+                if let Some(error) = visit.error {
+                    println!("error: {error}");
+                }
+            }
+        }
+        BrowserCommand::History { tail } => {
+            let mut visits = history;
+            visits.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+            if visits.len() > tail {
+                let keep_from = visits.len() - tail;
+                visits = visits.split_off(keep_from);
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "visits": visits,
+                    "path": history_path.display().to_string(),
+                }));
+            } else if visits.is_empty() {
+                println!("No browser history.");
+            } else {
+                for visit in visits {
+                    let status = visit
+                        .http_status
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".to_string());
+                    println!(
+                        "{} [{}] {} status={} title={}",
+                        visit.id,
+                        if visit.ok { "ok" } else { "error" },
+                        visit.url,
+                        status,
+                        visit.title.unwrap_or_else(|| "-".to_string())
+                    );
+                }
+            }
+        }
+        BrowserCommand::Show { visit_id } => {
+            let visit = history
+                .into_iter()
+                .find(|item| item.id == visit_id)
+                .ok_or_else(|| MosaicError::Validation(format!("visit '{}' not found", visit_id)))?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "visit": visit,
+                }));
+            } else {
+                println!("visit: {}", visit.id);
+                println!("ts: {}", visit.ts.to_rfc3339());
+                println!("url: {}", visit.url);
+                println!("ok: {}", visit.ok);
+                if let Some(status) = visit.http_status {
+                    println!("status: {status}");
+                }
+                if let Some(content_type) = visit.content_type {
+                    println!("content_type: {content_type}");
+                }
+                if let Some(content_length) = visit.content_length {
+                    println!("content_length: {content_length}");
+                }
+                if let Some(title) = visit.title {
+                    println!("title: {title}");
+                }
+                if let Some(preview) = visit.preview {
+                    println!("preview: {preview}");
+                }
+                if let Some(error) = visit.error {
+                    println!("error: {error}");
+                }
+            }
+        }
+        BrowserCommand::Clear { visit_id, all } => {
+            if all && visit_id.is_some() {
+                return Err(MosaicError::Validation(
+                    "cannot set visit_id and --all together".to_string(),
+                ));
+            }
+            if !all && visit_id.is_none() {
+                return Err(MosaicError::Validation(
+                    "specify visit_id or use --all".to_string(),
+                ));
+            }
+
+            let (removed, remaining) = if all {
+                let removed = history.len();
+                (removed, Vec::new())
+            } else {
+                let target = visit_id.expect("validated visit_id");
+                let before = history.len();
+                let remaining = history
+                    .into_iter()
+                    .filter(|item| item.id != target)
+                    .collect::<Vec<_>>();
+                (before.saturating_sub(remaining.len()), remaining)
+            };
+            if removed > 0 || all {
+                save_browser_history(&history_path, &remaining)?;
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "removed": removed,
+                    "remaining": remaining.len(),
+                    "path": history_path.display().to_string(),
+                }));
+            } else {
+                println!("removed visits: {removed}");
+                println!("remaining visits: {}", remaining.len());
             }
         }
     }
@@ -6112,6 +6744,22 @@ fn hook_events_file_path(data_dir: &std::path::Path, hook_id: &str) -> PathBuf {
     hook_events_dir(data_dir).join(format!("{hook_id}.jsonl"))
 }
 
+fn webhooks_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("webhooks.json")
+}
+
+fn webhook_events_dir(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("webhook-events")
+}
+
+fn webhook_events_file_path(data_dir: &std::path::Path, webhook_id: &str) -> PathBuf {
+    webhook_events_dir(data_dir).join(format!("{webhook_id}.jsonl"))
+}
+
+fn browser_history_file_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("browser-history.json")
+}
+
 fn cron_jobs_file_path(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("cron-jobs.json")
 }
@@ -6159,6 +6807,22 @@ fn load_hooks_or_default(path: &std::path::Path) -> Result<Vec<HookRecord>> {
 
 fn save_hooks(path: &std::path::Path, hooks: &[HookRecord]) -> Result<()> {
     save_json_file(path, &hooks.to_vec())
+}
+
+fn load_webhooks_or_default(path: &std::path::Path) -> Result<Vec<WebhookRecord>> {
+    Ok(load_json_file_opt::<Vec<WebhookRecord>>(path)?.unwrap_or_default())
+}
+
+fn save_webhooks(path: &std::path::Path, webhooks: &[WebhookRecord]) -> Result<()> {
+    save_json_file(path, &webhooks.to_vec())
+}
+
+fn load_browser_history_or_default(path: &std::path::Path) -> Result<Vec<BrowserVisitRecord>> {
+    Ok(load_json_file_opt::<Vec<BrowserVisitRecord>>(path)?.unwrap_or_default())
+}
+
+fn save_browser_history(path: &std::path::Path, visits: &[BrowserVisitRecord]) -> Result<()> {
+    save_json_file(path, &visits.to_vec())
 }
 
 fn load_cron_jobs_or_default(path: &std::path::Path) -> Result<Vec<CronJobRecord>> {
@@ -6210,6 +6874,24 @@ fn next_cron_seq() -> u64 {
 fn generate_cron_job_id() -> String {
     let ts = Utc::now().timestamp_millis();
     format!("cj-{ts}-{}", next_cron_seq())
+}
+
+fn next_webhook_seq() -> u64 {
+    WEBHOOK_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+fn generate_webhook_id() -> String {
+    let ts = Utc::now().timestamp_millis();
+    format!("wh-{ts}-{}", next_webhook_seq())
+}
+
+fn next_browser_seq() -> u64 {
+    BROWSER_SEQ.fetch_add(1, Ordering::Relaxed)
+}
+
+fn generate_browser_visit_id() -> String {
+    let ts = Utc::now().timestamp_millis();
+    format!("bv-{ts}-{}", next_browser_seq())
 }
 
 fn dispatch_system_event(
@@ -6641,6 +7323,449 @@ fn load_cron_events_file(path: &std::path::Path, events: &mut Vec<CronEventRecor
         events.push(event);
     }
     Ok(())
+}
+
+fn normalize_webhook_path(path: &str) -> Result<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(MosaicError::Validation(
+            "webhook path cannot be empty".to_string(),
+        ));
+    }
+    if path.contains(' ') || path.contains('\t') || path.contains('\n') || path.contains('\r') {
+        return Err(MosaicError::Validation(
+            "webhook path cannot contain whitespace".to_string(),
+        ));
+    }
+    if path.starts_with('/') {
+        Ok(path.to_string())
+    } else {
+        Ok(format!("/{path}"))
+    }
+}
+
+fn normalize_optional_secret_env(secret_env: Option<String>) -> Result<Option<String>> {
+    match secret_env {
+        None => Ok(None),
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Err(MosaicError::Validation(
+                    "webhook secret env cannot be empty".to_string(),
+                ));
+            }
+            if !is_valid_env_name(trimmed) {
+                return Err(MosaicError::Validation(format!(
+                    "invalid webhook secret env '{}'",
+                    trimmed
+                )));
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+    }
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first == '_' || first.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|item| item == '_' || item.is_ascii_alphanumeric())
+}
+
+fn verify_webhook_secret(webhook: &WebhookRecord, provided_secret: Option<&str>) -> Result<()> {
+    let Some(secret_env) = &webhook.secret_env else {
+        return Ok(());
+    };
+    let expected = std::env::var(secret_env).map_err(|_| {
+        MosaicError::Auth(format!(
+            "webhook '{}' requires secret env '{}' to be set",
+            webhook.id, secret_env
+        ))
+    })?;
+    if expected.is_empty() {
+        return Err(MosaicError::Auth(format!(
+            "webhook '{}' secret env '{}' is empty",
+            webhook.id, secret_env
+        )));
+    }
+    let Some(provided_secret) = provided_secret else {
+        return Err(MosaicError::Auth(format!(
+            "webhook '{}' requires --secret to trigger",
+            webhook.id
+        )));
+    };
+    if provided_secret != expected {
+        return Err(MosaicError::Auth(format!(
+            "webhook '{}' secret mismatch",
+            webhook.id
+        )));
+    }
+    Ok(())
+}
+
+fn execute_webhook(
+    cli: &Cli,
+    paths: &StatePaths,
+    webhook: &WebhookRecord,
+    trigger: &str,
+    payload: Value,
+    provided_secret: Option<&str>,
+) -> Result<WebhookExecutionReport> {
+    let dispatch = match verify_webhook_secret(webhook, provided_secret) {
+        Ok(()) => dispatch_system_event(cli, paths, &webhook.event, payload.clone()),
+        Err(err) => Err(err),
+    };
+    let report = match dispatch {
+        Ok(dispatch) => {
+            let hooks_triggered = dispatch.hook_reports.len();
+            let hooks_ok = dispatch.hook_reports.iter().filter(|item| item.ok).count();
+            let hooks_failed = hooks_triggered.saturating_sub(hooks_ok);
+            let error = if hooks_failed > 0 {
+                Some(format!("{hooks_failed} hook execution(s) failed"))
+            } else {
+                None
+            };
+            WebhookExecutionReport {
+                webhook_id: webhook.id.clone(),
+                webhook_name: webhook.name.clone(),
+                trigger: trigger.to_string(),
+                event: webhook.event.clone(),
+                path: webhook.path.clone(),
+                method: webhook.method.clone(),
+                ok: hooks_failed == 0,
+                hooks_triggered,
+                hooks_ok,
+                hooks_failed,
+                error_code: if hooks_failed == 0 {
+                    None
+                } else {
+                    Some("tool".to_string())
+                },
+                error,
+                system_event: Some(dispatch.event),
+            }
+        }
+        Err(err) => WebhookExecutionReport {
+            webhook_id: webhook.id.clone(),
+            webhook_name: webhook.name.clone(),
+            trigger: trigger.to_string(),
+            event: webhook.event.clone(),
+            path: webhook.path.clone(),
+            method: webhook.method.clone(),
+            ok: false,
+            hooks_triggered: 0,
+            hooks_ok: 0,
+            hooks_failed: 0,
+            error_code: Some(err.code().to_string()),
+            error: Some(err.to_string()),
+            system_event: None,
+        },
+    };
+    append_webhook_event(&paths.data_dir, webhook, trigger, payload, &report)?;
+    Ok(report)
+}
+
+fn append_webhook_event(
+    data_dir: &std::path::Path,
+    webhook: &WebhookRecord,
+    trigger: &str,
+    payload: Value,
+    report: &WebhookExecutionReport,
+) -> Result<()> {
+    let event = WebhookEventRecord {
+        ts: Utc::now(),
+        webhook_id: webhook.id.clone(),
+        webhook_name: webhook.name.clone(),
+        trigger: trigger.to_string(),
+        event: webhook.event.clone(),
+        path: webhook.path.clone(),
+        method: webhook.method.clone(),
+        data: payload,
+        ok: report.ok,
+        hooks_triggered: report.hooks_triggered,
+        hooks_ok: report.hooks_ok,
+        hooks_failed: report.hooks_failed,
+        error_code: report.error_code.clone(),
+        error: report.error.clone(),
+    };
+    let path = webhook_events_file_path(data_dir, &webhook.id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let encoded = serde_json::to_string(&event).map_err(|err| {
+        MosaicError::Validation(format!(
+            "failed to encode webhook event {}: {err}",
+            path.display()
+        ))
+    })?;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)?;
+    use std::io::Write as _;
+    file.write_all(encoded.as_bytes())?;
+    file.write_all(b"\n")?;
+    Ok(())
+}
+
+fn apply_webhook_last_result(webhook: &mut WebhookRecord, report: &WebhookExecutionReport) {
+    let now = Utc::now();
+    webhook.updated_at = now;
+    webhook.last_triggered_at = Some(now);
+    webhook.last_result = Some(WebhookLastResult {
+        ok: report.ok,
+        hooks_triggered: report.hooks_triggered,
+        hooks_ok: report.hooks_ok,
+        hooks_failed: report.hooks_failed,
+        error_code: report.error_code.clone(),
+        error: report.error.clone(),
+    });
+}
+
+fn webhook_execution_error(webhook_id: &str, report: &WebhookExecutionReport) -> MosaicError {
+    let message = report
+        .error
+        .clone()
+        .unwrap_or_else(|| format!("webhook '{}' execution failed", webhook_id));
+    match report.error_code.as_deref() {
+        Some("config") => MosaicError::Config(message),
+        Some("auth") => MosaicError::Auth(message),
+        Some("network") => MosaicError::Network(message),
+        Some("io") => MosaicError::Io(message),
+        Some("validation") => MosaicError::Validation(message),
+        Some("gateway_unavailable") => MosaicError::GatewayUnavailable(message),
+        Some("gateway_protocol") => MosaicError::GatewayProtocol(message),
+        Some("channel_unsupported") => MosaicError::ChannelUnsupported(message),
+        Some("approval_required") => MosaicError::ApprovalRequired(message),
+        Some("sandbox_denied") => MosaicError::SandboxDenied(message),
+        _ => MosaicError::Tool(message),
+    }
+}
+
+fn read_webhook_events(
+    data_dir: &std::path::Path,
+    webhook_id: Option<&str>,
+    tail: usize,
+) -> Result<Vec<WebhookEventRecord>> {
+    let mut events = Vec::new();
+    if let Some(webhook_id) = webhook_id {
+        let path = webhook_events_file_path(data_dir, webhook_id);
+        load_webhook_events_file(&path, &mut events)?;
+    } else {
+        let dir = webhook_events_dir(data_dir);
+        if dir.exists() {
+            for entry in std::fs::read_dir(&dir)? {
+                let path = entry?.path();
+                if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                load_webhook_events_file(&path, &mut events)?;
+            }
+        }
+    }
+    events.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+    if events.len() > tail {
+        let keep_from = events.len() - tail;
+        events = events.split_off(keep_from);
+    }
+    Ok(events)
+}
+
+fn load_webhook_events_file(
+    path: &std::path::Path,
+    events: &mut Vec<WebhookEventRecord>,
+) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let raw = std::fs::read_to_string(path)?;
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event = serde_json::from_str::<WebhookEventRecord>(line).map_err(|err| {
+            MosaicError::Validation(format!(
+                "invalid webhook event format {}: {err}",
+                path.display()
+            ))
+        })?;
+        events.push(event);
+    }
+    Ok(())
+}
+
+async fn browser_open_visit(url: &str, timeout_ms: u64) -> Result<BrowserVisitRecord> {
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|err| MosaicError::Validation(format!("invalid browser url '{}': {err}", url)))?;
+    let visit_id = generate_browser_visit_id();
+    let ts = Utc::now();
+    match parsed.scheme() {
+        "mock" => Ok(browser_open_mock_visit(visit_id, ts, url, &parsed)),
+        "http" | "https" => Ok(browser_open_http_visit(visit_id, ts, url, &parsed, timeout_ms).await),
+        scheme => Err(MosaicError::Validation(format!(
+            "unsupported browser url scheme '{}', expected http/https/mock",
+            scheme
+        ))),
+    }
+}
+
+fn browser_open_mock_visit(
+    visit_id: String,
+    ts: DateTime<Utc>,
+    url: &str,
+    parsed: &reqwest::Url,
+) -> BrowserVisitRecord {
+    let status = resolve_mock_browser_status(parsed);
+    let title = parsed
+        .query_pairs()
+        .find(|(key, _)| key == "title")
+        .map(|(_, value)| value.to_string())
+        .or_else(|| Some("Mock Page".to_string()));
+    let body = format!(
+        "<html><head><title>{}</title></head><body>mock browser response status {status}</body></html>",
+        title.clone().unwrap_or_else(|| "Mock Page".to_string())
+    );
+    let ok = (200..300).contains(&status);
+    BrowserVisitRecord {
+        id: visit_id,
+        ts,
+        url: url.to_string(),
+        ok,
+        http_status: Some(status),
+        title,
+        content_type: Some("text/html; charset=utf-8".to_string()),
+        content_length: Some(body.len()),
+        preview: preview_text(&body, 240),
+        error: if ok {
+            None
+        } else {
+            Some(format!("http status {status}"))
+        },
+    }
+}
+
+fn resolve_mock_browser_status(parsed: &reqwest::Url) -> u16 {
+    if let Some(host) = parsed.host_str() {
+        if host.eq_ignore_ascii_case("ok") {
+            return 200;
+        }
+        if let Ok(code) = host.parse::<u16>() {
+            return code;
+        }
+        if host.eq_ignore_ascii_case("status") {
+            let path = parsed.path().trim_start_matches('/');
+            if let Ok(code) = path.parse::<u16>() {
+                return code;
+            }
+        }
+    }
+    200
+}
+
+async fn browser_open_http_visit(
+    visit_id: String,
+    ts: DateTime<Utc>,
+    url: &str,
+    parsed: &reqwest::Url,
+    timeout_ms: u64,
+) -> BrowserVisitRecord {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            return BrowserVisitRecord {
+                id: visit_id,
+                ts,
+                url: url.to_string(),
+                ok: false,
+                http_status: None,
+                title: None,
+                content_type: None,
+                content_length: None,
+                preview: None,
+                error: Some(format!("failed to build http client: {err}")),
+            };
+        }
+    };
+
+    let response = match client.get(parsed.clone()).send().await {
+        Ok(response) => response,
+        Err(err) => {
+            return BrowserVisitRecord {
+                id: visit_id,
+                ts,
+                url: url.to_string(),
+                ok: false,
+                http_status: None,
+                title: None,
+                content_type: None,
+                content_length: None,
+                preview: None,
+                error: Some(format!("request failed: {err}")),
+            };
+        }
+    };
+
+    let status = response.status().as_u16();
+    let ok = response.status().is_success();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(err) => {
+            return BrowserVisitRecord {
+                id: visit_id,
+                ts,
+                url: url.to_string(),
+                ok: false,
+                http_status: Some(status),
+                title: None,
+                content_type,
+                content_length: None,
+                preview: None,
+                error: Some(format!("failed to read response body: {err}")),
+            };
+        }
+    };
+    let title = extract_html_title(&body);
+    BrowserVisitRecord {
+        id: visit_id,
+        ts,
+        url: url.to_string(),
+        ok,
+        http_status: Some(status),
+        title,
+        content_type,
+        content_length: Some(body.len()),
+        preview: preview_text(&body, 240),
+        error: if ok {
+            None
+        } else {
+            Some(format!("http status {status}"))
+        },
+    }
+}
+
+fn extract_html_title(body: &str) -> Option<String> {
+    let lower = body.to_lowercase();
+    let title_start = lower.find("<title")?;
+    let open_end_rel = lower[title_start..].find('>')?;
+    let content_start = title_start + open_end_rel + 1;
+    let close_rel = lower[content_start..].find("</title>")?;
+    let content_end = content_start + close_rel;
+    let title = body[content_start..content_end].trim();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_string())
+    }
 }
 
 fn preview_text(value: &str, max_len: usize) -> Option<String> {

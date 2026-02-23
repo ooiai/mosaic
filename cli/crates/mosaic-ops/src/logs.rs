@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
-use mosaic_core::error::Result;
+use mosaic_core::error::{MosaicError, Result};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct UnifiedLogEntry {
@@ -78,12 +78,50 @@ pub fn collect_logs(data_dir: &Path, tail: usize) -> Result<Vec<UnifiedLogEntry>
         }
     }
 
+    let webhook_events_dir = data_dir.join("webhook-events");
+    if webhook_events_dir.exists() {
+        for entry in std::fs::read_dir(&webhook_events_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let source = format!(
+                "webhook:{}",
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown")
+            );
+            load_jsonl_file(&mut entries, &path, &source)?;
+        }
+    }
+
+    load_browser_history_file(&mut entries, &data_dir.join("browser-history.json"))?;
+
     entries.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
     if entries.len() > tail {
         let keep_from = entries.len() - tail;
         entries = entries.split_off(keep_from);
     }
     Ok(entries)
+}
+
+fn load_browser_history_file(entries: &mut Vec<UnifiedLogEntry>, path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let raw = std::fs::read_to_string(path)?;
+    let items = serde_json::from_str::<Vec<Value>>(&raw).map_err(|err| {
+        MosaicError::Validation(format!("invalid browser history format {}: {err}", path.display()))
+    })?;
+    for payload in items {
+        let ts = payload.get("ts").and_then(Value::as_str).and_then(parse_ts);
+        entries.push(UnifiedLogEntry {
+            source: "browser".to_string(),
+            ts,
+            payload,
+        });
+    }
+    Ok(())
 }
 
 fn load_jsonl_file(entries: &mut Vec<UnifiedLogEntry>, path: &Path, source: &str) -> Result<()> {
@@ -177,5 +215,53 @@ mod tests {
         let logs = collect_logs(temp.path(), 50).expect("collect logs");
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].source, "cron:cj-1");
+    }
+
+    #[test]
+    fn collect_logs_includes_webhook_events() {
+        let temp = tempdir().expect("tempdir");
+        let webhooks_dir = temp.path().join("webhook-events");
+        fs::create_dir_all(&webhooks_dir).expect("create webhook-events dir");
+        let path = webhooks_dir.join("wh-1.jsonl");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                json!({
+                    "ts": "2026-02-22T00:00:00Z",
+                    "webhook_id": "wh-1",
+                    "ok": true,
+                    "event": "deploy",
+                })
+            ),
+        )
+        .expect("write webhook event");
+
+        let logs = collect_logs(temp.path(), 50).expect("collect logs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].source, "webhook:wh-1");
+    }
+
+    #[test]
+    fn collect_logs_includes_browser_history() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("browser-history.json");
+        fs::write(
+            &path,
+            format!(
+                "[{}]\n",
+                json!({
+                    "ts": "2026-02-22T00:00:00Z",
+                    "id": "bv-1",
+                    "url": "mock://ok",
+                    "ok": true
+                })
+            ),
+        )
+        .expect("write browser history");
+
+        let logs = collect_logs(temp.path(), 50).expect("collect logs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].source, "browser");
     }
 }

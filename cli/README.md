@@ -8,9 +8,11 @@ This workspace ships a pure CLI with no frontend dependency.
 - Local agent core (`ask`, `chat`, `session`, `models`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway install|start|restart|status|health|probe|discover|call|stop|uninstall`)
 - Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
-- Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|approve`)
+- Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve`)
 - Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
 - Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
+- Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
+- Browser runtime (`browser open|history|show|clear`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
@@ -116,6 +118,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state devices approve dev-1 --
 cargo run -p mosaic-cli --bin mosaic -- --project-state devices rotate dev-1
 cargo run -p mosaic-cli --bin mosaic -- --project-state devices revoke dev-1 --reason "device replaced"
 
+cargo run -p mosaic-cli --bin mosaic -- --project-state pairing request --device dev-1 --node local --reason "new laptop"
 cargo run -p mosaic-cli --bin mosaic -- --project-state pairing list --status pending
 cargo run -p mosaic-cli --bin mosaic -- --project-state pairing approve <request-id>
 ```
@@ -153,6 +156,45 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --yes cron tick
 cargo run -p mosaic-cli --bin mosaic -- --project-state --yes cron run <job-id>
 
 cargo run -p mosaic-cli --bin mosaic -- --project-state cron logs --tail 20
+```
+
+### Webhooks Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state webhooks add \
+  --name deploy-webhook \
+  --event deploy \
+  --path /inbound/deploy \
+  --method post
+
+# resolve route to webhook and dispatch event -> hooks pipeline
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes webhooks resolve \
+  --path /inbound/deploy \
+  --method post \
+  --data '{"release":"2026.02"}'
+
+# secret-protected webhook
+export MOSAIC_WEBHOOK_SECRET="replace-me"
+cargo run -p mosaic-cli --bin mosaic -- --project-state webhooks add \
+  --name deploy-secret \
+  --event deploy \
+  --path /inbound/secure \
+  --method post \
+  --secret-env MOSAIC_WEBHOOK_SECRET
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes webhooks resolve \
+  --path /inbound/secure \
+  --method post \
+  --secret "$MOSAIC_WEBHOOK_SECRET"
+```
+
+### Browser Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser open --url mock://ok?title=Docs
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser history --tail 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser show <visit-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser clear <visit-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser clear --all
 ```
 
 ### Channels Runtime
@@ -217,18 +259,36 @@ Terminal channel guide: `docs/channels-terminal.md`
 Telegram channel guide: `docs/channels-telegram.md`
 Gateway ops guide: `docs/gateway-ops.md`
 Nodes/devices/pairing guide: `docs/nodes-devices-pairing.md`
+Ops guide (logs/system): `docs/ops.md`
 Hooks guide: `docs/hooks.md`
 Cron guide: `docs/cron.md`
+Webhooks guide: `docs/webhooks.md`
+Browser guide: `docs/browser.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
 Security audit guide: `docs/security-audit.md`
 Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
+OpenClaw parity map: `docs/openclaw-parity.md`
+Regression catalog (all docs + all test cases): `docs/regression-catalog.md`
+Regression runbook: `docs/regression-runbook.md`
+Work log (concise change history): `../WORKLOG.md` (entry point note: `docs/worklog.md`)
 
 Telegram default token env: `MOSAIC_TELEGRAM_BOT_TOKEN`.
 Telegram min send interval env: `MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS` (default `800`).
 Idempotency dedupe window env: `MOSAIC_CHANNELS_IDEMPOTENCY_WINDOW_SECONDS` (default `86400`).
 Telegram 429 fallback retry env: `MOSAIC_CHANNELS_TELEGRAM_RETRY_AFTER_DEFAULT_SECONDS` (default `1`).
+
+### Regression Scripts
+
+```bash
+cd cli
+./scripts/update_regression_catalog.sh
+./scripts/run_regression_suite.sh
+./scripts/run_regression_suite.sh --worklog-summary "Nightly full regression"
+SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
+./scripts/worklog_append.sh --summary "Summary of change" --tests "cargo test --workspace"
+```
 
 ### Ops Runtime
 

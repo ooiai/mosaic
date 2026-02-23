@@ -2,6 +2,7 @@ use assert_cmd::Command;
 use serde_json::Value;
 use tempfile::tempdir;
 
+#[allow(deprecated)]
 fn setup_project(temp: &tempfile::TempDir) {
     Command::cargo_bin("mosaic")
         .expect("binary")
