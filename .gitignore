@@ -54,4 +54,6 @@ config.yml
 
 # mosaic
 .mosaic/
+# regression artifacts
+cli/reports/
 #cli/scripts/run-command.sh
