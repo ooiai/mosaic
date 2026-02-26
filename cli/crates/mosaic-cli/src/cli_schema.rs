@@ -29,15 +29,19 @@ struct Cli {
 enum Commands {
     #[command(visible_alias = "onboard")]
     Setup(SetupArgs),
+    #[command(visible_alias = "config")]
     Configure(ConfigureArgs),
     Models(ModelsArgs),
     #[command(visible_alias = "message")]
     Ask(AskArgs),
     #[command(visible_alias = "agent")]
     Chat(ChatArgs),
+    #[command(visible_alias = "sessions")]
     Session(SessionArgs),
+    #[command(visible_alias = "daemon")]
     Gateway(GatewayArgs),
     Channels(ChannelsArgs),
+    #[command(visible_alias = "node")]
     Nodes(NodesArgs),
     Devices(DevicesArgs),
     Pairing(PairingArgs),
@@ -47,6 +51,7 @@ enum Commands {
     Browser(BrowserArgs),
     Logs(LogsArgs),
     System(SystemArgs),
+    #[command(visible_alias = "acp")]
     Approvals(ApprovalsArgs),
     Sandbox(SandboxArgs),
     Memory(MemoryArgs),
@@ -54,6 +59,17 @@ enum Commands {
     Agents(AgentsArgs),
     Plugins(PluginsArgs),
     Skills(SkillsArgs),
+    Completion(CompletionArgs),
+    Directory,
+    Dashboard,
+    Update(UpdateArgs),
+    Reset,
+    Uninstall,
+    Docs(DocsArgs),
+    Dns(DnsArgs),
+    Tui(TuiArgs),
+    Qr(QrArgs),
+    Clawbot(ClawbotArgs),
     Status,
     Health,
     Doctor,
@@ -938,6 +954,143 @@ enum SkillsCommand {
     },
 }
 
+#[derive(Args, Debug, Clone)]
+struct CompletionArgs {
+    #[command(subcommand)]
+    command: CompletionCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum CompletionCommand {
+    Shell {
+        #[arg(value_enum)]
+        shell: CompletionShellArg,
+    },
+    Install {
+        #[arg(value_enum)]
+        shell: CompletionShellArg,
+        #[arg(long)]
+        dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct UpdateArgs {
+    #[arg(long)]
+    check: bool,
+    #[arg(long)]
+    source: Option<String>,
+    #[arg(long, default_value_t = 5000)]
+    timeout_ms: u64,
+}
+
+#[derive(Args, Debug, Clone)]
+struct DocsArgs {
+    topic: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+struct DnsArgs {
+    #[command(subcommand)]
+    command: DnsCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum DnsCommand {
+    Resolve {
+        host: String,
+        #[arg(long, default_value_t = 443)]
+        port: u16,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct TuiArgs {
+    #[arg(long)]
+    session: Option<String>,
+    #[arg(long)]
+    prompt: Option<String>,
+    #[arg(long)]
+    agent: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+struct QrArgs {
+    #[command(subcommand)]
+    command: QrCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum QrCommand {
+    Encode {
+        value: String,
+        #[arg(long, value_enum, default_value_t = QrRenderArg::Payload)]
+        render: QrRenderArg,
+        #[arg(long)]
+        output: Option<String>,
+        #[arg(long, default_value_t = 2)]
+        quiet_zone: u8,
+        #[arg(long, default_value_t = 8)]
+        module_size: u32,
+    },
+    Pairing {
+        #[arg(long)]
+        device: String,
+        #[arg(long, default_value = "local")]
+        node: String,
+        #[arg(long, default_value_t = 900)]
+        ttl_seconds: u64,
+        #[arg(long, value_enum, default_value_t = QrRenderArg::Payload)]
+        render: QrRenderArg,
+        #[arg(long)]
+        output: Option<String>,
+        #[arg(long, default_value_t = 2)]
+        quiet_zone: u8,
+        #[arg(long, default_value_t = 8)]
+        module_size: u32,
+    },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum QrRenderArg {
+    Payload,
+    Ascii,
+    Png,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ClawbotArgs {
+    #[command(subcommand)]
+    command: ClawbotCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ClawbotCommand {
+    Ask {
+        prompt: String,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    Chat {
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        prompt: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    Send {
+        text: String,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    Status,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct GatewayState {
     running: bool,
@@ -1305,6 +1458,16 @@ enum WebhookMethodArg {
     Put,
     Patch,
     Delete,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CompletionShellArg {
+    Bash,
+    Zsh,
+    Fish,
+    #[value(name = "powershell")]
+    PowerShell,
+    Elvish,
 }
 
 impl From<PairingStatusArg> for PairingStatus {

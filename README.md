@@ -35,14 +35,14 @@ Mosaic is an AI-powered visual frontend development platform that revolutionizes
 - 🎯 **Modular Architecture**: Clean separation between frontend and desktop concerns
 - 🔧 **Developer Friendly**: Hot reload, TypeScript support, and modern tooling
 
-## 🦀 Rust CLI (OpenClaw-style)
+## 🦀 Rust CLI
 
 This repository also includes a full Rust CLI workspace for local-agent workflows:
 
 - Workspace: `cli/`
 - Command binary: `mosaic`
 - Command docs and runtime guides: `cli/README.md`
-- Parity map and regression docs: `cli/docs/openclaw-parity.md`, `cli/docs/regression-runbook.md`
+- Capability map and regression docs: `cli/docs/parity-map.md`, `cli/docs/regression-runbook.md`
 
 Quick start:
 

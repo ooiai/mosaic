@@ -17,12 +17,15 @@ mod automation_commands;
 mod automation_runtime;
 mod browser_runtime;
 mod channels_command;
+mod compat_commands;
 mod core_commands;
 mod devices_pairing_command;
 mod diagnostics_command;
+mod discovery_commands;
 mod feature_commands;
 mod gateway_command;
 mod gateway_runtime;
+mod maintenance_commands;
 mod nodes_command;
 mod ops_command;
 mod runtime_context;
@@ -42,11 +45,13 @@ use automation_runtime::{
 };
 use browser_runtime::browser_open_visit;
 use channels_command::handle_channels;
+use compat_commands::{handle_completion, handle_directory};
 use core_commands::{
     handle_ask, handle_chat, handle_configure, handle_models, handle_session, handle_setup,
 };
 use devices_pairing_command::{handle_devices, handle_pairing};
 use diagnostics_command::{emit_checks, handle_doctor, handle_health, handle_status, run_check};
+use discovery_commands::{handle_dns, handle_docs, handle_qr};
 use feature_commands::{handle_browser, handle_memory, handle_plugins, handle_skills};
 use gateway_command::handle_gateway;
 use gateway_runtime::{
@@ -54,6 +59,7 @@ use gateway_runtime::{
     resolve_gateway_start_target, resolve_gateway_target, run_gateway_http_server,
     start_gateway_runtime, stop_gateway_runtime, upsert_gateway_service,
 };
+use maintenance_commands::{handle_reset, handle_uninstall, handle_update};
 use nodes_command::handle_nodes;
 use ops_command::{handle_approvals, handle_logs, handle_sandbox, handle_system};
 #[cfg(test)]
@@ -139,6 +145,74 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Agents(args) => handle_agents(&cli, args),
         Commands::Plugins(args) => handle_plugins(&cli, args),
         Commands::Skills(args) => handle_skills(&cli, args),
+        Commands::Completion(args) => handle_completion(&cli, args),
+        Commands::Directory => handle_directory(&cli),
+        Commands::Dashboard => handle_status(&cli),
+        Commands::Update(args) => handle_update(&cli, args).await,
+        Commands::Reset => handle_reset(&cli),
+        Commands::Uninstall => handle_uninstall(&cli),
+        Commands::Docs(args) => handle_docs(&cli, args),
+        Commands::Dns(args) => handle_dns(&cli, args),
+        Commands::Tui(args) => {
+            handle_chat(
+                &cli,
+                ChatArgs {
+                    session: args.session,
+                    prompt: args.prompt,
+                    agent: args.agent,
+                },
+            )
+            .await
+        }
+        Commands::Qr(args) => handle_qr(&cli, args),
+        Commands::Clawbot(args) => match args.command {
+            ClawbotCommand::Ask {
+                prompt,
+                session,
+                agent,
+            } => {
+                handle_ask(
+                    &cli,
+                    AskArgs {
+                        prompt,
+                        session,
+                        agent,
+                    },
+                )
+                .await
+            }
+            ClawbotCommand::Chat {
+                session,
+                prompt,
+                agent,
+            } => {
+                handle_chat(
+                    &cli,
+                    ChatArgs {
+                        session,
+                        prompt,
+                        agent,
+                    },
+                )
+                .await
+            }
+            ClawbotCommand::Send {
+                text,
+                session,
+                agent,
+            } => {
+                handle_ask(
+                    &cli,
+                    AskArgs {
+                        prompt: text,
+                        session,
+                        agent,
+                    },
+                )
+                .await
+            }
+            ClawbotCommand::Status => handle_status(&cli),
+        },
         Commands::Status => handle_status(&cli),
         Commands::Health => handle_health(&cli).await,
         Commands::Doctor => handle_doctor(&cli).await,

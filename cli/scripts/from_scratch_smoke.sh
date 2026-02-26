@@ -334,6 +334,64 @@ require_contains "$TMP_ROOT/health.json" '"type"[[:space:]]*:[[:space:]]*"health
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json doctor >"$TMP_ROOT/doctor.json")
 require_contains "$TMP_ROOT/doctor.json" '"type"[[:space:]]*:[[:space:]]*"doctor"'
 
+log "Step 14: compatibility command family (docs/dns/tui/qr/clawbot/completion/directory/dashboard/update/reset/uninstall)"
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json docs >"$TMP_ROOT/docs_list.json")
+require_contains "$TMP_ROOT/docs_list.json" '"topics"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json docs gateway >"$TMP_ROOT/docs_gateway.json")
+require_contains "$TMP_ROOT/docs_gateway.json" '"topic"[[:space:]]*:[[:space:]]*"gateway"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json dns resolve localhost --port 443 >"$TMP_ROOT/dns_localhost.json")
+require_contains "$TMP_ROOT/dns_localhost.json" '"addresses"'
+
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="tui-smoke-ok" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json tui --prompt "hello tui" >"$TMP_ROOT/tui_prompt.json")
+require_contains "$TMP_ROOT/tui_prompt.json" '"response"[[:space:]]*:[[:space:]]*"tui-smoke-ok"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json qr encode "smoke payload" --render ascii >"$TMP_ROOT/qr_ascii.json")
+require_contains "$TMP_ROOT/qr_ascii.json" '"render"[[:space:]]*:[[:space:]]*"ascii"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json qr encode "smoke payload" --render png --output "$TMP_ROOT/qr/smoke.png" --module-size 6 >"$TMP_ROOT/qr_png.json")
+require_contains "$TMP_ROOT/qr_png.json" '"render"[[:space:]]*:[[:space:]]*"png"'
+if [[ ! -f "$TMP_ROOT/qr/smoke.png" ]]; then
+  echo "error: expected qr png output at $TMP_ROOT/qr/smoke.png" >&2
+  exit 1
+fi
+
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="clawbot-send-ok" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot send "hello clawbot send" >"$TMP_ROOT/clawbot_send.json")
+require_contains "$TMP_ROOT/clawbot_send.json" '"response"[[:space:]]*:[[:space:]]*"clawbot-send-ok"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot status >"$TMP_ROOT/clawbot_status.json")
+require_contains "$TMP_ROOT/clawbot_status.json" '"configured"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- completion shell zsh >"$TMP_ROOT/completion_zsh.sh")
+require_contains "$TMP_ROOT/completion_zsh.sh" "compdef"
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- completion install zsh --dir "$TMP_ROOT/completions" >"$TMP_ROOT/completion_install.txt")
+if [[ ! -f "$TMP_ROOT/completions/_mosaic" ]]; then
+  echo "error: completion install did not create $TMP_ROOT/completions/_mosaic" >&2
+  exit 1
+fi
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json directory >"$TMP_ROOT/directory.json")
+require_contains "$TMP_ROOT/directory.json" '"root_dir"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json dashboard >"$TMP_ROOT/dashboard.json")
+require_contains "$TMP_ROOT/dashboard.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json update >"$TMP_ROOT/update_local.json")
+require_contains "$TMP_ROOT/update_local.json" '"current_version"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json update --check --source mock://v9.9.9 >"$TMP_ROOT/update_check.json")
+require_contains "$TMP_ROOT/update_check.json" '"latest_version"[[:space:]]*:[[:space:]]*"v9\.9\.9"'
+
+MAINT_DIR="$TMP_ROOT/maint"
+mkdir -p "$MAINT_DIR"
+(cd "$MAINT_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state setup --base-url mock://mock-model --model mock-model >/dev/null)
+(cd "$MAINT_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json reset >"$TMP_ROOT/reset_yes.json")
+require_contains "$TMP_ROOT/reset_yes.json" '"ok"[[:space:]]*:[[:space:]]*true'
+(cd "$MAINT_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json uninstall >"$TMP_ROOT/uninstall_yes.json")
+require_contains "$TMP_ROOT/uninstall_yes.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
 log "Smoke test completed successfully"
 echo "session_id=$SESSION_ID"
 echo "src_channel_id=$SRC_CHANNEL_ID"

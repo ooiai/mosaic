@@ -1,11 +1,11 @@
 # Mosaic CLI (Rust)
 
-Mosaic CLI is the first-phase Rust implementation of a local agent workflow inspired by OpenClaw.
+Mosaic CLI is the first-phase Rust implementation of a local agent workflow.
 This workspace ships a pure CLI with no frontend dependency.
 
 ## Scope (V1 + V2)
 
-- Local agent core (`ask`, `chat`, `session`, `models`, `status`, `health`, `doctor`)
+- Local agent core (`ask`, `chat`, `session`, `models`, `dashboard`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway install|start|restart|status|health|probe|discover|call|stop|uninstall`)
 - Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
 - Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve`)
@@ -14,16 +14,26 @@ This workspace ships a pure CLI with no frontend dependency.
 - Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
 - Browser runtime (`browser open|history|show|clear`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
+- CLI compatibility/runtime helpers (`completion shell|install`, `directory`)
+- Maintenance runtime (`update`, `reset`, `uninstall`)
+- Discovery/runtime helpers (`docs`, `dns resolve`)
+- UX compatibility shim (`tui` -> chat runtime)
+- Compatibility helpers (`qr encode|pairing` with payload/ascii/png render, `clawbot ask|chat|send|status`)
 - Memory runtime (`memory index|search|status`)
 - Security runtime (`security audit`)
 - Agents runtime (`agents list|add|update|show|remove|default|route`)
 - Plugins and skills runtime (`plugins list|info|check|install|remove`, `skills list|info|check|install|remove`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
-- Command aliases compatible with OpenClaw-style naming:
+- Command aliases for legacy naming compatibility:
   - `mosaic onboard` -> `mosaic setup`
+  - `mosaic config` -> `mosaic configure`
   - `mosaic message` -> `mosaic ask`
   - `mosaic agent` -> `mosaic chat`
+  - `mosaic sessions` -> `mosaic session`
+  - `mosaic daemon` -> `mosaic gateway`
+  - `mosaic node` -> `mosaic nodes`
+  - `mosaic acp` -> `mosaic approvals`
 
 ## Workspace Layout
 
@@ -63,6 +73,58 @@ If `mosaic` is still not found, add Cargo bin to PATH (zsh):
 ```bash
 echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
+```
+
+### Completion / Directory / Dashboard
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- completion shell zsh
+cargo run -p mosaic-cli --bin mosaic -- completion install zsh
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state directory
+cargo run -p mosaic-cli --bin mosaic -- --project-state dashboard
+```
+
+### Maintenance Commands
+
+```bash
+# show current version
+cargo run -p mosaic-cli --bin mosaic -- update
+
+# optional remote check (supports JSON with latest/version/tag_name or plain text)
+cargo run -p mosaic-cli --bin mosaic -- update --check --source mock://v0.2.0
+
+# destructive operations require --yes
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes reset
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes uninstall
+```
+
+### Docs / DNS
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- docs
+cargo run -p mosaic-cli --bin mosaic -- docs gateway
+
+cargo run -p mosaic-cli --bin mosaic -- --json dns resolve localhost --port 443
+```
+
+### TUI Shim
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state tui --prompt "hello"
+```
+
+### QR / Clawbot
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --json qr encode "hello world"
+cargo run -p mosaic-cli --bin mosaic -- --json qr encode "hello world" --render ascii
+cargo run -p mosaic-cli --bin mosaic -- --json qr encode "hello world" --render png --output .mosaic/qr/hello.png --module-size 6
+cargo run -p mosaic-cli --bin mosaic -- --json qr pairing --device dev-1 --node local --ttl-seconds 300
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state clawbot ask "hello"
+cargo run -p mosaic-cli --bin mosaic -- --project-state clawbot send "ship it"
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json clawbot status
 ```
 
 ### Setup (Project State)
@@ -284,7 +346,7 @@ Security audit guide: `docs/security-audit.md`
 Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
 Azure OpenAI provider guide: `docs/provider-azure-openai.md`
-OpenClaw parity map: `docs/openclaw-parity.md`
+Coverage map: `docs/parity-map.md`
 JSON contracts guide: `docs/json-contracts.md`
 Regression catalog (all docs + all test cases): `docs/regression-catalog.md`
 Regression runbook: `docs/regression-runbook.md`
