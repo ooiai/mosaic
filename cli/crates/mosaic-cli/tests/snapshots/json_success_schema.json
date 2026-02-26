@@ -1,0 +1,95 @@
+{
+  "ask": {
+    "agent_id": "null",
+    "ok": "bool",
+    "profile": "string",
+    "response": "string",
+    "session_id": "string",
+    "turns": "number"
+  },
+  "channels_list": {
+    "channels": {
+      "items": [],
+      "type": "array"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "doctor": {
+    "checks": {
+      "items": [
+        {
+          "detail": "string",
+          "name": "string",
+          "status": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "type": "string"
+  },
+  "gateway_status": {
+    "gateway": "null",
+    "installed": "bool",
+    "ok": "bool",
+    "path": "string",
+    "running": "bool",
+    "service": "null",
+    "service_path": "string"
+  },
+  "health": {
+    "checks": {
+      "items": [
+        {
+          "detail": "string",
+          "name": "string",
+          "status": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "type": "string"
+  },
+  "models_list": {
+    "models": {
+      "items": [
+        {
+          "id": "string",
+          "owned_by": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "setup": {
+    "config_path": "string",
+    "mode": "string",
+    "ok": "bool",
+    "profile": "string"
+  },
+  "status": {
+    "agents_count": "number",
+    "config_path": "string",
+    "configured": "bool",
+    "default_agent_id": "null",
+    "latest_session": "string",
+    "ok": "bool",
+    "profile": "string",
+    "provider": {
+      "api_key_env": "string",
+      "base_url": "string",
+      "kind": "string",
+      "model": "string"
+    },
+    "state_mode": "string",
+    "tools": {
+      "enabled": "bool",
+      "run": {
+        "guard_mode": "string"
+      }
+    }
+  }
+}

@@ -70,6 +70,15 @@ cli-quality:
 	cd cli && cargo test -p mosaic-cli --test command_surface
 	cd cli && cargo test -p mosaic-cli
 
+# Rust CLI JSON contract gate (envelopes + schema snapshots + help snapshots + error codes).
+# Usage: make cli-json-contract
+cli-json-contract:
+	@echo "===> Rust CLI JSON contract gate."
+	cd cli && cargo test -p mosaic-cli --test error_codes
+	cd cli && cargo test -p mosaic-cli --test json_contract
+	cd cli && cargo test -p mosaic-cli --test json_contract_modules
+	cd cli && cargo test -p mosaic-cli --test help_snapshot
+
 # Rust CLI full regression.
 # Usage: make cli-regression
 cli-regression:

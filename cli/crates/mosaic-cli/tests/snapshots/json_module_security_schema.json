@@ -1,0 +1,68 @@
+{
+  "audit": {
+    "baseline": {
+      "added": "number",
+      "enabled": "bool",
+      "path": "string",
+      "updated": "bool"
+    },
+    "ok": "bool",
+    "report": {
+      "findings": {
+        "items": [
+          {
+            "category": "string",
+            "detail": "string",
+            "fingerprint": "string",
+            "id": "string",
+            "line": "number",
+            "path": "string",
+            "severity": "string",
+            "suggestion": "string",
+            "title": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "summary": {
+        "baseline_path": "string",
+        "findings": "number",
+        "generated_at": "string",
+        "high": "number",
+        "ignored": "number",
+        "low": "number",
+        "medium": "number",
+        "ok": "bool",
+        "root": "string",
+        "scanned_files": "number",
+        "skipped_files": "number"
+      }
+    },
+    "sarif_output": "null"
+  },
+  "baseline_show": {
+    "baseline": {
+      "ignored_categories": {
+        "items": [],
+        "type": "array"
+      },
+      "ignored_fingerprints": {
+        "items": [],
+        "type": "array"
+      },
+      "ignored_paths": {
+        "items": [],
+        "type": "array"
+      },
+      "version": "number"
+    },
+    "exists": "bool",
+    "ok": "bool",
+    "path": "string",
+    "stats": {
+      "categories": "number",
+      "fingerprints": "number",
+      "paths": "number"
+    }
+  }
+}

@@ -179,6 +179,7 @@ pnpm build
 - `pnpm preview:web` - 预览构建的 web 应用
 - `pnpm lint:web` - 代码检查 web 应用
 - `make cli-quality` - 运行 Rust CLI 快速质量门（`check + clippy + command_surface + mosaic-cli tests`）
+- `make cli-json-contract` - 运行 Rust CLI JSON 契约门禁（`error_codes + json_contract + json_contract_modules + help_snapshot`）
 - `make cli-test` - 运行 Rust CLI 工作区测试（`cli/`）
 - `make cli-regression` - 运行 Rust CLI 全量回归（`cli/scripts/run_regression_suite.sh`）
 

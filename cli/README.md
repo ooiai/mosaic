@@ -285,6 +285,7 @@ Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
 Azure OpenAI provider guide: `docs/provider-azure-openai.md`
 OpenClaw parity map: `docs/openclaw-parity.md`
+JSON contracts guide: `docs/json-contracts.md`
 Regression catalog (all docs + all test cases): `docs/regression-catalog.md`
 Regression runbook: `docs/regression-runbook.md`
 Work logs: `../WORKLOG.md` (release timeline) and `docs/progress.md` (concise per-iteration record)
@@ -301,6 +302,9 @@ cd cli
 ./scripts/update_regression_catalog.sh
 ./scripts/run_regression_suite.sh
 ./scripts/run_regression_suite.sh --worklog-summary "Nightly full regression"
+cargo test -p mosaic-cli --test error_codes
+cargo test -p mosaic-cli --test json_contract
+cargo test -p mosaic-cli --test json_contract_modules
 SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 ./scripts/worklog_append.sh --summary "Summary of change" --tests "cargo test --workspace"
 ```

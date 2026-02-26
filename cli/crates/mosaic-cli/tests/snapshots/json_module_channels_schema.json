@@ -1,0 +1,148 @@
+{
+  "add": {
+    "channel": {
+      "created_at": "string",
+      "endpoint_masked": "string",
+      "has_template_defaults": "bool",
+      "id": "string",
+      "kind": "string",
+      "last_error": "null",
+      "last_login_at": "null",
+      "last_send_at": "null",
+      "name": "string",
+      "target_masked": "string"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "capabilities": {
+    "capabilities": {
+      "items": [
+        {
+          "aliases": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "kind": "string",
+          "supports_bearer_token": "bool",
+          "supports_endpoint": "bool",
+          "supports_idempotency_key": "bool",
+          "supports_message_template": "bool",
+          "supports_parse_mode": "bool",
+          "supports_rate_limit_report": "bool",
+          "supports_test_probe": "bool",
+          "supports_token_env": "bool"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "list": {
+    "channels": {
+      "items": [
+        {
+          "created_at": "string",
+          "endpoint_masked": "string",
+          "has_template_defaults": "bool",
+          "id": "string",
+          "kind": "string",
+          "last_error": "null",
+          "last_login_at": "null",
+          "last_send_at": "null",
+          "name": "string",
+          "target_masked": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "logs": {
+    "channel": "string",
+    "events": {
+      "items": [
+        {
+          "attempt": "number",
+          "channel_id": "string",
+          "deduplicated": "bool",
+          "delivery_status": "string",
+          "error": "null",
+          "http_status": "number",
+          "idempotency_key": "null",
+          "kind": "string",
+          "parse_mode": "null",
+          "rate_limited_ms": "null",
+          "text_preview": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "resolve": {
+    "channel": "string",
+    "entries": {
+      "items": [
+        {
+          "endpoint_masked": "string",
+          "id": "string",
+          "kind": "string",
+          "last_error": "null",
+          "last_send_at": "null",
+          "name": "string",
+          "target_masked": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "query": "string"
+  },
+  "send": {
+    "attempts": "number",
+    "channel_id": "string",
+    "deduplicated": "bool",
+    "delivered_via": "string",
+    "endpoint_masked": "string",
+    "event_path": "string",
+    "http_status": "number",
+    "idempotency_key": "null",
+    "kind": "string",
+    "ok": "bool",
+    "parse_mode": "null",
+    "rate_limited_ms": "null",
+    "target_masked": "string"
+  },
+  "status": {
+    "ok": "bool",
+    "status": {
+      "channels_with_errors": "number",
+      "healthy_channels": "number",
+      "kinds": {
+        "slack_webhook": "number"
+      },
+      "last_send_at": "null",
+      "total_channels": "number"
+    }
+  },
+  "test": {
+    "attempts": "number",
+    "channel_id": "string",
+    "deduplicated": "bool",
+    "endpoint_masked": "string",
+    "event_path": "string",
+    "http_status": "number",
+    "idempotency_key": "null",
+    "kind": "string",
+    "ok": "bool",
+    "parse_mode": "null",
+    "probe": "bool",
+    "rate_limited_ms": "null",
+    "target_masked": "string"
+  }
+}

@@ -24,3 +24,13 @@ Concise per-iteration delivery log for CLI work.
 | `2026-02-26T08:31:17Z` | Full regression after command surface parity expansion | ./scripts/run_regression_suite.sh (report: cli/reports/regression-20260226T083002Z.log) |
 | `2026-02-26T08:33:11Z` | Add aliases_ops integration tests for onboard/message/agent alias runtime flows | cargo test -p mosaic-cli --test aliases_ops; make cli-quality; ./scripts/update_regression_catalog.sh |
 | `2026-02-26T08:33:37Z` | Sync regression runbook fast-test section with new aliases_ops suite | ./scripts/update_regression_catalog.sh |
+| `2026-02-26T08:39:09Z` | Expand help snapshots and error-code contract coverage | ./scripts/run_regression_suite.sh (report: cli/reports/regression-20260226T083802Z.log) |
+| `2026-02-26T08:39:36Z` | Add gateway/channels help snapshots and extend error-code contract tests for gateway_unavailable approval_required sandbox_denied | cargo test -p mosaic-cli --test help_snapshot --test error_codes; make cli-quality; ./scripts/run_regression_suite.sh |
+| `2026-02-26T08:39:49Z` | Sync regression runbook fast-target list with error_codes suite | ./scripts/update_regression_catalog.sh |
+| `2026-02-26T08:45:49Z` | Add json_contract schema snapshots for stable --json success/failure envelope regression | ./scripts/run_regression_suite.sh (report: cli/reports/regression-20260226T084443Z.log) |
+| `2026-02-26T08:51:36Z` | Add module-level json schema contracts for channels gateway security agents | ./scripts/run_regression_suite.sh (report: cli/reports/regression-20260226T085027Z.log) |
+| `2026-02-26T08:53:39Z` | Extend error code contracts for agents and security validation failures | ./scripts/run_regression_suite.sh (report: cli/reports/regression-20260226T085232Z.log) |
+| `2026-02-26T08:54:16Z` | Document JSON contract test suites in cli README regression script section | docs-only |
+| `2026-02-26T08:55:03Z` | Add make cli-json-contract target and document JSON contract gate in root README EN/CN and cli README | make cli-json-contract |
+| `2026-02-26T08:55:41Z` | Add json-contracts guide documenting JSON envelope/schema suites and snapshot policy | ./scripts/update_regression_catalog.sh; make cli-json-contract |
+| `2026-02-26T08:56:00Z` | Validate new cli-json-contract gate after JSON contract docs update | make cli-json-contract |
