@@ -36,7 +36,14 @@ fn browser_open_history_show_and_clear_flow() {
     let history_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .args(["--project-state", "--json", "browser", "history", "--tail", "10"])
+        .args([
+            "--project-state",
+            "--json",
+            "browser",
+            "history",
+            "--tail",
+            "10",
+        ])
         .assert()
         .success()
         .get_output()

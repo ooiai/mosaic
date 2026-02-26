@@ -54,3 +54,15 @@ desktop:
 web:
 	@echo "===> Web start dev server."
 	$(CD) $(WEB_PATH) && $(PNPM) dev
+
+# Rust CLI workspace tests.
+# Usage: make cli-test
+cli-test:
+	@echo "===> Rust CLI workspace tests."
+	cd cli && cargo test --workspace
+
+# Rust CLI full regression.
+# Usage: make cli-regression
+cli-regression:
+	@echo "===> Rust CLI full regression."
+	cd cli && ./scripts/run_regression_suite.sh

@@ -52,7 +52,7 @@ pub struct ToolsConfig {
     pub run: RunToolConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProfileConfig {
     pub provider: ProviderConfig,
     pub agent: AgentConfig,
@@ -113,16 +113,6 @@ impl Default for ToolsConfig {
         Self {
             enabled: true,
             run: RunToolConfig::default(),
-        }
-    }
-}
-
-impl Default for ProfileConfig {
-    fn default() -> Self {
-        Self {
-            provider: ProviderConfig::default(),
-            agent: AgentConfig::default(),
-            tools: ToolsConfig::default(),
         }
     }
 }

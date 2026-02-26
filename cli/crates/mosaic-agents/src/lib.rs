@@ -357,13 +357,13 @@ impl AgentStore {
             }
         }
 
-        if let Some(default_agent_id) = &routes.default_agent_id {
-            if !agents.iter().any(|agent| &agent.id == default_agent_id) {
-                issues.push(format!(
-                    "default_agent_id '{}' does not exist",
-                    default_agent_id
-                ));
-            }
+        if let Some(default_agent_id) = &routes.default_agent_id
+            && !agents.iter().any(|agent| &agent.id == default_agent_id)
+        {
+            issues.push(format!(
+                "default_agent_id '{}' does not exist",
+                default_agent_id
+            ));
         }
         for (route, agent_id) in &routes.routes {
             if !agents.iter().any(|agent| &agent.id == agent_id) {
@@ -560,19 +560,19 @@ fn validate_agent_fields(
             "agent profile cannot be empty".to_string(),
         ));
     }
-    if let Some(value) = temperature {
-        if !(0.0..=2.0).contains(&value) {
-            return Err(MosaicError::Validation(
-                "temperature must be in [0.0, 2.0]".to_string(),
-            ));
-        }
+    if let Some(value) = temperature
+        && !(0.0..=2.0).contains(&value)
+    {
+        return Err(MosaicError::Validation(
+            "temperature must be in [0.0, 2.0]".to_string(),
+        ));
     }
-    if let Some(value) = max_turns {
-        if value == 0 {
-            return Err(MosaicError::Validation(
-                "max_turns must be greater than 0".to_string(),
-            ));
-        }
+    if let Some(value) = max_turns
+        && value == 0
+    {
+        return Err(MosaicError::Validation(
+            "max_turns must be greater than 0".to_string(),
+        ));
     }
     Ok(())
 }
@@ -621,40 +621,40 @@ fn validate_agent_update_input(input: &UpdateAgentInput) -> Result<()> {
         ));
     }
 
-    if let Some(name) = &input.name {
-        if name.trim().is_empty() {
-            return Err(MosaicError::Validation(
-                "agent name cannot be empty".to_string(),
-            ));
-        }
+    if let Some(name) = &input.name
+        && name.trim().is_empty()
+    {
+        return Err(MosaicError::Validation(
+            "agent name cannot be empty".to_string(),
+        ));
     }
-    if let Some(profile) = &input.profile {
-        if profile.trim().is_empty() {
-            return Err(MosaicError::Validation(
-                "agent profile cannot be empty".to_string(),
-            ));
-        }
+    if let Some(profile) = &input.profile
+        && profile.trim().is_empty()
+    {
+        return Err(MosaicError::Validation(
+            "agent profile cannot be empty".to_string(),
+        ));
     }
-    if let Some(model) = &input.model {
-        if model.trim().is_empty() {
-            return Err(MosaicError::Validation(
-                "agent model cannot be empty".to_string(),
-            ));
-        }
+    if let Some(model) = &input.model
+        && model.trim().is_empty()
+    {
+        return Err(MosaicError::Validation(
+            "agent model cannot be empty".to_string(),
+        ));
     }
-    if let Some(value) = input.temperature {
-        if !(0.0..=2.0).contains(&value) {
-            return Err(MosaicError::Validation(
-                "temperature must be in [0.0, 2.0]".to_string(),
-            ));
-        }
+    if let Some(value) = input.temperature
+        && !(0.0..=2.0).contains(&value)
+    {
+        return Err(MosaicError::Validation(
+            "temperature must be in [0.0, 2.0]".to_string(),
+        ));
     }
-    if let Some(value) = input.max_turns {
-        if value == 0 {
-            return Err(MosaicError::Validation(
-                "max_turns must be greater than 0".to_string(),
-            ));
-        }
+    if let Some(value) = input.max_turns
+        && value == 0
+    {
+        return Err(MosaicError::Validation(
+            "max_turns must be greater than 0".to_string(),
+        ));
     }
     Ok(())
 }

@@ -4,6 +4,7 @@ set -euo pipefail
 CLI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(cd "$CLI_DIR/.." && pwd)"
 LOG_FILE="$PROJECT_ROOT/WORKLOG.md"
+PROGRESS_FILE="$CLI_DIR/docs/progress.md"
 
 sanitize_cell() {
   local value="$1"
@@ -104,6 +105,18 @@ Concise timeline of completed work for regression and release review.
 EOF
 fi
 
+if [[ ! -f "$PROGRESS_FILE" ]]; then
+  cat >"$PROGRESS_FILE" <<'EOF'
+# Mosaic CLI Progress Log
+
+Concise per-iteration delivery log for CLI work.
+
+| UTC | Summary | Tests |
+| --- | --- | --- |
+
+EOF
+fi
+
 if [[ -z "$FILES" ]]; then
   FILES="$(collect_changed_preview)"
 fi
@@ -113,5 +126,7 @@ TESTS="$(sanitize_cell "$TESTS")"
 FILES="$(sanitize_cell "$FILES")"
 
 printf '| `%s` | %s | %s | %s |\n' "$TS" "$SUMMARY" "$TESTS" "$FILES" >>"$LOG_FILE"
+printf '| `%s` | %s | %s |\n' "$TS" "$SUMMARY" "$TESTS" >>"$PROGRESS_FILE"
 
 echo "updated: $LOG_FILE"
+echo "updated: $PROGRESS_FILE"

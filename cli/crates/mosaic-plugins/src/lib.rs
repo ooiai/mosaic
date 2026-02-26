@@ -726,15 +726,15 @@ fn discover_plugin_entry(source: ExtensionSource, plugin_dir: &Path) -> PluginEn
         }
     };
 
-    if let Some(id) = parsed.plugin_id() {
-        if !id.trim().is_empty() {
-            entry.id = id.trim().to_string();
-        }
+    if let Some(id) = parsed.plugin_id()
+        && !id.trim().is_empty()
+    {
+        entry.id = id.trim().to_string();
     }
-    if let Some(name) = parsed.plugin_name() {
-        if !name.trim().is_empty() {
-            entry.name = name.trim().to_string();
-        }
+    if let Some(name) = parsed.plugin_name()
+        && !name.trim().is_empty()
+    {
+        entry.name = name.trim().to_string();
     }
     entry.version = parsed
         .plugin_version()

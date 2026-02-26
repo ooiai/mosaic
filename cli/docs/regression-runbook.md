@@ -23,7 +23,7 @@ The catalog includes:
 ```bash
 cd cli
 ./scripts/run_regression_suite.sh
-# optional: append a concise entry to ../../WORKLOG.md after success
+# optional: append concise entries to ../../WORKLOG.md and docs/progress.md after success
 ./scripts/run_regression_suite.sh --worklog-summary "Nightly full regression"
 ```
 
@@ -38,7 +38,14 @@ Reports:
 - Timestamped log: `reports/regression-<UTCSTAMP>.log`
 - Latest symlink/copy: `reports/regression-latest.log`
 
-## 3) Fast Targeted Regression
+## 3) Quality Gate (lint/idioms)
+
+```bash
+cd cli
+cargo clippy -p mosaic-cli -- -D warnings
+```
+
+## 4) Fast Targeted Regression
 
 ```bash
 cd cli
@@ -50,35 +57,44 @@ cargo test -p mosaic-cli --test webhooks_ops
 cargo test -p mosaic-cli --test browser_ops
 ```
 
-## 4) Full Smoke Only (skip workspace tests)
+## 5) Full Smoke Only (skip workspace tests)
 
 ```bash
 cd cli
 SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 ```
 
-## 5) CI Alignment
+## 6) CI Alignment
 
 For local parity with CI test gates:
 
 ```bash
 cd cli
-cargo test --workspace
+./scripts/run_regression_suite.sh
 ```
 
-## 6) Pre-merge Checklist
+CI uploads latest regression report artifact:
+
+- `rust-cli-regression-report` (file: `cli/reports/regression-latest.log`)
+- `rust-cli-Linux-binary` (file: `cli/target/release/mosaic`)
+- `rust-cli-macOS-binary` (file: `cli/target/release/mosaic`)
+- `rust-cli-Windows-binary` (file: `cli/target/release/mosaic.exe`)
+
+## 7) Pre-merge Checklist
 
 1. Run `./scripts/update_regression_catalog.sh`
 2. Run `./scripts/run_regression_suite.sh`
-3. Confirm `docs/regression-catalog.md` is updated and committed
-4. Confirm `reports/regression-latest.log` shows no failures
-5. Append concise change note:
+3. Run `cargo clippy -p mosaic-cli -- -D warnings`
+4. Confirm `docs/regression-catalog.md` is updated and committed
+5. Confirm `reports/regression-latest.log` shows no failures
+6. Append concise change note:
 
 ```bash
 cd cli
 ./scripts/worklog_append.sh --summary "What changed" --tests "cargo test --workspace"
 ```
 
-Canonical log file:
+Canonical log files:
 
 - `../../WORKLOG.md`
+- `docs/progress.md`

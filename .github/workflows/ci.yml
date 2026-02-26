@@ -67,10 +67,73 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cli-cargo-
 
-    - name: Build and test Rust CLI workspace
+    - name: Install CLI test dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ripgrep
+
+    - name: Run Rust CLI clippy quality gate
       run: |
         cd cli
-        cargo test --workspace
+        cargo clippy -p mosaic-cli -- -D warnings
+
+    - name: Run Rust CLI full regression suite
+      run: |
+        cd cli
+        ./scripts/run_regression_suite.sh
+
+    - name: Upload Rust CLI regression report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-cli-regression-report
+        path: cli/reports/regression-latest.log
+
+  rust-cli-build:
+    name: Rust CLI Build (${{ matrix.platform }})
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - name: Cache Rust dependencies (CLI)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          cli/target
+        key: ${{ runner.os }}-cli-build-cargo-${{ hashFiles('cli/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cli-build-cargo-
+
+    - name: Build Rust CLI release binary
+      run: |
+        cd cli
+        cargo build --release -p mosaic-cli
+
+    - name: Upload Rust CLI binary (Linux/macOS)
+      if: runner.os != 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-cli-${{ runner.os }}-binary
+        path: cli/target/release/mosaic
+
+    - name: Upload Rust CLI binary (Windows)
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-cli-${{ runner.os }}-binary
+        path: cli/target/release/mosaic.exe
 
   desktop-test:
     name: Desktop App Tests
@@ -154,7 +217,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web-test, rust-cli-test, desktop-test]
+    needs: [web-test, rust-cli-test, rust-cli-build, desktop-test]
     runs-on: ubuntu-latest
 
     steps:
@@ -171,6 +234,9 @@ jobs:
           desktop-linux/**/*
           desktop-windows/**/*
           desktop-macos/**/*
+          rust-cli-Linux-binary/**/*
+          rust-cli-Windows-binary/**/*
+          rust-cli-macOS-binary/**/*
         draft: true
         prerelease: ${{ contains(github.ref, '-') }}
       env:
