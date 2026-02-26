@@ -260,7 +260,7 @@ pub fn report_to_sarif(report: &SecurityAuditReport) -> Value {
                 "tool": {
                     "driver": {
                         "name": "mosaic-security",
-                        "informationUri": "https://github.com/openclaw/openclaw",
+                        "informationUri": "https://github.com/jerrychir/mosaic",
                         "version": env!("CARGO_PKG_VERSION")
                     }
                 },

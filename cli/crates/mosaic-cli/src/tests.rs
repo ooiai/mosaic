@@ -41,7 +41,7 @@ impl Provider for StubProvider {
 }
 
 #[test]
-fn cli_accepts_openclaw_aliases() {
+fn cli_accepts_legacy_aliases() {
     let alias_ask = Cli::try_parse_from(["mosaic", "message", "hello"]).unwrap();
     assert!(matches!(alias_ask.command, Commands::Ask(_)));
 
@@ -50,6 +50,21 @@ fn cli_accepts_openclaw_aliases() {
 
     let alias_setup = Cli::try_parse_from(["mosaic", "onboard"]).unwrap();
     assert!(matches!(alias_setup.command, Commands::Setup(_)));
+
+    let alias_config = Cli::try_parse_from(["mosaic", "config", "--show"]).unwrap();
+    assert!(matches!(alias_config.command, Commands::Configure(_)));
+
+    let alias_sessions = Cli::try_parse_from(["mosaic", "sessions", "list"]).unwrap();
+    assert!(matches!(alias_sessions.command, Commands::Session(_)));
+
+    let alias_daemon = Cli::try_parse_from(["mosaic", "daemon", "status"]).unwrap();
+    assert!(matches!(alias_daemon.command, Commands::Gateway(_)));
+
+    let alias_node = Cli::try_parse_from(["mosaic", "node", "list"]).unwrap();
+    assert!(matches!(alias_node.command, Commands::Nodes(_)));
+
+    let alias_acp = Cli::try_parse_from(["mosaic", "acp", "get"]).unwrap();
+    assert!(matches!(alias_acp.command, Commands::Approvals(_)));
 }
 
 #[test]

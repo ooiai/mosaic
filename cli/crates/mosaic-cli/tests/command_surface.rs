@@ -15,7 +15,7 @@ fn run_help(args: &[&str]) -> String {
 
 #[test]
 #[allow(deprecated)]
-fn root_help_includes_openclaw_parity_commands() {
+fn root_help_includes_expected_commands() {
     let help = run_help(&["--help"]);
     let expected = [
         "setup",
@@ -42,6 +42,17 @@ fn root_help_includes_openclaw_parity_commands() {
         "agents",
         "plugins",
         "skills",
+        "completion",
+        "directory",
+        "dashboard",
+        "update",
+        "reset",
+        "uninstall",
+        "docs",
+        "dns",
+        "tui",
+        "qr",
+        "clawbot",
         "status",
         "health",
         "doctor",
@@ -54,7 +65,9 @@ fn root_help_includes_openclaw_parity_commands() {
         );
     }
 
-    let visible_aliases = ["onboard", "message", "agent"];
+    let visible_aliases = [
+        "onboard", "config", "message", "agent", "sessions", "daemon", "node", "acp",
+    ];
     for alias in visible_aliases {
         assert!(
             help.contains(alias),
@@ -342,6 +355,69 @@ fn sandbox_help_includes_profile_commands() {
         assert!(
             help.contains(name),
             "sandbox --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn completion_help_includes_shell_and_install_commands() {
+    let help = run_help(&["completion", "--help"]);
+    let expected = ["shell", "install"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "completion --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn dns_help_includes_resolve_command() {
+    let help = run_help(&["dns", "--help"]);
+    assert!(
+        help.contains("resolve"),
+        "dns --help missing expected subcommand: resolve\n{help}"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn tui_help_includes_prompt_and_session_options() {
+    let help = run_help(&["tui", "--help"]);
+    let expected = ["--prompt", "--session", "--agent"];
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "tui --help missing expected option: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn qr_help_includes_encode_and_pairing() {
+    let help = run_help(&["qr", "--help"]);
+    let expected = ["encode", "pairing"];
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "qr --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn clawbot_help_includes_ask_chat_send_status() {
+    let help = run_help(&["clawbot", "--help"]);
+    let expected = ["ask", "chat", "send", "status"];
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "clawbot --help missing expected subcommand: {name}\n{help}"
         );
     }
 }
