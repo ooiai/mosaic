@@ -750,11 +750,7 @@ impl ChannelRepository {
             .filter(|value| !value.is_empty() && *value != "all")
             .map(ToOwned::to_owned);
 
-        let allowed: Option<HashSet<String>> = if let Some(value) = filter {
-            Some(HashSet::from([value]))
-        } else {
-            None
-        };
+        let allowed: Option<HashSet<String>> = filter.map(|value| HashSet::from([value]));
 
         let mut events = Vec::new();
         for entry in std::fs::read_dir(&self.events_dir)? {

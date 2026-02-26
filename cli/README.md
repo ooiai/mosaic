@@ -51,6 +51,20 @@ cd cli
 cargo test --workspace
 ```
 
+### Install Binary (`mosaic`)
+
+```bash
+cd cli
+cargo install --path crates/mosaic-cli --force
+```
+
+If `mosaic` is still not found, add Cargo bin to PATH (zsh):
+
+```bash
+echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
 ### Setup (Project State)
 
 ```bash
@@ -269,10 +283,11 @@ Memory guide: `docs/memory.md`
 Security audit guide: `docs/security-audit.md`
 Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
+Azure OpenAI provider guide: `docs/provider-azure-openai.md`
 OpenClaw parity map: `docs/openclaw-parity.md`
 Regression catalog (all docs + all test cases): `docs/regression-catalog.md`
 Regression runbook: `docs/regression-runbook.md`
-Work log (concise change history): `../WORKLOG.md` (entry point note: `docs/worklog.md`)
+Work logs: `../WORKLOG.md` (release timeline) and `docs/progress.md` (concise per-iteration record)
 
 Telegram default token env: `MOSAIC_TELEGRAM_BOT_TOKEN`.
 Telegram min send interval env: `MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS` (default `800`).

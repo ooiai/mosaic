@@ -1,8 +1,12 @@
-# Work Log (Moved)
+# Work Logs
 
-Canonical concise log is now stored at:
+Primary release/regression timeline:
 
 - `../../WORKLOG.md`
+
+Concise per-iteration CLI delivery log:
+
+- `./progress.md`
 
 Append new entries with:
 

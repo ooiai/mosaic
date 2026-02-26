@@ -27,4 +27,4 @@ This file tracks Mosaic CLI parity against the targeted OpenClaw-style module se
 - Full test/doc inventory: `docs/regression-catalog.md`
 - Full runbook: `docs/regression-runbook.md`
 - Full from-scratch CLI smoke: `scripts/from_scratch_smoke.sh`
-- Concise change timeline: `../../WORKLOG.md`
+- Change logs: `../../WORKLOG.md` and `docs/progress.md`

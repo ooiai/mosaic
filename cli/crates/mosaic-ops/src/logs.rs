@@ -111,7 +111,10 @@ fn load_browser_history_file(entries: &mut Vec<UnifiedLogEntry>, path: &Path) ->
     }
     let raw = std::fs::read_to_string(path)?;
     let items = serde_json::from_str::<Vec<Value>>(&raw).map_err(|err| {
-        MosaicError::Validation(format!("invalid browser history format {}: {err}", path.display()))
+        MosaicError::Validation(format!(
+            "invalid browser history format {}: {err}",
+            path.display()
+        ))
     })?;
     for payload in items {
         let ts = payload.get("ts").and_then(Value::as_str).and_then(parse_ts);

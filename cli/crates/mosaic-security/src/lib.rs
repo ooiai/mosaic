@@ -649,10 +649,8 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
         cursor += found + part.len();
     }
 
-    if anchored_end {
-        if let Some(last) = parts.iter().rev().find(|part| !part.is_empty()) {
-            return value.ends_with(last);
-        }
+    if anchored_end && let Some(last) = parts.iter().rev().find(|part| !part.is_empty()) {
+        return value.ends_with(last);
     }
     true
 }
