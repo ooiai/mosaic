@@ -177,6 +177,7 @@ This will create platform-specific installers in `apps/desktop/src-tauri/target/
 - `pnpm build:web` - Build web application
 - `pnpm preview:web` - Preview built web application
 - `pnpm lint:web` - Lint web application code
+- `make cli-quality` - Run Rust CLI fast quality gate (`check + clippy + command_surface + mosaic-cli tests`)
 - `make cli-test` - Run Rust CLI workspace tests (`cli/`)
 - `make cli-regression` - Run Rust CLI full regression suite (`cli/scripts/run_regression_suite.sh`)
 

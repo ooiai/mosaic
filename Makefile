@@ -61,6 +61,15 @@ cli-test:
 	@echo "===> Rust CLI workspace tests."
 	cd cli && cargo test --workspace
 
+# Rust CLI quality gate (fast local guardrails).
+# Usage: make cli-quality
+cli-quality:
+	@echo "===> Rust CLI quality gate (check + clippy + tests)."
+	cd cli && cargo check -p mosaic-cli
+	cd cli && cargo clippy -p mosaic-cli -- -D warnings
+	cd cli && cargo test -p mosaic-cli --test command_surface
+	cd cli && cargo test -p mosaic-cli
+
 # Rust CLI full regression.
 # Usage: make cli-regression
 cli-regression:
