@@ -430,3 +430,130 @@ fn gateway_call_unknown_method_returns_gateway_protocol_exit_code() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "gateway_protocol");
 }
+
+#[test]
+#[allow(deprecated)]
+fn gateway_call_without_runtime_returns_gateway_unavailable_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "call", "status"])
+        .assert()
+        .failure()
+        .code(8)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "gateway_unavailable");
+}
+
+#[test]
+#[allow(deprecated)]
+fn nodes_run_without_yes_returns_approval_required_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "nodes",
+            "run",
+            "local",
+            "--command",
+            "echo hello",
+        ])
+        .assert()
+        .failure()
+        .code(11)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "approval_required");
+}
+
+#[test]
+#[allow(deprecated)]
+fn nodes_run_with_restricted_sandbox_returns_sandbox_denied_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let policy_dir = temp.path().join(".mosaic/policy");
+    std::fs::create_dir_all(&policy_dir).expect("create policy dir");
+    std::fs::write(
+        policy_dir.join("sandbox.toml"),
+        "version = 1\nprofile = \"restricted\"\n",
+    )
+    .expect("write sandbox policy");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "nodes",
+            "run",
+            "local",
+            "--command",
+            "curl https://example.com",
+        ])
+        .assert()
+        .failure()
+        .code(12)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "sandbox_denied");
+}
+
+#[test]
+#[allow(deprecated)]
+fn agents_show_missing_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "agents", "show", "missing-agent"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn security_audit_missing_path_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "audit",
+            "--path",
+            "missing-security-target",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}

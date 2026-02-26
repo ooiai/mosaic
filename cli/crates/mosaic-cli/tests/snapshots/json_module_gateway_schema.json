@@ -1,0 +1,88 @@
+{
+  "call_status": {
+    "data": {
+      "ok": "bool",
+      "service": "string",
+      "test_mode": "bool"
+    },
+    "gateway": {
+      "host": "string",
+      "port": "number"
+    },
+    "method": "string",
+    "ok": "bool",
+    "request_id": "string"
+  },
+  "discover": {
+    "discovery": {
+      "endpoint": "string",
+      "methods": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "ok": "bool"
+    },
+    "gateway": {
+      "host": "string",
+      "port": "number"
+    },
+    "ok": "bool"
+  },
+  "probe": {
+    "gateway": {
+      "host": "string",
+      "port": "number"
+    },
+    "ok": "bool",
+    "probe": {
+      "detail": "string",
+      "endpoint": "string",
+      "latency_ms": "number",
+      "ok": "bool"
+    }
+  },
+  "start": {
+    "already_running": "bool",
+    "gateway": {
+      "host": "string",
+      "pid": "number",
+      "port": "number",
+      "running": "bool",
+      "started_at": "string",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "path": "string",
+    "service": {
+      "host": "string",
+      "installed": "bool",
+      "installed_at": "string",
+      "port": "number",
+      "updated_at": "string"
+    }
+  },
+  "status": {
+    "gateway": "null",
+    "installed": "bool",
+    "ok": "bool",
+    "path": "string",
+    "running": "bool",
+    "service": "null",
+    "service_path": "string"
+  },
+  "stop": {
+    "gateway": {
+      "host": "string",
+      "pid": "number",
+      "port": "number",
+      "running": "bool",
+      "started_at": "string",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "stopped": "bool",
+    "was_running": "bool"
+  }
+}

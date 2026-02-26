@@ -1,0 +1,87 @@
+{
+  "add": {
+    "agent": {
+      "created_at": "string",
+      "guard_mode": "null",
+      "id": "string",
+      "max_turns": "null",
+      "model": "string",
+      "name": "string",
+      "profile": "string",
+      "temperature": "null",
+      "tools_enabled": "null",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "routes": {
+      "default_agent_id": "string",
+      "routes": {
+        "ask": "string"
+      }
+    }
+  },
+  "list_after": {
+    "agents": {
+      "items": [
+        {
+          "created_at": "string",
+          "guard_mode": "null",
+          "id": "string",
+          "max_turns": "null",
+          "model": "string",
+          "name": "string",
+          "profile": "string",
+          "temperature": "null",
+          "tools_enabled": "null",
+          "updated_at": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "routes": {
+      "default_agent_id": "string",
+      "routes": {
+        "ask": "string"
+      }
+    }
+  },
+  "list_before": {
+    "agents": {
+      "items": [],
+      "type": "array"
+    },
+    "ok": "bool",
+    "routes": {
+      "default_agent_id": "null",
+      "routes": {}
+    }
+  },
+  "route_resolve": {
+    "agent_id": "string",
+    "ok": "bool",
+    "route": "string"
+  },
+  "show": {
+    "agent": {
+      "created_at": "string",
+      "guard_mode": "null",
+      "id": "string",
+      "max_turns": "null",
+      "model": "string",
+      "name": "string",
+      "profile": "string",
+      "temperature": "null",
+      "tools_enabled": "null",
+      "updated_at": "string"
+    },
+    "is_default": "bool",
+    "ok": "bool",
+    "route_keys": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    }
+  }
+}

@@ -54,6 +54,9 @@ cargo test -p mosaic-cli --test hooks_ops
 cargo test -p mosaic-cli --test gateway_channels
 cargo test -p mosaic-cli --test command_surface
 cargo test -p mosaic-cli --test aliases_ops
+cargo test -p mosaic-cli --test error_codes
+cargo test -p mosaic-cli --test json_contract
+cargo test -p mosaic-cli --test json_contract_modules
 cargo test -p mosaic-cli --test help_snapshot
 cargo test -p mosaic-cli --test webhooks_ops
 cargo test -p mosaic-cli --test browser_ops
