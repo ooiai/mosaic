@@ -1271,3 +1271,41 @@ fn qr_png_without_output_returns_validation_exit_code() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "validation");
 }
+
+#[test]
+#[allow(deprecated)]
+fn browser_snapshot_without_visits_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "browser", "snapshot"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn browser_screenshot_without_visits_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "browser", "screenshot"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}

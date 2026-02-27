@@ -13,6 +13,15 @@
       "version": "number"
     }
   },
+  "approvals_check": {
+    "approved_by": "null",
+    "command": "string",
+    "decision": "string",
+    "ok": "bool",
+    "path": "string",
+    "policy_mode": "string",
+    "reason": "string"
+  },
   "approvals_get": {
     "ok": "bool",
     "path": "string",
@@ -70,6 +79,14 @@
       "profile": "string"
     }
   },
+  "sandbox_get": {
+    "ok": "bool",
+    "path": "string",
+    "policy": {
+      "profile": "string",
+      "version": "number"
+    }
+  },
   "sandbox_list": {
     "current": "string",
     "ok": "bool",
@@ -90,6 +107,14 @@
       "type": "array"
     }
   },
+  "sandbox_set": {
+    "ok": "bool",
+    "path": "string",
+    "policy": {
+      "profile": "string",
+      "version": "number"
+    }
+  },
   "system_event": {
     "event": {
       "data": {
@@ -106,6 +131,22 @@
         "type": "array"
       },
       "triggered": "number"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "system_list": {
+    "events": {
+      "items": [
+        {
+          "data": {
+            "suite": "string"
+          },
+          "name": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
     },
     "ok": "bool",
     "path": "string"

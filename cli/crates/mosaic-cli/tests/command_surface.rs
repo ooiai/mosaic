@@ -277,7 +277,22 @@ fn pairing_help_includes_request_approval_and_reject_commands() {
 #[allow(deprecated)]
 fn browser_help_includes_navigation_and_history_commands() {
     let help = run_help(&["browser", "--help"]);
-    let expected = ["open", "visit", "history", "show", "clear"];
+    let expected = [
+        "start",
+        "stop",
+        "status",
+        "open",
+        "visit",
+        "navigate",
+        "history",
+        "tabs",
+        "show",
+        "focus",
+        "snapshot",
+        "screenshot",
+        "close",
+        "clear",
+    ];
 
     for name in expected {
         assert!(
@@ -347,7 +362,7 @@ fn skills_help_includes_management_commands() {
 #[allow(deprecated)]
 fn logs_help_includes_streaming_options() {
     let help = run_help(&["logs", "--help"]);
-    let expected = ["--follow", "--tail"];
+    let expected = ["--follow", "--tail", "--source"];
 
     for name in expected {
         assert!(
@@ -361,7 +376,7 @@ fn logs_help_includes_streaming_options() {
 #[allow(deprecated)]
 fn system_help_includes_event_and_presence_commands() {
     let help = run_help(&["system", "--help"]);
-    let expected = ["event", "presence"];
+    let expected = ["event", "presence", "list"];
 
     for name in expected {
         assert!(
@@ -375,7 +390,7 @@ fn system_help_includes_event_and_presence_commands() {
 #[allow(deprecated)]
 fn approvals_help_includes_policy_commands() {
     let help = run_help(&["approvals", "--help"]);
-    let expected = ["get", "set", "allowlist"];
+    let expected = ["get", "set", "check", "allowlist"];
 
     for name in expected {
         assert!(
@@ -389,7 +404,7 @@ fn approvals_help_includes_policy_commands() {
 #[allow(deprecated)]
 fn sandbox_help_includes_profile_commands() {
     let help = run_help(&["sandbox", "--help"]);
-    let expected = ["list", "explain"];
+    let expected = ["get", "set", "list", "explain"];
 
     for name in expected {
         assert!(

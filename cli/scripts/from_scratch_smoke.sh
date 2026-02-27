@@ -277,6 +277,10 @@ require_contains "$TMP_ROOT/hooks_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/system_event_deploy.json" '"hooks"'
 require_contains "$TMP_ROOT/system_event_deploy.json" '"triggered"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json system list --tail 20 >"$TMP_ROOT/system_list.json")
+require_contains "$TMP_ROOT/system_list.json" '"events"'
+require_contains "$TMP_ROOT/system_list.json" '"name"[[:space:]]*:[[:space:]]*"deploy"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json webhooks add --name deploy-wh --event deploy --path /inbound/deploy --method post >"$TMP_ROOT/webhooks_add.json")
 require_contains "$TMP_ROOT/webhooks_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
 
@@ -302,28 +306,68 @@ require_contains "$TMP_ROOT/webhooks_logs.json" '"events"'
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 50 >"$TMP_ROOT/logs_tail.json")
 require_contains "$TMP_ROOT/logs_tail.json" '"source"[[:space:]]*:[[:space:]]*"system"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 50 --source system >"$TMP_ROOT/logs_tail_system.json")
+require_contains "$TMP_ROOT/logs_tail_system.json" '"source"[[:space:]]*:[[:space:]]*"system"'
+
 log "Step 7: browser/runtime presence"
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser open --url "mock://ok?title=Smoke+Docs" >"$TMP_ROOT/browser_open.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser start >"$TMP_ROOT/browser_start.json")
+require_contains "$TMP_ROOT/browser_start.json" '"running"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser navigate --url "mock://ok?title=Smoke+Docs" >"$TMP_ROOT/browser_open.json")
 require_contains "$TMP_ROOT/browser_open.json" '"http_status"[[:space:]]*:[[:space:]]*200'
+BROWSER_VISIT_ID="$(sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$TMP_ROOT/browser_open.json" | head -n1)"
+if [[ -z "$BROWSER_VISIT_ID" ]]; then
+  echo "error: failed to parse browser visit id" >&2
+  cat "$TMP_ROOT/browser_open.json" >&2
+  exit 1
+fi
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser history --tail 10 >"$TMP_ROOT/browser_history.json")
 require_contains "$TMP_ROOT/browser_history.json" '"visits"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser tabs --tail 10 >"$TMP_ROOT/browser_tabs.json")
+require_contains "$TMP_ROOT/browser_tabs.json" '"active_visit_id"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser status >"$TMP_ROOT/browser_status.json")
+require_contains "$TMP_ROOT/browser_status.json" '"running"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser focus "$BROWSER_VISIT_ID" >"$TMP_ROOT/browser_focus.json")
+require_contains "$TMP_ROOT/browser_focus.json" '"active_visit_id"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser snapshot >"$TMP_ROOT/browser_snapshot.json")
+require_contains "$TMP_ROOT/browser_snapshot.json" '"snapshot"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser screenshot --out "$TMP_ROOT/browser-shot.txt" >"$TMP_ROOT/browser_screenshot.json")
+require_contains "$TMP_ROOT/browser_screenshot.json" '"output"'
+require_contains "$TMP_ROOT/browser-shot.txt" 'MOSAIC_BROWSER_SCREENSHOT_V1'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser stop >"$TMP_ROOT/browser_stop.json")
+require_contains "$TMP_ROOT/browser_stop.json" '"running"[[:space:]]*:[[:space:]]*false'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json system presence >"$TMP_ROOT/system_presence.json")
 require_contains "$TMP_ROOT/system_presence.json" '"presence"'
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 100 >"$TMP_ROOT/logs_after_browser.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 500 >"$TMP_ROOT/logs_after_browser.json")
 require_contains "$TMP_ROOT/logs_after_browser.json" '"source"[[:space:]]*:[[:space:]]*"browser"'
 
 log "Step 8: approvals/sandbox policies"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals get >"$TMP_ROOT/approvals_get.json")
 require_contains "$TMP_ROOT/approvals_get.json" '"mode"[[:space:]]*:[[:space:]]*"confirm"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals check --command "echo smoke" >"$TMP_ROOT/approvals_check_confirm.json")
+require_contains "$TMP_ROOT/approvals_check_confirm.json" '"decision"[[:space:]]*:[[:space:]]*"confirm"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals set deny >"$TMP_ROOT/approvals_set_deny.json")
 require_contains "$TMP_ROOT/approvals_set_deny.json" '"mode"[[:space:]]*:[[:space:]]*"deny"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals allowlist add "echo" >"$TMP_ROOT/approvals_allowlist_add.json")
 require_contains "$TMP_ROOT/approvals_allowlist_add.json" '"allowlist"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox get >"$TMP_ROOT/sandbox_get.json")
+require_contains "$TMP_ROOT/sandbox_get.json" '"profile"[[:space:]]*:[[:space:]]*"standard"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox set restricted >"$TMP_ROOT/sandbox_set.json")
+require_contains "$TMP_ROOT/sandbox_set.json" '"profile"[[:space:]]*:[[:space:]]*"restricted"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox list >"$TMP_ROOT/sandbox_list.json")
 require_contains "$TMP_ROOT/sandbox_list.json" '"profiles"'

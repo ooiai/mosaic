@@ -6,9 +6,9 @@ use chrono::Utc;
 use crate::utils::{load_json_file_opt, save_json_file};
 
 use super::{
-    BROWSER_SEQ, BrowserVisitRecord, CRON_SEQ, CronJobRecord, DeviceRecord, HOOK_SEQ, HookRecord,
-    NodeRecord, NodeRuntimeStatus, PAIRING_REQUEST_SEQ, PairingRequestRecord, Result, WEBHOOK_SEQ,
-    WebhookRecord,
+    BROWSER_SEQ, BrowserRuntimeState, BrowserVisitRecord, CRON_SEQ, CronJobRecord, DeviceRecord,
+    HOOK_SEQ, HookRecord, NodeRecord, NodeRuntimeStatus, PAIRING_REQUEST_SEQ, PairingRequestRecord,
+    Result, WEBHOOK_SEQ, WebhookRecord,
 };
 
 pub(super) fn nodes_file_path(data_dir: &Path) -> PathBuf {
@@ -49,6 +49,10 @@ pub(super) fn webhook_events_file_path(data_dir: &Path, webhook_id: &str) -> Pat
 
 pub(super) fn browser_history_file_path(data_dir: &Path) -> PathBuf {
     data_dir.join("browser-history.json")
+}
+
+pub(super) fn browser_state_file_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("browser-state.json")
 }
 
 pub(super) fn cron_jobs_file_path(data_dir: &Path) -> PathBuf {
@@ -116,6 +120,14 @@ pub(super) fn save_browser_history(path: &Path, visits: &[BrowserVisitRecord]) -
     save_json_file(path, &visits.to_vec())
 }
 
+pub(super) fn load_browser_state_or_default(path: &Path) -> Result<BrowserRuntimeState> {
+    Ok(load_json_file_opt::<BrowserRuntimeState>(path)?.unwrap_or_else(default_browser_state))
+}
+
+pub(super) fn save_browser_state(path: &Path, state: &BrowserRuntimeState) -> Result<()> {
+    save_json_file(path, state)
+}
+
 pub(super) fn load_cron_jobs_or_default(path: &Path) -> Result<Vec<CronJobRecord>> {
     Ok(load_json_file_opt::<Vec<CronJobRecord>>(path)?.unwrap_or_default())
 }
@@ -137,6 +149,15 @@ fn default_local_node() -> NodeRecord {
         ],
         last_seen_at: now,
         updated_at: now,
+    }
+}
+
+fn default_browser_state() -> BrowserRuntimeState {
+    BrowserRuntimeState {
+        running: false,
+        started_at: None,
+        stopped_at: None,
+        active_visit_id: None,
     }
 }
 

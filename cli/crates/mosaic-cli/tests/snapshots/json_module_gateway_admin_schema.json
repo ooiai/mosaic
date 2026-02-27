@@ -1,0 +1,152 @@
+{
+  "health_verbose": {
+    "checks": {
+      "items": [
+        {
+          "detail": "string",
+          "name": "string",
+          "status": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "type": "string"
+  },
+  "install": {
+    "ok": "bool",
+    "path": "string",
+    "service": {
+      "host": "string",
+      "installed": "bool",
+      "installed_at": "string",
+      "port": "number",
+      "updated_at": "string"
+    }
+  },
+  "restart": {
+    "gateway": {
+      "host": "string",
+      "pid": "number",
+      "port": "number",
+      "running": "bool",
+      "started_at": "string",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "path": "string",
+    "service": {
+      "host": "string",
+      "installed": "bool",
+      "installed_at": "string",
+      "port": "number",
+      "updated_at": "string"
+    },
+    "stopped": "bool",
+    "was_running": "bool"
+  },
+  "start": {
+    "already_running": "bool",
+    "gateway": {
+      "host": "string",
+      "pid": "number",
+      "port": "number",
+      "running": "bool",
+      "started_at": "string",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "path": "string",
+    "service": {
+      "host": "string",
+      "installed": "bool",
+      "installed_at": "string",
+      "port": "number",
+      "updated_at": "string"
+    }
+  },
+  "status_deep_installed": {
+    "deep": {
+      "endpoint_healthy": "bool",
+      "process_alive": "bool",
+      "service_file_exists": "bool",
+      "state_file_exists": "bool",
+      "target_host": "string",
+      "target_port": "number"
+    },
+    "gateway": {
+      "host": "string",
+      "pid": "number",
+      "port": "number",
+      "running": "bool",
+      "started_at": "string",
+      "updated_at": "string"
+    },
+    "installed": "bool",
+    "ok": "bool",
+    "path": "string",
+    "running": "bool",
+    "service": {
+      "host": "string",
+      "installed": "bool",
+      "installed_at": "string",
+      "port": "number",
+      "updated_at": "string"
+    },
+    "service_path": "string"
+  },
+  "status_deep_restarted": {
+    "deep": {
+      "endpoint_healthy": "bool",
+      "process_alive": "bool",
+      "service_file_exists": "bool",
+      "state_file_exists": "bool",
+      "target_host": "string",
+      "target_port": "number"
+    },
+    "gateway": {
+      "host": "string",
+      "pid": "number",
+      "port": "number",
+      "running": "bool",
+      "started_at": "string",
+      "updated_at": "string"
+    },
+    "installed": "bool",
+    "ok": "bool",
+    "path": "string",
+    "running": "bool",
+    "service": {
+      "host": "string",
+      "installed": "bool",
+      "installed_at": "string",
+      "port": "number",
+      "updated_at": "string"
+    },
+    "service_path": "string"
+  },
+  "status_deep_uninstalled": {
+    "deep": {
+      "endpoint_healthy": "bool",
+      "process_alive": "bool",
+      "service_file_exists": "bool",
+      "state_file_exists": "bool",
+      "target_host": "string",
+      "target_port": "number"
+    },
+    "gateway": "null",
+    "installed": "bool",
+    "ok": "bool",
+    "path": "string",
+    "running": "bool",
+    "service": "null",
+    "service_path": "string"
+  },
+  "uninstall": {
+    "ok": "bool",
+    "removed_service_file": "bool",
+    "removed_state_file": "bool",
+    "stopped": "bool",
+    "was_running": "bool"
+  }
+}
