@@ -1,0 +1,93 @@
+{
+  "aliases_set": {
+    "aliases": {
+      "fast": "string"
+    },
+    "models_path": "string",
+    "ok": "bool",
+    "profile": "string"
+  },
+  "fallbacks_add": {
+    "fallbacks": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "models_path": "string",
+    "ok": "bool",
+    "profile": "string"
+  },
+  "list": {
+    "models": {
+      "items": [
+        {
+          "id": "string",
+          "owned_by": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "resolve_alias": {
+    "aliases": {
+      "fast": "string"
+    },
+    "current_model": "string",
+    "effective_model": "string",
+    "fallback_chain": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "models_path": "string",
+    "ok": "bool",
+    "profile": "string",
+    "requested_model": "string",
+    "used_alias": "string"
+  },
+  "set": {
+    "effective_model": "string",
+    "ok": "bool",
+    "previous_model": "string",
+    "profile": "string",
+    "requested_model": "string",
+    "used_alias": "string"
+  },
+  "status_after": {
+    "aliases": {
+      "fast": "string"
+    },
+    "api_key_env": "string",
+    "base_url": "string",
+    "current_model": "string",
+    "effective_model": "string",
+    "fallbacks": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "models_path": "string",
+    "ok": "bool",
+    "profile": "string",
+    "used_alias": "null"
+  },
+  "status_before": {
+    "aliases": {},
+    "api_key_env": "string",
+    "base_url": "string",
+    "current_model": "string",
+    "effective_model": "string",
+    "fallbacks": {
+      "items": [],
+      "type": "array"
+    },
+    "models_path": "string",
+    "ok": "bool",
+    "profile": "string",
+    "used_alias": "null"
+  }
+}

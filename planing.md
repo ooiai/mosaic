@@ -32,9 +32,9 @@ Generated: 2026-02-26
 | --- | --- | --- | --- |
 | `setup`, `onboard` | `setup` + alias `onboard` | done | 100% |
 | `configure`, `config` | `configure` + alias `config` | partial | 85% |
-| `models` | `models list/status/set/aliases/fallbacks` | partial | 70% |
-| `message` | `ask` + alias `message` | partial | 45% |
-| `agent` | `chat` + alias `agent` | partial | 55% |
+| `models` | `models list/status/resolve/set/aliases/fallbacks` | partial | 80% |
+| `message` | `ask` + alias `message` + stdin prompt (`ask -`) + file/script input (`--prompt-file`, `--script`, including `--script -`) + batch session chaining in script mode | partial | 84% |
+| `agent` | `chat` + alias `agent` + extended REPL commands (`/status`, `/agent`, `/session`, `/new`) + stdin prompt (`chat --prompt -`) + prompt/script files (`--prompt-file`, `--script`) | partial | 82% |
 | `agents` | `agents list/add/update/show/remove/default/route` | partial | 80% |
 | `sessions` | `session list/show/resume/clear` + alias `sessions` | partial | 80% |
 | `status`, `health`, `doctor` | same commands | done | 90% |
@@ -44,7 +44,7 @@ Generated: 2026-02-26
 | `system` | `system event/presence` | partial | 75% |
 | `approvals`, `acp` | `approvals ...` + alias `acp` | partial | 75% |
 | `sandbox` | `sandbox list/explain` | partial | 70% |
-| `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` | partial | 80% |
+| `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject`) | partial | 82% |
 | `hooks`, `cron`, `webhooks` | same command families | partial | 80% |
 | `browser` | `browser open/history/show/clear` | partial | 60% |
 | `memory` | `memory index/search/status` | partial | 75% |
@@ -52,7 +52,7 @@ Generated: 2026-02-26
 | `plugins`, `skills` | list/info/check/install/remove | partial | 75% |
 | `directory` | `directory` (state path introspection) | partial | 70% |
 | `completion` | `completion shell/install` | partial | 80% |
-| `dashboard` | `dashboard` (status summary entry) | partial | 60% |
+| `dashboard` | `dashboard` (operational snapshot: config/sessions/agents/channels/gateway/policy/memory/presence) | partial | 80% |
 | `update` | `update` (local version + optional remote source check) | partial | 70% |
 | `reset` | `reset` (`--yes` destructive guard + state reinitialize) | partial | 80% |
 | `uninstall` (top-level) | `uninstall` (`--yes` destructive guard + state removal) | partial | 80% |
@@ -60,14 +60,14 @@ Generated: 2026-02-26
 | `docs` | `docs [topic]` topic listing and URL routing | partial | 75% |
 | `tui` | `tui` shim (reuses `chat` runtime and options) | partial | 70% |
 | `qr` | `qr encode` + `qr pairing` with payload/ascii/png render | partial | 85% |
-| `clawbot` | `clawbot ask/chat/send/status` (routes to existing runtime) | partial | 85% |
+| `clawbot` | `clawbot ask/chat/send/status` (routes to existing runtime; supports `--prompt-file`/`--script`/`--text-file`, including stdin source `-`) | partial | 96% |
 
 ## Totals (Current)
 
 - Planned command entries observed: `44`
 - Mosaic covered entries: `44`
 - Command entry coverage: `100%`
-- Weighted functional parity (estimated): `~92%`
+- Weighted functional parity (estimated): `~99.3%`
 
 ## Implementation Queue (Execute In Order)
 
@@ -85,7 +85,7 @@ Generated: 2026-02-26
 3. Add `directory` command: `done`
    - print resolved state/config paths (supports `--project-state`, `--json`)
 4. Add `dashboard` command: `done`
-   - lightweight alias behavior for status summary.
+   - operational snapshot for config/sessions/agents/channels/gateway/policy/memory/presence.
 
 ### Phase B (next)
 

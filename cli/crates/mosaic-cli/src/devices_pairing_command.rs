@@ -267,6 +267,48 @@ pub(super) fn handle_pairing(cli: &Cli, args: PairingArgs) -> Result<()> {
                 println!("device: {}", device.id);
             }
         }
+        PairingCommand::Reject { request_id, reason } => {
+            let now = Utc::now();
+            let request = pairings
+                .iter_mut()
+                .find(|item| item.id == request_id)
+                .ok_or_else(|| {
+                    MosaicError::Validation(format!("pairing request '{}' not found", request_id))
+                })?;
+            if request.status != PairingStatus::Pending {
+                return Err(MosaicError::Validation(format!(
+                    "pairing request '{}' is not pending",
+                    request_id
+                )));
+            }
+            request.status = PairingStatus::Rejected;
+            request.updated_at = now;
+            request.reason = reason.and_then(|raw| {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+            let request = request.clone();
+
+            if let Some(device) = devices.iter_mut().find(|item| item.id == request.device_id) {
+                device.status = DeviceStatus::Rejected;
+                device.last_error = request.reason.clone();
+                device.updated_at = now;
+            }
+            save_pairing_requests(&pairings_path, &pairings)?;
+            save_devices(&devices_path, &devices)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "request": request,
+                }));
+            } else {
+                println!("pairing rejected: {}", request.id);
+            }
+        }
         PairingCommand::Request {
             device,
             node,

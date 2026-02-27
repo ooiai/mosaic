@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use serde_json::{Value, json};
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 fn schema_of(value: &Value) -> Value {
@@ -33,6 +34,24 @@ fn schema_of(value: &Value) -> Value {
 
 fn parse_stdout_json(output: &[u8]) -> Value {
     serde_json::from_slice(output).expect("stdout json")
+}
+
+fn test_snapshot_path(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join(relative)
+}
+
+fn assert_json_snapshot(relative: &str, actual: &Value) {
+    let path = test_snapshot_path(relative);
+    if std::env::var_os("MOSAIC_UPDATE_SNAPSHOTS").is_some() {
+        let rendered = serde_json::to_string_pretty(actual).expect("render snapshot");
+        std::fs::write(&path, rendered).expect("write snapshot");
+    }
+
+    let expected_raw = std::fs::read_to_string(&path).expect("read snapshot");
+    let expected: Value = serde_json::from_str(&expected_raw).expect("parse snapshot");
+    assert_eq!(*actual, expected);
 }
 
 fn assert_success_envelope(payload: &Value) {
@@ -229,6 +248,275 @@ fn json_channels_module_schema_matches_snapshot() {
 
 #[test]
 #[allow(deprecated)]
+fn json_channels_admin_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "add",
+                "--name",
+                "contract-admin-telegram",
+                "--kind",
+                "telegram_bot",
+                "--chat-id=-1001234567890",
+                "--endpoint",
+                "mock-http://200",
+                "--token-env",
+                "MOSAIC_TELEGRAM_BOT_TOKEN_OLD",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&add);
+    let channel_id = add["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    let update = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "update",
+                &channel_id,
+                "--name",
+                "contract-admin-updated",
+                "--default-parse-mode",
+                "markdown",
+                "--default-title",
+                "Contract Title",
+                "--default-block",
+                "line one",
+                "--default-block",
+                "line two",
+                "--default-metadata",
+                "{\"suite\":\"channels-admin\"}",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&update);
+
+    let login = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "login",
+                &channel_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&login);
+
+    let export_path = temp.path().join("channels-admin-export.json");
+    let export = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "export",
+                "--out",
+                export_path.to_str().expect("export path"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&export);
+
+    let remove_before_import = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "channels", "remove", &channel_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&remove_before_import);
+
+    let import_report_path = temp.path().join("channels-admin-import-report.json");
+    let import = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "import",
+                "--file",
+                export_path.to_str().expect("export path"),
+                "--report-out",
+                import_report_path.to_str().expect("import report path"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&import);
+
+    let list_after_import = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "channels", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&list_after_import);
+    let imported_channel_id = list_after_import["channels"]
+        .as_array()
+        .expect("channels list")
+        .first()
+        .and_then(|entry| entry["id"].as_str())
+        .expect("imported channel id")
+        .to_string();
+
+    let rotate_dry_run = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "rotate-token-env",
+                "--channel",
+                &imported_channel_id,
+                "--to",
+                "MOSAIC_TELEGRAM_BOT_TOKEN_NEW",
+                "--dry-run",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&rotate_dry_run);
+
+    let rotate_report_path = temp.path().join("channels-admin-rotate-report.json");
+    let rotate_apply = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "rotate-token-env",
+                "--channel",
+                &imported_channel_id,
+                "--from",
+                "MOSAIC_TELEGRAM_BOT_TOKEN_OLD",
+                "--to",
+                "MOSAIC_TELEGRAM_BOT_TOKEN_NEW",
+                "--report-out",
+                rotate_report_path.to_str().expect("rotation report path"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&rotate_apply);
+
+    let logout = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "logout",
+                &imported_channel_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&logout);
+
+    let remove_after_logout = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "remove",
+                &imported_channel_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&remove_after_logout);
+
+    let list_final = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "channels", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&list_final);
+
+    let actual_schema = json!({
+        "add": schema_of(&add),
+        "update": schema_of(&update),
+        "login": schema_of(&login),
+        "export": schema_of(&export),
+        "remove_before_import": schema_of(&remove_before_import),
+        "import": schema_of(&import),
+        "list_after_import": schema_of(&list_after_import),
+        "rotate_dry_run": schema_of(&rotate_dry_run),
+        "rotate_apply": schema_of(&rotate_apply),
+        "logout": schema_of(&logout),
+        "remove_after_logout": schema_of(&remove_after_logout),
+        "list_final": schema_of(&list_final),
+    });
+    assert_json_snapshot("snapshots/json_module_channels_admin_schema.json", &actual_schema);
+}
+
+#[test]
+#[allow(deprecated)]
 fn json_gateway_module_schema_matches_snapshot() {
     let temp = tempdir().expect("tempdir");
 
@@ -340,13 +628,7 @@ fn json_security_module_schema_matches_snapshot() {
         &Command::cargo_bin("mosaic")
             .expect("binary")
             .current_dir(temp.path())
-            .args([
-                "--project-state",
-                "--json",
-                "security",
-                "baseline",
-                "show",
-            ])
+            .args(["--project-state", "--json", "security", "baseline", "show"])
             .assert()
             .success()
             .get_output()
@@ -501,4 +783,1215 @@ fn json_agents_module_schema_matches_snapshot() {
         serde_json::from_str(include_str!("snapshots/json_module_agents_schema.json"))
             .expect("expected module agents schema");
     assert_eq!(actual_schema, expected_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_nodes_pairing_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let nodes_list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "nodes", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&nodes_list);
+
+    let pairing_request_approve = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "pairing",
+                "request",
+                "--device",
+                "contract-dev-approve",
+                "--node",
+                "local",
+                "--reason",
+                "contract-approve",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&pairing_request_approve);
+    let approve_request_id = pairing_request_approve["request"]["id"]
+        .as_str()
+        .expect("approve request id");
+
+    let pairing_approve = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "pairing",
+                "approve",
+                approve_request_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&pairing_approve);
+
+    let pairing_request_reject = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "pairing",
+                "request",
+                "--device",
+                "contract-dev-reject",
+                "--node",
+                "local",
+                "--reason",
+                "contract-reject",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&pairing_request_reject);
+    let reject_request_id = pairing_request_reject["request"]["id"]
+        .as_str()
+        .expect("reject request id");
+
+    let pairing_reject = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "pairing",
+                "reject",
+                reject_request_id,
+                "--reason",
+                "contract-rejected",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&pairing_reject);
+
+    let pairing_list_rejected = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "pairing",
+                "list",
+                "--status",
+                "rejected",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&pairing_list_rejected);
+
+    let nodes_status_local = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "nodes", "status", "local"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&nodes_status_local);
+
+    let nodes_status_summary = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "nodes", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&nodes_status_summary);
+
+    let actual_schema = json!({
+        "nodes_list": schema_of(&nodes_list),
+        "pairing_request_approve": schema_of(&pairing_request_approve),
+        "pairing_approve": schema_of(&pairing_approve),
+        "pairing_request_reject": schema_of(&pairing_request_reject),
+        "pairing_reject": schema_of(&pairing_reject),
+        "pairing_list_rejected": schema_of(&pairing_list_rejected),
+        "nodes_status_local": schema_of(&nodes_status_local),
+        "nodes_status_summary": schema_of(&nodes_status_summary),
+    });
+    let expected_schema: Value =
+        serde_json::from_str(include_str!("snapshots/json_module_nodes_pairing_schema.json"))
+            .expect("expected module nodes/pairing schema");
+    assert_eq!(actual_schema, expected_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_models_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let setup = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "setup",
+                "--base-url",
+                "mock://mock-model",
+                "--model",
+                "mock-model",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&setup);
+
+    let list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "models", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&list);
+
+    let status_before = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "models", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&status_before);
+
+    let aliases_set = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "models",
+                "aliases",
+                "set",
+                "fast",
+                "mock-model",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&aliases_set);
+
+    let fallbacks_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "models",
+                "fallbacks",
+                "add",
+                "mock-fallback",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&fallbacks_add);
+
+    let resolve_alias = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "models", "resolve", "fast"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&resolve_alias);
+
+    let set = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "models", "set", "fast"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&set);
+
+    let status_after = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "models", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&status_after);
+
+    let actual_schema = json!({
+        "list": schema_of(&list),
+        "status_before": schema_of(&status_before),
+        "aliases_set": schema_of(&aliases_set),
+        "fallbacks_add": schema_of(&fallbacks_add),
+        "resolve_alias": schema_of(&resolve_alias),
+        "set": schema_of(&set),
+        "status_after": schema_of(&status_after),
+    });
+    let expected_schema: Value =
+        serde_json::from_str(include_str!("snapshots/json_module_models_schema.json"))
+            .expect("expected module models schema");
+    assert_eq!(actual_schema, expected_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_ops_policy_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let approvals_get = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "approvals", "get"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&approvals_get);
+
+    let approvals_set = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "approvals", "set", "deny"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&approvals_set);
+
+    let approvals_allowlist_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "approvals",
+                "allowlist",
+                "add",
+                "cargo test",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&approvals_allowlist_add);
+
+    let sandbox_list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "sandbox", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&sandbox_list);
+
+    let sandbox_explain = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "sandbox",
+                "explain",
+                "--profile",
+                "restricted",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&sandbox_explain);
+
+    let system_event = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "system",
+                "event",
+                "contract_event",
+                "--data",
+                "{\"suite\":\"ops-policy\"}",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&system_event);
+
+    let system_presence = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "system", "presence"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&system_presence);
+
+    let logs = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "logs", "--tail", "20"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&logs);
+
+    let actual_schema = json!({
+        "approvals_get": schema_of(&approvals_get),
+        "approvals_set": schema_of(&approvals_set),
+        "approvals_allowlist_add": schema_of(&approvals_allowlist_add),
+        "sandbox_list": schema_of(&sandbox_list),
+        "sandbox_explain": schema_of(&sandbox_explain),
+        "system_event": schema_of(&system_event),
+        "system_presence": schema_of(&system_presence),
+        "logs": schema_of(&logs),
+    });
+    let expected_schema: Value =
+        serde_json::from_str(include_str!("snapshots/json_module_ops_policy_schema.json"))
+            .expect("expected module ops/policy schema");
+    assert_eq!(actual_schema, expected_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_automation_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let setup = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "setup",
+                "--base-url",
+                "mock://mock-model",
+                "--model",
+                "mock-model",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&setup);
+
+    let hook_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "hooks",
+                "add",
+                "--name",
+                "contract-hook",
+                "--event",
+                "deploy",
+                "--command",
+                "echo contract-hook",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&hook_add);
+    let hook_id = hook_add["hook"]["id"].as_str().expect("hook id").to_string();
+
+    let hook_run = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--yes",
+                "--json",
+                "hooks",
+                "run",
+                &hook_id,
+                "--data",
+                "{\"source\":\"manual\"}",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&hook_run);
+
+    let hook_logs = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "hooks",
+                "logs",
+                "--hook",
+                &hook_id,
+                "--tail",
+                "10",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&hook_logs);
+
+    let webhook_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "webhooks",
+                "add",
+                "--name",
+                "contract-webhook",
+                "--event",
+                "deploy",
+                "--path",
+                "/contract/deploy",
+                "--method",
+                "post",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&webhook_add);
+    let webhook_id = webhook_add["webhook"]["id"]
+        .as_str()
+        .expect("webhook id")
+        .to_string();
+
+    let webhook_resolve = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--yes",
+                "--json",
+                "webhooks",
+                "resolve",
+                "--path",
+                "/contract/deploy",
+                "--method",
+                "post",
+                "--data",
+                "{\"kind\":\"resolve\"}",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&webhook_resolve);
+
+    let webhook_logs = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "webhooks",
+                "logs",
+                "--webhook",
+                &webhook_id,
+                "--tail",
+                "10",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&webhook_logs);
+
+    let cron_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "cron",
+                "add",
+                "--name",
+                "contract-cron",
+                "--event",
+                "deploy",
+                "--every",
+                "1",
+                "--data",
+                "{\"source\":\"contract\"}",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_add);
+    let cron_job_id = cron_add["job"]["id"].as_str().expect("cron job id").to_string();
+
+    let cron_tick = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--yes", "--json", "cron", "tick"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_tick);
+
+    let cron_run = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--yes",
+                "--json",
+                "cron",
+                "run",
+                &cron_job_id,
+                "--data",
+                "{\"trigger\":\"manual\"}",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_run);
+
+    let cron_logs = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "cron",
+                "logs",
+                "--job",
+                &cron_job_id,
+                "--tail",
+                "10",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_logs);
+
+    let actual_schema = json!({
+        "hook_add": schema_of(&hook_add),
+        "hook_run": schema_of(&hook_run),
+        "hook_logs": schema_of(&hook_logs),
+        "webhook_add": schema_of(&webhook_add),
+        "webhook_resolve": schema_of(&webhook_resolve),
+        "webhook_logs": schema_of(&webhook_logs),
+        "cron_add": schema_of(&cron_add),
+        "cron_tick": schema_of(&cron_tick),
+        "cron_run": schema_of(&cron_run),
+        "cron_logs": schema_of(&cron_logs),
+    });
+    assert_json_snapshot("snapshots/json_module_automation_schema.json", &actual_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_feature_runtime_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::write(temp.path().join("README.txt"), "runtime features contract")
+        .expect("write readme");
+    std::fs::write(temp.path().join("notes.md"), "browser memory plugin skill")
+        .expect("write notes");
+
+    let setup = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "setup",
+                "--base-url",
+                "mock://mock-model",
+                "--model",
+                "mock-model",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&setup);
+
+    let browser_open = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "browser",
+                "open",
+                "--url",
+                "mock://ok?title=Contract+Browser",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_open);
+    let visit_id = browser_open["visit"]["id"]
+        .as_str()
+        .expect("visit id")
+        .to_string();
+
+    let browser_history = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "browser",
+                "history",
+                "--tail",
+                "10",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_history);
+
+    let browser_show = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "show", &visit_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_show);
+
+    let browser_clear = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "clear", &visit_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_clear);
+
+    let memory_index = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "memory",
+                "index",
+                "--path",
+                ".",
+                "--max-files",
+                "100",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_index);
+
+    let memory_search = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "memory",
+                "search",
+                "contract",
+                "--limit",
+                "5",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_search);
+
+    let memory_status = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "memory", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_status);
+
+    let plugin_source = temp.path().join("sample-plugin");
+    let skill_source = temp.path().join("writer");
+    std::fs::create_dir_all(&plugin_source).expect("create plugin source");
+    std::fs::create_dir_all(&skill_source).expect("create skill source");
+    std::fs::write(
+        plugin_source.join("plugin.toml"),
+        "[plugin]\nid = \"sample_plugin\"\nname = \"Sample Plugin\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(
+        skill_source.join("SKILL.md"),
+        "# Writer\nGenerate concise notes.\n",
+    )
+    .expect("write skill file");
+
+    let plugins_install = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "plugins",
+                "install",
+                "--path",
+                "sample-plugin",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_install);
+
+    let plugins_list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "plugins", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_list);
+
+    let plugins_check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "plugins", "check", "sample_plugin"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_check);
+
+    let skills_install = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "skills", "install", "--path", "writer"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&skills_install);
+
+    let skills_list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "skills", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&skills_list);
+
+    let skills_check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "skills", "check", "writer"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&skills_check);
+
+    let actual_schema = json!({
+        "browser_open": schema_of(&browser_open),
+        "browser_history": schema_of(&browser_history),
+        "browser_show": schema_of(&browser_show),
+        "browser_clear": schema_of(&browser_clear),
+        "memory_index": schema_of(&memory_index),
+        "memory_search": schema_of(&memory_search),
+        "memory_status": schema_of(&memory_status),
+        "plugins_install": schema_of(&plugins_install),
+        "plugins_list": schema_of(&plugins_list),
+        "plugins_check": schema_of(&plugins_check),
+        "skills_install": schema_of(&skills_install),
+        "skills_list": schema_of(&skills_list),
+        "skills_check": schema_of(&skills_check),
+    });
+    assert_json_snapshot("snapshots/json_module_features_schema.json", &actual_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_compat_discovery_maintenance_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let setup = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "setup",
+                "--base-url",
+                "mock://mock-model",
+                "--model",
+                "mock-model",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&setup);
+
+    let docs_index = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--json", "docs"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&docs_index);
+
+    let docs_topic = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--json", "docs", "gateway"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&docs_topic);
+
+    let dns_resolve = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--json", "dns", "resolve", "localhost", "--port", "443"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&dns_resolve);
+
+    let tui_prompt = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_MOCK_CHAT_RESPONSE", "compat-tui-ok")
+            .args([
+                "--project-state",
+                "--json",
+                "tui",
+                "--prompt",
+                "compat tui prompt",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&tui_prompt);
+
+    let qr_encode_ascii = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--json",
+                "qr",
+                "encode",
+                "compat payload",
+                "--render",
+                "ascii",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&qr_encode_ascii);
+
+    let qr_pairing = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "qr",
+                "pairing",
+                "--device",
+                "compat-device",
+                "--node",
+                "local",
+                "--ttl-seconds",
+                "300",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&qr_pairing);
+
+    let clawbot_send = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_MOCK_CHAT_RESPONSE", "compat-clawbot-ok")
+            .args([
+                "--project-state",
+                "--json",
+                "clawbot",
+                "send",
+                "compat message",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&clawbot_send);
+
+    let clawbot_status = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "clawbot", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&clawbot_status);
+
+    let directory = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "directory"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&directory);
+
+    let dashboard = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "dashboard"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&dashboard);
+
+    let update_local = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--json", "update"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&update_local);
+
+    let update_check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--json", "update", "--check", "--source", "mock://v9.9.9"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&update_check);
+
+    let reset = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--yes", "--json", "reset"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&reset);
+
+    let uninstall = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--yes", "--json", "uninstall"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&uninstall);
+
+    let actual_schema = json!({
+        "docs_index": schema_of(&docs_index),
+        "docs_topic": schema_of(&docs_topic),
+        "dns_resolve": schema_of(&dns_resolve),
+        "tui_prompt": schema_of(&tui_prompt),
+        "qr_encode_ascii": schema_of(&qr_encode_ascii),
+        "qr_pairing": schema_of(&qr_pairing),
+        "clawbot_send": schema_of(&clawbot_send),
+        "clawbot_status": schema_of(&clawbot_status),
+        "directory": schema_of(&directory),
+        "dashboard": schema_of(&dashboard),
+        "update_local": schema_of(&update_local),
+        "update_check": schema_of(&update_check),
+        "reset": schema_of(&reset),
+        "uninstall": schema_of(&uninstall),
+    });
+    assert_json_snapshot(
+        "snapshots/json_module_compat_discovery_maintenance_schema.json",
+        &actual_schema,
+    );
 }

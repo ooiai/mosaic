@@ -85,6 +85,74 @@ fn nodes_devices_pairing_flow() {
     assert_eq!(approve_json["request"]["status"], "approved");
     assert_eq!(approve_json["device"]["status"], "approved");
 
+    let reject_request_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "pairing",
+            "request",
+            "--device",
+            "dev-2",
+            "--node",
+            "local",
+            "--reason",
+            "reject me",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let reject_request_json: Value =
+        serde_json::from_slice(&reject_request_output).expect("reject request json");
+    let reject_request_id = reject_request_json["request"]["id"]
+        .as_str()
+        .expect("reject request id")
+        .to_string();
+    assert_eq!(reject_request_json["request"]["status"], "pending");
+
+    let reject_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "pairing",
+            "reject",
+            &reject_request_id,
+            "--reason",
+            "policy denied",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let reject_json: Value = serde_json::from_slice(&reject_output).expect("reject json");
+    assert_eq!(reject_json["request"]["status"], "rejected");
+    assert_eq!(reject_json["request"]["reason"], "policy denied");
+
+    let rejected_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "pairing",
+            "list",
+            "--status",
+            "rejected",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let rejected_json: Value = serde_json::from_slice(&rejected_output).expect("rejected json");
+    assert_eq!(rejected_json["requests"][0]["id"], reject_request_id);
+
     let rotate_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -168,8 +236,10 @@ fn nodes_devices_pairing_flow() {
         .stdout
         .clone();
     let status_json: Value = serde_json::from_slice(&status_output).expect("status json");
-    assert_eq!(status_json["pairings"]["total"], 1);
+    assert_eq!(status_json["pairings"]["total"], 2);
     assert_eq!(status_json["pairings"]["pending"], 0);
+    assert_eq!(status_json["pairings"]["approved"], 1);
+    assert_eq!(status_json["pairings"]["rejected"], 1);
 
     let revoke_output = Command::cargo_bin("mosaic")
         .expect("binary")

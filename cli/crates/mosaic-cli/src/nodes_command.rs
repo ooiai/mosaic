@@ -60,16 +60,27 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                     .iter()
                     .filter(|item| item.node_id == node.id)
                     .collect::<Vec<_>>();
+                let pending_pairings = node_pairings
+                    .iter()
+                    .filter(|item| item.status == PairingStatus::Pending)
+                    .count();
+                let approved_pairings = node_pairings
+                    .iter()
+                    .filter(|item| item.status == PairingStatus::Approved)
+                    .count();
+                let rejected_pairings = node_pairings
+                    .iter()
+                    .filter(|item| item.status == PairingStatus::Rejected)
+                    .count();
                 if cli.json {
                     print_json(&json!({
                         "ok": true,
                         "node": node,
                         "pairings": {
                             "total": node_pairings.len(),
-                            "pending": node_pairings
-                                .iter()
-                                .filter(|item| item.status == PairingStatus::Pending)
-                                .count(),
+                            "pending": pending_pairings,
+                            "approved": approved_pairings,
+                            "rejected": rejected_pairings,
                         },
                         "approved_devices": devices
                             .iter()
@@ -89,15 +100,27 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                     );
                     println!("last seen: {}", node.last_seen_at.to_rfc3339());
                     println!(
-                        "pairings: total={} pending={}",
+                        "pairings: total={} pending={} approved={} rejected={}",
                         node_pairings.len(),
-                        node_pairings
-                            .iter()
-                            .filter(|item| item.status == PairingStatus::Pending)
-                            .count()
+                        pending_pairings,
+                        approved_pairings,
+                        rejected_pairings
                     );
                 }
             } else if cli.json {
+                let total_pairings = pairings.len();
+                let pending_pairings = pairings
+                    .iter()
+                    .filter(|item| item.status == PairingStatus::Pending)
+                    .count();
+                let approved_pairings = pairings
+                    .iter()
+                    .filter(|item| item.status == PairingStatus::Approved)
+                    .count();
+                let rejected_pairings = pairings
+                    .iter()
+                    .filter(|item| item.status == PairingStatus::Rejected)
+                    .count();
                 let summary = json!({
                     "total": nodes.len(),
                     "online": nodes
@@ -108,10 +131,10 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                         .iter()
                         .filter(|item| item.status == DeviceStatus::Approved)
                         .count(),
-                    "pending_pairings": pairings
-                        .iter()
-                        .filter(|item| item.status == PairingStatus::Pending)
-                        .count(),
+                    "total_pairings": total_pairings,
+                    "pending_pairings": pending_pairings,
+                    "approved_pairings": approved_pairings,
+                    "rejected_pairings": rejected_pairings,
                 });
                 print_json(&json!({
                     "ok": true,

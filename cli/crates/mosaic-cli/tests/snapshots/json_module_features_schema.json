@@ -1,0 +1,218 @@
+{
+  "browser_clear": {
+    "ok": "bool",
+    "path": "string",
+    "remaining": "number",
+    "removed": "number"
+  },
+  "browser_history": {
+    "ok": "bool",
+    "path": "string",
+    "visits": {
+      "items": [
+        {
+          "content_length": "number",
+          "content_type": "string",
+          "error": "null",
+          "http_status": "number",
+          "id": "string",
+          "ok": "bool",
+          "preview": "string",
+          "title": "string",
+          "ts": "string",
+          "url": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "browser_open": {
+    "ok": "bool",
+    "path": "string",
+    "visit": {
+      "content_length": "number",
+      "content_type": "string",
+      "error": "null",
+      "http_status": "number",
+      "id": "string",
+      "ok": "bool",
+      "preview": "string",
+      "title": "string",
+      "ts": "string",
+      "url": "string"
+    }
+  },
+  "browser_show": {
+    "ok": "bool",
+    "visit": {
+      "content_length": "number",
+      "content_type": "string",
+      "error": "null",
+      "http_status": "number",
+      "id": "string",
+      "ok": "bool",
+      "preview": "string",
+      "title": "string",
+      "ts": "string",
+      "url": "string"
+    }
+  },
+  "memory_index": {
+    "index": {
+      "index_path": "string",
+      "indexed_documents": "number",
+      "skipped_files": "number",
+      "status_path": "string"
+    },
+    "ok": "bool"
+  },
+  "memory_search": {
+    "ok": "bool",
+    "result": {
+      "hits": {
+        "items": [
+          {
+            "id": "string",
+            "path": "string",
+            "score": "number",
+            "snippet": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "query": "string",
+      "total_hits": "number"
+    }
+  },
+  "memory_status": {
+    "ok": "bool",
+    "status": {
+      "index_path": "string",
+      "indexed_documents": "number",
+      "last_indexed_at": "string",
+      "status_path": "string"
+    }
+  },
+  "plugins_check": {
+    "ok": "bool",
+    "report": {
+      "checked": "number",
+      "failed": "number",
+      "kind": "string",
+      "ok": "bool",
+      "results": {
+        "items": [
+          {
+            "checks": {
+              "items": [
+                {
+                  "detail": "string",
+                  "name": "string",
+                  "ok": "bool"
+                }
+              ],
+              "type": "array"
+            },
+            "id": "string",
+            "kind": "string",
+            "ok": "bool",
+            "path": "string",
+            "source": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "target": "string"
+    }
+  },
+  "plugins_install": {
+    "installed": {
+      "id": "string",
+      "installed_path": "string",
+      "kind": "string",
+      "replaced": "bool",
+      "source_path": "string"
+    },
+    "ok": "bool"
+  },
+  "plugins_list": {
+    "count": "number",
+    "ok": "bool",
+    "plugins": {
+      "items": [
+        {
+          "description": "null",
+          "id": "string",
+          "manifest_error": "null",
+          "manifest_exists": "bool",
+          "manifest_path": "string",
+          "manifest_valid": "bool",
+          "name": "string",
+          "path": "string",
+          "source": "string",
+          "version": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "skills_check": {
+    "ok": "bool",
+    "report": {
+      "checked": "number",
+      "failed": "number",
+      "kind": "string",
+      "ok": "bool",
+      "results": {
+        "items": [
+          {
+            "checks": {
+              "items": [
+                {
+                  "detail": "string",
+                  "name": "string",
+                  "ok": "bool"
+                }
+              ],
+              "type": "array"
+            },
+            "id": "string",
+            "kind": "string",
+            "ok": "bool",
+            "path": "string",
+            "source": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "target": "string"
+    }
+  },
+  "skills_install": {
+    "installed": {
+      "id": "string",
+      "installed_path": "string",
+      "kind": "string",
+      "replaced": "bool",
+      "source_path": "string"
+    },
+    "ok": "bool"
+  },
+  "skills_list": {
+    "count": "number",
+    "ok": "bool",
+    "skills": {
+      "items": [
+        {
+          "description": "string",
+          "id": "string",
+          "path": "string",
+          "skill_file": "string",
+          "source": "string",
+          "title": "string"
+        }
+      ],
+      "type": "array"
+    }
+  }
+}

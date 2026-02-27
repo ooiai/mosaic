@@ -45,10 +45,19 @@ fn assert_success_envelope(payload: &Value) {
 
 fn assert_failure_envelope(payload: &Value) {
     assert_eq!(payload["ok"], false);
-    assert!(payload["error"].is_object(), "missing error object: {payload}");
+    assert!(
+        payload["error"].is_object(),
+        "missing error object: {payload}"
+    );
     assert!(payload["error"]["code"].is_string(), "missing error.code");
-    assert!(payload["error"]["message"].is_string(), "missing error.message");
-    assert!(payload["error"]["exit_code"].is_number(), "missing error.exit_code");
+    assert!(
+        payload["error"]["message"].is_string(),
+        "missing error.message"
+    );
+    assert!(
+        payload["error"]["exit_code"].is_number(),
+        "missing error.exit_code"
+    );
 }
 
 #[test]
@@ -172,8 +181,9 @@ fn json_success_envelope_schema_matches_snapshot() {
         "doctor": schema_of(&doctor),
         "gateway_status": schema_of(&gateway_status),
     });
-    let expected_schema: Value = serde_json::from_str(include_str!("snapshots/json_success_schema.json"))
-        .expect("expected json success schema");
+    let expected_schema: Value =
+        serde_json::from_str(include_str!("snapshots/json_success_schema.json"))
+            .expect("expected json success schema");
     assert_eq!(actual_schema, expected_schema);
 }
 
@@ -235,7 +245,8 @@ fn json_failure_envelope_schema_matches_snapshot() {
         "nodes_approval_error": schema_of(&approval_failure),
         "gateway_unavailable_error": schema_of(&gateway_failure),
     });
-    let expected_schema: Value = serde_json::from_str(include_str!("snapshots/json_failure_schema.json"))
-        .expect("expected json failure schema");
+    let expected_schema: Value =
+        serde_json::from_str(include_str!("snapshots/json_failure_schema.json"))
+            .expect("expected json failure schema");
     assert_eq!(actual_schema, expected_schema);
 }

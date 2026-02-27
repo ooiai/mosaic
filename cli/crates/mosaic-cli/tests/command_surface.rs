@@ -133,6 +133,44 @@ fn gateway_help_includes_lifecycle_commands() {
 
 #[test]
 #[allow(deprecated)]
+fn models_help_includes_resolution_commands() {
+    let help = run_help(&["models", "--help"]);
+    let expected = ["list", "status", "resolve", "set", "aliases", "fallbacks"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "models --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn ask_help_includes_prompt_file_and_script_options() {
+    let help = run_help(&["ask", "--help"]);
+    for option in ["--prompt-file", "--script"] {
+        assert!(
+            help.contains(option),
+            "ask --help missing option {option}:\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn chat_help_includes_prompt_file_and_script_options() {
+    let help = run_help(&["chat", "--help"]);
+    for option in ["--prompt-file", "--script"] {
+        assert!(
+            help.contains(option),
+            "chat --help missing option {option}:\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
 fn hooks_help_includes_lifecycle_commands() {
     let help = run_help(&["hooks", "--help"]);
     let expected = ["list", "add", "remove", "enable", "disable", "run", "logs"];
@@ -181,7 +219,9 @@ fn webhooks_help_includes_lifecycle_commands() {
 #[allow(deprecated)]
 fn agents_help_includes_management_commands() {
     let help = run_help(&["agents", "--help"]);
-    let expected = ["list", "add", "update", "show", "remove", "default", "route"];
+    let expected = [
+        "list", "add", "update", "show", "remove", "default", "route",
+    ];
 
     for name in expected {
         assert!(
@@ -221,9 +261,9 @@ fn devices_help_includes_lifecycle_commands() {
 
 #[test]
 #[allow(deprecated)]
-fn pairing_help_includes_request_and_approval_commands() {
+fn pairing_help_includes_request_approval_and_reject_commands() {
     let help = run_help(&["pairing", "--help"]);
-    let expected = ["list", "request", "approve"];
+    let expected = ["list", "request", "approve", "reject"];
 
     for name in expected {
         assert!(
@@ -420,4 +460,38 @@ fn clawbot_help_includes_ask_chat_send_status() {
             "clawbot --help missing expected subcommand: {name}\n{help}"
         );
     }
+}
+
+#[test]
+#[allow(deprecated)]
+fn clawbot_ask_help_includes_prompt_file_and_script_options() {
+    let help = run_help(&["clawbot", "ask", "--help"]);
+    for option in ["--prompt-file", "--script"] {
+        assert!(
+            help.contains(option),
+            "clawbot ask --help missing option {option}:\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn clawbot_chat_help_includes_prompt_file_and_script_options() {
+    let help = run_help(&["clawbot", "chat", "--help"]);
+    for option in ["--prompt-file", "--script"] {
+        assert!(
+            help.contains(option),
+            "clawbot chat --help missing option {option}:\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn clawbot_send_help_includes_text_file_option() {
+    let help = run_help(&["clawbot", "send", "--help"]);
+    assert!(
+        help.contains("--text-file"),
+        "clawbot send --help missing --text-file option:\n{help}"
+    );
 }

@@ -18,7 +18,7 @@ fn root_help_matches_snapshot() {
 
 #[test]
 #[allow(deprecated)]
-fn pairing_help_lists_request_subcommand() {
+fn pairing_help_lists_request_approve_reject_subcommands() {
     let output = Command::cargo_bin("mosaic")
         .expect("binary")
         .args(["pairing", "--help"])
@@ -28,10 +28,12 @@ fn pairing_help_lists_request_subcommand() {
         .stdout
         .clone();
     let actual = String::from_utf8(output).expect("stdout is utf8");
-    assert!(
-        actual.contains("request"),
-        "pairing --help should expose request subcommand for local pairing workflow"
-    );
+    for subcommand in ["request", "approve", "reject"] {
+        assert!(
+            actual.contains(subcommand),
+            "pairing --help should expose {subcommand} subcommand for local pairing workflow"
+        );
+    }
 }
 
 #[test]

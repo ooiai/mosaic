@@ -54,12 +54,18 @@ cargo test -p mosaic-cli --test hooks_ops
 cargo test -p mosaic-cli --test gateway_channels
 cargo test -p mosaic-cli --test command_surface
 cargo test -p mosaic-cli --test aliases_ops
+cargo test -p mosaic-cli --test ask_stdin_ops
+cargo test -p mosaic-cli --test chat_repl_ops
+cargo test -p mosaic-cli --test prompt_file_ops
+cargo test -p mosaic-cli --test qr_clawbot_ops
 cargo test -p mosaic-cli --test error_codes
 cargo test -p mosaic-cli --test json_contract
 cargo test -p mosaic-cli --test json_contract_modules
 cargo test -p mosaic-cli --test help_snapshot
 cargo test -p mosaic-cli --test webhooks_ops
 cargo test -p mosaic-cli --test browser_ops
+cargo test -p mosaic-cli --test models_ops
+cargo test -p mosaic-cli --test nodes_devices_pairing
 ```
 
 ## 5) Full Smoke Only (skip workspace tests)

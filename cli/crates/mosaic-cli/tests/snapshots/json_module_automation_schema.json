@@ -1,0 +1,276 @@
+{
+  "cron_add": {
+    "job": {
+      "created_at": "string",
+      "data": {
+        "source": "string"
+      },
+      "enabled": "bool",
+      "event": "string",
+      "every_seconds": "number",
+      "id": "string",
+      "last_result": "null",
+      "last_run_at": "null",
+      "name": "string",
+      "next_run_at": "string",
+      "run_count": "number",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "cron_logs": {
+    "events": {
+      "items": [
+        {
+          "data": {
+            "source": "string"
+          },
+          "error": "null",
+          "event": "string",
+          "hooks_failed": "number",
+          "hooks_ok": "number",
+          "hooks_triggered": "number",
+          "job_id": "string",
+          "job_name": "string",
+          "ok": "bool",
+          "trigger": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "cron_run": {
+    "job": {
+      "created_at": "string",
+      "data": {
+        "source": "string"
+      },
+      "enabled": "bool",
+      "event": "string",
+      "every_seconds": "number",
+      "id": "string",
+      "last_result": {
+        "error": "null",
+        "hooks_failed": "number",
+        "hooks_ok": "number",
+        "hooks_triggered": "number",
+        "ok": "bool"
+      },
+      "last_run_at": "string",
+      "name": "string",
+      "next_run_at": "string",
+      "run_count": "number",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "result": {
+      "error": "null",
+      "event": "string",
+      "hooks_failed": "number",
+      "hooks_ok": "number",
+      "hooks_triggered": "number",
+      "job_id": "string",
+      "job_name": "string",
+      "ok": "bool",
+      "system_event": {
+        "data": {
+          "trigger": "string"
+        },
+        "name": "string",
+        "ts": "string"
+      },
+      "trigger": "string"
+    }
+  },
+  "cron_tick": {
+    "failed_count": "number",
+    "ok": "bool",
+    "ok_count": "number",
+    "results": {
+      "items": [
+        {
+          "error": "null",
+          "event": "string",
+          "hooks_failed": "number",
+          "hooks_ok": "number",
+          "hooks_triggered": "number",
+          "job_id": "string",
+          "job_name": "string",
+          "ok": "bool",
+          "system_event": {
+            "data": {
+              "source": "string"
+            },
+            "name": "string",
+            "ts": "string"
+          },
+          "trigger": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "triggered": "number"
+  },
+  "hook_add": {
+    "hook": {
+      "command": "string",
+      "created_at": "string",
+      "enabled": "bool",
+      "event": "string",
+      "id": "string",
+      "last_result": "null",
+      "last_triggered_at": "null",
+      "name": "string",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "hook_logs": {
+    "events": {
+      "items": [
+        {
+          "approved_by": "string",
+          "command": "string",
+          "data": {
+            "source": "string"
+          },
+          "delivery_status": "string",
+          "duration_ms": "number",
+          "error": "null",
+          "error_code": "null",
+          "event": "string",
+          "exit_code": "number",
+          "hook_id": "string",
+          "hook_name": "string",
+          "ok": "bool",
+          "stderr_preview": "null",
+          "stdout_preview": "string",
+          "trigger": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "hook_run": {
+    "hook": {
+      "command": "string",
+      "created_at": "string",
+      "enabled": "bool",
+      "event": "string",
+      "id": "string",
+      "last_result": "null",
+      "last_triggered_at": "null",
+      "name": "string",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "result": {
+      "approved_by": "string",
+      "command": "string",
+      "duration_ms": "number",
+      "error": "null",
+      "error_code": "null",
+      "event": "string",
+      "exit_code": "number",
+      "hook_id": "string",
+      "hook_name": "string",
+      "ok": "bool",
+      "stderr": "string",
+      "stdout": "string",
+      "trigger": "string"
+    }
+  },
+  "webhook_add": {
+    "ok": "bool",
+    "path": "string",
+    "webhook": {
+      "created_at": "string",
+      "enabled": "bool",
+      "event": "string",
+      "id": "string",
+      "last_result": "null",
+      "last_triggered_at": "null",
+      "method": "string",
+      "name": "string",
+      "path": "string",
+      "secret_env": "null",
+      "updated_at": "string"
+    }
+  },
+  "webhook_logs": {
+    "events": {
+      "items": [
+        {
+          "data": {
+            "kind": "string"
+          },
+          "error": "null",
+          "error_code": "null",
+          "event": "string",
+          "hooks_failed": "number",
+          "hooks_ok": "number",
+          "hooks_triggered": "number",
+          "method": "string",
+          "ok": "bool",
+          "path": "string",
+          "trigger": "string",
+          "ts": "string",
+          "webhook_id": "string",
+          "webhook_name": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "webhook_resolve": {
+    "ok": "bool",
+    "result": {
+      "error": "null",
+      "error_code": "null",
+      "event": "string",
+      "hooks_failed": "number",
+      "hooks_ok": "number",
+      "hooks_triggered": "number",
+      "method": "string",
+      "ok": "bool",
+      "path": "string",
+      "system_event": {
+        "data": {
+          "kind": "string"
+        },
+        "name": "string",
+        "ts": "string"
+      },
+      "trigger": "string",
+      "webhook_id": "string",
+      "webhook_name": "string"
+    },
+    "webhook": {
+      "created_at": "string",
+      "enabled": "bool",
+      "event": "string",
+      "id": "string",
+      "last_result": {
+        "error": "null",
+        "error_code": "null",
+        "hooks_failed": "number",
+        "hooks_ok": "number",
+        "hooks_triggered": "number",
+        "ok": "bool"
+      },
+      "last_triggered_at": "string",
+      "method": "string",
+      "name": "string",
+      "path": "string",
+      "secret_env": "null",
+      "updated_at": "string"
+    }
+  }
+}
