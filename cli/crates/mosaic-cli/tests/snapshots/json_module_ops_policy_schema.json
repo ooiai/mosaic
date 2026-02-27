@@ -1,0 +1,122 @@
+{
+  "approvals_allowlist_add": {
+    "ok": "bool",
+    "path": "string",
+    "policy": {
+      "allowlist": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "mode": "string",
+      "version": "number"
+    }
+  },
+  "approvals_get": {
+    "ok": "bool",
+    "path": "string",
+    "policy": {
+      "allowlist": {
+        "items": [],
+        "type": "array"
+      },
+      "mode": "string",
+      "version": "number"
+    }
+  },
+  "approvals_set": {
+    "ok": "bool",
+    "path": "string",
+    "policy": {
+      "allowlist": {
+        "items": [],
+        "type": "array"
+      },
+      "mode": "string",
+      "version": "number"
+    }
+  },
+  "logs": {
+    "logs": {
+      "items": [
+        {
+          "payload": {
+            "data": {
+              "suite": "string"
+            },
+            "name": "string",
+            "ts": "string"
+          },
+          "source": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
+  },
+  "sandbox_explain": {
+    "ok": "bool",
+    "path": "string",
+    "profile": {
+      "blocked_examples": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "description": "string",
+      "profile": "string"
+    }
+  },
+  "sandbox_list": {
+    "current": "string",
+    "ok": "bool",
+    "path": "string",
+    "profiles": {
+      "items": [
+        {
+          "blocked_examples": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "description": "string",
+          "profile": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "system_event": {
+    "event": {
+      "data": {
+        "suite": "string"
+      },
+      "name": "string",
+      "ts": "string"
+    },
+    "hooks": {
+      "failed": "number",
+      "ok": "number",
+      "results": {
+        "items": [],
+        "type": "array"
+      },
+      "triggered": "number"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "system_presence": {
+    "ok": "bool",
+    "presence": {
+      "cwd": "string",
+      "hostname": "string",
+      "pid": "number",
+      "ts": "string"
+    }
+  }
+}

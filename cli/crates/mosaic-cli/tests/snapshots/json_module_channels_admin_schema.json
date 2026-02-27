@@ -1,0 +1,198 @@
+{
+  "add": {
+    "channel": {
+      "created_at": "string",
+      "endpoint_masked": "string",
+      "has_template_defaults": "bool",
+      "id": "string",
+      "kind": "string",
+      "last_error": "null",
+      "last_login_at": "null",
+      "last_send_at": "null",
+      "name": "string",
+      "target_masked": "string"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "export": {
+    "channels": "number",
+    "ok": "bool",
+    "path": "string"
+  },
+  "import": {
+    "file": "string",
+    "ok": "bool",
+    "report_path": "string",
+    "summary": {
+      "dry_run": "bool",
+      "imported": "number",
+      "replace": "bool",
+      "skipped": "number",
+      "strict": "bool",
+      "total": "number",
+      "updated": "number"
+    }
+  },
+  "list_after_import": {
+    "channels": {
+      "items": [
+        {
+          "created_at": "string",
+          "endpoint_masked": "string",
+          "has_template_defaults": "bool",
+          "id": "string",
+          "kind": "string",
+          "last_error": "null",
+          "last_login_at": "string",
+          "last_send_at": "null",
+          "name": "string",
+          "target_masked": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "list_final": {
+    "channels": {
+      "items": [],
+      "type": "array"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "login": {
+    "channel": {
+      "created_at": "string",
+      "endpoint_masked": "string",
+      "has_template_defaults": "bool",
+      "id": "string",
+      "kind": "string",
+      "last_error": "null",
+      "last_login_at": "string",
+      "last_send_at": "null",
+      "name": "string",
+      "target_masked": "string"
+    },
+    "channel_id": "string",
+    "ok": "bool",
+    "token_env": "string",
+    "token_present": "bool"
+  },
+  "logout": {
+    "channel": {
+      "created_at": "string",
+      "endpoint_masked": "string",
+      "has_template_defaults": "bool",
+      "id": "string",
+      "kind": "string",
+      "last_error": "null",
+      "last_login_at": "null",
+      "last_send_at": "null",
+      "name": "string",
+      "target_masked": "string"
+    },
+    "ok": "bool"
+  },
+  "remove_after_logout": {
+    "ok": "bool",
+    "removed": {
+      "created_at": "string",
+      "endpoint_masked": "string",
+      "has_template_defaults": "bool",
+      "id": "string",
+      "kind": "string",
+      "last_error": "null",
+      "last_login_at": "null",
+      "last_send_at": "null",
+      "name": "string",
+      "target_masked": "string"
+    }
+  },
+  "remove_before_import": {
+    "ok": "bool",
+    "removed": {
+      "created_at": "string",
+      "endpoint_masked": "string",
+      "has_template_defaults": "bool",
+      "id": "string",
+      "kind": "string",
+      "last_error": "null",
+      "last_login_at": "string",
+      "last_send_at": "null",
+      "name": "string",
+      "target_masked": "string"
+    }
+  },
+  "rotate_apply": {
+    "ok": "bool",
+    "report_path": "string",
+    "summary": {
+      "dry_run": "bool",
+      "from_token_env": "string",
+      "items": {
+        "items": [
+          {
+            "channel_id": "string",
+            "kind": "string",
+            "name": "string",
+            "next_token_env": "string",
+            "previous_token_env": "string",
+            "status": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "skipped_already_set": "number",
+      "skipped_from_mismatch": "number",
+      "skipped_unsupported": "number",
+      "to_token_env": "string",
+      "total": "number",
+      "updated": "number"
+    }
+  },
+  "rotate_dry_run": {
+    "ok": "bool",
+    "report_path": "null",
+    "summary": {
+      "dry_run": "bool",
+      "from_token_env": "null",
+      "items": {
+        "items": [
+          {
+            "channel_id": "string",
+            "kind": "string",
+            "name": "string",
+            "next_token_env": "string",
+            "previous_token_env": "string",
+            "status": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "skipped_already_set": "number",
+      "skipped_from_mismatch": "number",
+      "skipped_unsupported": "number",
+      "to_token_env": "string",
+      "total": "number",
+      "updated": "number"
+    }
+  },
+  "update": {
+    "channel": {
+      "created_at": "string",
+      "endpoint_masked": "string",
+      "has_template_defaults": "bool",
+      "id": "string",
+      "kind": "string",
+      "last_error": "null",
+      "last_login_at": "null",
+      "last_send_at": "null",
+      "name": "string",
+      "target_masked": "string"
+    },
+    "ok": "bool"
+  }
+}

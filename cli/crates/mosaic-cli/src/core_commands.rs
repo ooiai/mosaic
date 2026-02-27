@@ -1,4 +1,5 @@
-use std::io::{self, Write};
+use std::fs;
+use std::io::{self, Read, Write};
 
 use serde_json::json;
 
@@ -211,6 +212,76 @@ pub(super) async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
                 println!("models path: {}", model_store.path().display());
             }
         }
+        ModelsCommand::Resolve { model } => {
+            let paths = resolve_state_paths(cli.project_state)?;
+            paths.ensure_dirs()?;
+            let manager = ConfigManager::new(paths.config_path.clone());
+            let config = manager.load()?;
+            let resolved = config.resolve_profile(Some(&cli.profile))?;
+            let model_store = ModelRoutingStore::new(paths.models_path.clone());
+            let profile_models = model_store.profile(&resolved.profile_name)?;
+            let requested_model = match model {
+                Some(model) => {
+                    let model = model.trim();
+                    if model.is_empty() {
+                        return Err(MosaicError::Validation("model cannot be empty".to_string()));
+                    }
+                    model.to_string()
+                }
+                None => resolved.profile.provider.model.clone(),
+            };
+            if requested_model.trim().is_empty() {
+                return Err(MosaicError::Validation("model cannot be empty".to_string()));
+            }
+            let (effective_model, used_alias) =
+                resolve_effective_model(&profile_models, &requested_model);
+            let mut fallback_chain = Vec::new();
+            for fallback in &profile_models.fallbacks {
+                let fallback = fallback.trim();
+                if fallback.is_empty() {
+                    continue;
+                }
+                let (effective_fallback, _) = resolve_effective_model(&profile_models, fallback);
+                if effective_fallback == effective_model
+                    || fallback_chain.contains(&effective_fallback)
+                {
+                    continue;
+                }
+                fallback_chain.push(effective_fallback);
+            }
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "profile": resolved.profile_name,
+                    "current_model": resolved.profile.provider.model,
+                    "requested_model": requested_model,
+                    "effective_model": effective_model,
+                    "used_alias": used_alias,
+                    "fallback_chain": fallback_chain,
+                    "aliases": profile_models.aliases,
+                    "models_path": model_store.path().display().to_string(),
+                }));
+            } else {
+                println!("profile: {}", resolved.profile_name);
+                println!("current model: {}", resolved.profile.provider.model);
+                println!("requested model: {requested_model}");
+                if let Some(alias) = used_alias {
+                    println!("effective model: {} (alias: {alias})", effective_model);
+                } else {
+                    println!("effective model: {effective_model}");
+                }
+                if fallback_chain.is_empty() {
+                    println!("fallback chain: <empty>");
+                } else {
+                    println!("fallback chain:");
+                    for fallback in fallback_chain {
+                        println!("- {fallback}");
+                    }
+                }
+                println!("models path: {}", model_store.path().display());
+            }
+        }
         ModelsCommand::Set { model } => {
             let requested_model = model.trim();
             if requested_model.is_empty() {
@@ -330,12 +401,74 @@ pub(super) async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
 
 pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
     let runtime = build_runtime(cli, args.agent.as_deref(), Some("ask"))?;
+    let mut session_id = args.session;
+
+    if let Some(script_path) = args.script {
+        let prompts = resolve_script_prompts(script_path)?;
+        let mut run_results = Vec::with_capacity(prompts.len());
+        let mut total_turns = 0u32;
+        for (index, prompt) in prompts.into_iter().enumerate() {
+            let result = runtime
+                .agent
+                .ask(
+                    &prompt,
+                    AgentRunOptions {
+                        session_id: session_id.clone(),
+                        cwd: std::env::current_dir()
+                            .map_err(|err| MosaicError::Io(err.to_string()))?,
+                        yes: cli.yes,
+                        interactive: false,
+                    },
+                )
+                .await?;
+            session_id = Some(result.session_id.clone());
+            total_turns = total_turns.saturating_add(result.turns);
+            run_results.push(json!({
+                "index": index + 1,
+                "prompt": prompt,
+                "response": result.response,
+                "turns": result.turns,
+                "session_id": result.session_id,
+            }));
+        }
+
+        if cli.json {
+            print_json(&json!({
+                "ok": true,
+                "mode": "script",
+                "session_id": session_id,
+                "runs": run_results,
+                "run_count": run_results.len(),
+                "total_turns": total_turns,
+                "agent_id": runtime.active_agent_id,
+                "profile": runtime.active_profile_name,
+            }));
+        } else {
+            for run in run_results {
+                println!("you> {}", run["prompt"].as_str().unwrap_or_default());
+                println!(
+                    "assistant> {}",
+                    run["response"].as_str().unwrap_or_default().trim()
+                );
+                println!(
+                    "session: {}",
+                    run["session_id"].as_str().unwrap_or_default()
+                );
+            }
+            if let Some(agent_id) = &runtime.active_agent_id {
+                println!("agent: {agent_id}");
+            }
+        }
+        return Ok(());
+    }
+
+    let prompt = resolve_prompt_source(args.prompt, args.prompt_file)?;
     let result = runtime
         .agent
         .ask(
-            &args.prompt,
+            &prompt,
             AgentRunOptions {
-                session_id: args.session,
+                session_id,
                 cwd: std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?,
                 yes: cli.yes,
                 interactive: false,
@@ -364,8 +497,69 @@ pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
 pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
     let runtime = build_runtime(cli, args.agent.as_deref(), Some("chat"))?;
     let mut session_id = args.session;
+    let initial_prompt = resolve_prompt_source_optional(args.prompt, args.prompt_file)?;
 
-    if let Some(prompt) = args.prompt {
+    if let Some(script_path) = args.script {
+        let prompts = resolve_script_prompts(script_path)?;
+        let mut run_results = Vec::with_capacity(prompts.len());
+        let mut total_turns = 0u32;
+        for (index, prompt) in prompts.into_iter().enumerate() {
+            let result = runtime
+                .agent
+                .ask(
+                    &prompt,
+                    AgentRunOptions {
+                        session_id: session_id.clone(),
+                        cwd: std::env::current_dir()
+                            .map_err(|err| MosaicError::Io(err.to_string()))?,
+                        yes: cli.yes,
+                        interactive: true,
+                    },
+                )
+                .await?;
+            session_id = Some(result.session_id.clone());
+            total_turns = total_turns.saturating_add(result.turns);
+            run_results.push(json!({
+                "index": index + 1,
+                "prompt": prompt,
+                "response": result.response,
+                "turns": result.turns,
+                "session_id": result.session_id,
+            }));
+        }
+
+        if cli.json {
+            print_json(&json!({
+                "ok": true,
+                "mode": "script",
+                "session_id": session_id,
+                "runs": run_results,
+                "run_count": run_results.len(),
+                "total_turns": total_turns,
+                "agent_id": runtime.active_agent_id,
+                "profile": runtime.active_profile_name,
+            }));
+            return Ok(());
+        }
+
+        for run in run_results {
+            println!("you> {}", run["prompt"].as_str().unwrap_or_default());
+            println!(
+                "assistant> {}",
+                run["response"].as_str().unwrap_or_default().trim()
+            );
+            println!(
+                "session: {}",
+                run["session_id"].as_str().unwrap_or_default()
+            );
+        }
+        if let Some(agent_id) = &runtime.active_agent_id {
+            println!("agent: {agent_id}");
+        }
+        return Ok(());
+    }
+
+    if let Some(prompt) = initial_prompt {
         let result = runtime
             .agent
             .ask(
@@ -397,7 +591,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
         }
     } else if cli.json {
         return Err(MosaicError::Validation(
-            "chat in --json mode requires --prompt".to_string(),
+            "chat in --json mode requires one of --prompt, --prompt-file, or --script".to_string(),
         ));
     }
 
@@ -421,41 +615,244 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
         if prompt.is_empty() {
             continue;
         }
-        if matches!(prompt, "/exit" | "exit" | "quit") {
-            println!("Bye.");
-            break;
-        }
-        if prompt == "/help" {
-            println!("/help     Show help");
-            println!("/session  Show current session id");
-            println!("/exit     Exit chat");
-            continue;
-        }
-        if prompt == "/session" {
-            if let Some(id) = &session_id {
-                println!("session: {id}");
-            } else {
-                println!("session: <new session>");
+        match parse_chat_repl_command(prompt) {
+            ChatReplCommand::Exit => {
+                println!("Bye.");
+                break;
             }
-            continue;
+            ChatReplCommand::Help => {
+                println!("/help     Show help");
+                println!("/status   Show profile/agent/session");
+                println!("/agent    Show active agent");
+                println!("/session  Show current session id");
+                println!("/new      Start a new chat session");
+                println!("/exit     Exit chat");
+                continue;
+            }
+            ChatReplCommand::Session => {
+                println!("session: {}", format_chat_session(session_id.as_deref()));
+                continue;
+            }
+            ChatReplCommand::New => {
+                session_id = None;
+                println!(
+                    "session reset: {}",
+                    format_chat_session(session_id.as_deref())
+                );
+                continue;
+            }
+            ChatReplCommand::Status => {
+                println!("profile: {}", runtime.active_profile_name);
+                println!(
+                    "agent: {}",
+                    format_chat_agent(runtime.active_agent_id.as_deref())
+                );
+                println!("session: {}", format_chat_session(session_id.as_deref()));
+                continue;
+            }
+            ChatReplCommand::Agent => {
+                println!(
+                    "agent: {}",
+                    format_chat_agent(runtime.active_agent_id.as_deref())
+                );
+                continue;
+            }
+            ChatReplCommand::Prompt(prompt) => {
+                let result = runtime
+                    .agent
+                    .ask(
+                        prompt,
+                        AgentRunOptions {
+                            session_id: session_id.clone(),
+                            cwd: std::env::current_dir()
+                                .map_err(|err| MosaicError::Io(err.to_string()))?,
+                            yes: cli.yes,
+                            interactive: true,
+                        },
+                    )
+                    .await?;
+                session_id = Some(result.session_id.clone());
+                println!("assistant> {}", result.response.trim());
+            }
         }
-
-        let result = runtime
-            .agent
-            .ask(
-                prompt,
-                AgentRunOptions {
-                    session_id: session_id.clone(),
-                    cwd: std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?,
-                    yes: cli.yes,
-                    interactive: true,
-                },
-            )
-            .await?;
-        session_id = Some(result.session_id.clone());
-        println!("assistant> {}", result.response.trim());
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatReplCommand<'a> {
+    Exit,
+    Help,
+    Session,
+    New,
+    Status,
+    Agent,
+    Prompt(&'a str),
+}
+
+fn parse_chat_repl_command(prompt: &str) -> ChatReplCommand<'_> {
+    match prompt {
+        "/exit" | "exit" | "quit" => ChatReplCommand::Exit,
+        "/help" => ChatReplCommand::Help,
+        "/session" => ChatReplCommand::Session,
+        "/new" => ChatReplCommand::New,
+        "/status" => ChatReplCommand::Status,
+        "/agent" => ChatReplCommand::Agent,
+        _ => ChatReplCommand::Prompt(prompt),
+    }
+}
+
+fn format_chat_session(session_id: Option<&str>) -> String {
+    session_id
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "<new session>".to_string())
+}
+
+fn format_chat_agent(agent_id: Option<&str>) -> String {
+    agent_id
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| "<none>".to_string())
+}
+
+fn resolve_prompt_source(prompt: Option<String>, prompt_file: Option<String>) -> Result<String> {
+    match (prompt, prompt_file) {
+        (Some(prompt), None) => resolve_prompt_input(prompt),
+        (None, Some(path)) => resolve_prompt_file(path),
+        (Some(_), Some(_)) => Err(MosaicError::Validation(
+            "provide either prompt text or --prompt-file, not both".to_string(),
+        )),
+        (None, None) => Err(MosaicError::Validation("prompt is required".to_string())),
+    }
+}
+
+fn resolve_prompt_source_optional(
+    prompt: Option<String>,
+    prompt_file: Option<String>,
+) -> Result<Option<String>> {
+    match (prompt, prompt_file) {
+        (None, None) => Ok(None),
+        (Some(prompt), None) => Ok(Some(resolve_prompt_input(prompt)?)),
+        (None, Some(path)) => Ok(Some(resolve_prompt_file(path)?)),
+        (Some(_), Some(_)) => Err(MosaicError::Validation(
+            "provide either prompt text or --prompt-file, not both".to_string(),
+        )),
+    }
+}
+
+fn resolve_prompt_file(path: String) -> Result<String> {
+    let source = if path == "-" {
+        let mut stdin_prompt = String::new();
+        io::stdin()
+            .read_to_string(&mut stdin_prompt)
+            .map_err(|err| MosaicError::Io(err.to_string()))?;
+        stdin_prompt
+    } else {
+        fs::read_to_string(&path)
+            .map_err(|err| MosaicError::Io(format!("failed to read prompt file {}: {err}", path)))?
+    };
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        return Err(MosaicError::Validation("prompt file is empty".to_string()));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn resolve_prompt_input(prompt: String) -> Result<String> {
+    if prompt != "-" {
+        let trimmed = prompt.trim();
+        if trimmed.is_empty() {
+            return Err(MosaicError::Validation(
+                "prompt cannot be empty".to_string(),
+            ));
+        }
+        return Ok(prompt);
+    }
+
+    let mut stdin_prompt = String::new();
+    io::stdin()
+        .read_to_string(&mut stdin_prompt)
+        .map_err(|err| MosaicError::Io(err.to_string()))?;
+    let trimmed = stdin_prompt.trim();
+    if trimmed.is_empty() {
+        return Err(MosaicError::Validation(
+            "stdin prompt is empty; provide content via pipe".to_string(),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn resolve_script_prompts(path: String) -> Result<Vec<String>> {
+    let source = if path == "-" {
+        let mut stdin_source = String::new();
+        io::stdin()
+            .read_to_string(&mut stdin_source)
+            .map_err(|err| MosaicError::Io(err.to_string()))?;
+        stdin_source
+    } else {
+        fs::read_to_string(&path)
+            .map_err(|err| MosaicError::Io(format!("failed to read script file {}: {err}", path)))?
+    };
+    let prompts = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if prompts.is_empty() {
+        return Err(MosaicError::Validation(
+            "script is empty; provide at least one non-empty line".to_string(),
+        ));
+    }
+    Ok(prompts)
+}
+
+#[cfg(test)]
+mod repl_tests {
+    use super::*;
+
+    #[test]
+    fn parse_chat_repl_commands() {
+        assert!(matches!(
+            parse_chat_repl_command("/exit"),
+            ChatReplCommand::Exit
+        ));
+        assert!(matches!(
+            parse_chat_repl_command("/help"),
+            ChatReplCommand::Help
+        ));
+        assert!(matches!(
+            parse_chat_repl_command("/session"),
+            ChatReplCommand::Session
+        ));
+        assert!(matches!(
+            parse_chat_repl_command("/new"),
+            ChatReplCommand::New
+        ));
+        assert!(matches!(
+            parse_chat_repl_command("/status"),
+            ChatReplCommand::Status
+        ));
+        assert!(matches!(
+            parse_chat_repl_command("/agent"),
+            ChatReplCommand::Agent
+        ));
+        assert!(matches!(
+            parse_chat_repl_command("hello"),
+            ChatReplCommand::Prompt("hello")
+        ));
+    }
+
+    #[test]
+    fn chat_display_helpers_return_fallback_labels() {
+        assert_eq!(format_chat_session(None), "<new session>");
+        assert_eq!(format_chat_agent(None), "<none>");
+    }
+
+    #[test]
+    fn resolve_prompt_input_validates_non_empty_prompt() {
+        let err = resolve_prompt_input("   ".to_string()).expect_err("expected validation");
+        assert!(matches!(err, MosaicError::Validation(_)));
+    }
 }
 
 pub(super) async fn handle_session(cli: &Cli, args: SessionArgs) -> Result<()> {
@@ -505,6 +902,8 @@ pub(super) async fn handle_session(cli: &Cli, args: SessionArgs) -> Result<()> {
                 ChatArgs {
                     session: Some(session_id),
                     prompt: None,
+                    prompt_file: None,
+                    script: None,
                     agent: None,
                 },
             )

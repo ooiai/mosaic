@@ -272,16 +272,17 @@ fn render_qr_payload(
                     "--output is only supported when --render png".to_string(),
                 ));
             }
-            Ok(RenderedQr::Ascii(render_qr_ascii(&qr, i32::from(quiet_zone))))
+            Ok(RenderedQr::Ascii(render_qr_ascii(
+                &qr,
+                i32::from(quiet_zone),
+            )))
         }
         QrRenderArg::Png => {
             let output = output
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| {
-                    MosaicError::Validation(
-                        "--output is required when --render png".to_string(),
-                    )
+                    MosaicError::Validation("--output is required when --render png".to_string())
                 })?;
             write_qr_png(&qr, Path::new(&output), quiet_zone, module_size)?;
             Ok(RenderedQr::Png { output })

@@ -1,0 +1,153 @@
+{
+  "nodes_list": {
+    "nodes": {
+      "items": [
+        {
+          "capabilities": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "id": "string",
+          "last_seen_at": "string",
+          "name": "string",
+          "status": "string",
+          "updated_at": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "path": "string"
+  },
+  "nodes_status_local": {
+    "approved_devices": "number",
+    "node": {
+      "capabilities": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "id": "string",
+      "last_seen_at": "string",
+      "name": "string",
+      "status": "string",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "pairings": {
+      "approved": "number",
+      "pending": "number",
+      "rejected": "number",
+      "total": "number"
+    }
+  },
+  "nodes_status_summary": {
+    "nodes": {
+      "items": [
+        {
+          "capabilities": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "id": "string",
+          "last_seen_at": "string",
+          "name": "string",
+          "status": "string",
+          "updated_at": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "summary": {
+      "approved_devices": "number",
+      "approved_pairings": "number",
+      "online": "number",
+      "pending_pairings": "number",
+      "rejected_pairings": "number",
+      "total": "number",
+      "total_pairings": "number"
+    }
+  },
+  "pairing_approve": {
+    "device": {
+      "fingerprint": "string",
+      "id": "string",
+      "last_error": "null",
+      "last_seen_at": "string",
+      "name": "string",
+      "status": "string",
+      "token_version": "number",
+      "updated_at": "string"
+    },
+    "ok": "bool",
+    "request": {
+      "device_id": "string",
+      "id": "string",
+      "node_id": "string",
+      "reason": "string",
+      "requested_at": "string",
+      "status": "string",
+      "updated_at": "string"
+    }
+  },
+  "pairing_list_rejected": {
+    "ok": "bool",
+    "path": "string",
+    "requests": {
+      "items": [
+        {
+          "device_id": "string",
+          "id": "string",
+          "node_id": "string",
+          "reason": "string",
+          "requested_at": "string",
+          "status": "string",
+          "updated_at": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "pairing_reject": {
+    "ok": "bool",
+    "request": {
+      "device_id": "string",
+      "id": "string",
+      "node_id": "string",
+      "reason": "string",
+      "requested_at": "string",
+      "status": "string",
+      "updated_at": "string"
+    }
+  },
+  "pairing_request_approve": {
+    "ok": "bool",
+    "request": {
+      "device_id": "string",
+      "id": "string",
+      "node_id": "string",
+      "reason": "string",
+      "requested_at": "string",
+      "status": "string",
+      "updated_at": "string"
+    }
+  },
+  "pairing_request_reject": {
+    "ok": "bool",
+    "request": {
+      "device_id": "string",
+      "id": "string",
+      "node_id": "string",
+      "reason": "string",
+      "requested_at": "string",
+      "status": "string",
+      "updated_at": "string"
+    }
+  }
+}

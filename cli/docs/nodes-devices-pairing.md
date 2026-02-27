@@ -21,6 +21,7 @@ mosaic --project-state devices revoke <device-id> [--reason <text>]
 mosaic --project-state pairing list [--status pending|approved|rejected]
 mosaic --project-state pairing request --device <device-id> [--node <node-id>] [--reason <text>]
 mosaic --project-state pairing approve <request-id>
+mosaic --project-state pairing reject <request-id> [--reason <text>]
 ```
 
 ## Storage
@@ -34,4 +35,6 @@ mosaic --project-state pairing approve <request-id>
 - `nodes run` and `nodes invoke` are dispatched via gateway (`nodes.run` / `nodes.invoke` methods).
 - `nodes run` follows approvals/sandbox policy; under default confirm mode, use `--yes` for non-interactive runs.
 - Pairing approval automatically marks the associated device as approved.
-- `pairing request` is useful for local/dev workflow to seed approval requests before `pairing approve`.
+- Pairing rejection marks the request as `rejected` and sets the device status to `rejected` when the device exists.
+- `pairing request` is useful for local/dev workflow to seed approval requests before `pairing approve` or `pairing reject`.
+- `nodes status <node-id> --json` reports pairing counters: `total`, `pending`, `approved`, `rejected`.

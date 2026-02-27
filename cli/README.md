@@ -8,7 +8,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Local agent core (`ask`, `chat`, `session`, `models`, `dashboard`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway install|start|restart|status|health|probe|discover|call|stop|uninstall`)
 - Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
-- Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve`)
+- Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve|reject`)
 - Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
 - Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
 - Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
@@ -83,7 +83,10 @@ cargo run -p mosaic-cli --bin mosaic -- completion install zsh
 
 cargo run -p mosaic-cli --bin mosaic -- --project-state directory
 cargo run -p mosaic-cli --bin mosaic -- --project-state dashboard
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json dashboard
 ```
+
+`dashboard` now provides an operational snapshot (config, sessions, agents, channels, gateway, policy, memory, presence) and keeps compatibility keys like `configured/profile/latest_session`.
 
 ### Maintenance Commands
 
@@ -123,7 +126,12 @@ cargo run -p mosaic-cli --bin mosaic -- --json qr encode "hello world" --render 
 cargo run -p mosaic-cli --bin mosaic -- --json qr pairing --device dev-1 --node local --ttl-seconds 300
 
 cargo run -p mosaic-cli --bin mosaic -- --project-state clawbot ask "hello"
+cargo run -p mosaic-cli --bin mosaic -- --project-state clawbot ask --prompt-file prompts/clawbot-ask.txt
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json clawbot ask --script prompts/clawbot-ask-script.txt
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json clawbot chat --script prompts/clawbot-chat-script.txt
 cargo run -p mosaic-cli --bin mosaic -- --project-state clawbot send "ship it"
+cargo run -p mosaic-cli --bin mosaic -- --project-state clawbot send --text-file prompts/clawbot-send.txt
+printf "ship it stdin\n" | cargo run -p mosaic-cli --bin mosaic -- --project-state clawbot send --text-file -
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json clawbot status
 ```
 
@@ -142,6 +150,8 @@ OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
   --project-state models list
 
 cargo run -p mosaic-cli --bin mosaic -- --project-state models status
+cargo run -p mosaic-cli --bin mosaic -- --project-state models resolve
+cargo run -p mosaic-cli --bin mosaic -- --project-state models resolve fast
 cargo run -p mosaic-cli --bin mosaic -- --project-state models set gpt-4o-mini
 cargo run -p mosaic-cli --bin mosaic -- --project-state models aliases set fast gpt-4o-mini
 cargo run -p mosaic-cli --bin mosaic -- --project-state models aliases list
@@ -154,6 +164,22 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state models fallbacks list
 ```bash
 OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
   --project-state ask "summarize this repo"
+
+# read prompt from stdin
+printf "summarize this repo\n" | OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state ask -
+
+# read prompt from file
+OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state ask --prompt-file prompts/ask.txt
+
+# run line-based ask script (one non-empty line = one ask turn)
+OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state --json ask --script prompts/ask-script.txt
+
+# run ask script from stdin
+printf "first ask\nsecond ask\n" | OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state --json ask --script -
 ```
 
 ### Chat REPL
@@ -161,7 +187,24 @@ OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
 ```bash
 OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
   --project-state chat
+
+# single non-interactive chat from file
+OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state --json chat --prompt-file prompts/chat.txt
+
+# run line-based chat script (one non-empty line = one turn)
+OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state --json chat --script prompts/chat-script.txt
 ```
+
+REPL commands:
+
+- `/help`: show command help
+- `/status`: show active profile, agent, and session
+- `/agent`: show active agent
+- `/session`: show current session id
+- `/new`: reset chat and start a new session
+- `/exit`: quit chat
 
 ### Gateway Runtime
 
@@ -197,6 +240,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state devices revoke dev-1 --r
 cargo run -p mosaic-cli --bin mosaic -- --project-state pairing request --device dev-1 --node local --reason "new laptop"
 cargo run -p mosaic-cli --bin mosaic -- --project-state pairing list --status pending
 cargo run -p mosaic-cli --bin mosaic -- --project-state pairing approve <request-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state pairing reject <request-id> --reason "policy denied"
 ```
 
 ### Hooks Runtime

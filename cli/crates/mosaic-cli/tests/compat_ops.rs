@@ -44,7 +44,10 @@ fn completion_install_writes_script_file() {
     let json: Value = serde_json::from_slice(&output).expect("json");
     assert_eq!(json["ok"], true);
     let path = json["path"].as_str().expect("path");
-    assert!(path.ends_with("/_mosaic"), "unexpected completion path: {path}");
+    assert!(
+        path.ends_with("/_mosaic"),
+        "unexpected completion path: {path}"
+    );
     let content = fs::read_to_string(path).expect("completion file");
     assert!(content.contains("#compdef mosaic"));
 }
@@ -72,18 +75,57 @@ fn directory_reports_project_state_paths_in_json() {
 
 #[test]
 #[allow(deprecated)]
-fn dashboard_reuses_status_contract() {
+fn dashboard_reports_operational_panels() {
     let temp = tempdir().expect("tempdir");
 
-    let status_output = Command::cargo_bin("mosaic")
+    Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .args(["--project-state", "--json", "status"])
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+        .success();
+
+    fs::write(temp.path().join("memory-doc.txt"), "dashboard memory test").expect("write doc");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "memory",
+            "index",
+            "--path",
+            ".",
+            "--max-files",
+            "32",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "term",
+            "--kind",
+            "terminal",
+        ])
+        .assert()
+        .success();
+
     let dashboard_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -94,10 +136,26 @@ fn dashboard_reuses_status_contract() {
         .stdout
         .clone();
 
-    let status_json: Value = serde_json::from_slice(&status_output).expect("status json");
     let dashboard_json: Value = serde_json::from_slice(&dashboard_output).expect("dashboard json");
-    assert_eq!(status_json["ok"], true);
     assert_eq!(dashboard_json["ok"], true);
-    assert_eq!(status_json["configured"], dashboard_json["configured"]);
-    assert_eq!(status_json["profile"], dashboard_json["profile"]);
+    assert_eq!(dashboard_json["configured"], true);
+    assert_eq!(dashboard_json["dashboard"]["config"]["configured"], true);
+    assert_eq!(
+        dashboard_json["dashboard"]["config"]["model"],
+        Value::String("mock-model".to_string())
+    );
+    assert_eq!(dashboard_json["dashboard"]["channels"]["total"], 1);
+    assert!(
+        dashboard_json["dashboard"]["memory"]["indexed_documents"]
+            .as_u64()
+            .expect("memory indexed_documents")
+            >= 1
+    );
+    assert!(dashboard_json["dashboard"]["presence"]["hostname"].is_string());
+    assert!(
+        dashboard_json["warnings"]
+            .as_array()
+            .expect("warnings array")
+            .is_empty()
+    );
 }

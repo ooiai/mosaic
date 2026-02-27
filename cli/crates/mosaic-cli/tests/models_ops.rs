@@ -73,6 +73,22 @@ fn models_status_set_aliases_and_fallbacks_flow() {
     assert_eq!(status_json["effective_model"], "mock-model");
     assert_eq!(status_json["used_alias"], "fast");
 
+    let resolve_default_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "models", "resolve"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let resolve_default_json: Value =
+        serde_json::from_slice(&resolve_default_output).expect("resolve default json");
+    assert_eq!(resolve_default_json["ok"], true);
+    assert_eq!(resolve_default_json["requested_model"], "fast");
+    assert_eq!(resolve_default_json["effective_model"], "mock-model");
+    assert_eq!(resolve_default_json["used_alias"], "fast");
+
     let set_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -122,4 +138,19 @@ fn models_status_set_aliases_and_fallbacks_flow() {
         serde_json::from_slice(&fallbacks_list).expect("fallback list json");
     assert_eq!(fallbacks_list_json["ok"], true);
     assert_eq!(fallbacks_list_json["fallbacks"][0], "backup-model");
+
+    let resolve_explicit_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "models", "resolve", "fast"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let resolve_explicit_json: Value =
+        serde_json::from_slice(&resolve_explicit_output).expect("resolve explicit json");
+    assert_eq!(resolve_explicit_json["ok"], true);
+    assert_eq!(resolve_explicit_json["effective_model"], "mock-model");
+    assert_eq!(resolve_explicit_json["fallback_chain"][0], "backup-model");
 }

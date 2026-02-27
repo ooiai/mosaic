@@ -84,6 +84,66 @@ fi
 require_contains "$TMP_ROOT/session_show.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/session_show.json" '"events"'
 
+printf "ask prompt from file\n" >"$SRC_DIR/ask-prompt.txt"
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-file-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json ask --prompt-file ask-prompt.txt >"$TMP_ROOT/ask_prompt_file.json")
+require_contains "$TMP_ROOT/ask_prompt_file.json" '"response"[[:space:]]*:[[:space:]]*"mock-file-answer"'
+
+cat >"$SRC_DIR/ask-script.txt" <<'EOF'
+first ask scripted prompt
+second ask scripted prompt
+EOF
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-ask-script-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json ask --script ask-script.txt >"$TMP_ROOT/ask_script.json")
+require_contains "$TMP_ROOT/ask_script.json" '"mode"[[:space:]]*:[[:space:]]*"script"'
+require_contains "$TMP_ROOT/ask_script.json" '"run_count"[[:space:]]*:[[:space:]]*2'
+
+(cd "$SRC_DIR" && printf "stdin ask scripted first\nstdin ask scripted second\n" | MOSAIC_MOCK_CHAT_RESPONSE="mock-ask-script-stdin-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json ask --script - >"$TMP_ROOT/ask_script_stdin.json")
+require_contains "$TMP_ROOT/ask_script_stdin.json" '"mode"[[:space:]]*:[[:space:]]*"script"'
+require_contains "$TMP_ROOT/ask_script_stdin.json" '"run_count"[[:space:]]*:[[:space:]]*2'
+
+printf "chat prompt from file\n" >"$SRC_DIR/chat-prompt.txt"
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-chat-file-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json chat --prompt-file chat-prompt.txt >"$TMP_ROOT/chat_prompt_file.json")
+require_contains "$TMP_ROOT/chat_prompt_file.json" '"response"[[:space:]]*:[[:space:]]*"mock-chat-file-answer"'
+
+cat >"$SRC_DIR/chat-script.txt" <<'EOF'
+first scripted prompt
+
+second scripted prompt
+EOF
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-chat-script-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json chat --script chat-script.txt >"$TMP_ROOT/chat_script.json")
+require_contains "$TMP_ROOT/chat_script.json" '"mode"[[:space:]]*:[[:space:]]*"script"'
+require_contains "$TMP_ROOT/chat_script.json" '"run_count"[[:space:]]*:[[:space:]]*2'
+
+printf "clawbot ask prompt file\n" >"$SRC_DIR/clawbot-ask.txt"
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-clawbot-file-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot ask --prompt-file clawbot-ask.txt >"$TMP_ROOT/clawbot_ask_prompt_file.json")
+require_contains "$TMP_ROOT/clawbot_ask_prompt_file.json" '"response"[[:space:]]*:[[:space:]]*"mock-clawbot-file-answer"'
+
+cat >"$SRC_DIR/clawbot-ask-script.txt" <<'EOF'
+clawbot ask scripted first
+clawbot ask scripted second
+EOF
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-clawbot-ask-script-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot ask --script clawbot-ask-script.txt >"$TMP_ROOT/clawbot_ask_script.json")
+require_contains "$TMP_ROOT/clawbot_ask_script.json" '"mode"[[:space:]]*:[[:space:]]*"script"'
+require_contains "$TMP_ROOT/clawbot_ask_script.json" '"run_count"[[:space:]]*:[[:space:]]*2'
+
+(cd "$SRC_DIR" && printf "stdin clawbot ask scripted first\nstdin clawbot ask scripted second\n" | MOSAIC_MOCK_CHAT_RESPONSE="mock-clawbot-ask-script-stdin-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot ask --script - >"$TMP_ROOT/clawbot_ask_script_stdin.json")
+require_contains "$TMP_ROOT/clawbot_ask_script_stdin.json" '"mode"[[:space:]]*:[[:space:]]*"script"'
+require_contains "$TMP_ROOT/clawbot_ask_script_stdin.json" '"run_count"[[:space:]]*:[[:space:]]*2'
+
+cat >"$SRC_DIR/clawbot-chat-script.txt" <<'EOF'
+clawbot scripted first
+clawbot scripted second
+EOF
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-clawbot-script-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot chat --script clawbot-chat-script.txt >"$TMP_ROOT/clawbot_chat_script.json")
+require_contains "$TMP_ROOT/clawbot_chat_script.json" '"mode"[[:space:]]*:[[:space:]]*"script"'
+require_contains "$TMP_ROOT/clawbot_chat_script.json" '"run_count"[[:space:]]*:[[:space:]]*2'
+
+printf "clawbot send text file\n" >"$SRC_DIR/clawbot-send.txt"
+(cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-clawbot-send-file-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot send --text-file clawbot-send.txt >"$TMP_ROOT/clawbot_send_text_file.json")
+require_contains "$TMP_ROOT/clawbot_send_text_file.json" '"response"[[:space:]]*:[[:space:]]*"mock-clawbot-send-file-answer"'
+
+(cd "$SRC_DIR" && printf "stdin clawbot send text file\n" | MOSAIC_MOCK_CHAT_RESPONSE="mock-clawbot-send-stdin-file-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot send --text-file - >"$TMP_ROOT/clawbot_send_text_file_stdin.json")
+require_contains "$TMP_ROOT/clawbot_send_text_file_stdin.json" '"response"[[:space:]]*:[[:space:]]*"mock-clawbot-send-stdin-file-answer"'
+
 log "Step 2: channels export/import (with success + strict-failure reports)"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels add --name src-slack --kind slack_webhook --endpoint mock-http://200 >"$TMP_ROOT/add_src_slack.json")
 SRC_CHANNEL_ID="$(extract_first_match "$TMP_ROOT/add_src_slack.json" 'ch_[0-9a-f-]{8,}')"
@@ -165,6 +225,16 @@ require_contains "$TMP_ROOT/pairing_request.json" '"status"[[:space:]]*:[[:space
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json pairing approve "$PAIRING_REQUEST_ID" >"$TMP_ROOT/pairing_approve.json")
 require_contains "$TMP_ROOT/pairing_approve.json" '"status"[[:space:]]*:[[:space:]]*"approved"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json pairing request --device dev-smoke-reject --node local --reason "smoke reject pairing" >"$TMP_ROOT/pairing_request_reject.json")
+PAIRING_REJECT_REQUEST_ID="$(extract_first_match "$TMP_ROOT/pairing_request_reject.json" 'pr-[0-9-]+')"
+require_contains "$TMP_ROOT/pairing_request_reject.json" '"status"[[:space:]]*:[[:space:]]*"pending"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json pairing reject "$PAIRING_REJECT_REQUEST_ID" --reason "smoke rejected" >"$TMP_ROOT/pairing_reject.json")
+require_contains "$TMP_ROOT/pairing_reject.json" '"status"[[:space:]]*:[[:space:]]*"rejected"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json pairing list --status rejected >"$TMP_ROOT/pairing_list_rejected.json")
+require_contains "$TMP_ROOT/pairing_list_rejected.json" "$PAIRING_REJECT_REQUEST_ID"
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json devices rotate dev-smoke >"$TMP_ROOT/devices_rotate.json")
 require_contains "$TMP_ROOT/devices_rotate.json" '"token_version"[[:space:]]*:[[:space:]]*2'
 
@@ -190,7 +260,11 @@ require_contains "$TMP_ROOT/nodes_invoke.json" '"ok"[[:space:]]*:[[:space:]]*tru
 require_contains "$TMP_ROOT/gateway_stop.json" '"stopped"[[:space:]]*:[[:space:]]*true'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json nodes status local >"$TMP_ROOT/nodes_status.json")
-require_contains "$TMP_ROOT/nodes_status.json" '"total"[[:space:]]*:[[:space:]]*1'
+require_contains "$TMP_ROOT/nodes_status.json" '"pairings"'
+require_contains "$TMP_ROOT/nodes_status.json" '"total"[[:space:]]*:[[:space:]]*2'
+require_contains "$TMP_ROOT/nodes_status.json" '"pending"[[:space:]]*:[[:space:]]*0'
+require_contains "$TMP_ROOT/nodes_status.json" '"approved"[[:space:]]*:[[:space:]]*1'
+require_contains "$TMP_ROOT/nodes_status.json" '"rejected"[[:space:]]*:[[:space:]]*1'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json devices revoke dev-smoke --reason "smoke cleanup" >"$TMP_ROOT/devices_revoke.json")
 require_contains "$TMP_ROOT/devices_revoke.json" '"status"[[:space:]]*:[[:space:]]*"revoked"'
@@ -377,6 +451,8 @@ require_contains "$TMP_ROOT/directory.json" '"root_dir"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json dashboard >"$TMP_ROOT/dashboard.json")
 require_contains "$TMP_ROOT/dashboard.json" '"ok"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/dashboard.json" '"dashboard"'
+require_contains "$TMP_ROOT/dashboard.json" '"channels"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json update >"$TMP_ROOT/update_local.json")
 require_contains "$TMP_ROOT/update_local.json" '"current_version"'
@@ -398,5 +474,6 @@ echo "src_channel_id=$SRC_CHANNEL_ID"
 echo "telegram_channel_id=$TG_CHANNEL_ID"
 echo "terminal_channel_id=$TERMINAL_CHANNEL_ID"
 echo "pairing_request_id=$PAIRING_REQUEST_ID"
+echo "pairing_reject_request_id=$PAIRING_REJECT_REQUEST_ID"
 echo "tmp_dir=$TMP_ROOT"
 echo "Use KEEP_TMP=1 to keep artifacts."

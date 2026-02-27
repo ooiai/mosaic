@@ -123,6 +123,9 @@ struct ModelsArgs {
 enum ModelsCommand {
     List,
     Status,
+    Resolve {
+        model: Option<String>,
+    },
     Set {
         model: String,
     },
@@ -154,7 +157,16 @@ enum ModelFallbacksCommand {
 
 #[derive(Args, Debug, Clone)]
 struct AskArgs {
-    prompt: String,
+    #[arg(
+        value_name = "PROMPT",
+        required_unless_present_any = ["prompt_file", "script"],
+        conflicts_with_all = ["prompt_file", "script"]
+    )]
+    prompt: Option<String>,
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "script"])]
+    prompt_file: Option<String>,
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "prompt_file"])]
+    script: Option<String>,
     #[arg(long)]
     session: Option<String>,
     #[arg(long)]
@@ -165,8 +177,12 @@ struct AskArgs {
 struct ChatArgs {
     #[arg(long)]
     session: Option<String>,
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["prompt_file", "script"])]
     prompt: Option<String>,
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "script"])]
+    prompt_file: Option<String>,
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "prompt_file"])]
+    script: Option<String>,
     #[arg(long)]
     agent: Option<String>,
 }
@@ -314,6 +330,11 @@ enum PairingCommand {
     },
     Approve {
         request_id: String,
+    },
+    Reject {
+        request_id: String,
+        #[arg(long)]
+        reason: Option<String>,
     },
     Request {
         #[arg(long)]
@@ -1067,7 +1088,16 @@ struct ClawbotArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum ClawbotCommand {
     Ask {
-        prompt: String,
+        #[arg(
+            value_name = "PROMPT",
+            required_unless_present_any = ["prompt_file", "script"],
+            conflicts_with_all = ["prompt_file", "script"]
+        )]
+        prompt: Option<String>,
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "script"])]
+        prompt_file: Option<String>,
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "prompt_file"])]
+        script: Option<String>,
         #[arg(long)]
         session: Option<String>,
         #[arg(long)]
@@ -1076,13 +1106,24 @@ enum ClawbotCommand {
     Chat {
         #[arg(long)]
         session: Option<String>,
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["prompt_file", "script"])]
         prompt: Option<String>,
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "script"])]
+        prompt_file: Option<String>,
+        #[arg(long, value_name = "PATH", conflicts_with_all = ["prompt", "prompt_file"])]
+        script: Option<String>,
         #[arg(long)]
         agent: Option<String>,
     },
     Send {
-        text: String,
+        #[arg(
+            value_name = "TEXT",
+            required_unless_present = "text_file",
+            conflicts_with = "text_file"
+        )]
+        text: Option<String>,
+        #[arg(long, value_name = "PATH", conflicts_with = "text")]
+        text_file: Option<String>,
         #[arg(long)]
         session: Option<String>,
         #[arg(long)]

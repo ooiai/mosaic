@@ -1,0 +1,211 @@
+{
+  "clawbot_send": {
+    "agent_id": "null",
+    "ok": "bool",
+    "profile": "string",
+    "response": "string",
+    "session_id": "string",
+    "turns": "number"
+  },
+  "clawbot_status": {
+    "agents_count": "number",
+    "config_path": "string",
+    "configured": "bool",
+    "default_agent_id": "null",
+    "latest_session": "string",
+    "ok": "bool",
+    "profile": "string",
+    "provider": {
+      "api_key_env": "string",
+      "base_url": "string",
+      "kind": "string",
+      "model": "string"
+    },
+    "state_mode": "string",
+    "tools": {
+      "enabled": "bool",
+      "run": {
+        "guard_mode": "string"
+      }
+    }
+  },
+  "dashboard": {
+    "agents_count": "number",
+    "configured": "bool",
+    "dashboard": {
+      "agents": {
+        "default_agent_id": "null",
+        "total": "number"
+      },
+      "channels": {
+        "healthy": "number",
+        "kinds": {},
+        "last_send_at": "null",
+        "total": "number",
+        "with_errors": "number"
+      },
+      "config": {
+        "configured": "bool",
+        "model": "string",
+        "path": "string",
+        "profile": "string",
+        "provider_kind": "string"
+      },
+      "gateway": {
+        "host": "string",
+        "pid": "null",
+        "port": "number",
+        "running": "bool",
+        "service_file_exists": "bool",
+        "service_installed": "bool",
+        "state_file_exists": "bool",
+        "updated_at": "null"
+      },
+      "memory": {
+        "index_path": "string",
+        "indexed_documents": "number",
+        "last_indexed_at": "null"
+      },
+      "policy": {
+        "approval_allowlist_size": "number",
+        "approval_mode": "string",
+        "sandbox_profile": "string"
+      },
+      "presence": {
+        "cwd": "string",
+        "hostname": "string",
+        "pid": "number",
+        "ts": "string"
+      },
+      "sessions": {
+        "latest_id": "string",
+        "latest_updated_at": "string",
+        "total": "number"
+      }
+    },
+    "default_agent_id": "null",
+    "latest_session": "string",
+    "ok": "bool",
+    "profile": "string",
+    "state_mode": "string",
+    "warnings": {
+      "items": [],
+      "type": "array"
+    }
+  },
+  "directory": {
+    "mode": "string",
+    "ok": "bool",
+    "paths": {
+      "approvals_policy_path": "string",
+      "audit_dir": "string",
+      "audit_log_path": "string",
+      "config_path": "string",
+      "data_dir": "string",
+      "models_path": "string",
+      "policy_dir": "string",
+      "root_dir": "string",
+      "sandbox_policy_path": "string",
+      "sessions_dir": "string",
+      "system_events_path": "string"
+    }
+  },
+  "dns_resolve": {
+    "addresses": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "host": "string",
+    "ok": "bool",
+    "port": "number"
+  },
+  "docs_index": {
+    "ok": "bool",
+    "topics": {
+      "items": [
+        {
+          "topic": "string",
+          "url": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "docs_topic": {
+    "ok": "bool",
+    "topic": "string",
+    "url": "string"
+  },
+  "qr_encode_ascii": {
+    "ascii": "string",
+    "kind": "string",
+    "ok": "bool",
+    "payload": "string",
+    "render": "string",
+    "value": "string"
+  },
+  "qr_pairing": {
+    "device": "string",
+    "expires_at": "number",
+    "kind": "string",
+    "node": "string",
+    "ok": "bool",
+    "payload": "string",
+    "render": "string",
+    "ttl_seconds": "number"
+  },
+  "reset": {
+    "mode": "string",
+    "ok": "bool",
+    "reinitialized": "bool",
+    "removed_dirs": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "removed_files": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "state_root": "string"
+  },
+  "tui_prompt": {
+    "agent_id": "null",
+    "ok": "bool",
+    "profile": "string",
+    "response": "string",
+    "session_id": "string",
+    "turns": "number"
+  },
+  "uninstall": {
+    "mode": "string",
+    "note": "string",
+    "ok": "bool",
+    "removed_dirs": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    }
+  },
+  "update_check": {
+    "checked": "bool",
+    "current_version": "string",
+    "latest_version": "string",
+    "ok": "bool",
+    "source": "string",
+    "up_to_date": "bool",
+    "update_available": "bool"
+  },
+  "update_local": {
+    "checked": "bool",
+    "current_version": "string",
+    "ok": "bool",
+    "update_available": "bool"
+  }
+}

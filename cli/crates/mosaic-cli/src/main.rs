@@ -45,7 +45,7 @@ use automation_runtime::{
 };
 use browser_runtime::browser_open_visit;
 use channels_command::handle_channels;
-use compat_commands::{handle_completion, handle_directory};
+use compat_commands::{handle_completion, handle_dashboard, handle_directory};
 use core_commands::{
     handle_ask, handle_chat, handle_configure, handle_models, handle_session, handle_setup,
 };
@@ -147,7 +147,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Skills(args) => handle_skills(&cli, args),
         Commands::Completion(args) => handle_completion(&cli, args),
         Commands::Directory => handle_directory(&cli),
-        Commands::Dashboard => handle_status(&cli),
+        Commands::Dashboard => handle_dashboard(&cli),
         Commands::Update(args) => handle_update(&cli, args).await,
         Commands::Reset => handle_reset(&cli),
         Commands::Uninstall => handle_uninstall(&cli),
@@ -159,6 +159,8 @@ async fn run(cli: Cli) -> Result<()> {
                 ChatArgs {
                     session: args.session,
                     prompt: args.prompt,
+                    prompt_file: None,
+                    script: None,
                     agent: args.agent,
                 },
             )
@@ -168,6 +170,8 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Clawbot(args) => match args.command {
             ClawbotCommand::Ask {
                 prompt,
+                prompt_file,
+                script,
                 session,
                 agent,
             } => {
@@ -175,6 +179,8 @@ async fn run(cli: Cli) -> Result<()> {
                     &cli,
                     AskArgs {
                         prompt,
+                        prompt_file,
+                        script,
                         session,
                         agent,
                     },
@@ -184,6 +190,8 @@ async fn run(cli: Cli) -> Result<()> {
             ClawbotCommand::Chat {
                 session,
                 prompt,
+                prompt_file,
+                script,
                 agent,
             } => {
                 handle_chat(
@@ -191,6 +199,8 @@ async fn run(cli: Cli) -> Result<()> {
                     ChatArgs {
                         session,
                         prompt,
+                        prompt_file,
+                        script,
                         agent,
                     },
                 )
@@ -198,6 +208,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
             ClawbotCommand::Send {
                 text,
+                text_file,
                 session,
                 agent,
             } => {
@@ -205,6 +216,8 @@ async fn run(cli: Cli) -> Result<()> {
                     &cli,
                     AskArgs {
                         prompt: text,
+                        prompt_file: text_file,
+                        script: None,
                         session,
                         agent,
                     },
