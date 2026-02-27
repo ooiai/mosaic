@@ -8,6 +8,7 @@ This document covers the lightweight operational commands used for local observa
 # unified logs across system/hooks/cron/channels/webhooks/browser
 mosaic --project-state logs --tail 100
 mosaic --project-state --json logs --tail 200
+mosaic --project-state --json logs --tail 200 --source system
 mosaic --project-state --json logs --follow
 
 # emit a system event (hooks/webhooks/cron pipelines can consume it)
@@ -17,10 +18,15 @@ mosaic --project-state --json system event deploy --data '{"version":"1.0.0","en
 # runtime presence probe
 mosaic --project-state system presence
 mosaic --project-state --json system presence
+
+# list recent system events
+mosaic --project-state system list --tail 50
+mosaic --project-state --json system list --tail 50
 ```
 
 ## Notes
 
 - `logs` is the fastest way to inspect cross-module activity after `channels send`, `system event`, `webhooks resolve`, `cron tick`, or `browser open`.
 - `system event` is also the trigger path for enabled hooks and cron-linked workflows.
+- `system list` reads directly from the system event stream and is useful when you need event-only history.
 - Use `--json` for scripts and CI checks.

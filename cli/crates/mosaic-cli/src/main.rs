@@ -67,14 +67,15 @@ use runtime_context::ModelRoutingProvider;
 use runtime_context::{build_runtime, resolve_effective_model, resolve_state_paths};
 use security_command::handle_security;
 use state_records::{
-    browser_history_file_path, cron_events_dir, cron_events_file_path, cron_jobs_file_path,
-    devices_file_path, generate_browser_visit_id, generate_cron_job_id, generate_hook_id,
-    generate_pairing_request_id, generate_webhook_id, hook_events_dir, hook_events_file_path,
-    hooks_file_path, load_browser_history_or_default, load_cron_jobs_or_default,
-    load_devices_or_default, load_hooks_or_default, load_nodes_or_default,
-    load_pairing_requests_or_default, load_webhooks_or_default, next_pairing_seq, nodes_file_path,
-    pairing_requests_file_path, save_browser_history, save_cron_jobs, save_devices, save_hooks,
-    save_nodes, save_pairing_requests, save_webhooks, webhook_events_dir, webhook_events_file_path,
+    browser_history_file_path, browser_state_file_path, cron_events_dir, cron_events_file_path,
+    cron_jobs_file_path, devices_file_path, generate_browser_visit_id, generate_cron_job_id,
+    generate_hook_id, generate_pairing_request_id, generate_webhook_id, hook_events_dir,
+    hook_events_file_path, hooks_file_path, load_browser_history_or_default,
+    load_browser_state_or_default, load_cron_jobs_or_default, load_devices_or_default,
+    load_hooks_or_default, load_nodes_or_default, load_pairing_requests_or_default,
+    load_webhooks_or_default, next_pairing_seq, nodes_file_path, pairing_requests_file_path,
+    save_browser_history, save_browser_state, save_cron_jobs, save_devices, save_hooks, save_nodes,
+    save_pairing_requests, save_webhooks, webhook_events_dir, webhook_events_file_path,
     webhooks_file_path,
 };
 use utils::{

@@ -508,8 +508,17 @@ struct BrowserArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 enum BrowserCommand {
+    Start,
+    Stop,
+    Status,
     #[command(visible_alias = "visit")]
     Open {
+        #[arg(long)]
+        url: String,
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+    },
+    Navigate {
         #[arg(long)]
         url: String,
         #[arg(long, default_value_t = 10_000)]
@@ -519,8 +528,28 @@ enum BrowserCommand {
         #[arg(long, default_value_t = 20)]
         tail: usize,
     },
+    Tabs {
+        #[arg(long, default_value_t = 20)]
+        tail: usize,
+    },
     Show {
         visit_id: String,
+    },
+    Focus {
+        visit_id: String,
+    },
+    Snapshot {
+        visit_id: Option<String>,
+    },
+    Screenshot {
+        visit_id: Option<String>,
+        #[arg(long)]
+        out: Option<String>,
+    },
+    Close {
+        visit_id: Option<String>,
+        #[arg(long)]
+        all: bool,
     },
     Clear {
         visit_id: Option<String>,
@@ -680,6 +709,8 @@ struct LogsArgs {
     follow: bool,
     #[arg(long, default_value_t = 100)]
     tail: usize,
+    #[arg(long)]
+    source: Option<String>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -696,6 +727,10 @@ enum SystemCommand {
         data: Option<String>,
     },
     Presence,
+    List {
+        #[arg(long, default_value_t = 50)]
+        tail: usize,
+    },
 }
 
 #[derive(Args, Debug, Clone)]
@@ -710,6 +745,10 @@ enum ApprovalsCommand {
     Set {
         #[arg(value_enum)]
         mode: ApprovalModeArg,
+    },
+    Check {
+        #[arg(long)]
+        command: String,
     },
     Allowlist {
         #[command(subcommand)]
@@ -731,6 +770,11 @@ struct SandboxArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 enum SandboxCommand {
+    Get,
+    Set {
+        #[arg(value_enum)]
+        profile: SandboxProfileArg,
+    },
     List,
     Explain {
         #[arg(long, value_enum)]
@@ -1441,6 +1485,14 @@ struct BrowserVisitRecord {
     content_length: Option<usize>,
     preview: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BrowserRuntimeState {
+    running: bool,
+    started_at: Option<DateTime<Utc>>,
+    stopped_at: Option<DateTime<Utc>>,
+    active_visit_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

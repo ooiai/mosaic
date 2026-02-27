@@ -1,11 +1,37 @@
 {
   "browser_clear": {
+    "active_visit_id": "null",
     "ok": "bool",
     "path": "string",
     "remaining": "number",
     "removed": "number"
   },
+  "browser_close_all": {
+    "active_visit_id": "null",
+    "ok": "bool",
+    "path": "string",
+    "remaining": "number",
+    "removed": "number"
+  },
+  "browser_focus": {
+    "active_visit_id": "string",
+    "ok": "bool",
+    "path": "string",
+    "visit": {
+      "content_length": "number",
+      "content_type": "string",
+      "error": "null",
+      "http_status": "number",
+      "id": "string",
+      "ok": "bool",
+      "preview": "string",
+      "title": "string",
+      "ts": "string",
+      "url": "string"
+    }
+  },
   "browser_history": {
+    "active_visit_id": "string",
     "ok": "bool",
     "path": "string",
     "visits": {
@@ -27,6 +53,7 @@
     }
   },
   "browser_open": {
+    "active_visit_id": "string",
     "ok": "bool",
     "path": "string",
     "visit": {
@@ -42,6 +69,12 @@
       "url": "string"
     }
   },
+  "browser_screenshot": {
+    "bytes": "number",
+    "ok": "bool",
+    "output": "string",
+    "visit_id": "string"
+  },
   "browser_show": {
     "ok": "bool",
     "visit": {
@@ -55,6 +88,85 @@
       "title": "string",
       "ts": "string",
       "url": "string"
+    }
+  },
+  "browser_snapshot": {
+    "ok": "bool",
+    "snapshot": {
+      "http_status": "number",
+      "ok": "bool",
+      "preview": "string",
+      "title": "string",
+      "ts": "string",
+      "url": "string",
+      "visit_id": "string"
+    }
+  },
+  "browser_start": {
+    "ok": "bool",
+    "path": "string",
+    "state": {
+      "active_visit_id": "null",
+      "running": "bool",
+      "started_at": "string",
+      "stopped_at": "null"
+    }
+  },
+  "browser_status": {
+    "active_visit_id": "string",
+    "history_path": "string",
+    "latest_visit": {
+      "content_length": "number",
+      "content_type": "string",
+      "error": "null",
+      "http_status": "number",
+      "id": "string",
+      "ok": "bool",
+      "preview": "string",
+      "title": "string",
+      "ts": "string",
+      "url": "string"
+    },
+    "ok": "bool",
+    "state": {
+      "active_visit_id": "string",
+      "running": "bool",
+      "started_at": "string",
+      "stopped_at": "null"
+    },
+    "state_path": "string",
+    "total_visits": "number"
+  },
+  "browser_stop": {
+    "ok": "bool",
+    "path": "string",
+    "state": {
+      "active_visit_id": "null",
+      "running": "bool",
+      "started_at": "string",
+      "stopped_at": "string"
+    }
+  },
+  "browser_tabs": {
+    "active_visit_id": "string",
+    "ok": "bool",
+    "path": "string",
+    "visits": {
+      "items": [
+        {
+          "content_length": "number",
+          "content_type": "string",
+          "error": "null",
+          "http_status": "number",
+          "id": "string",
+          "ok": "bool",
+          "preview": "string",
+          "title": "string",
+          "ts": "string",
+          "url": "string"
+        }
+      ],
+      "type": "array"
     }
   },
   "memory_index": {

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use chrono::Utc;
 use serde_json::json;
 
 use mosaic_core::error::MosaicError;
@@ -9,16 +10,82 @@ use mosaic_plugins::{ExtensionRegistry, RegistryRoots};
 use super::{
     BrowserArgs, BrowserCommand, Cli, MemoryArgs, MemoryCommand, PluginsArgs, PluginsCommand,
     Result, SkillsArgs, SkillsCommand, browser_history_file_path, browser_open_visit,
-    load_browser_history_or_default, print_json, resolve_state_paths, save_browser_history,
+    browser_state_file_path, load_browser_history_or_default, load_browser_state_or_default,
+    print_json, resolve_state_paths, save_browser_history, save_browser_state,
 };
 
 pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
     let history_path = browser_history_file_path(&paths.data_dir);
+    let state_path = browser_state_file_path(&paths.data_dir);
     let mut history = load_browser_history_or_default(&history_path)?;
+    let mut state = load_browser_state_or_default(&state_path)?;
     match args.command {
-        BrowserCommand::Open { url, timeout_ms } => {
+        BrowserCommand::Start => {
+            if !state.running {
+                state.running = true;
+                state.started_at = Some(Utc::now());
+            }
+            save_browser_state(&state_path, &state)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "state": state,
+                    "path": state_path.display().to_string(),
+                }));
+            } else {
+                println!("browser runtime: running");
+                if let Some(started_at) = state.started_at {
+                    println!("started_at: {}", started_at.to_rfc3339());
+                }
+            }
+        }
+        BrowserCommand::Stop => {
+            state.running = false;
+            state.stopped_at = Some(Utc::now());
+            save_browser_state(&state_path, &state)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "state": state,
+                    "path": state_path.display().to_string(),
+                }));
+            } else {
+                println!("browser runtime: stopped");
+                if let Some(stopped_at) = state.stopped_at {
+                    println!("stopped_at: {}", stopped_at.to_rfc3339());
+                }
+            }
+        }
+        BrowserCommand::Status => {
+            let latest_visit = history.iter().max_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "state": state,
+                    "active_visit_id": state.active_visit_id,
+                    "total_visits": history.len(),
+                    "latest_visit": latest_visit,
+                    "state_path": state_path.display().to_string(),
+                    "history_path": history_path.display().to_string(),
+                }));
+            } else {
+                println!(
+                    "browser runtime: {}",
+                    if state.running { "running" } else { "stopped" }
+                );
+                println!("total visits: {}", history.len());
+                println!(
+                    "active visit: {}",
+                    state.active_visit_id.as_deref().unwrap_or("-")
+                );
+                if let Some(visit) = latest_visit {
+                    println!("latest visit: {} {}", visit.id, visit.url);
+                }
+            }
+        }
+        BrowserCommand::Open { url, timeout_ms } | BrowserCommand::Navigate { url, timeout_ms } => {
             if timeout_ms == 0 {
                 return Err(MosaicError::Validation(
                     "--timeout-ms must be greater than 0".to_string(),
@@ -26,12 +93,15 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
             }
             let visit = browser_open_visit(&url, timeout_ms).await?;
             history.push(visit.clone());
+            state.active_visit_id = Some(visit.id.clone());
             save_browser_history(&history_path, &history)?;
+            save_browser_state(&state_path, &state)?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "visit": visit,
                     "path": history_path.display().to_string(),
+                    "active_visit_id": state.active_visit_id,
                 }));
             } else {
                 let status = visit
@@ -50,17 +120,13 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
                 }
             }
         }
-        BrowserCommand::History { tail } => {
-            let mut visits = history;
-            visits.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
-            if visits.len() > tail {
-                let keep_from = visits.len() - tail;
-                visits = visits.split_off(keep_from);
-            }
+        BrowserCommand::History { tail } | BrowserCommand::Tabs { tail } => {
+            let visits = sorted_tail_visits(history, tail);
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "visits": visits,
+                    "active_visit_id": state.active_visit_id,
                     "path": history_path.display().to_string(),
                 }));
             } else if visits.is_empty() {
@@ -83,12 +149,7 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
             }
         }
         BrowserCommand::Show { visit_id } => {
-            let visit = history
-                .into_iter()
-                .find(|item| item.id == visit_id)
-                .ok_or_else(|| {
-                    MosaicError::Validation(format!("visit '{}' not found", visit_id))
-                })?;
+            let visit = find_visit_by_id(&history, &visit_id)?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -119,7 +180,109 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
                 }
             }
         }
-        BrowserCommand::Clear { visit_id, all } => {
+        BrowserCommand::Focus { visit_id } => {
+            let visit = find_visit_by_id(&history, &visit_id)?;
+            state.active_visit_id = Some(visit.id.clone());
+            save_browser_state(&state_path, &state)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "active_visit_id": state.active_visit_id,
+                    "visit": visit,
+                    "path": state_path.display().to_string(),
+                }));
+            } else {
+                println!("active visit set: {}", visit.id);
+                println!("url: {}", visit.url);
+            }
+        }
+        BrowserCommand::Snapshot { visit_id } => {
+            let visit = resolve_snapshot_visit(&history, visit_id.as_deref(), state.active_visit_id.as_deref())?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "snapshot": {
+                        "visit_id": visit.id,
+                        "ts": visit.ts,
+                        "url": visit.url,
+                        "ok": visit.ok,
+                        "http_status": visit.http_status,
+                        "title": visit.title,
+                        "preview": visit.preview,
+                    }
+                }));
+            } else {
+                println!("visit: {}", visit.id);
+                println!("url: {}", visit.url);
+                println!("ok: {}", visit.ok);
+                if let Some(status) = visit.http_status {
+                    println!("status: {status}");
+                }
+                println!("title: {}", visit.title.unwrap_or_else(|| "-".to_string()));
+                println!("preview: {}", visit.preview.unwrap_or_else(|| "-".to_string()));
+            }
+        }
+        BrowserCommand::Screenshot { visit_id, out } => {
+            let visit =
+                resolve_snapshot_visit(&history, visit_id.as_deref(), state.active_visit_id.as_deref())?;
+            let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+            let output_path = match out {
+                Some(path) => {
+                    let candidate = PathBuf::from(path);
+                    if candidate.is_absolute() {
+                        candidate
+                    } else {
+                        cwd.join(candidate)
+                    }
+                }
+                None => paths
+                    .data_dir
+                    .join("browser-screenshots")
+                    .join(format!("{}.txt", visit.id)),
+            };
+            if let Some(parent) = output_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    MosaicError::Io(format!(
+                        "failed to create screenshot directory '{}': {err}",
+                        parent.display()
+                    ))
+                })?;
+            }
+            let title = visit.title.unwrap_or_else(|| "-".to_string());
+            let preview = visit.preview.unwrap_or_else(|| "-".to_string());
+            let status = visit
+                .http_status
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string());
+            let payload = format!(
+                "MOSAIC_BROWSER_SCREENSHOT_V1\nvisit_id={}\nts={}\nurl={}\nok={}\nstatus={}\ntitle={}\npreview={}\n",
+                visit.id,
+                visit.ts.to_rfc3339(),
+                visit.url,
+                visit.ok,
+                status,
+                title,
+                preview
+            );
+            std::fs::write(&output_path, payload.as_bytes()).map_err(|err| {
+                MosaicError::Io(format!(
+                    "failed to write screenshot artifact '{}': {err}",
+                    output_path.display()
+                ))
+            })?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "visit_id": visit.id,
+                    "output": output_path.display().to_string(),
+                    "bytes": payload.len(),
+                }));
+            } else {
+                println!("visit: {}", visit.id);
+                println!("output: {}", output_path.display());
+            }
+        }
+        BrowserCommand::Close { visit_id, all } | BrowserCommand::Clear { visit_id, all } => {
             if all && visit_id.is_some() {
                 return Err(MosaicError::Validation(
                     "cannot set visit_id and --all together".to_string(),
@@ -146,12 +309,25 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
             if removed > 0 || all {
                 save_browser_history(&history_path, &remaining)?;
             }
+            if all {
+                state.active_visit_id = None;
+                save_browser_state(&state_path, &state)?;
+            } else if removed > 0 {
+                let current_active = state.active_visit_id.clone();
+                if let Some(active_id) = current_active
+                    && !remaining.iter().any(|visit| visit.id == active_id)
+                {
+                    state.active_visit_id = remaining.last().map(|visit| visit.id.clone());
+                    save_browser_state(&state_path, &state)?;
+                }
+            }
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "removed": removed,
                     "remaining": remaining.len(),
                     "path": history_path.display().to_string(),
+                    "active_visit_id": state.active_visit_id,
                 }));
             } else {
                 println!("removed visits: {removed}");
@@ -160,6 +336,52 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn sorted_tail_visits(mut visits: Vec<super::BrowserVisitRecord>, tail: usize) -> Vec<super::BrowserVisitRecord> {
+    visits.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+    if visits.len() > tail {
+        let keep_from = visits.len() - tail;
+        visits.split_off(keep_from)
+    } else {
+        visits
+    }
+}
+
+fn find_visit_by_id(
+    history: &[super::BrowserVisitRecord],
+    visit_id: &str,
+) -> Result<super::BrowserVisitRecord> {
+    history
+        .iter()
+        .find(|item| item.id == visit_id)
+        .cloned()
+        .ok_or_else(|| MosaicError::Validation(format!("visit '{}' not found", visit_id)))
+}
+
+fn resolve_snapshot_visit(
+    history: &[super::BrowserVisitRecord],
+    visit_id: Option<&str>,
+    active_visit_id: Option<&str>,
+) -> Result<super::BrowserVisitRecord> {
+    if history.is_empty() {
+        return Err(MosaicError::Validation(
+            "no browser visits available; run `mosaic browser open --url <...>` first".to_string(),
+        ));
+    }
+    if let Some(visit_id) = visit_id {
+        return find_visit_by_id(history, visit_id);
+    }
+    if let Some(active) = active_visit_id
+        && let Ok(found) = find_visit_by_id(history, active)
+    {
+        return Ok(found);
+    }
+    history
+        .iter()
+        .max_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts))
+        .cloned()
+        .ok_or_else(|| MosaicError::Validation("no browser visits available".to_string()))
 }
 
 pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {

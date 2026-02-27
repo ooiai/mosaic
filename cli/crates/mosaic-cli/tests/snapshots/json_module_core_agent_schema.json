@@ -1,0 +1,140 @@
+{
+  "ask": {
+    "agent_id": "null",
+    "ok": "bool",
+    "profile": "string",
+    "response": "string",
+    "session_id": "string",
+    "turns": "number"
+  },
+  "chat_prompt": {
+    "agent_id": "null",
+    "ok": "bool",
+    "profile": "string",
+    "response": "string",
+    "session_id": "string",
+    "turns": "number"
+  },
+  "configure_show": {
+    "changed": "bool",
+    "config": {
+      "profile": {
+        "agent": {
+          "max_turns": "number",
+          "temperature": "number"
+        },
+        "provider": {
+          "api_key_env": "string",
+          "base_url": "string",
+          "kind": "string",
+          "model": "string"
+        },
+        "tools": {
+          "enabled": "bool",
+          "run": {
+            "guard_mode": "string"
+          }
+        }
+      },
+      "profile_name": "string",
+      "state": {
+        "mode": "string",
+        "project_dir": "string"
+      }
+    },
+    "config_path": "string",
+    "ok": "bool",
+    "profile": "string"
+  },
+  "doctor": {
+    "checks": {
+      "items": [
+        {
+          "detail": "string",
+          "name": "string",
+          "status": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "type": "string"
+  },
+  "health": {
+    "checks": {
+      "items": [
+        {
+          "detail": "string",
+          "name": "string",
+          "status": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "type": "string"
+  },
+  "session_clear": {
+    "ok": "bool",
+    "removed_session": "string"
+  },
+  "session_list": {
+    "ok": "bool",
+    "sessions": {
+      "items": [
+        {
+          "event_count": "number",
+          "last_updated": "string",
+          "session_id": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "session_show": {
+    "events": {
+      "items": [
+        {
+          "id": "string",
+          "payload": {
+            "text": "string"
+          },
+          "session_id": "string",
+          "ts": "string",
+          "type": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "session_id": "string"
+  },
+  "setup": {
+    "config_path": "string",
+    "mode": "string",
+    "ok": "bool",
+    "profile": "string"
+  },
+  "status": {
+    "agents_count": "number",
+    "config_path": "string",
+    "configured": "bool",
+    "default_agent_id": "null",
+    "latest_session": "string",
+    "ok": "bool",
+    "profile": "string",
+    "provider": {
+      "api_key_env": "string",
+      "base_url": "string",
+      "kind": "string",
+      "model": "string"
+    },
+    "state_mode": "string",
+    "tools": {
+      "enabled": "bool",
+      "run": {
+        "guard_mode": "string"
+      }
+    }
+  }
+}

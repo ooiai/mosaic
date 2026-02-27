@@ -40,13 +40,13 @@ Generated: 2026-02-26
 | `status`, `health`, `doctor` | same commands | done | 90% |
 | `gateway`, `daemon` | `gateway ...` + alias `daemon` | partial | 85% |
 | `channels` | add/list/login/send/test/status/logs/capabilities/resolve/remove/logout/export/import/rotate | partial | 85% |
-| `logs` | `logs` | partial | 75% |
-| `system` | `system event/presence` | partial | 75% |
-| `approvals`, `acp` | `approvals ...` + alias `acp` | partial | 75% |
-| `sandbox` | `sandbox list/explain` | partial | 70% |
+| `logs` | `logs` (`--tail`, `--follow`, `--source`) | partial | 80% |
+| `system` | `system event/presence/list` | partial | 80% |
+| `approvals`, `acp` | `approvals ...` + alias `acp` + `approvals check --command` | partial | 80% |
+| `sandbox` | `sandbox get/set/list/explain` | partial | 78% |
 | `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject`) | partial | 82% |
 | `hooks`, `cron`, `webhooks` | same command families | partial | 80% |
-| `browser` | `browser open/history/show/clear` | partial | 60% |
+| `browser` | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | partial | 84% |
 | `memory` | `memory index/search/status` | partial | 75% |
 | `security` | `security audit/baseline` | partial | 90% |
 | `plugins`, `skills` | list/info/check/install/remove | partial | 75% |

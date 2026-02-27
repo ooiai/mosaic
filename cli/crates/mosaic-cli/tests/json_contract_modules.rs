@@ -614,6 +614,144 @@ fn json_gateway_module_schema_matches_snapshot() {
 
 #[test]
 #[allow(deprecated)]
+fn json_gateway_admin_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let install = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args([
+                "--project-state",
+                "--json",
+                "gateway",
+                "install",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "9898",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&install);
+
+    let start = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args(["--project-state", "--json", "gateway", "start"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&start);
+
+    let status_deep_installed = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args(["--project-state", "--json", "gateway", "status", "--deep"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&status_deep_installed);
+
+    let health_verbose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args(["--project-state", "--json", "gateway", "health", "--verbose"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&health_verbose);
+
+    let restart = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args([
+                "--project-state",
+                "--json",
+                "gateway",
+                "restart",
+                "--port",
+                "9899",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&restart);
+
+    let status_deep_restarted = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args(["--project-state", "--json", "gateway", "status", "--deep"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&status_deep_restarted);
+
+    let uninstall = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args(["--project-state", "--json", "gateway", "uninstall"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&uninstall);
+
+    let status_deep_uninstalled = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args(["--project-state", "--json", "gateway", "status", "--deep"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&status_deep_uninstalled);
+
+    let actual_schema = json!({
+        "install": schema_of(&install),
+        "start": schema_of(&start),
+        "status_deep_installed": schema_of(&status_deep_installed),
+        "health_verbose": schema_of(&health_verbose),
+        "restart": schema_of(&restart),
+        "status_deep_restarted": schema_of(&status_deep_restarted),
+        "uninstall": schema_of(&uninstall),
+        "status_deep_uninstalled": schema_of(&status_deep_uninstalled),
+    });
+    assert_json_snapshot("snapshots/json_module_gateway_admin_schema.json", &actual_schema);
+}
+
+#[test]
+#[allow(deprecated)]
 fn json_security_module_schema_matches_snapshot() {
     let temp = tempdir().expect("tempdir");
     let audit_dir = temp.path().join("audit_target");
@@ -663,6 +801,117 @@ fn json_security_module_schema_matches_snapshot() {
         serde_json::from_str(include_str!("snapshots/json_module_security_schema.json"))
             .expect("expected module security schema");
     assert_eq!(actual_schema, expected_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_security_baseline_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let show_initial = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "security", "baseline", "show"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&show_initial);
+
+    let add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "security",
+                "baseline",
+                "add",
+                "--fingerprint",
+                "contract:1:security:baseline",
+                "--category",
+                "transport_security",
+                "--match-path",
+                "vendor/*",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&add);
+
+    let show_after_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "security", "baseline", "show"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&show_after_add);
+
+    let remove = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "security",
+                "baseline",
+                "remove",
+                "--category",
+                "transport_security",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&remove);
+
+    let clear = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "security", "baseline", "clear"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&clear);
+
+    let show_after_clear = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "security", "baseline", "show"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&show_after_clear);
+
+    let actual_schema = json!({
+        "show_initial": schema_of(&show_initial),
+        "add": schema_of(&add),
+        "show_after_add": schema_of(&show_after_add),
+        "remove": schema_of(&remove),
+        "clear": schema_of(&clear),
+        "show_after_clear": schema_of(&show_after_clear),
+    });
+    assert_json_snapshot(
+        "snapshots/json_module_security_baseline_schema.json",
+        &actual_schema,
+    );
 }
 
 #[test]
@@ -1092,6 +1341,178 @@ fn json_models_module_schema_matches_snapshot() {
 
 #[test]
 #[allow(deprecated)]
+fn json_core_agent_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let setup = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "setup",
+                "--base-url",
+                "mock://mock-model",
+                "--model",
+                "mock-model",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&setup);
+
+    let configure_show = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "configure", "--show"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_show);
+
+    let ask = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_MOCK_CHAT_RESPONSE", "core-agent-ask")
+            .args(["--project-state", "--json", "ask", "core agent ask"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&ask);
+    let ask_session_id = ask["session_id"]
+        .as_str()
+        .expect("ask session id")
+        .to_string();
+
+    let chat_prompt = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_MOCK_CHAT_RESPONSE", "core-agent-chat")
+            .args([
+                "--project-state",
+                "--json",
+                "chat",
+                "--prompt",
+                "core agent chat prompt",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&chat_prompt);
+
+    let session_list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "session", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&session_list);
+
+    let session_show = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "session",
+                "show",
+                &ask_session_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&session_show);
+
+    let session_clear = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "session",
+                "clear",
+                &ask_session_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&session_clear);
+
+    let status = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&status);
+
+    let health = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "health"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&health);
+
+    let doctor = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "doctor"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&doctor);
+
+    let actual_schema = json!({
+        "setup": schema_of(&setup),
+        "configure_show": schema_of(&configure_show),
+        "ask": schema_of(&ask),
+        "chat_prompt": schema_of(&chat_prompt),
+        "session_list": schema_of(&session_list),
+        "session_show": schema_of(&session_show),
+        "session_clear": schema_of(&session_clear),
+        "status": schema_of(&status),
+        "health": schema_of(&health),
+        "doctor": schema_of(&doctor),
+    });
+    assert_json_snapshot("snapshots/json_module_core_agent_schema.json", &actual_schema);
+}
+
+#[test]
+#[allow(deprecated)]
 fn json_ops_policy_module_schema_matches_snapshot() {
     let temp = tempdir().expect("tempdir");
 
@@ -1138,6 +1559,25 @@ fn json_ops_policy_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&approvals_allowlist_add);
 
+    let approvals_check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "approvals",
+                "check",
+                "--command",
+                "echo contract",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&approvals_check);
+
     let sandbox_list = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1149,6 +1589,36 @@ fn json_ops_policy_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&sandbox_list);
+
+    let sandbox_get = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "sandbox", "get"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&sandbox_get);
+
+    let sandbox_set = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "sandbox",
+                "set",
+                "restricted",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&sandbox_set);
 
     let sandbox_explain = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -1201,6 +1671,18 @@ fn json_ops_policy_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&system_presence);
 
+    let system_list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "system", "list", "--tail", "20"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&system_list);
+
     let logs = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1217,16 +1699,17 @@ fn json_ops_policy_module_schema_matches_snapshot() {
         "approvals_get": schema_of(&approvals_get),
         "approvals_set": schema_of(&approvals_set),
         "approvals_allowlist_add": schema_of(&approvals_allowlist_add),
+        "approvals_check": schema_of(&approvals_check),
         "sandbox_list": schema_of(&sandbox_list),
+        "sandbox_get": schema_of(&sandbox_get),
+        "sandbox_set": schema_of(&sandbox_set),
         "sandbox_explain": schema_of(&sandbox_explain),
         "system_event": schema_of(&system_event),
         "system_presence": schema_of(&system_presence),
+        "system_list": schema_of(&system_list),
         "logs": schema_of(&logs),
     });
-    let expected_schema: Value =
-        serde_json::from_str(include_str!("snapshots/json_module_ops_policy_schema.json"))
-            .expect("expected module ops/policy schema");
-    assert_eq!(actual_schema, expected_schema);
+    assert_json_snapshot("snapshots/json_module_ops_policy_schema.json", &actual_schema);
 }
 
 #[test]
@@ -1518,6 +2001,18 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&setup);
 
+    let browser_start = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "start"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_start);
+
     let browser_open = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1526,7 +2021,7 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
                 "--project-state",
                 "--json",
                 "browser",
-                "open",
+                "navigate",
                 "--url",
                 "mock://ok?title=Contract+Browser",
             ])
@@ -1540,6 +2035,18 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         .as_str()
         .expect("visit id")
         .to_string();
+
+    let browser_status = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_status);
 
     let browser_history = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -1560,6 +2067,25 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&browser_history);
 
+    let browser_tabs = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "browser",
+                "tabs",
+                "--tail",
+                "10",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_tabs);
+
     let browser_show = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1572,6 +2098,50 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&browser_show);
 
+    let browser_focus = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "focus", &visit_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_focus);
+
+    let browser_snapshot = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "snapshot"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_snapshot);
+
+    let screenshot_out = temp.path().join("browser-artifacts").join("shot.txt");
+    let browser_screenshot = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "browser",
+                "screenshot",
+                "--out",
+                screenshot_out.to_str().expect("screenshot output"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_screenshot);
+
     let browser_clear = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1583,6 +2153,30 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&browser_clear);
+
+    let browser_close_all = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "close", "--all"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_close_all);
+
+    let browser_stop = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "browser", "stop"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_stop);
 
     let memory_index = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -1732,10 +2326,18 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     assert_success_envelope(&skills_check);
 
     let actual_schema = json!({
+        "browser_start": schema_of(&browser_start),
         "browser_open": schema_of(&browser_open),
+        "browser_status": schema_of(&browser_status),
         "browser_history": schema_of(&browser_history),
+        "browser_tabs": schema_of(&browser_tabs),
         "browser_show": schema_of(&browser_show),
+        "browser_focus": schema_of(&browser_focus),
+        "browser_snapshot": schema_of(&browser_snapshot),
+        "browser_screenshot": schema_of(&browser_screenshot),
         "browser_clear": schema_of(&browser_clear),
+        "browser_close_all": schema_of(&browser_close_all),
+        "browser_stop": schema_of(&browser_stop),
         "memory_index": schema_of(&memory_index),
         "memory_search": schema_of(&memory_search),
         "memory_status": schema_of(&memory_status),

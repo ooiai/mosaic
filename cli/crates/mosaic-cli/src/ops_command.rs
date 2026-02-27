@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_ops::{
-    ApprovalStore, SandboxStore, SystemEventStore, collect_logs, list_profiles, snapshot_presence,
-    system_events_path,
+    ApprovalDecision, ApprovalStore, SandboxStore, SystemEventStore, UnifiedLogEntry,
+    collect_logs, evaluate_approval, list_profiles, snapshot_presence, system_events_path,
 };
 
 use super::{
@@ -17,9 +17,10 @@ use super::{
 pub(super) async fn handle_logs(cli: &Cli, args: LogsArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
+    let source_filter = args.source.as_deref();
 
     if !args.follow {
-        let entries = collect_logs(&paths.data_dir, args.tail)?;
+        let entries = filter_logs(collect_logs(&paths.data_dir, args.tail)?, source_filter);
         if cli.json {
             print_json(&json!({
                 "ok": true,
@@ -45,7 +46,10 @@ pub(super) async fn handle_logs(cli: &Cli, args: LogsArgs) -> Result<()> {
 
     let mut printed = 0usize;
     loop {
-        let entries = collect_logs(&paths.data_dir, args.tail.max(200))?;
+        let entries = filter_logs(
+            collect_logs(&paths.data_dir, args.tail.max(200))?,
+            source_filter,
+        );
         if entries.len() > printed {
             for entry in entries.iter().skip(printed) {
                 println!(
@@ -61,6 +65,16 @@ pub(super) async fn handle_logs(cli: &Cli, args: LogsArgs) -> Result<()> {
             printed = entries.len();
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+fn filter_logs(entries: Vec<UnifiedLogEntry>, source_filter: Option<&str>) -> Vec<UnifiedLogEntry> {
+    match source_filter {
+        Some(source) => entries
+            .into_iter()
+            .filter(|entry| entry.source == source)
+            .collect(),
+        None => entries,
     }
 }
 
@@ -120,6 +134,27 @@ pub(super) fn handle_system(cli: &Cli, args: SystemArgs) -> Result<()> {
                 println!("ts: {}", presence.ts.to_rfc3339());
             }
         }
+        SystemCommand::List { tail } => {
+            let events = store.read_tail(tail)?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "events": events,
+                    "path": store.path().display().to_string(),
+                }));
+            } else if events.is_empty() {
+                println!("No system events.");
+            } else {
+                for event in events {
+                    println!(
+                        "{} {} {}",
+                        event.ts.to_rfc3339(),
+                        event.name,
+                        event.data
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -129,6 +164,42 @@ pub(super) fn handle_approvals(cli: &Cli, args: ApprovalsArgs) -> Result<()> {
     paths.ensure_dirs()?;
     let store = ApprovalStore::new(paths.approvals_policy_path.clone());
     let policy = match args.command {
+        ApprovalsCommand::Check { command } => {
+            let policy = store.load_or_default()?;
+            let decision = evaluate_approval(&command, &policy);
+            let (decision_name, reason, approved_by) = match decision {
+                ApprovalDecision::Auto { approved_by } => {
+                    ("auto", None, Some(approved_by))
+                }
+                ApprovalDecision::NeedsConfirmation { reason } => {
+                    ("confirm", Some(reason), None)
+                }
+                ApprovalDecision::Deny { reason } => ("deny", Some(reason), None),
+            };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "command": command,
+                    "decision": decision_name,
+                    "approved_by": approved_by,
+                    "reason": reason,
+                    "policy_mode": policy.mode,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!("command: {command}");
+                println!("decision: {decision_name}");
+                if let Some(approved_by) = approved_by {
+                    println!("approved_by: {approved_by}");
+                }
+                if let Some(reason) = reason {
+                    println!("reason: {reason}");
+                }
+                println!("approvals mode: {:?}", policy.mode);
+                println!("path: {}", store.path().display());
+            }
+            return Ok(());
+        }
         ApprovalsCommand::Get => store.load_or_default()?,
         ApprovalsCommand::Set { mode } => store.set_mode(mode.into())?,
         ApprovalsCommand::Allowlist { command } => match command {
@@ -162,9 +233,35 @@ pub(super) fn handle_sandbox(cli: &Cli, args: SandboxArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
     let store = SandboxStore::new(paths.sandbox_policy_path.clone());
-    let policy = store.load_or_default()?;
     match args.command {
+        SandboxCommand::Get => {
+            let policy = store.load_or_default()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "policy": policy,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!("sandbox profile: {:?}", policy.profile);
+                println!("path: {}", store.path().display());
+            }
+        }
+        SandboxCommand::Set { profile } => {
+            let policy = store.set_profile(profile.into())?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "policy": policy,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!("sandbox profile set: {:?}", policy.profile);
+                println!("path: {}", store.path().display());
+            }
+        }
         SandboxCommand::List => {
+            let policy = store.load_or_default()?;
             let profiles = list_profiles();
             if cli.json {
                 print_json(&json!({
@@ -181,6 +278,7 @@ pub(super) fn handle_sandbox(cli: &Cli, args: SandboxArgs) -> Result<()> {
             }
         }
         SandboxCommand::Explain { profile } => {
+            let policy = store.load_or_default()?;
             let profile = profile.map(Into::into).unwrap_or(policy.profile);
             let info = mosaic_ops::profile_info(profile);
             if cli.json {

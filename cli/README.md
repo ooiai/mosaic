@@ -12,7 +12,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
 - Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
 - Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
-- Browser runtime (`browser open|history|show|clear`)
+- Browser runtime (`browser start|stop|status|open|navigate|history|tabs|show|focus|snapshot|screenshot|close|clear`)
 - Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
 - CLI compatibility/runtime helpers (`completion shell|install`, `directory`)
 - Maintenance runtime (`update`, `reset`, `uninstall`)
@@ -310,11 +310,20 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --yes webhooks resolve \
 ### Browser Runtime
 
 ```bash
-cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser open --url mock://ok?title=Docs
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser start
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser navigate --url mock://ok?title=Docs
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser status
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser tabs --tail 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser focus <visit-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser snapshot
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser screenshot
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser history --tail 20
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser show <visit-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser close <visit-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser close --all
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser clear <visit-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser clear --all
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser stop
 ```
 
 ### Channels Runtime
@@ -419,11 +428,16 @@ SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state logs --tail 100
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 100 --source system
 cargo run -p mosaic-cli --bin mosaic -- --project-state system event deployment --data '{"env":"staging"}'
 cargo run -p mosaic-cli --bin mosaic -- --project-state system presence
+cargo run -p mosaic-cli --bin mosaic -- --project-state system list --tail 50
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals get
+cargo run -p mosaic-cli --bin mosaic -- --project-state approvals check --command "cargo test --workspace"
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals set allowlist
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals allowlist add "cargo test"
+cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox get
+cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox set restricted
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox list
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox explain --profile restricted
 ```

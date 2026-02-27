@@ -13,9 +13,9 @@ This file tracks Mosaic CLI command/module coverage and pending gaps.
 | Hooks | `hooks list/add/remove/enable/disable/run/logs` | Partial |
 | Cron | `cron list/add/remove/enable/disable/run/tick/logs` | Partial |
 | Webhooks | `webhooks list/add/remove/enable/disable/trigger/resolve/logs` | Partial |
-| Browser | `browser open/history/show/clear` | Partial |
-| Ops | `logs`, `system event/presence` | Partial |
-| Policy | `approvals` (`acp` alias), `sandbox` | Partial |
+| Browser | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | Partial |
+| Ops | `logs` (tail/follow/source), `system event/presence/list` | Partial |
+| Policy | `approvals` (`acp` alias, includes `check`), `sandbox get/set/list/explain` | Partial |
 | Memory | `memory index/search/status` | Partial |
 | Security | `security audit`, `security baseline` | Partial |
 | Agents | `agents list/add/update/show/remove/default/route` | Partial |
