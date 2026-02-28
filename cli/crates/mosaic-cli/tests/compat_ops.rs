@@ -60,7 +60,13 @@ fn directory_reports_project_state_paths_in_json() {
     let output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .args(["--project-state", "--json", "directory"])
+        .args([
+            "--project-state",
+            "--json",
+            "directory",
+            "--ensure",
+            "--check-writable",
+        ])
         .assert()
         .success()
         .get_output()
@@ -69,8 +75,11 @@ fn directory_reports_project_state_paths_in_json() {
     let json: Value = serde_json::from_slice(&output).expect("json");
     assert_eq!(json["ok"], true);
     assert_eq!(json["mode"], "project");
+    assert_eq!(json["ensured"], true);
     let config_path = json["paths"]["config_path"].as_str().expect("config_path");
     assert!(config_path.ends_with(".mosaic/config.toml"));
+    assert_eq!(json["checks"]["root_dir"]["exists"], true);
+    assert!(json["checks"]["data_dir"]["writable"].is_boolean());
 }
 
 #[test]

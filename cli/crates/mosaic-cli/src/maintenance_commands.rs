@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -40,9 +41,7 @@ pub(super) async fn handle_update(cli: &Cli, args: UpdateArgs) -> Result<()> {
 
     let source = resolve_update_source(args.source.clone())?;
     let latest_version = fetch_latest_version(&source, args.timeout_ms).await?;
-    let current_normalized = normalize_version(&current_version);
-    let latest_normalized = normalize_version(&latest_version);
-    let update_available = current_normalized != latest_normalized;
+    let update_available = is_update_available(&current_version, &latest_version);
 
     if cli.json {
         print_json(&json!({
@@ -249,6 +248,51 @@ fn truncate_for_error(text: &str) -> String {
 
 fn normalize_version(value: &str) -> String {
     value.trim().trim_start_matches('v').to_string()
+}
+
+fn is_update_available(current: &str, latest: &str) -> bool {
+    match (
+        parse_numeric_version(current),
+        parse_numeric_version(latest),
+    ) {
+        (Some(current_parts), Some(latest_parts)) => {
+            compare_numeric_versions(&latest_parts, &current_parts) == Ordering::Greater
+        }
+        _ => normalize_version(current) != normalize_version(latest),
+    }
+}
+
+fn parse_numeric_version(value: &str) -> Option<Vec<u64>> {
+    let normalized = normalize_version(value);
+    if normalized.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for chunk in normalized.split('.') {
+        let digits = chunk
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect::<String>();
+        if digits.is_empty() {
+            return None;
+        }
+        let parsed = digits.parse::<u64>().ok()?;
+        parts.push(parsed);
+    }
+    if parts.is_empty() { None } else { Some(parts) }
+}
+
+fn compare_numeric_versions(left: &[u64], right: &[u64]) -> Ordering {
+    let len = left.len().max(right.len());
+    for idx in 0..len {
+        let lhs = left.get(idx).copied().unwrap_or(0);
+        let rhs = right.get(idx).copied().unwrap_or(0);
+        match lhs.cmp(&rhs) {
+            Ordering::Equal => continue,
+            order => return order,
+        }
+    }
+    Ordering::Equal
 }
 
 fn reset_state(paths: &StatePaths) -> Result<StateCleanupSummary> {

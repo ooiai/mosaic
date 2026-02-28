@@ -41,19 +41,19 @@ Generated: 2026-02-26
 | `gateway`, `daemon` | `gateway ...` + alias `daemon` | partial | 85% |
 | `channels` | add/list/login/send/test/status/logs/capabilities/resolve/remove/logout/export/import/rotate | partial | 85% |
 | `logs` | `logs` (`--tail`, `--follow`, `--source`) | partial | 80% |
-| `system` | `system event/presence/list` | partial | 80% |
-| `approvals`, `acp` | `approvals ...` + alias `acp` + `approvals check --command` | partial | 80% |
-| `sandbox` | `sandbox get/set/list/explain` | partial | 78% |
+| `system` | `system event/presence/list` (includes `--name` filter) | partial | 83% |
+| `approvals`, `acp` | `approvals ...` + alias `acp` + `approvals check --command` + `allowlist list` | partial | 83% |
+| `sandbox` | `sandbox get/set/check/list/explain` | partial | 83% |
 | `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject`) | partial | 82% |
 | `hooks`, `cron`, `webhooks` | same command families | partial | 80% |
 | `browser` | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | partial | 84% |
 | `memory` | `memory index/search/status` | partial | 75% |
 | `security` | `security audit/baseline` | partial | 90% |
 | `plugins`, `skills` | list/info/check/install/remove | partial | 75% |
-| `directory` | `directory` (state path introspection) | partial | 70% |
+| `directory` | `directory` (state path introspection + `--ensure` + `--check-writable`) | partial | 80% |
 | `completion` | `completion shell/install` | partial | 80% |
 | `dashboard` | `dashboard` (operational snapshot: config/sessions/agents/channels/gateway/policy/memory/presence) | partial | 80% |
-| `update` | `update` (local version + optional remote source check) | partial | 70% |
+| `update` | `update` (local version + optional remote source check + semantic version comparison) | partial | 80% |
 | `reset` | `reset` (`--yes` destructive guard + state reinitialize) | partial | 80% |
 | `uninstall` (top-level) | `uninstall` (`--yes` destructive guard + state removal) | partial | 80% |
 | `dns` | `dns resolve <host> [--port]` | partial | 75% |

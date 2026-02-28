@@ -14,14 +14,14 @@ This file tracks Mosaic CLI command/module coverage and pending gaps.
 | Cron | `cron list/add/remove/enable/disable/run/tick/logs` | Partial |
 | Webhooks | `webhooks list/add/remove/enable/disable/trigger/resolve/logs` | Partial |
 | Browser | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | Partial |
-| Ops | `logs` (tail/follow/source), `system event/presence/list` | Partial |
-| Policy | `approvals` (`acp` alias, includes `check`), `sandbox get/set/list/explain` | Partial |
+| Ops | `logs` (tail/follow/source), `system event/presence/list` (tail/name filter) | Partial |
+| Policy | `approvals` (`acp` alias, includes `check` and `allowlist list`), `sandbox get/set/check/list/explain` | Partial |
 | Memory | `memory index/search/status` | Partial |
 | Security | `security audit`, `security baseline` | Partial |
 | Agents | `agents list/add/update/show/remove/default/route` | Partial |
 | Plugins/skills | `plugins`, `skills` minimal runtime (`list/info/check/install/remove`) | Partial |
-| Diagnostics | `dashboard` (operational snapshot), `status`, `health`, `doctor`, `directory`, `completion shell/install` | Partial |
-| Maintenance | `update`, `reset`, top-level `uninstall` | Partial |
+| Diagnostics | `dashboard` (operational snapshot), `status`, `health`, `doctor`, `directory` (`--ensure`, `--check-writable`), `completion shell/install` | Partial |
+| Maintenance | `update` (semantic compare), `reset`, top-level `uninstall` | Partial |
 | Discovery | `docs [topic]`, `dns resolve <host> [--port]` | Partial |
 | UX shim | `tui` (routes to existing chat runtime) | Partial |
 | QR | `qr encode`, `qr pairing` with payload/ascii/png render | Partial |

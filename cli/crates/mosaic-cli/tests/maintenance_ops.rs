@@ -42,6 +42,43 @@ fn update_check_uses_mock_source() {
 
 #[test]
 #[allow(deprecated)]
+fn update_check_same_version_reports_no_update() {
+    let source = format!("mock://{}", env!("CARGO_PKG_VERSION"));
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .args(["--json", "update", "--check", "--source", source.as_str()])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["checked"], true);
+    assert_eq!(json["update_available"], false);
+    assert_eq!(json["up_to_date"], true);
+}
+
+#[test]
+#[allow(deprecated)]
+fn update_check_older_numeric_version_reports_no_update() {
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .args(["--json", "update", "--check", "--source", "mock://0.0.0"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["checked"], true);
+    assert_eq!(json["latest_version"], "0.0.0");
+    assert_eq!(json["update_available"], false);
+}
+
+#[test]
+#[allow(deprecated)]
 fn reset_requires_yes() {
     let output = Command::cargo_bin("mosaic")
         .expect("binary")

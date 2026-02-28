@@ -197,7 +197,11 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
             }
         }
         BrowserCommand::Snapshot { visit_id } => {
-            let visit = resolve_snapshot_visit(&history, visit_id.as_deref(), state.active_visit_id.as_deref())?;
+            let visit = resolve_snapshot_visit(
+                &history,
+                visit_id.as_deref(),
+                state.active_visit_id.as_deref(),
+            )?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -219,12 +223,18 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
                     println!("status: {status}");
                 }
                 println!("title: {}", visit.title.unwrap_or_else(|| "-".to_string()));
-                println!("preview: {}", visit.preview.unwrap_or_else(|| "-".to_string()));
+                println!(
+                    "preview: {}",
+                    visit.preview.unwrap_or_else(|| "-".to_string())
+                );
             }
         }
         BrowserCommand::Screenshot { visit_id, out } => {
-            let visit =
-                resolve_snapshot_visit(&history, visit_id.as_deref(), state.active_visit_id.as_deref())?;
+            let visit = resolve_snapshot_visit(
+                &history,
+                visit_id.as_deref(),
+                state.active_visit_id.as_deref(),
+            )?;
             let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
             let output_path = match out {
                 Some(path) => {
@@ -338,7 +348,10 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
     Ok(())
 }
 
-fn sorted_tail_visits(mut visits: Vec<super::BrowserVisitRecord>, tail: usize) -> Vec<super::BrowserVisitRecord> {
+fn sorted_tail_visits(
+    mut visits: Vec<super::BrowserVisitRecord>,
+    tail: usize,
+) -> Vec<super::BrowserVisitRecord> {
     visits.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
     if visits.len() > tail {
         let keep_from = visits.len() - tail;

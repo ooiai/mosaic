@@ -402,9 +402,23 @@ fn approvals_help_includes_policy_commands() {
 
 #[test]
 #[allow(deprecated)]
+fn approvals_allowlist_help_includes_list_add_remove() {
+    let help = run_help(&["approvals", "allowlist", "--help"]);
+    let expected = ["list", "add", "remove"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "approvals allowlist --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
 fn sandbox_help_includes_profile_commands() {
     let help = run_help(&["sandbox", "--help"]);
-    let expected = ["get", "set", "list", "explain"];
+    let expected = ["get", "set", "check", "list", "explain"];
 
     for name in expected {
         assert!(
@@ -424,6 +438,18 @@ fn completion_help_includes_shell_and_install_commands() {
         assert!(
             help.contains(name),
             "completion --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn directory_help_includes_ensure_and_writable_flags() {
+    let help = run_help(&["directory", "--help"]);
+    for option in ["--ensure", "--check-writable"] {
+        assert!(
+            help.contains(option),
+            "directory --help missing expected option: {option}\n{help}"
         );
     }
 }

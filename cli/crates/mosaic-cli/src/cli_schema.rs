@@ -60,7 +60,7 @@ enum Commands {
     Plugins(PluginsArgs),
     Skills(SkillsArgs),
     Completion(CompletionArgs),
-    Directory,
+    Directory(DirectoryArgs),
     Dashboard,
     Update(UpdateArgs),
     Reset,
@@ -730,6 +730,8 @@ enum SystemCommand {
     List {
         #[arg(long, default_value_t = 50)]
         tail: usize,
+        #[arg(long)]
+        name: Option<String>,
     },
 }
 
@@ -758,6 +760,7 @@ enum ApprovalsCommand {
 
 #[derive(Subcommand, Debug, Clone)]
 enum AllowlistCommand {
+    List,
     Add { prefix: String },
     Remove { prefix: String },
 }
@@ -774,6 +777,10 @@ enum SandboxCommand {
     Set {
         #[arg(value_enum)]
         profile: SandboxProfileArg,
+    },
+    Check {
+        #[arg(long)]
+        command: String,
     },
     List,
     Explain {
@@ -1037,6 +1044,14 @@ enum CompletionCommand {
         #[arg(long)]
         dir: Option<PathBuf>,
     },
+}
+
+#[derive(Args, Debug, Clone)]
+struct DirectoryArgs {
+    #[arg(long)]
+    ensure: bool,
+    #[arg(long)]
+    check_writable: bool,
 }
 
 #[derive(Args, Debug, Clone)]

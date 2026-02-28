@@ -23,6 +23,7 @@ mosaic --project-state approvals check --command "cargo test --workspace"
 mosaic --project-state approvals set confirm
 mosaic --project-state approvals set allowlist
 mosaic --project-state approvals allowlist add "cargo test"
+mosaic --project-state approvals allowlist list
 mosaic --project-state approvals allowlist remove "cargo test"
 ```
 
@@ -37,6 +38,7 @@ Commands:
 ```bash
 mosaic --project-state sandbox get
 mosaic --project-state sandbox set restricted
+mosaic --project-state sandbox check --command "curl https://example.com"
 mosaic --project-state sandbox list
 mosaic --project-state sandbox explain --profile restricted
 ```

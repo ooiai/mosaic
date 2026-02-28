@@ -82,6 +82,7 @@ cargo run -p mosaic-cli --bin mosaic -- completion shell zsh
 cargo run -p mosaic-cli --bin mosaic -- completion install zsh
 
 cargo run -p mosaic-cli --bin mosaic -- --project-state directory
+cargo run -p mosaic-cli --bin mosaic -- --project-state directory --ensure --check-writable
 cargo run -p mosaic-cli --bin mosaic -- --project-state dashboard
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json dashboard
 ```
@@ -96,6 +97,9 @@ cargo run -p mosaic-cli --bin mosaic -- update
 
 # optional remote check (supports JSON with latest/version/tag_name or plain text)
 cargo run -p mosaic-cli --bin mosaic -- update --check --source mock://v0.2.0
+
+# semantic compare: older/same versions report update_available=false
+cargo run -p mosaic-cli --bin mosaic -- --json update --check --source mock://0.0.0
 
 # destructive operations require --yes
 cargo run -p mosaic-cli --bin mosaic -- --project-state --yes reset
@@ -432,12 +436,15 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 100 -
 cargo run -p mosaic-cli --bin mosaic -- --project-state system event deployment --data '{"env":"staging"}'
 cargo run -p mosaic-cli --bin mosaic -- --project-state system presence
 cargo run -p mosaic-cli --bin mosaic -- --project-state system list --tail 50
+cargo run -p mosaic-cli --bin mosaic -- --project-state system list --tail 50 --name deployment
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals get
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals check --command "cargo test --workspace"
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals set allowlist
 cargo run -p mosaic-cli --bin mosaic -- --project-state approvals allowlist add "cargo test"
+cargo run -p mosaic-cli --bin mosaic -- --project-state approvals allowlist list
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox get
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox set restricted
+cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox check --command "curl https://example.com"
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox list
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox explain --profile restricted
 ```

@@ -147,7 +147,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Plugins(args) => handle_plugins(&cli, args),
         Commands::Skills(args) => handle_skills(&cli, args),
         Commands::Completion(args) => handle_completion(&cli, args),
-        Commands::Directory => handle_directory(&cli),
+        Commands::Directory(args) => handle_directory(&cli, args),
         Commands::Dashboard => handle_dashboard(&cli),
         Commands::Update(args) => handle_update(&cli, args).await,
         Commands::Reset => handle_reset(&cli),

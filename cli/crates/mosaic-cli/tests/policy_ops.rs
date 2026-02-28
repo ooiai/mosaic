@@ -111,6 +111,31 @@ fn approvals_and_sandbox_commands_json_contract() {
             .any(|item| item.as_str() == Some("cargo test"))
     );
 
+    let approvals_allowlist_list = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "approvals",
+            "allowlist",
+            "list",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let approvals_allowlist_list: Value =
+        serde_json::from_slice(&approvals_allowlist_list).expect("approvals allowlist list");
+    assert!(
+        approvals_allowlist_list["policy"]["allowlist"]
+            .as_array()
+            .expect("allowlist list")
+            .iter()
+            .any(|item| item.as_str() == Some("cargo test"))
+    );
+
     let approvals_check_auto = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -158,6 +183,26 @@ fn approvals_and_sandbox_commands_json_contract() {
     assert_eq!(sandbox_get["ok"], true);
     assert_eq!(sandbox_get["policy"]["profile"], "standard");
 
+    let sandbox_check_allow = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "sandbox",
+            "check",
+            "--command",
+            "echo smoke",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let sandbox_check_allow: Value =
+        serde_json::from_slice(&sandbox_check_allow).expect("sandbox check allow");
+    assert_eq!(sandbox_check_allow["decision"], "allow");
+
     let sandbox_set = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -170,6 +215,27 @@ fn approvals_and_sandbox_commands_json_contract() {
     let sandbox_set: Value = serde_json::from_slice(&sandbox_set).expect("sandbox set");
     assert_eq!(sandbox_set["ok"], true);
     assert_eq!(sandbox_set["policy"]["profile"], "restricted");
+
+    let sandbox_check_deny = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "sandbox",
+            "check",
+            "--command",
+            "curl https://example.com",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let sandbox_check_deny: Value =
+        serde_json::from_slice(&sandbox_check_deny).expect("sandbox check deny");
+    assert_eq!(sandbox_check_deny["decision"], "deny");
+    assert!(sandbox_check_deny["reason"].is_string());
 
     let sandbox_explain = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -255,7 +321,9 @@ fn system_event_and_logs_flow() {
         .clone();
     let system_logs_json: Value = serde_json::from_slice(&system_logs_output).expect("system logs");
     assert_eq!(system_logs_json["ok"], true);
-    let system_logs = system_logs_json["logs"].as_array().expect("system logs array");
+    let system_logs = system_logs_json["logs"]
+        .as_array()
+        .expect("system logs array");
     assert!(!system_logs.is_empty());
     assert!(
         system_logs
@@ -266,7 +334,16 @@ fn system_event_and_logs_flow() {
     let system_list = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .args(["--project-state", "--json", "system", "list", "--tail", "20"])
+        .args([
+            "--project-state",
+            "--json",
+            "system",
+            "list",
+            "--tail",
+            "20",
+            "--name",
+            "deploy_start",
+        ])
         .assert()
         .success()
         .get_output()
@@ -280,5 +357,12 @@ fn system_event_and_logs_flow() {
             .expect("events array")
             .iter()
             .any(|event| event["name"].as_str() == Some("deploy_start"))
+    );
+    assert!(
+        system_list["events"]
+            .as_array()
+            .expect("events array")
+            .iter()
+            .all(|event| event["name"].as_str() == Some("deploy_start"))
     );
 }

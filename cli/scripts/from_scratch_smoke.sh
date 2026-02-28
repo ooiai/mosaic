@@ -277,7 +277,7 @@ require_contains "$TMP_ROOT/hooks_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/system_event_deploy.json" '"hooks"'
 require_contains "$TMP_ROOT/system_event_deploy.json" '"triggered"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json system list --tail 20 >"$TMP_ROOT/system_list.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json system list --tail 20 --name deploy >"$TMP_ROOT/system_list.json")
 require_contains "$TMP_ROOT/system_list.json" '"events"'
 require_contains "$TMP_ROOT/system_list.json" '"name"[[:space:]]*:[[:space:]]*"deploy"'
 
@@ -363,11 +363,18 @@ require_contains "$TMP_ROOT/approvals_set_deny.json" '"mode"[[:space:]]*:[[:spac
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals allowlist add "echo" >"$TMP_ROOT/approvals_allowlist_add.json")
 require_contains "$TMP_ROOT/approvals_allowlist_add.json" '"allowlist"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals allowlist list >"$TMP_ROOT/approvals_allowlist_list.json")
+require_contains "$TMP_ROOT/approvals_allowlist_list.json" '"allowlist"'
+require_contains "$TMP_ROOT/approvals_allowlist_list.json" '"echo"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox get >"$TMP_ROOT/sandbox_get.json")
 require_contains "$TMP_ROOT/sandbox_get.json" '"profile"[[:space:]]*:[[:space:]]*"standard"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox set restricted >"$TMP_ROOT/sandbox_set.json")
 require_contains "$TMP_ROOT/sandbox_set.json" '"profile"[[:space:]]*:[[:space:]]*"restricted"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox check --command "curl https://example.com" >"$TMP_ROOT/sandbox_check.json")
+require_contains "$TMP_ROOT/sandbox_check.json" '"decision"[[:space:]]*:[[:space:]]*"deny"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json sandbox list >"$TMP_ROOT/sandbox_list.json")
 require_contains "$TMP_ROOT/sandbox_list.json" '"profiles"'
@@ -490,8 +497,11 @@ if [[ ! -f "$TMP_ROOT/completions/_mosaic" ]]; then
   exit 1
 fi
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json directory >"$TMP_ROOT/directory.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json directory --ensure --check-writable >"$TMP_ROOT/directory.json")
 require_contains "$TMP_ROOT/directory.json" '"root_dir"'
+require_contains "$TMP_ROOT/directory.json" '"ensured"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/directory.json" '"checks"'
+require_contains "$TMP_ROOT/directory.json" '"writable"[[:space:]]*:[[:space:]]*(true|false)'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json dashboard >"$TMP_ROOT/dashboard.json")
 require_contains "$TMP_ROOT/dashboard.json" '"ok"[[:space:]]*:[[:space:]]*true'
@@ -503,6 +513,11 @@ require_contains "$TMP_ROOT/update_local.json" '"current_version"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json update --check --source mock://v9.9.9 >"$TMP_ROOT/update_check.json")
 require_contains "$TMP_ROOT/update_check.json" '"latest_version"[[:space:]]*:[[:space:]]*"v9\.9\.9"'
+require_contains "$TMP_ROOT/update_check.json" '"update_available"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json update --check --source mock://0.0.0 >"$TMP_ROOT/update_check_old.json")
+require_contains "$TMP_ROOT/update_check_old.json" '"latest_version"[[:space:]]*:[[:space:]]*"0\.0\.0"'
+require_contains "$TMP_ROOT/update_check_old.json" '"update_available"[[:space:]]*:[[:space:]]*false'
 
 MAINT_DIR="$TMP_ROOT/maint"
 mkdir -p "$MAINT_DIR"
