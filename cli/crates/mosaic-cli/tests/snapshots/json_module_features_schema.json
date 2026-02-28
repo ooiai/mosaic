@@ -169,6 +169,15 @@
       "type": "array"
     }
   },
+  "memory_clear": {
+    "cleared": {
+      "index_path": "string",
+      "removed_index": "bool",
+      "removed_status": "bool",
+      "status_path": "string"
+    },
+    "ok": "bool"
+  },
   "memory_index": {
     "index": {
       "index_path": "string",
@@ -266,7 +275,30 @@
         }
       ],
       "type": "array"
-    }
+    },
+    "source_filter": "string"
+  },
+  "plugins_list_project": {
+    "count": "number",
+    "ok": "bool",
+    "plugins": {
+      "items": [
+        {
+          "description": "null",
+          "id": "string",
+          "manifest_error": "null",
+          "manifest_exists": "bool",
+          "manifest_path": "string",
+          "manifest_valid": "bool",
+          "name": "string",
+          "path": "string",
+          "source": "string",
+          "version": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "source_filter": "string"
   },
   "skills_check": {
     "ok": "bool",
@@ -325,6 +357,25 @@
         }
       ],
       "type": "array"
-    }
+    },
+    "source_filter": "string"
+  },
+  "skills_list_project": {
+    "count": "number",
+    "ok": "bool",
+    "skills": {
+      "items": [
+        {
+          "description": "string",
+          "id": "string",
+          "path": "string",
+          "skill_file": "string",
+          "source": "string",
+          "title": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "source_filter": "string"
   }
 }

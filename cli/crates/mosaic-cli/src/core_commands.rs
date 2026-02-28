@@ -142,11 +142,33 @@ pub(super) fn handle_configure(cli: &Cli, args: ConfigureArgs) -> Result<()> {
 
 pub(super) async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
     match args.command {
-        ModelsCommand::List => {
+        ModelsCommand::List { query, limit } => {
             let runtime = build_runtime(cli, None, None)?;
-            let models = runtime.provider.list_models().await?;
+            let query = normalize_models_query(query)?;
+            let limit = normalize_models_limit(limit)?;
+            let mut models = runtime.provider.list_models().await?;
+            let total_models = models.len();
+            if let Some(query) = query.as_ref() {
+                let query_lc = query.to_ascii_lowercase();
+                models.retain(|model| model.id.to_ascii_lowercase().contains(&query_lc));
+            }
+            let matched_models = models.len();
+            if let Some(limit) = limit
+                && models.len() > limit
+            {
+                models.truncate(limit);
+            }
+            let returned_models = models.len();
             if cli.json {
-                print_json(&json!({ "ok": true, "models": models }));
+                print_json(&json!({
+                    "ok": true,
+                    "query": query,
+                    "limit": limit,
+                    "total_models": total_models,
+                    "matched_models": matched_models,
+                    "returned_models": returned_models,
+                    "models": models,
+                }));
             } else {
                 for model in &models {
                     if let Some(owner) = &model.owned_by {
@@ -155,7 +177,15 @@ pub(super) async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
                         println!("{}", model.id);
                     }
                 }
-                println!("Total models: {}", models.len());
+                println!("Total models: {total_models}");
+                if let Some(query) = query {
+                    println!("Query: {query}");
+                }
+                if let Some(limit) = limit {
+                    println!("Limit: {limit}");
+                }
+                println!("Matched models: {matched_models}");
+                println!("Returned models: {returned_models}");
             }
         }
         ModelsCommand::Status => {
@@ -712,6 +742,30 @@ fn format_chat_agent(agent_id: Option<&str>) -> String {
     agent_id
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| "<none>".to_string())
+}
+
+fn normalize_models_query(query: Option<String>) -> Result<Option<String>> {
+    match query {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Err(MosaicError::Validation(
+                    "--query cannot be empty".to_string(),
+                ));
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn normalize_models_limit(limit: Option<usize>) -> Result<Option<usize>> {
+    match limit {
+        Some(0) => Err(MosaicError::Validation(
+            "--limit must be greater than 0".to_string(),
+        )),
+        _ => Ok(limit),
+    }
 }
 
 fn resolve_prompt_source(prompt: Option<String>, prompt_file: Option<String>) -> Result<String> {

@@ -21,6 +21,62 @@ fn models_status_set_aliases_and_fallbacks_flow() {
         .assert()
         .success();
 
+    let list_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "models",
+            "list",
+            "--query",
+            "mock",
+            "--limit",
+            "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_json: Value = serde_json::from_slice(&list_output).expect("models list json");
+    assert_eq!(list_json["ok"], true);
+    assert_eq!(list_json["query"], "mock");
+    assert_eq!(list_json["limit"], 1);
+    assert_eq!(list_json["total_models"], 1);
+    assert_eq!(list_json["matched_models"], 1);
+    assert_eq!(list_json["returned_models"], 1);
+    assert_eq!(list_json["models"][0]["id"], "mock-model");
+
+    let list_none_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "models",
+            "list",
+            "--query",
+            "absent-model",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let list_none_json: Value =
+        serde_json::from_slice(&list_none_output).expect("models list none json");
+    assert_eq!(list_none_json["ok"], true);
+    assert_eq!(list_none_json["query"], "absent-model");
+    assert_eq!(list_none_json["matched_models"], 0);
+    assert_eq!(list_none_json["returned_models"], 0);
+    assert!(
+        list_none_json["models"]
+            .as_array()
+            .expect("models array")
+            .is_empty()
+    );
+
     let aliases_set = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())

@@ -19,6 +19,8 @@
     "profile": "string"
   },
   "list": {
+    "limit": "null",
+    "matched_models": "number",
     "models": {
       "items": [
         {
@@ -28,7 +30,27 @@
       ],
       "type": "array"
     },
-    "ok": "bool"
+    "ok": "bool",
+    "query": "null",
+    "returned_models": "number",
+    "total_models": "number"
+  },
+  "list_filtered": {
+    "limit": "number",
+    "matched_models": "number",
+    "models": {
+      "items": [
+        {
+          "id": "string",
+          "owned_by": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "query": "string",
+    "returned_models": "number",
+    "total_models": "number"
   },
   "resolve_alias": {
     "aliases": {

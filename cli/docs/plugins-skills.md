@@ -7,6 +7,7 @@ This module provides a local, CLI-first runtime for discovering and validating p
 ```bash
 # Plugins
 mosaic --project-state plugins list
+mosaic --project-state plugins list --source project
 mosaic --project-state plugins info <plugin-id>
 mosaic --project-state plugins check [plugin-id]
 mosaic --project-state plugins install --path ./my-plugin [--force]
@@ -14,6 +15,7 @@ mosaic --project-state plugins remove <plugin-id>
 
 # Skills
 mosaic --project-state skills list
+mosaic --project-state skills list --source project
 mosaic --project-state skills info <skill-id>
 mosaic --project-state skills check [skill-id]
 mosaic --project-state skills install --path ./writer [--force]
@@ -29,6 +31,13 @@ The CLI discovers extensions from these roots in priority order:
 3. `~/.codex/plugins` and `~/.codex/skills`
 
 If duplicate IDs exist, earlier roots override later roots.
+
+`list --source` supports:
+
+- `all` (default)
+- `project`
+- `codex-home`
+- `user-home`
 
 ## Expected File Shape
 

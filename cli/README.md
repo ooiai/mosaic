@@ -19,7 +19,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Discovery/runtime helpers (`docs`, `dns resolve`)
 - UX compatibility shim (`tui` -> chat runtime)
 - Compatibility helpers (`qr encode|pairing` with payload/ascii/png render, `clawbot ask|chat|send|status`)
-- Memory runtime (`memory index|search|status`)
+- Memory runtime (`memory index|search|status|clear`)
 - Security runtime (`security audit`)
 - Agents runtime (`agents list|add|update|show|remove|default|route`)
 - Plugins and skills runtime (`plugins list|info|check|install|remove`, `skills list|info|check|install|remove`)
@@ -153,6 +153,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state setup \
 OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
   --project-state models list
 
+OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state --json models list --query gpt --limit 5
+
 cargo run -p mosaic-cli --bin mosaic -- --project-state models status
 cargo run -p mosaic-cli --bin mosaic -- --project-state models resolve
 cargo run -p mosaic-cli --bin mosaic -- --project-state models resolve fast
@@ -162,6 +165,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state models aliases list
 cargo run -p mosaic-cli --bin mosaic -- --project-state models fallbacks add gpt-4.1-mini
 cargo run -p mosaic-cli --bin mosaic -- --project-state models fallbacks list
 ```
+
+`models list --json` now includes `query`, `limit`, `total_models`, `matched_models`, and `returned_models`.
 
 ### Ask
 
@@ -455,6 +460,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox explain --profil
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory index --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory search "rust cli"
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory status
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory clear
 ```
 
 ### Security Runtime
@@ -486,11 +492,13 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state ask --agent writer "hell
 
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins list
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins list --source project
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins info <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins check
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins install --path ./my-plugin
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins remove <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills list
+cargo run -p mosaic-cli --bin mosaic -- --project-state skills list --source project
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills info <skill-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills check
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills install --path ./writer

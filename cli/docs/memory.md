@@ -8,6 +8,7 @@
 mosaic --project-state memory index --path .
 mosaic --project-state memory search "rust agent"
 mosaic --project-state memory status
+mosaic --project-state memory clear
 ```
 
 ## Index behavior
@@ -33,3 +34,10 @@ mosaic --project-state memory status
 - ranked `hits` with `path`, `score`, and `snippet`
 
 Supports `--json` for machine-readable output.
+
+## Clear behavior
+
+- `memory clear` removes:
+  - `.mosaic/data/memory/index.jsonl`
+  - `.mosaic/data/memory/status.json`
+- Running `memory status` after clear returns `indexed_documents=0`.

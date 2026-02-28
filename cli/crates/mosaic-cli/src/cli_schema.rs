@@ -121,7 +121,12 @@ struct ModelsArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 enum ModelsCommand {
-    List,
+    List {
+        #[arg(long)]
+        query: Option<String>,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     Status,
     Resolve {
         model: Option<String>,
@@ -813,6 +818,7 @@ enum MemoryCommand {
         limit: usize,
     },
     Status,
+    Clear,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -982,7 +988,10 @@ struct PluginsArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 enum PluginsCommand {
-    List,
+    List {
+        #[arg(long, value_enum, default_value_t = ExtensionSourceFilterArg::All)]
+        source: ExtensionSourceFilterArg,
+    },
     Info {
         plugin_id: String,
     },
@@ -1008,7 +1017,10 @@ struct SkillsArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 enum SkillsCommand {
-    List,
+    List {
+        #[arg(long, value_enum, default_value_t = ExtensionSourceFilterArg::All)]
+        source: ExtensionSourceFilterArg,
+    },
     Info {
         skill_id: String,
     },
@@ -1136,6 +1148,14 @@ enum QrRenderArg {
     Payload,
     Ascii,
     Png,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum ExtensionSourceFilterArg {
+    All,
+    Project,
+    CodexHome,
+    UserHome,
 }
 
 #[derive(Args, Debug, Clone)]

@@ -1256,6 +1256,27 @@ fn json_models_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&list);
 
+    let list_filtered = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "models",
+                "list",
+                "--query",
+                "mock",
+                "--limit",
+                "1",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&list_filtered);
+
     let status_before = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1345,6 +1366,7 @@ fn json_models_module_schema_matches_snapshot() {
 
     let actual_schema = json!({
         "list": schema_of(&list),
+        "list_filtered": schema_of(&list_filtered),
         "status_before": schema_of(&status_before),
         "aliases_set": schema_of(&aliases_set),
         "fallbacks_add": schema_of(&fallbacks_add),
@@ -1352,10 +1374,7 @@ fn json_models_module_schema_matches_snapshot() {
         "set": schema_of(&set),
         "status_after": schema_of(&status_after),
     });
-    let expected_schema: Value =
-        serde_json::from_str(include_str!("snapshots/json_module_models_schema.json"))
-            .expect("expected module models schema");
-    assert_eq!(actual_schema, expected_schema);
+    assert_json_snapshot("snapshots/json_module_models_schema.json", &actual_schema);
 }
 
 #[test]
@@ -2307,6 +2326,18 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&memory_status);
 
+    let memory_clear = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "memory", "clear"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_clear);
+
     let plugin_source = temp.path().join("sample-plugin");
     let skill_source = temp.path().join("writer");
     std::fs::create_dir_all(&plugin_source).expect("create plugin source");
@@ -2352,6 +2383,25 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&plugins_list);
+
+    let plugins_list_project = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "plugins",
+                "list",
+                "--source",
+                "project",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_list_project);
 
     let plugins_check = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -2402,6 +2452,25 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&skills_list);
 
+    let skills_list_project = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "skills",
+                "list",
+                "--source",
+                "project",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&skills_list_project);
+
     let skills_check = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -2430,11 +2499,14 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         "memory_index": schema_of(&memory_index),
         "memory_search": schema_of(&memory_search),
         "memory_status": schema_of(&memory_status),
+        "memory_clear": schema_of(&memory_clear),
         "plugins_install": schema_of(&plugins_install),
         "plugins_list": schema_of(&plugins_list),
+        "plugins_list_project": schema_of(&plugins_list_project),
         "plugins_check": schema_of(&plugins_check),
         "skills_install": schema_of(&skills_install),
         "skills_list": schema_of(&skills_list),
+        "skills_list_project": schema_of(&skills_list_project),
         "skills_check": schema_of(&skills_check),
     });
     assert_json_snapshot("snapshots/json_module_features_schema.json", &actual_schema);

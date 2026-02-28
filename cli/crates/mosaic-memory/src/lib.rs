@@ -52,6 +52,14 @@ pub struct MemoryIndexResult {
     pub status_path: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct MemoryClearResult {
+    pub removed_index: bool,
+    pub removed_status: bool,
+    pub index_path: String,
+    pub status_path: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct MemoryIndexOptions {
     pub root: PathBuf,
@@ -222,6 +230,17 @@ impl MemoryStore {
         })
     }
 
+    pub fn clear(&self) -> Result<MemoryClearResult> {
+        let removed_index = remove_if_exists(&self.index_path)?;
+        let removed_status = remove_if_exists(&self.status_path)?;
+        Ok(MemoryClearResult {
+            removed_index,
+            removed_status,
+            index_path: self.index_path.display().to_string(),
+            status_path: self.status_path.display().to_string(),
+        })
+    }
+
     fn save_documents(&self, docs: &[MemoryDocument]) -> Result<()> {
         if let Some(parent) = self.index_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -326,6 +345,15 @@ fn find_snippet(content: &str, query: &str) -> String {
     truncate_to_bytes(content, 160)
 }
 
+fn remove_if_exists(path: &Path) -> Result<bool> {
+    if path.exists() {
+        std::fs::remove_file(path)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -376,5 +404,36 @@ mod tests {
         );
         let err = store.search("", None).expect_err("expected err");
         assert!(matches!(err, MosaicError::Validation(_)));
+    }
+
+    #[test]
+    fn clear_removes_index_and_status_files() {
+        let temp = tempdir().expect("tempdir");
+        let docs_dir = temp.path().join("docs");
+        std::fs::create_dir_all(&docs_dir).expect("create docs dir");
+        std::fs::write(docs_dir.join("a.txt"), "memory clear sample").expect("write a.txt");
+
+        let store = MemoryStore::new(
+            temp.path().join("state/memory/index.jsonl"),
+            temp.path().join("state/memory/status.json"),
+        );
+        store
+            .index(MemoryIndexOptions {
+                root: docs_dir,
+                ..MemoryIndexOptions::default()
+            })
+            .expect("index");
+        assert!(store.index_path.exists());
+        assert!(store.status_path.exists());
+
+        let cleared = store.clear().expect("clear");
+        assert!(cleared.removed_index);
+        assert!(cleared.removed_status);
+        assert!(!store.index_path.exists());
+        assert!(!store.status_path.exists());
+
+        let status = store.status().expect("status after clear");
+        assert_eq!(status.indexed_documents, 0);
+        assert!(status.last_indexed_at.is_none());
     }
 }
