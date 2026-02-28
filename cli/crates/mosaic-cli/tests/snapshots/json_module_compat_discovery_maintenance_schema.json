@@ -94,6 +94,106 @@
     }
   },
   "directory": {
+    "checks": {
+      "approvals_policy_path": {
+        "exists": "bool"
+      },
+      "audit_dir": {
+        "exists": "bool"
+      },
+      "audit_log_path": {
+        "exists": "bool"
+      },
+      "config_path": {
+        "exists": "bool"
+      },
+      "data_dir": {
+        "exists": "bool"
+      },
+      "models_path": {
+        "exists": "bool"
+      },
+      "policy_dir": {
+        "exists": "bool"
+      },
+      "root_dir": {
+        "exists": "bool"
+      },
+      "sandbox_policy_path": {
+        "exists": "bool"
+      },
+      "sessions_dir": {
+        "exists": "bool"
+      },
+      "system_events_path": {
+        "exists": "bool"
+      }
+    },
+    "ensured": "bool",
+    "mode": "string",
+    "ok": "bool",
+    "paths": {
+      "approvals_policy_path": "string",
+      "audit_dir": "string",
+      "audit_log_path": "string",
+      "config_path": "string",
+      "data_dir": "string",
+      "models_path": "string",
+      "policy_dir": "string",
+      "root_dir": "string",
+      "sandbox_policy_path": "string",
+      "sessions_dir": "string",
+      "system_events_path": "string"
+    }
+  },
+  "directory_diagnostics": {
+    "checks": {
+      "approvals_policy_path": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "audit_dir": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "audit_log_path": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "config_path": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "data_dir": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "models_path": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "policy_dir": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "root_dir": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "sandbox_policy_path": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "sessions_dir": {
+        "exists": "bool",
+        "writable": "bool"
+      },
+      "system_events_path": {
+        "exists": "bool",
+        "writable": "bool"
+      }
+    },
+    "ensured": "bool",
     "mode": "string",
     "ok": "bool",
     "paths": {
@@ -194,6 +294,15 @@
     }
   },
   "update_check": {
+    "checked": "bool",
+    "current_version": "string",
+    "latest_version": "string",
+    "ok": "bool",
+    "source": "string",
+    "up_to_date": "bool",
+    "update_available": "bool"
+  },
+  "update_check_same": {
     "checked": "bool",
     "current_version": "string",
     "latest_version": "string",

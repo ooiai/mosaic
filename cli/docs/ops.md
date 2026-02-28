@@ -22,6 +22,7 @@ mosaic --project-state --json system presence
 # list recent system events
 mosaic --project-state system list --tail 50
 mosaic --project-state --json system list --tail 50
+mosaic --project-state --json system list --tail 50 --name deploy
 ```
 
 ## Notes

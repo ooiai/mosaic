@@ -13,6 +13,20 @@
       "version": "number"
     }
   },
+  "approvals_allowlist_list": {
+    "ok": "bool",
+    "path": "string",
+    "policy": {
+      "allowlist": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "mode": "string",
+      "version": "number"
+    }
+  },
   "approvals_check": {
     "approved_by": "null",
     "command": "string",
@@ -64,6 +78,14 @@
       "type": "array"
     },
     "ok": "bool"
+  },
+  "sandbox_check": {
+    "command": "string",
+    "decision": "string",
+    "ok": "bool",
+    "path": "string",
+    "profile": "string",
+    "reason": "string"
   },
   "sandbox_explain": {
     "ok": "bool",

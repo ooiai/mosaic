@@ -1,5 +1,6 @@
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::CommandFactory;
 use clap_complete::{Shell, generate};
@@ -16,7 +17,8 @@ use serde_json::json;
 use super::runtime_context::resolve_state_paths;
 use super::utils::{load_json_file_opt, print_json};
 use super::{
-    Cli, CompletionArgs, CompletionCommand, CompletionShellArg, GatewayServiceState, GatewayState,
+    Cli, CompletionArgs, CompletionCommand, CompletionShellArg, DirectoryArgs, GatewayServiceState,
+    GatewayState,
 };
 
 pub(super) fn handle_completion(cli: &Cli, args: CompletionArgs) -> Result<()> {
@@ -66,17 +68,34 @@ pub(super) fn handle_completion(cli: &Cli, args: CompletionArgs) -> Result<()> {
     }
 }
 
-pub(super) fn handle_directory(cli: &Cli) -> Result<()> {
+pub(super) fn handle_directory(cli: &Cli, args: DirectoryArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
+    if args.ensure {
+        paths.ensure_dirs()?;
+    }
     let mode = match paths.mode {
         StateMode::Xdg => "xdg",
         StateMode::Project => "project",
     };
+    let checks = json!({
+        "root_dir": path_check(&paths.root_dir, true, args.check_writable),
+        "config_path": path_check(&paths.config_path, false, args.check_writable),
+        "models_path": path_check(&paths.models_path, false, args.check_writable),
+        "data_dir": path_check(&paths.data_dir, true, args.check_writable),
+        "policy_dir": path_check(&paths.policy_dir, true, args.check_writable),
+        "approvals_policy_path": path_check(&paths.approvals_policy_path, false, args.check_writable),
+        "sandbox_policy_path": path_check(&paths.sandbox_policy_path, false, args.check_writable),
+        "system_events_path": path_check(&paths.system_events_path, false, args.check_writable),
+        "sessions_dir": path_check(&paths.sessions_dir, true, args.check_writable),
+        "audit_dir": path_check(&paths.audit_dir, true, args.check_writable),
+        "audit_log_path": path_check(&paths.audit_log_path, false, args.check_writable),
+    });
 
     if cli.json {
         print_json(&json!({
             "ok": true,
             "mode": mode,
+            "ensured": args.ensure,
             "paths": {
                 "root_dir": paths.root_dir.display().to_string(),
                 "config_path": paths.config_path.display().to_string(),
@@ -89,10 +108,12 @@ pub(super) fn handle_directory(cli: &Cli) -> Result<()> {
                 "sessions_dir": paths.sessions_dir.display().to_string(),
                 "audit_dir": paths.audit_dir.display().to_string(),
                 "audit_log_path": paths.audit_log_path.display().to_string(),
-            }
+            },
+            "checks": checks,
         }));
     } else {
         println!("mode: {mode}");
+        println!("ensured: {}", args.ensure);
         println!("root: {}", paths.root_dir.display());
         println!("config: {}", paths.config_path.display());
         println!("models: {}", paths.models_path.display());
@@ -107,8 +128,81 @@ pub(super) fn handle_directory(cli: &Cli) -> Result<()> {
         println!("sessions: {}", paths.sessions_dir.display());
         println!("audit dir: {}", paths.audit_dir.display());
         println!("audit log: {}", paths.audit_log_path.display());
+        if args.check_writable {
+            println!("writable checks:");
+            print_check_line("root_dir", &checks);
+            print_check_line("config_path", &checks);
+            print_check_line("models_path", &checks);
+            print_check_line("data_dir", &checks);
+            print_check_line("policy_dir", &checks);
+            print_check_line("approvals_policy_path", &checks);
+            print_check_line("sandbox_policy_path", &checks);
+            print_check_line("system_events_path", &checks);
+            print_check_line("sessions_dir", &checks);
+            print_check_line("audit_dir", &checks);
+            print_check_line("audit_log_path", &checks);
+        }
     }
     Ok(())
+}
+
+fn path_check(path: &Path, is_dir: bool, check_writable: bool) -> serde_json::Value {
+    let exists = path.exists();
+    let mut body = json!({
+        "exists": exists,
+    });
+    if check_writable {
+        let writable = if is_dir {
+            probe_dir_writable(path)
+        } else {
+            probe_file_writable(path)
+        };
+        if let Some(root) = body.as_object_mut() {
+            root.insert("writable".to_string(), json!(writable));
+        }
+    }
+    body
+}
+
+fn probe_dir_writable(path: &Path) -> bool {
+    if !path.exists() || !path.is_dir() {
+        return false;
+    }
+    let probe = path.join(format!(
+        ".mosaic-write-check-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    match OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(_) => {
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn probe_file_writable(path: &Path) -> bool {
+    if path.exists() {
+        return OpenOptions::new().append(true).open(path).is_ok();
+    }
+    match path.parent() {
+        Some(parent) => probe_dir_writable(parent),
+        None => false,
+    }
+}
+
+fn unique_suffix() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or_default()
+}
+
+fn print_check_line(key: &str, checks: &serde_json::Value) {
+    let exists = checks[key]["exists"].as_bool().unwrap_or(false);
+    let writable = checks[key]["writable"].as_bool().unwrap_or(false);
+    println!("- {key}: exists={exists} writable={writable}");
 }
 
 pub(super) fn handle_dashboard(cli: &Cli) -> Result<()> {

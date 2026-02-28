@@ -353,7 +353,13 @@ fn json_channels_admin_module_schema_matches_snapshot() {
         &Command::cargo_bin("mosaic")
             .expect("binary")
             .current_dir(temp.path())
-            .args(["--project-state", "--json", "channels", "remove", &channel_id])
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "remove",
+                &channel_id,
+            ])
             .assert()
             .success()
             .get_output()
@@ -512,7 +518,10 @@ fn json_channels_admin_module_schema_matches_snapshot() {
         "remove_after_logout": schema_of(&remove_after_logout),
         "list_final": schema_of(&list_final),
     });
-    assert_json_snapshot("snapshots/json_module_channels_admin_schema.json", &actual_schema);
+    assert_json_snapshot(
+        "snapshots/json_module_channels_admin_schema.json",
+        &actual_schema,
+    );
 }
 
 #[test]
@@ -670,7 +679,13 @@ fn json_gateway_admin_module_schema_matches_snapshot() {
             .expect("binary")
             .current_dir(temp.path())
             .env("MOSAIC_GATEWAY_TEST_MODE", "1")
-            .args(["--project-state", "--json", "gateway", "health", "--verbose"])
+            .args([
+                "--project-state",
+                "--json",
+                "gateway",
+                "health",
+                "--verbose",
+            ])
             .assert()
             .success()
             .get_output()
@@ -747,7 +762,10 @@ fn json_gateway_admin_module_schema_matches_snapshot() {
         "uninstall": schema_of(&uninstall),
         "status_deep_uninstalled": schema_of(&status_deep_uninstalled),
     });
-    assert_json_snapshot("snapshots/json_module_gateway_admin_schema.json", &actual_schema);
+    assert_json_snapshot(
+        "snapshots/json_module_gateway_admin_schema.json",
+        &actual_schema,
+    );
 }
 
 #[test]
@@ -1194,9 +1212,10 @@ fn json_nodes_pairing_module_schema_matches_snapshot() {
         "nodes_status_local": schema_of(&nodes_status_local),
         "nodes_status_summary": schema_of(&nodes_status_summary),
     });
-    let expected_schema: Value =
-        serde_json::from_str(include_str!("snapshots/json_module_nodes_pairing_schema.json"))
-            .expect("expected module nodes/pairing schema");
+    let expected_schema: Value = serde_json::from_str(include_str!(
+        "snapshots/json_module_nodes_pairing_schema.json"
+    ))
+    .expect("expected module nodes/pairing schema");
     assert_eq!(actual_schema, expected_schema);
 }
 
@@ -1508,7 +1527,10 @@ fn json_core_agent_module_schema_matches_snapshot() {
         "health": schema_of(&health),
         "doctor": schema_of(&doctor),
     });
-    assert_json_snapshot("snapshots/json_module_core_agent_schema.json", &actual_schema);
+    assert_json_snapshot(
+        "snapshots/json_module_core_agent_schema.json",
+        &actual_schema,
+    );
 }
 
 #[test]
@@ -1559,6 +1581,24 @@ fn json_ops_policy_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&approvals_allowlist_add);
 
+    let approvals_allowlist_list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "approvals",
+                "allowlist",
+                "list",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&approvals_allowlist_list);
+
     let approvals_check = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1606,19 +1646,32 @@ fn json_ops_policy_module_schema_matches_snapshot() {
         &Command::cargo_bin("mosaic")
             .expect("binary")
             .current_dir(temp.path())
-            .args([
-                "--project-state",
-                "--json",
-                "sandbox",
-                "set",
-                "restricted",
-            ])
+            .args(["--project-state", "--json", "sandbox", "set", "restricted"])
             .assert()
             .success()
             .get_output()
             .stdout,
     );
     assert_success_envelope(&sandbox_set);
+
+    let sandbox_check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "sandbox",
+                "check",
+                "--command",
+                "curl https://example.com",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&sandbox_check);
 
     let sandbox_explain = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -1675,7 +1728,16 @@ fn json_ops_policy_module_schema_matches_snapshot() {
         &Command::cargo_bin("mosaic")
             .expect("binary")
             .current_dir(temp.path())
-            .args(["--project-state", "--json", "system", "list", "--tail", "20"])
+            .args([
+                "--project-state",
+                "--json",
+                "system",
+                "list",
+                "--tail",
+                "20",
+                "--name",
+                "contract_event",
+            ])
             .assert()
             .success()
             .get_output()
@@ -1699,17 +1761,22 @@ fn json_ops_policy_module_schema_matches_snapshot() {
         "approvals_get": schema_of(&approvals_get),
         "approvals_set": schema_of(&approvals_set),
         "approvals_allowlist_add": schema_of(&approvals_allowlist_add),
+        "approvals_allowlist_list": schema_of(&approvals_allowlist_list),
         "approvals_check": schema_of(&approvals_check),
         "sandbox_list": schema_of(&sandbox_list),
         "sandbox_get": schema_of(&sandbox_get),
         "sandbox_set": schema_of(&sandbox_set),
+        "sandbox_check": schema_of(&sandbox_check),
         "sandbox_explain": schema_of(&sandbox_explain),
         "system_event": schema_of(&system_event),
         "system_presence": schema_of(&system_presence),
         "system_list": schema_of(&system_list),
         "logs": schema_of(&logs),
     });
-    assert_json_snapshot("snapshots/json_module_ops_policy_schema.json", &actual_schema);
+    assert_json_snapshot(
+        "snapshots/json_module_ops_policy_schema.json",
+        &actual_schema,
+    );
 }
 
 #[test]
@@ -1759,7 +1826,10 @@ fn json_automation_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&hook_add);
-    let hook_id = hook_add["hook"]["id"].as_str().expect("hook id").to_string();
+    let hook_id = hook_add["hook"]["id"]
+        .as_str()
+        .expect("hook id")
+        .to_string();
 
     let hook_run = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -1901,7 +1971,10 @@ fn json_automation_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&cron_add);
-    let cron_job_id = cron_add["job"]["id"].as_str().expect("cron job id").to_string();
+    let cron_job_id = cron_add["job"]["id"]
+        .as_str()
+        .expect("cron job id")
+        .to_string();
 
     let cron_tick = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -1969,7 +2042,10 @@ fn json_automation_module_schema_matches_snapshot() {
         "cron_run": schema_of(&cron_run),
         "cron_logs": schema_of(&cron_logs),
     });
-    assert_json_snapshot("snapshots/json_module_automation_schema.json", &actual_schema);
+    assert_json_snapshot(
+        "snapshots/json_module_automation_schema.json",
+        &actual_schema,
+    );
 }
 
 #[test]
@@ -2281,7 +2357,13 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         &Command::cargo_bin("mosaic")
             .expect("binary")
             .current_dir(temp.path())
-            .args(["--project-state", "--json", "plugins", "check", "sample_plugin"])
+            .args([
+                "--project-state",
+                "--json",
+                "plugins",
+                "check",
+                "sample_plugin",
+            ])
             .assert()
             .success()
             .get_output()
@@ -2293,7 +2375,14 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         &Command::cargo_bin("mosaic")
             .expect("binary")
             .current_dir(temp.path())
-            .args(["--project-state", "--json", "skills", "install", "--path", "writer"])
+            .args([
+                "--project-state",
+                "--json",
+                "skills",
+                "install",
+                "--path",
+                "writer",
+            ])
             .assert()
             .success()
             .get_output()
@@ -2516,6 +2605,24 @@ fn json_compat_discovery_maintenance_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&directory);
 
+    let directory_diagnostics = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "directory",
+                "--ensure",
+                "--check-writable",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&directory_diagnostics);
+
     let dashboard = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -2552,6 +2659,24 @@ fn json_compat_discovery_maintenance_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&update_check);
 
+    let update_check_same = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--json",
+                "update",
+                "--check",
+                "--source",
+                concat!("mock://", env!("CARGO_PKG_VERSION")),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&update_check_same);
+
     let reset = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -2586,9 +2711,11 @@ fn json_compat_discovery_maintenance_module_schema_matches_snapshot() {
         "clawbot_send": schema_of(&clawbot_send),
         "clawbot_status": schema_of(&clawbot_status),
         "directory": schema_of(&directory),
+        "directory_diagnostics": schema_of(&directory_diagnostics),
         "dashboard": schema_of(&dashboard),
         "update_local": schema_of(&update_local),
         "update_check": schema_of(&update_check),
+        "update_check_same": schema_of(&update_check_same),
         "reset": schema_of(&reset),
         "uninstall": schema_of(&uninstall),
     });

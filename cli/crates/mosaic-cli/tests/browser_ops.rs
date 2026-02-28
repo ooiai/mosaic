@@ -185,7 +185,14 @@ fn browser_runtime_status_snapshot_and_screenshot_flow() {
     let tabs_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .args(["--project-state", "--json", "browser", "tabs", "--tail", "10"])
+        .args([
+            "--project-state",
+            "--json",
+            "browser",
+            "tabs",
+            "--tail",
+            "10",
+        ])
         .assert()
         .success()
         .get_output()
@@ -230,7 +237,8 @@ fn browser_runtime_status_snapshot_and_screenshot_flow() {
     let output_path = screenshot_json["output"]
         .as_str()
         .expect("screenshot output path");
-    let screenshot_content = std::fs::read_to_string(output_path).expect("read screenshot artifact");
+    let screenshot_content =
+        std::fs::read_to_string(output_path).expect("read screenshot artifact");
     assert!(screenshot_content.contains("MOSAIC_BROWSER_SCREENSHOT_V1"));
     assert!(screenshot_content.contains(&visit_id));
 

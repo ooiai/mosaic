@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_ops::{
-    ApprovalDecision, ApprovalStore, SandboxStore, SystemEventStore, UnifiedLogEntry,
-    collect_logs, evaluate_approval, list_profiles, snapshot_presence, system_events_path,
+    ApprovalDecision, ApprovalStore, SandboxStore, SystemEventStore, UnifiedLogEntry, collect_logs,
+    evaluate_approval, evaluate_sandbox, list_profiles, snapshot_presence, system_events_path,
 };
 
 use super::{
@@ -134,8 +134,11 @@ pub(super) fn handle_system(cli: &Cli, args: SystemArgs) -> Result<()> {
                 println!("ts: {}", presence.ts.to_rfc3339());
             }
         }
-        SystemCommand::List { tail } => {
-            let events = store.read_tail(tail)?;
+        SystemCommand::List { tail, name } => {
+            let mut events = store.read_tail(tail)?;
+            if let Some(name_filter) = name.as_deref() {
+                events.retain(|event| event.name == name_filter);
+            }
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -146,12 +149,7 @@ pub(super) fn handle_system(cli: &Cli, args: SystemArgs) -> Result<()> {
                 println!("No system events.");
             } else {
                 for event in events {
-                    println!(
-                        "{} {} {}",
-                        event.ts.to_rfc3339(),
-                        event.name,
-                        event.data
-                    );
+                    println!("{} {} {}", event.ts.to_rfc3339(), event.name, event.data);
                 }
             }
         }
@@ -168,12 +166,8 @@ pub(super) fn handle_approvals(cli: &Cli, args: ApprovalsArgs) -> Result<()> {
             let policy = store.load_or_default()?;
             let decision = evaluate_approval(&command, &policy);
             let (decision_name, reason, approved_by) = match decision {
-                ApprovalDecision::Auto { approved_by } => {
-                    ("auto", None, Some(approved_by))
-                }
-                ApprovalDecision::NeedsConfirmation { reason } => {
-                    ("confirm", Some(reason), None)
-                }
+                ApprovalDecision::Auto { approved_by } => ("auto", None, Some(approved_by)),
+                ApprovalDecision::NeedsConfirmation { reason } => ("confirm", Some(reason), None),
                 ApprovalDecision::Deny { reason } => ("deny", Some(reason), None),
             };
             if cli.json {
@@ -203,6 +197,7 @@ pub(super) fn handle_approvals(cli: &Cli, args: ApprovalsArgs) -> Result<()> {
         ApprovalsCommand::Get => store.load_or_default()?,
         ApprovalsCommand::Set { mode } => store.set_mode(mode.into())?,
         ApprovalsCommand::Allowlist { command } => match command {
+            AllowlistCommand::List => store.load_or_default()?,
             AllowlistCommand::Add { prefix } => store.add_allowlist(&prefix)?,
             AllowlistCommand::Remove { prefix } => store.remove_allowlist(&prefix)?,
         },
@@ -257,6 +252,29 @@ pub(super) fn handle_sandbox(cli: &Cli, args: SandboxArgs) -> Result<()> {
                 }));
             } else {
                 println!("sandbox profile set: {:?}", policy.profile);
+                println!("path: {}", store.path().display());
+            }
+        }
+        SandboxCommand::Check { command } => {
+            let policy = store.load_or_default()?;
+            let reason = evaluate_sandbox(&command, policy.profile);
+            let decision = if reason.is_some() { "deny" } else { "allow" };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "command": command,
+                    "decision": decision,
+                    "reason": reason,
+                    "profile": policy.profile,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!("command: {command}");
+                println!("decision: {decision}");
+                if let Some(reason) = reason {
+                    println!("reason: {reason}");
+                }
+                println!("sandbox profile: {:?}", policy.profile);
                 println!("path: {}", store.path().display());
             }
         }
