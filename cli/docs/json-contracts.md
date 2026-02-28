@@ -18,14 +18,14 @@ This document defines JSON output contract coverage for Mosaic CLI.
   - Locks module-level success JSON schemas.
   - Covered modules:
     - `core/agent` (`setup`, `configure --show`, `ask`, `chat --prompt`, `session list/show/clear`, `status`, `health`, `doctor`)
-    - `models`
+    - `models` (`list` and `list --query/--limit` include `query`, `limit`, `total_models`, `matched_models`, `returned_models`)
     - `channels`
     - `channels/admin` (`update`, `login`, `export`, `import`, `rotate-token-env`, `logout`, `remove`)
     - `gateway`
     - `gateway/admin` (`install`, `start`, `status --deep`, `health --verbose`, `restart`, `uninstall`)
     - `ops/policy` (`approvals get/set/check/allowlist add|list|remove`, `sandbox get/set/check/list/explain`, `system event/presence/list`, `logs`)
     - `automation` (`hooks`, `cron`, `webhooks`)
-    - `features` (`browser start/status/navigate/history/tabs/show/focus/snapshot/screenshot/clear/close/stop`, `memory`, `plugins`, `skills`)
+    - `features` (`browser start/status/navigate/history/tabs/show/focus/snapshot/screenshot/clear/close/stop`, `memory index/search/status/clear`, `plugins/skills` with list source filters)
     - `compat/discovery/maintenance` (`docs`, `dns`, `tui`, `qr`, `clawbot`, `directory` + diagnostics flags, `dashboard`, `update` + same-version check, `reset`, `uninstall`)
     - `security`
     - `security/baseline` (`show`, `add`, `remove`, `clear`)

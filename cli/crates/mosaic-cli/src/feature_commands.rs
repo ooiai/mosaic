@@ -5,13 +5,14 @@ use serde_json::json;
 
 use mosaic_core::error::MosaicError;
 use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
-use mosaic_plugins::{ExtensionRegistry, RegistryRoots};
+use mosaic_plugins::{ExtensionRegistry, ExtensionSource, RegistryRoots};
 
 use super::{
-    BrowserArgs, BrowserCommand, Cli, MemoryArgs, MemoryCommand, PluginsArgs, PluginsCommand,
-    Result, SkillsArgs, SkillsCommand, browser_history_file_path, browser_open_visit,
-    browser_state_file_path, load_browser_history_or_default, load_browser_state_or_default,
-    print_json, resolve_state_paths, save_browser_history, save_browser_state,
+    BrowserArgs, BrowserCommand, Cli, ExtensionSourceFilterArg, MemoryArgs, MemoryCommand,
+    PluginsArgs, PluginsCommand, Result, SkillsArgs, SkillsCommand, browser_history_file_path,
+    browser_open_visit, browser_state_file_path, load_browser_history_or_default,
+    load_browser_state_or_default, print_json, resolve_state_paths, save_browser_history,
+    save_browser_state,
 };
 
 pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
@@ -477,6 +478,22 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
                 println!("index path: {}", status.index_path);
             }
         }
+        MemoryCommand::Clear => {
+            let cleared = store.clear()?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "cleared": cleared,
+                }));
+            } else {
+                println!(
+                    "memory clear: index_removed={} status_removed={}",
+                    cleared.removed_index, cleared.removed_status
+                );
+                println!("index path: {}", cleared.index_path);
+                println!("status path: {}", cleared.status_path);
+            }
+        }
     }
     Ok(())
 }
@@ -487,11 +504,17 @@ pub(super) fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
     let registry = ExtensionRegistry::new(RegistryRoots::from_state_root(paths.root_dir.clone()));
 
     match args.command {
-        PluginsCommand::List => {
-            let plugins = registry.list_plugins()?;
+        PluginsCommand::List { source } => {
+            let requested_source = parse_extension_source_filter(source);
+            let plugins = registry
+                .list_plugins()?
+                .into_iter()
+                .filter(|entry| source_matches(requested_source, entry.source))
+                .collect::<Vec<_>>();
             if cli.json {
                 print_json(&json!({
                     "ok": true,
+                    "source_filter": extension_source_filter_name(source),
                     "count": plugins.len(),
                     "plugins": plugins,
                 }));
@@ -499,6 +522,7 @@ pub(super) fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
                 println!("No plugins found.");
             } else {
                 println!("plugins: {}", plugins.len());
+                println!("source filter: {}", extension_source_filter_name(source));
                 for plugin in plugins {
                     println!(
                         "- {} ({}) source={:?} version={} manifest_valid={}",
@@ -612,11 +636,17 @@ pub(super) fn handle_skills(cli: &Cli, args: SkillsArgs) -> Result<()> {
     let registry = ExtensionRegistry::new(RegistryRoots::from_state_root(paths.root_dir.clone()));
 
     match args.command {
-        SkillsCommand::List => {
-            let skills = registry.list_skills()?;
+        SkillsCommand::List { source } => {
+            let requested_source = parse_extension_source_filter(source);
+            let skills = registry
+                .list_skills()?
+                .into_iter()
+                .filter(|entry| source_matches(requested_source, entry.source))
+                .collect::<Vec<_>>();
             if cli.json {
                 print_json(&json!({
                     "ok": true,
+                    "source_filter": extension_source_filter_name(source),
                     "count": skills.len(),
                     "skills": skills,
                 }));
@@ -624,6 +654,7 @@ pub(super) fn handle_skills(cli: &Cli, args: SkillsArgs) -> Result<()> {
                 println!("No skills found.");
             } else {
                 println!("skills: {}", skills.len());
+                println!("source filter: {}", extension_source_filter_name(source));
                 for skill in skills {
                     println!("- {} ({}) source={:?}", skill.id, skill.title, skill.source);
                 }
@@ -714,4 +745,29 @@ pub(super) fn handle_skills(cli: &Cli, args: SkillsArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn parse_extension_source_filter(source: ExtensionSourceFilterArg) -> Option<ExtensionSource> {
+    match source {
+        ExtensionSourceFilterArg::All => None,
+        ExtensionSourceFilterArg::Project => Some(ExtensionSource::Project),
+        ExtensionSourceFilterArg::CodexHome => Some(ExtensionSource::CodexHome),
+        ExtensionSourceFilterArg::UserHome => Some(ExtensionSource::UserHome),
+    }
+}
+
+fn extension_source_filter_name(source: ExtensionSourceFilterArg) -> &'static str {
+    match source {
+        ExtensionSourceFilterArg::All => "all",
+        ExtensionSourceFilterArg::Project => "project",
+        ExtensionSourceFilterArg::CodexHome => "codex_home",
+        ExtensionSourceFilterArg::UserHome => "user_home",
+    }
+}
+
+fn source_matches(requested: Option<ExtensionSource>, actual: ExtensionSource) -> bool {
+    match requested {
+        Some(expected) => expected == actual,
+        None => true,
+    }
 }

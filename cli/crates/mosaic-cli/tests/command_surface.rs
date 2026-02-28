@@ -143,6 +143,14 @@ fn models_help_includes_resolution_commands() {
             "models --help missing expected subcommand: {name}\n{help}"
         );
     }
+
+    let list_help = run_help(&["models", "list", "--help"]);
+    for option in ["--query", "--limit"] {
+        assert!(
+            list_help.contains(option),
+            "models list --help missing expected option: {option}\n{list_help}"
+        );
+    }
 }
 
 #[test]
@@ -306,7 +314,7 @@ fn browser_help_includes_navigation_and_history_commands() {
 #[allow(deprecated)]
 fn memory_help_includes_index_and_search_commands() {
     let help = run_help(&["memory", "--help"]);
-    let expected = ["index", "search", "status"];
+    let expected = ["index", "search", "status", "clear"];
 
     for name in expected {
         assert!(
@@ -342,6 +350,12 @@ fn plugins_help_includes_management_commands() {
             "plugins --help missing expected subcommand: {name}\n{help}"
         );
     }
+
+    let list_help = run_help(&["plugins", "list", "--help"]);
+    assert!(
+        list_help.contains("--source"),
+        "plugins list --help missing expected option --source:\n{list_help}"
+    );
 }
 
 #[test]
@@ -356,6 +370,12 @@ fn skills_help_includes_management_commands() {
             "skills --help missing expected subcommand: {name}\n{help}"
         );
     }
+
+    let list_help = run_help(&["skills", "list", "--help"]);
+    assert!(
+        list_help.contains("--source"),
+        "skills list --help missing expected option --source:\n{list_help}"
+    );
 }
 
 #[test]

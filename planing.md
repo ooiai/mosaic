@@ -32,7 +32,7 @@ Generated: 2026-02-26
 | --- | --- | --- | --- |
 | `setup`, `onboard` | `setup` + alias `onboard` | done | 100% |
 | `configure`, `config` | `configure` + alias `config` | partial | 85% |
-| `models` | `models list/status/resolve/set/aliases/fallbacks` | partial | 80% |
+| `models` | `models list/status/resolve/set/aliases/fallbacks` (`list` includes `--query/--limit`) | partial | 82% |
 | `message` | `ask` + alias `message` + stdin prompt (`ask -`) + file/script input (`--prompt-file`, `--script`, including `--script -`) + batch session chaining in script mode | partial | 84% |
 | `agent` | `chat` + alias `agent` + extended REPL commands (`/status`, `/agent`, `/session`, `/new`) + stdin prompt (`chat --prompt -`) + prompt/script files (`--prompt-file`, `--script`) | partial | 82% |
 | `agents` | `agents list/add/update/show/remove/default/route` | partial | 80% |
@@ -47,9 +47,9 @@ Generated: 2026-02-26
 | `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject`) | partial | 82% |
 | `hooks`, `cron`, `webhooks` | same command families | partial | 80% |
 | `browser` | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | partial | 84% |
-| `memory` | `memory index/search/status` | partial | 75% |
+| `memory` | `memory index/search/status/clear` | partial | 82% |
 | `security` | `security audit/baseline` | partial | 90% |
-| `plugins`, `skills` | list/info/check/install/remove | partial | 75% |
+| `plugins`, `skills` | list (`--source`)/info/check/install/remove | partial | 80% |
 | `directory` | `directory` (state path introspection + `--ensure` + `--check-writable`) | partial | 80% |
 | `completion` | `completion shell/install` | partial | 80% |
 | `dashboard` | `dashboard` (operational snapshot: config/sessions/agents/channels/gateway/policy/memory/presence) | partial | 80% |
@@ -67,7 +67,7 @@ Generated: 2026-02-26
 - Planned command entries observed: `44`
 - Mosaic covered entries: `44`
 - Command entry coverage: `100%`
-- Weighted functional parity (estimated): `~99.3%`
+- Weighted functional parity (estimated): `~99.4%`
 
 ## Implementation Queue (Execute In Order)
 

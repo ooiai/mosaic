@@ -6,7 +6,7 @@ This file tracks Mosaic CLI command/module coverage and pending gaps.
 
 | Module | Mosaic Command Surface | Status |
 | --- | --- | --- |
-| Core agent | `setup` (`onboard` alias), `configure` (`config` alias), `models` (includes `resolve`), `ask` (`message` alias, supports stdin via `-`, plus `--prompt-file/--script` including `-` stdin source), `chat` (`agent` alias, REPL `/status` `/agent` `/session` `/new`, supports `--prompt -`, `--prompt-file`, `--script`), `session` (`sessions` alias) | Partial |
+| Core agent | `setup` (`onboard` alias), `configure` (`config` alias), `models` (includes `list --query/--limit` and `resolve`), `ask` (`message` alias, supports stdin via `-`, plus `--prompt-file/--script` including `-` stdin source), `chat` (`agent` alias, REPL `/status` `/agent` `/session` `/new`, supports `--prompt -`, `--prompt-file`, `--script`), `session` (`sessions` alias) | Partial |
 | Gateway | `gateway install/start/restart/status/health/probe/discover/call/stop/uninstall` (`daemon` alias) | Partial |
 | Channels | `channels add/update/list/status/login/send/test/logs/capabilities/resolve/export/import/rotate-token-env/remove/logout` | Partial |
 | Nodes/devices/pairing | `nodes` (`node` alias), `devices`, `pairing list/request/approve/reject` | Partial |
@@ -16,10 +16,10 @@ This file tracks Mosaic CLI command/module coverage and pending gaps.
 | Browser | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | Partial |
 | Ops | `logs` (tail/follow/source), `system event/presence/list` (tail/name filter) | Partial |
 | Policy | `approvals` (`acp` alias, includes `check` and `allowlist list`), `sandbox get/set/check/list/explain` | Partial |
-| Memory | `memory index/search/status` | Partial |
+| Memory | `memory index/search/status/clear` | Partial |
 | Security | `security audit`, `security baseline` | Partial |
 | Agents | `agents list/add/update/show/remove/default/route` | Partial |
-| Plugins/skills | `plugins`, `skills` minimal runtime (`list/info/check/install/remove`) | Partial |
+| Plugins/skills | `plugins`, `skills` minimal runtime (`list --source/info/check/install/remove`) | Partial |
 | Diagnostics | `dashboard` (operational snapshot), `status`, `health`, `doctor`, `directory` (`--ensure`, `--check-writable`), `completion shell/install` | Partial |
 | Maintenance | `update` (semantic compare), `reset`, top-level `uninstall` | Partial |
 | Discovery | `docs [topic]`, `dns resolve <host> [--port]` | Partial |

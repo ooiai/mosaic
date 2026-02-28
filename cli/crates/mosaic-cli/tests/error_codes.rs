@@ -605,6 +605,84 @@ fn models_resolve_empty_model_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn models_list_empty_query_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "models",
+            "list",
+            "--query",
+            "   ",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn models_list_zero_limit_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "models",
+            "list",
+            "--limit",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
 fn channels_add_with_unsupported_kind_returns_channel_unsupported_exit_code() {
     let temp = tempdir().expect("tempdir");
     let output = Command::cargo_bin("mosaic")

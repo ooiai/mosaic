@@ -41,6 +41,34 @@ fn plugins_and_skills_list_info_check_flow() {
             .any(|item| item["id"].as_str() == Some("demo"))
     );
 
+    let plugins_list_project = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "plugins",
+            "list",
+            "--source",
+            "project",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugins_list_project: Value =
+        serde_json::from_slice(&plugins_list_project).expect("plugins list project json");
+    assert_eq!(plugins_list_project["ok"], true);
+    assert_eq!(plugins_list_project["source_filter"], "project");
+    assert!(
+        plugins_list_project["plugins"]
+            .as_array()
+            .expect("project plugins array")
+            .iter()
+            .all(|item| item["source"].as_str() == Some("project"))
+    );
+
     let plugins_info = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -86,6 +114,34 @@ fn plugins_and_skills_list_info_check_flow() {
             .expect("skills array")
             .iter()
             .any(|item| item["id"].as_str() == Some("writer"))
+    );
+
+    let skills_list_project = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "skills",
+            "list",
+            "--source",
+            "project",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let skills_list_project: Value =
+        serde_json::from_slice(&skills_list_project).expect("skills list project json");
+    assert_eq!(skills_list_project["ok"], true);
+    assert_eq!(skills_list_project["source_filter"], "project");
+    assert!(
+        skills_list_project["skills"]
+            .as_array()
+            .expect("project skills array")
+            .iter()
+            .all(|item| item["source"].as_str() == Some("project"))
     );
 
     let skills_info = Command::cargo_bin("mosaic")

@@ -71,6 +71,11 @@ log "Step 1: setup/models/ask/session smoke in isolated workspace"
 require_contains "$TMP_ROOT/models.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/models.json" '"mock-model"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json models list --query mock --limit 1 >"$TMP_ROOT/models_filtered.json")
+require_contains "$TMP_ROOT/models_filtered.json" '"ok"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/models_filtered.json" '"query"[[:space:]]*:[[:space:]]*"mock"'
+require_contains "$TMP_ROOT/models_filtered.json" '"returned_models"[[:space:]]*:[[:space:]]*1'
+
 (cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="mock-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json ask "hello from smoke" >"$TMP_ROOT/ask.json")
 require_contains "$TMP_ROOT/ask.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/ask.json" '"response"[[:space:]]*:[[:space:]]*"mock-answer"'
@@ -392,7 +397,7 @@ require_contains "$TMP_ROOT/agents_resolve.json" '"agent_id"[[:space:]]*:[[:spac
 (cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="agents-smoke-ok" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json ask "hello agents" >"$TMP_ROOT/agents_ask.json")
 require_contains "$TMP_ROOT/agents_ask.json" '"response"[[:space:]]*:[[:space:]]*"agents-smoke-ok"'
 
-log "Step 10: memory index/search/status"
+log "Step 10: memory index/search/status/clear"
 printf "Rust memory smoke test document\n" >"$SRC_DIR/memory-smoke.txt"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json memory index --path . --max-files 200 >"$TMP_ROOT/memory_index.json")
 require_contains "$TMP_ROOT/memory_index.json" '"indexed_documents"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
@@ -402,6 +407,13 @@ require_contains "$TMP_ROOT/memory_search.json" '"total_hits"[[:space:]]*:[[:spa
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json memory status >"$TMP_ROOT/memory_status.json")
 require_contains "$TMP_ROOT/memory_status.json" '"indexed_documents"[[:space:]]*:[[:space:]]*[1-9][0-9]*'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json memory clear >"$TMP_ROOT/memory_clear.json")
+require_contains "$TMP_ROOT/memory_clear.json" '"removed_index"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/memory_clear.json" '"removed_status"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json memory status >"$TMP_ROOT/memory_status_after_clear.json")
+require_contains "$TMP_ROOT/memory_status_after_clear.json" '"indexed_documents"[[:space:]]*:[[:space:]]*0'
 
 log "Step 11: security audit + baseline + sarif"
 printf "API_KEY = \"sk-live-secret-value-123456\"\n" >"$SRC_DIR/secrets.env"
@@ -440,8 +452,16 @@ require_contains "$TMP_ROOT/skills_install.json" '"id"[[:space:]]*:[[:space:]]*"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json plugins check sample_plugin >"$TMP_ROOT/plugins_check.json")
 require_contains "$TMP_ROOT/plugins_check.json" '"ok"[[:space:]]*:[[:space:]]*true'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json plugins list --source project >"$TMP_ROOT/plugins_list_project.json")
+require_contains "$TMP_ROOT/plugins_list_project.json" '"source_filter"[[:space:]]*:[[:space:]]*"project"'
+require_contains "$TMP_ROOT/plugins_list_project.json" '"id"[[:space:]]*:[[:space:]]*"sample_plugin"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json skills check writer >"$TMP_ROOT/skills_check.json")
 require_contains "$TMP_ROOT/skills_check.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json skills list --source project >"$TMP_ROOT/skills_list_project.json")
+require_contains "$TMP_ROOT/skills_list_project.json" '"source_filter"[[:space:]]*:[[:space:]]*"project"'
+require_contains "$TMP_ROOT/skills_list_project.json" '"id"[[:space:]]*:[[:space:]]*"writer"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json plugins remove sample_plugin >"$TMP_ROOT/plugins_remove.json")
 require_contains "$TMP_ROOT/plugins_remove.json" '"removed"[[:space:]]*:[[:space:]]*true'

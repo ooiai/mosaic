@@ -78,6 +78,35 @@ fn memory_index_search_status_flow() {
             .unwrap_or(0)
             >= 2
     );
+
+    let clear_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "memory", "clear"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let clear_json: Value = serde_json::from_slice(&clear_output).expect("clear json");
+    assert_eq!(clear_json["ok"], true);
+    assert_eq!(clear_json["cleared"]["removed_index"], true);
+    assert_eq!(clear_json["cleared"]["removed_status"], true);
+
+    let status_after_clear_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "memory", "status"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_after_clear_json: Value =
+        serde_json::from_slice(&status_after_clear_output).expect("status-after-clear json");
+    assert_eq!(status_after_clear_json["ok"], true);
+    assert_eq!(status_after_clear_json["status"]["indexed_documents"], 0);
+    assert!(status_after_clear_json["status"]["last_indexed_at"].is_null());
 }
 
 #[test]

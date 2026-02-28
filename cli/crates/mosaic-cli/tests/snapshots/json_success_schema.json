@@ -53,6 +53,8 @@
     "type": "string"
   },
   "models_list": {
+    "limit": "null",
+    "matched_models": "number",
     "models": {
       "items": [
         {
@@ -62,7 +64,10 @@
       ],
       "type": "array"
     },
-    "ok": "bool"
+    "ok": "bool",
+    "query": "null",
+    "returned_models": "number",
+    "total_models": "number"
   },
   "setup": {
     "config_path": "string",
