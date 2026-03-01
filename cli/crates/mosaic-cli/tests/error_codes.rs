@@ -1387,3 +1387,100 @@ fn browser_screenshot_without_visits_returns_validation_exit_code() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "validation");
 }
+
+#[test]
+#[allow(deprecated)]
+fn plugins_disable_missing_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "disable", "missing"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn configure_set_invalid_key_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "set",
+            "unknown.key",
+            "value",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn configure_subcommand_with_legacy_flags_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "--show",
+            "get",
+            "provider.base_url",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}

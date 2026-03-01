@@ -40,6 +40,13 @@ fn plugins_and_skills_list_info_check_flow() {
             .iter()
             .any(|item| item["id"].as_str() == Some("demo"))
     );
+    assert!(
+        plugins_list["plugins"]
+            .as_array()
+            .expect("plugins array")
+            .iter()
+            .all(|item| item["enabled"].is_boolean())
+    );
 
     let plugins_list_project = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -82,6 +89,35 @@ fn plugins_and_skills_list_info_check_flow() {
     assert_eq!(plugins_info["ok"], true);
     assert_eq!(plugins_info["plugin"]["id"], "demo");
     assert_eq!(plugins_info["plugin"]["manifest_valid"], true);
+    assert_eq!(plugins_info["plugin"]["enabled"], true);
+
+    let plugins_disable = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "disable", "demo"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugins_disable: Value =
+        serde_json::from_slice(&plugins_disable).expect("plugins disable json");
+    assert_eq!(plugins_disable["ok"], true);
+    assert_eq!(plugins_disable["enabled"], false);
+
+    let plugins_info_disabled = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "info", "demo"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugins_info_disabled: Value =
+        serde_json::from_slice(&plugins_info_disabled).expect("plugins info disabled json");
+    assert_eq!(plugins_info_disabled["ok"], true);
+    assert_eq!(plugins_info_disabled["plugin"]["enabled"], false);
 
     let plugins_check = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -96,6 +132,35 @@ fn plugins_and_skills_list_info_check_flow() {
     assert_eq!(plugins_check["ok"], true);
     assert_eq!(plugins_check["report"]["ok"], true);
     assert_eq!(plugins_check["report"]["checked"], 1);
+
+    let plugins_doctor = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "doctor"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugins_doctor: Value =
+        serde_json::from_slice(&plugins_doctor).expect("plugins doctor json");
+    assert_eq!(plugins_doctor["ok"], true);
+    assert_eq!(plugins_doctor["doctor"]["plugins_total"], 1);
+    assert_eq!(plugins_doctor["doctor"]["disabled_plugins"], 1);
+
+    let plugins_enable = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "enable", "demo"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugins_enable: Value =
+        serde_json::from_slice(&plugins_enable).expect("plugins enable json");
+    assert_eq!(plugins_enable["ok"], true);
+    assert_eq!(plugins_enable["enabled"], true);
 
     let skills_list = Command::cargo_bin("mosaic")
         .expect("binary")

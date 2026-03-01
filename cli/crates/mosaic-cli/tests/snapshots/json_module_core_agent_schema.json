@@ -15,6 +15,24 @@
     "session_id": "string",
     "turns": "number"
   },
+  "configure_get": {
+    "action": "string",
+    "changed": "bool",
+    "config_path": "string",
+    "key": "string",
+    "ok": "bool",
+    "profile": "string",
+    "value": "bool"
+  },
+  "configure_set": {
+    "action": "string",
+    "changed": "bool",
+    "config_path": "string",
+    "key": "string",
+    "ok": "bool",
+    "profile": "string",
+    "value": "bool"
+  },
   "configure_show": {
     "changed": "bool",
     "config": {
@@ -45,6 +63,15 @@
     "config_path": "string",
     "ok": "bool",
     "profile": "string"
+  },
+  "configure_unset": {
+    "action": "string",
+    "changed": "bool",
+    "config_path": "string",
+    "key": "string",
+    "ok": "bool",
+    "profile": "string",
+    "value": "bool"
   },
   "doctor": {
     "checks": {

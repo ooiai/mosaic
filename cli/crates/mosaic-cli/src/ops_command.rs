@@ -9,9 +9,9 @@ use mosaic_ops::{
 };
 
 use super::{
-    AllowlistCommand, ApprovalsArgs, ApprovalsCommand, Cli, LogsArgs, SandboxArgs, SandboxCommand,
-    SystemArgs, SystemCommand, dispatch_system_event, parse_json_input, print_json,
-    resolve_state_paths,
+    AllowlistCommand, ApprovalsArgs, ApprovalsCommand, Cli, LogsArgs, SafetyArgs, SafetyCommand,
+    SandboxArgs, SandboxCommand, SystemArgs, SystemCommand, dispatch_system_event,
+    parse_json_input, print_json, resolve_state_paths,
 };
 
 pub(super) async fn handle_logs(cli: &Cli, args: LogsArgs) -> Result<()> {
@@ -75,6 +75,82 @@ fn filter_logs(entries: Vec<UnifiedLogEntry>, source_filter: Option<&str>) -> Ve
             .filter(|entry| entry.source == source)
             .collect(),
         None => entries,
+    }
+}
+
+struct ApprovalDecisionView {
+    decision: &'static str,
+    reason: Option<String>,
+    approved_by: Option<String>,
+}
+
+struct SafetyCheckView {
+    command: String,
+    decision: &'static str,
+    reason: Option<String>,
+    approved_by: Option<String>,
+    sandbox_decision: &'static str,
+    sandbox_reason: Option<String>,
+    approval_decision: &'static str,
+    approval_reason: Option<String>,
+    approval_mode: String,
+    sandbox_profile: String,
+}
+
+fn approval_decision_view(decision: ApprovalDecision) -> ApprovalDecisionView {
+    match decision {
+        ApprovalDecision::Auto { approved_by } => ApprovalDecisionView {
+            decision: "auto",
+            reason: None,
+            approved_by: Some(approved_by),
+        },
+        ApprovalDecision::NeedsConfirmation { reason } => ApprovalDecisionView {
+            decision: "confirm",
+            reason: Some(reason),
+            approved_by: None,
+        },
+        ApprovalDecision::Deny { reason } => ApprovalDecisionView {
+            decision: "deny",
+            reason: Some(reason),
+            approved_by: None,
+        },
+    }
+}
+
+fn evaluate_safety(
+    command: &str,
+    policy: &mosaic_ops::ApprovalPolicy,
+    profile: mosaic_ops::SandboxProfile,
+) -> SafetyCheckView {
+    let sandbox_reason = evaluate_sandbox(command, profile);
+    let sandbox_decision = if sandbox_reason.is_some() {
+        "deny"
+    } else {
+        "allow"
+    };
+    let approval = approval_decision_view(evaluate_approval(command, policy));
+
+    let (decision, reason) = if let Some(reason) = sandbox_reason.clone() {
+        ("deny", Some(reason))
+    } else {
+        match approval.decision {
+            "deny" => ("deny", approval.reason.clone()),
+            "confirm" => ("confirm", approval.reason.clone()),
+            _ => ("allow", None),
+        }
+    };
+
+    SafetyCheckView {
+        command: command.to_string(),
+        decision,
+        reason,
+        approved_by: approval.approved_by.clone(),
+        sandbox_decision,
+        sandbox_reason,
+        approval_decision: approval.decision,
+        approval_reason: approval.reason,
+        approval_mode: format!("{:?}", policy.mode).to_lowercase(),
+        sandbox_profile: format!("{:?}", profile).to_lowercase(),
     }
 }
 
@@ -164,29 +240,24 @@ pub(super) fn handle_approvals(cli: &Cli, args: ApprovalsArgs) -> Result<()> {
     let policy = match args.command {
         ApprovalsCommand::Check { command } => {
             let policy = store.load_or_default()?;
-            let decision = evaluate_approval(&command, &policy);
-            let (decision_name, reason, approved_by) = match decision {
-                ApprovalDecision::Auto { approved_by } => ("auto", None, Some(approved_by)),
-                ApprovalDecision::NeedsConfirmation { reason } => ("confirm", Some(reason), None),
-                ApprovalDecision::Deny { reason } => ("deny", Some(reason), None),
-            };
+            let approval = approval_decision_view(evaluate_approval(&command, &policy));
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "command": command,
-                    "decision": decision_name,
-                    "approved_by": approved_by,
-                    "reason": reason,
+                    "decision": approval.decision,
+                    "approved_by": approval.approved_by,
+                    "reason": approval.reason,
                     "policy_mode": policy.mode,
                     "path": store.path().display().to_string(),
                 }));
             } else {
                 println!("command: {command}");
-                println!("decision: {decision_name}");
-                if let Some(approved_by) = approved_by {
+                println!("decision: {}", approval.decision);
+                if let Some(approved_by) = approval.approved_by {
                     println!("approved_by: {approved_by}");
                 }
-                if let Some(reason) = reason {
+                if let Some(reason) = approval.reason {
                     println!("reason: {reason}");
                 }
                 println!("approvals mode: {:?}", policy.mode);
@@ -319,5 +390,177 @@ pub(super) fn handle_sandbox(cli: &Cli, args: SandboxArgs) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+pub(super) fn handle_safety(cli: &Cli, args: SafetyArgs) -> Result<()> {
+    let paths = resolve_state_paths(cli.project_state)?;
+    paths.ensure_dirs()?;
+    let approval_store = ApprovalStore::new(paths.approvals_policy_path.clone());
+    let sandbox_store = SandboxStore::new(paths.sandbox_policy_path.clone());
+    let approval_policy = approval_store.load_or_default()?;
+    let sandbox_policy = sandbox_store.load_or_default()?;
+
+    match args.command {
+        SafetyCommand::Get => {
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "approvals": {
+                        "policy": approval_policy,
+                        "path": approval_store.path().display().to_string(),
+                    },
+                    "sandbox": {
+                        "policy": sandbox_policy,
+                        "path": sandbox_store.path().display().to_string(),
+                    },
+                }));
+            } else {
+                println!("approvals mode: {:?}", approval_policy.mode);
+                if approval_policy.allowlist.is_empty() {
+                    println!("approvals allowlist: <empty>");
+                } else {
+                    println!("approvals allowlist:");
+                    for item in approval_policy.allowlist {
+                        println!("- {item}");
+                    }
+                }
+                println!("approvals path: {}", approval_store.path().display());
+                println!("sandbox profile: {:?}", sandbox_policy.profile);
+                println!("sandbox path: {}", sandbox_store.path().display());
+            }
+        }
+        SafetyCommand::Check { command } => {
+            let check = evaluate_safety(&command, &approval_policy, sandbox_policy.profile);
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "command": check.command,
+                    "decision": check.decision,
+                    "reason": check.reason,
+                    "approved_by": check.approved_by,
+                    "sandbox": {
+                        "profile": check.sandbox_profile,
+                        "decision": check.sandbox_decision,
+                        "reason": check.sandbox_reason,
+                    },
+                    "approvals": {
+                        "mode": check.approval_mode,
+                        "decision": check.approval_decision,
+                        "reason": check.approval_reason,
+                    },
+                    "paths": {
+                        "approvals_policy": approval_store.path().display().to_string(),
+                        "sandbox_policy": sandbox_store.path().display().to_string(),
+                    }
+                }));
+            } else {
+                println!("command: {}", check.command);
+                println!("decision: {}", check.decision);
+                if let Some(reason) = check.reason {
+                    println!("reason: {reason}");
+                }
+                if let Some(approved_by) = check.approved_by {
+                    println!("approved_by: {approved_by}");
+                }
+                println!(
+                    "sandbox: {} ({})",
+                    check.sandbox_profile, check.sandbox_decision
+                );
+                if let Some(reason) = check.sandbox_reason {
+                    println!("sandbox_reason: {reason}");
+                }
+                println!(
+                    "approvals: {} ({})",
+                    check.approval_mode, check.approval_decision
+                );
+                if let Some(reason) = check.approval_reason {
+                    println!("approval_reason: {reason}");
+                }
+            }
+        }
+        SafetyCommand::Report { command } => {
+            let profile = mosaic_ops::profile_info(sandbox_policy.profile);
+            let check = command
+                .as_deref()
+                .map(|value| evaluate_safety(value, &approval_policy, sandbox_policy.profile));
+            let profiles = list_profiles();
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "approvals": {
+                        "policy": approval_policy,
+                        "path": approval_store.path().display().to_string(),
+                    },
+                    "sandbox": {
+                        "policy": sandbox_policy,
+                        "path": sandbox_store.path().display().to_string(),
+                        "profile_info": profile,
+                        "profiles": profiles,
+                    },
+                    "check": check.map(|value| json!({
+                        "command": value.command,
+                        "decision": value.decision,
+                        "reason": value.reason,
+                        "approved_by": value.approved_by,
+                        "sandbox": {
+                            "profile": value.sandbox_profile,
+                            "decision": value.sandbox_decision,
+                            "reason": value.sandbox_reason,
+                        },
+                        "approvals": {
+                            "mode": value.approval_mode,
+                            "decision": value.approval_decision,
+                            "reason": value.approval_reason,
+                        },
+                    })),
+                }));
+            } else {
+                println!("safety report");
+                println!("approvals mode: {:?}", approval_policy.mode);
+                println!(
+                    "approvals allowlist entries: {}",
+                    approval_policy.allowlist.len()
+                );
+                println!("sandbox profile: {:?}", sandbox_policy.profile);
+                println!("sandbox description: {}", profile.description);
+                if profile.blocked_examples.is_empty() {
+                    println!("sandbox blocked examples: <none>");
+                } else {
+                    println!("sandbox blocked examples:");
+                    for example in profile.blocked_examples {
+                        println!("- {example}");
+                    }
+                }
+                if let Some(check) = check {
+                    println!("check.command: {}", check.command);
+                    println!("check.decision: {}", check.decision);
+                    if let Some(reason) = check.reason {
+                        println!("check.reason: {reason}");
+                    }
+                    if let Some(approved_by) = check.approved_by {
+                        println!("check.approved_by: {approved_by}");
+                    }
+                    println!(
+                        "check.sandbox: {} ({})",
+                        check.sandbox_profile, check.sandbox_decision
+                    );
+                    if let Some(reason) = check.sandbox_reason {
+                        println!("check.sandbox_reason: {reason}");
+                    }
+                    println!(
+                        "check.approvals: {} ({})",
+                        check.approval_mode, check.approval_decision
+                    );
+                    if let Some(reason) = check.approval_reason {
+                        println!("check.approval_reason: {reason}");
+                    }
+                }
+                println!("approvals path: {}", approval_store.path().display());
+                println!("sandbox path: {}", sandbox_store.path().display());
+            }
+        }
+    }
+
     Ok(())
 }

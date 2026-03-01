@@ -61,7 +61,7 @@ use gateway_runtime::{
 };
 use maintenance_commands::{handle_reset, handle_uninstall, handle_update};
 use nodes_command::handle_nodes;
-use ops_command::{handle_approvals, handle_logs, handle_sandbox, handle_system};
+use ops_command::{handle_approvals, handle_logs, handle_safety, handle_sandbox, handle_system};
 #[cfg(test)]
 use runtime_context::ModelRoutingProvider;
 use runtime_context::{build_runtime, resolve_effective_model, resolve_state_paths};
@@ -141,6 +141,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::System(args) => handle_system(&cli, args),
         Commands::Approvals(args) => handle_approvals(&cli, args),
         Commands::Sandbox(args) => handle_sandbox(&cli, args),
+        Commands::Safety(args) => handle_safety(&cli, args),
         Commands::Memory(args) => handle_memory(&cli, args),
         Commands::Security(args) => handle_security(&cli, args),
         Commands::Agents(args) => handle_agents(&cli, args),

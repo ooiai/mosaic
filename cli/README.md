@@ -13,7 +13,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
 - Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
 - Browser runtime (`browser start|stop|status|open|navigate|history|tabs|show|focus|snapshot|screenshot|close|clear`)
-- Ops runtime (`logs`, `system`, `approvals`, `sandbox`)
+- Ops runtime (`logs`, `system`, `approvals`, `sandbox`, `safety`)
 - CLI compatibility/runtime helpers (`completion shell|install`, `directory`)
 - Maintenance runtime (`update`, `reset`, `uninstall`)
 - Discovery/runtime helpers (`docs`, `dns resolve`)
@@ -22,7 +22,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Memory runtime (`memory index|search|status|clear`)
 - Security runtime (`security audit`)
 - Agents runtime (`agents list|add|update|show|remove|default|route`)
-- Plugins and skills runtime (`plugins list|info|check|install|remove`, `skills list|info|check|install|remove`)
+- Plugins and skills runtime (`plugins list|info|check|install|enable|disable|doctor|remove`, `skills list|info|check|install|remove`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
 - Command aliases for legacy naming compatibility:
@@ -145,6 +145,15 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --json clawbot status
 cargo run -p mosaic-cli --bin mosaic -- --project-state setup \
   --base-url https://api.openai.com \
   --model gpt-4o-mini
+```
+
+### Configure (Profile Keys)
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure --show
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure get provider.base_url
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure set tools.enabled false
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure unset tools.enabled
 ```
 
 ### List Models
@@ -452,6 +461,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox set restricted
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox check --command "curl https://example.com"
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox list
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox explain --profile restricted
+cargo run -p mosaic-cli --bin mosaic -- --project-state safety get
+cargo run -p mosaic-cli --bin mosaic -- --project-state safety check --command "cargo test --workspace"
+cargo run -p mosaic-cli --bin mosaic -- --project-state safety report --command "curl https://example.com"
 ```
 
 ### Memory Runtime
@@ -496,6 +508,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state plugins list --source pr
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins info <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins check
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins install --path ./my-plugin
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins enable <plugin-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins disable <plugin-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state plugins doctor
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins remove <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills list
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills list --source project

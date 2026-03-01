@@ -37,6 +37,7 @@ fn root_help_includes_expected_commands() {
         "system",
         "approvals",
         "sandbox",
+        "safety",
         "memory",
         "security",
         "agents",
@@ -149,6 +150,18 @@ fn models_help_includes_resolution_commands() {
         assert!(
             list_help.contains(option),
             "models list --help missing expected option: {option}\n{list_help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn configure_help_includes_get_set_unset_commands() {
+    let help = run_help(&["configure", "--help"]);
+    for token in ["--show", "--base-url", "get", "set", "unset"] {
+        assert!(
+            help.contains(token),
+            "configure --help missing expected token: {token}\n{help}"
         );
     }
 }
@@ -342,7 +355,9 @@ fn security_help_includes_audit_and_baseline_commands() {
 #[allow(deprecated)]
 fn plugins_help_includes_management_commands() {
     let help = run_help(&["plugins", "--help"]);
-    let expected = ["list", "info", "check", "install", "remove"];
+    let expected = [
+        "list", "info", "check", "install", "enable", "disable", "doctor", "remove",
+    ];
 
     for name in expected {
         assert!(
@@ -444,6 +459,20 @@ fn sandbox_help_includes_profile_commands() {
         assert!(
             help.contains(name),
             "sandbox --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn safety_help_includes_get_check_report_commands() {
+    let help = run_help(&["safety", "--help"]);
+    let expected = ["get", "check", "report"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "safety --help missing expected subcommand: {name}\n{help}"
         );
     }
 }

@@ -54,6 +54,7 @@ enum Commands {
     #[command(visible_alias = "acp")]
     Approvals(ApprovalsArgs),
     Sandbox(SandboxArgs),
+    Safety(SafetyArgs),
     Memory(MemoryArgs),
     Security(SecurityArgs),
     Agents(AgentsArgs),
@@ -95,6 +96,8 @@ struct SetupArgs {
 
 #[derive(Args, Debug, Clone)]
 struct ConfigureArgs {
+    #[command(subcommand)]
+    command: Option<ConfigureCommand>,
     #[arg(long)]
     show: bool,
     #[arg(long)]
@@ -111,6 +114,20 @@ struct ConfigureArgs {
     tools_enabled: Option<bool>,
     #[arg(long, value_enum)]
     guard_mode: Option<GuardModeArg>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ConfigureCommand {
+    Get {
+        key: String,
+    },
+    Set {
+        key: String,
+        value: String,
+    },
+    Unset {
+        key: String,
+    },
 }
 
 #[derive(Args, Debug, Clone)]
@@ -795,6 +812,25 @@ enum SandboxCommand {
 }
 
 #[derive(Args, Debug, Clone)]
+struct SafetyArgs {
+    #[command(subcommand)]
+    command: SafetyCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum SafetyCommand {
+    Get,
+    Check {
+        #[arg(long)]
+        command: String,
+    },
+    Report {
+        #[arg(long)]
+        command: Option<String>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
 struct MemoryArgs {
     #[command(subcommand)]
     command: MemoryCommand,
@@ -1004,6 +1040,13 @@ enum PluginsCommand {
         #[arg(long)]
         force: bool,
     },
+    Enable {
+        plugin_id: String,
+    },
+    Disable {
+        plugin_id: String,
+    },
+    Doctor,
     Remove {
         plugin_id: String,
     },
