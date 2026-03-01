@@ -1,11 +1,13 @@
-use std::path::PathBuf;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use mosaic_core::error::MosaicError;
 use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
-use mosaic_plugins::{ExtensionRegistry, ExtensionSource, RegistryRoots};
+use mosaic_plugins::{ExtensionRegistry, ExtensionSource, PluginEntry, RegistryRoots};
 
 use super::{
     BrowserArgs, BrowserCommand, Cli, ExtensionSourceFilterArg, MemoryArgs, MemoryCommand,
@@ -14,6 +16,56 @@ use super::{
     load_browser_state_or_default, print_json, resolve_state_paths, save_browser_history,
     save_browser_state,
 };
+
+const PLUGIN_STATE_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PluginStateFile {
+    version: u32,
+    disabled_plugins: Vec<String>,
+}
+
+impl Default for PluginStateFile {
+    fn default() -> Self {
+        Self {
+            version: PLUGIN_STATE_VERSION,
+            disabled_plugins: Vec::new(),
+        }
+    }
+}
+
+impl PluginStateFile {
+    fn is_enabled(&self, plugin_id: &str) -> bool {
+        !self.disabled_plugins.iter().any(|item| item == plugin_id)
+    }
+
+    fn set_enabled(&mut self, plugin_id: &str, enabled: bool) -> bool {
+        let normalized = plugin_id.trim();
+        if normalized.is_empty() {
+            return false;
+        }
+        let mut disabled = self
+            .disabled_plugins
+            .iter()
+            .map(|item| item.trim().to_string())
+            .filter(|item| !item.is_empty())
+            .collect::<BTreeSet<_>>();
+        let changed = if enabled {
+            disabled.remove(normalized)
+        } else {
+            disabled.insert(normalized.to_string())
+        };
+        self.disabled_plugins = disabled.into_iter().collect();
+        changed
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PluginView {
+    #[serde(flatten)]
+    plugin: PluginEntry,
+    enabled: bool,
+}
 
 pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
@@ -502,6 +554,8 @@ pub(super) fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
     let registry = ExtensionRegistry::new(RegistryRoots::from_state_root(paths.root_dir.clone()));
+    let plugin_state_path = paths.data_dir.join("plugins-state.json");
+    let mut plugin_state = load_plugin_state(&plugin_state_path)?;
 
     match args.command {
         PluginsCommand::List { source } => {
@@ -511,53 +565,66 @@ pub(super) fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
                 .into_iter()
                 .filter(|entry| source_matches(requested_source, entry.source))
                 .collect::<Vec<_>>();
+            let plugin_views = plugin_views_with_state(plugins, &plugin_state);
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "source_filter": extension_source_filter_name(source),
-                    "count": plugins.len(),
-                    "plugins": plugins,
+                    "count": plugin_views.len(),
+                    "plugins": plugin_views,
                 }));
-            } else if plugins.is_empty() {
+            } else if plugin_views.is_empty() {
                 println!("No plugins found.");
             } else {
-                println!("plugins: {}", plugins.len());
+                println!("plugins: {}", plugin_views.len());
                 println!("source filter: {}", extension_source_filter_name(source));
-                for plugin in plugins {
+                for plugin in plugin_views {
                     println!(
-                        "- {} ({}) source={:?} version={} manifest_valid={}",
-                        plugin.id,
-                        plugin.name,
-                        plugin.source,
-                        plugin.version.unwrap_or_else(|| "-".to_string()),
-                        plugin.manifest_valid
+                        "- {} ({}) source={:?} enabled={} version={} manifest_valid={}",
+                        plugin.plugin.id,
+                        plugin.plugin.name,
+                        plugin.plugin.source,
+                        plugin.enabled,
+                        plugin.plugin.version.unwrap_or_else(|| "-".to_string()),
+                        plugin.plugin.manifest_valid
                     );
                 }
             }
         }
         PluginsCommand::Info { plugin_id } => {
             let plugin = registry.plugin_info(&plugin_id)?;
+            let plugin_view = PluginView {
+                enabled: plugin_state.is_enabled(&plugin.id),
+                plugin,
+            };
             if cli.json {
                 print_json(&json!({
                     "ok": true,
-                    "plugin": plugin,
+                    "plugin": plugin_view,
                 }));
             } else {
-                println!("id: {}", plugin.id);
-                println!("name: {}", plugin.name);
-                println!("source: {:?}", plugin.source);
+                println!("id: {}", plugin_view.plugin.id);
+                println!("name: {}", plugin_view.plugin.name);
+                println!("source: {:?}", plugin_view.plugin.source);
+                println!("enabled: {}", plugin_view.enabled);
                 println!(
                     "version: {}",
-                    plugin.version.unwrap_or_else(|| "-".to_string())
+                    plugin_view
+                        .plugin
+                        .version
+                        .unwrap_or_else(|| "-".to_string())
                 );
                 println!(
                     "description: {}",
-                    plugin.description.unwrap_or_else(|| "-".to_string())
+                    plugin_view
+                        .plugin
+                        .description
+                        .unwrap_or_else(|| "-".to_string())
                 );
-                println!("path: {}", plugin.path);
-                println!("manifest path: {}", plugin.manifest_path);
-                println!("manifest valid: {}", plugin.manifest_valid);
-                if let Some(error) = plugin.manifest_error {
+                println!("path: {}", plugin_view.plugin.path);
+                println!("manifest path: {}", plugin_view.plugin.manifest_path);
+                println!("manifest valid: {}", plugin_view.plugin.manifest_valid);
+                if let Some(error) = plugin_view.plugin.manifest_error {
                     println!("manifest error: {error}");
                 }
             }
@@ -597,10 +664,17 @@ pub(super) fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
                 }
             };
             let outcome = registry.install_plugin_from_path(&source, force)?;
+            let state_changed = plugin_state.set_enabled(&outcome.id, true);
+            if state_changed {
+                save_plugin_state(&plugin_state_path, &plugin_state)?;
+            }
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "installed": outcome,
+                    "enabled": true,
+                    "state_changed": state_changed,
+                    "state_path": plugin_state_path.display().to_string(),
                 }));
             } else {
                 println!(
@@ -610,18 +684,131 @@ pub(super) fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {
                 if outcome.replaced {
                     println!("replaced existing plugin package");
                 }
+                if state_changed {
+                    println!("plugin enabled in state: {}", plugin_state_path.display());
+                }
+            }
+        }
+        PluginsCommand::Enable { plugin_id } => {
+            let plugin = registry.plugin_info(&plugin_id)?;
+            let changed = plugin_state.set_enabled(&plugin.id, true);
+            if changed {
+                save_plugin_state(&plugin_state_path, &plugin_state)?;
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "plugin_id": plugin.id,
+                    "enabled": true,
+                    "changed": changed,
+                    "state_path": plugin_state_path.display().to_string(),
+                }));
+            } else {
+                println!("plugin: {}", plugin.id);
+                println!("enabled: true");
+                println!("changed: {changed}");
+                println!("state: {}", plugin_state_path.display());
+            }
+        }
+        PluginsCommand::Disable { plugin_id } => {
+            let plugin = registry.plugin_info(&plugin_id)?;
+            let changed = plugin_state.set_enabled(&plugin.id, false);
+            if changed {
+                save_plugin_state(&plugin_state_path, &plugin_state)?;
+            }
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "plugin_id": plugin.id,
+                    "enabled": false,
+                    "changed": changed,
+                    "state_path": plugin_state_path.display().to_string(),
+                }));
+            } else {
+                println!("plugin: {}", plugin.id);
+                println!("enabled: false");
+                println!("changed: {changed}");
+                println!("state: {}", plugin_state_path.display());
+            }
+        }
+        PluginsCommand::Doctor => {
+            let plugins = registry.list_plugins()?;
+            let report = registry.check_plugins(None)?;
+            let disabled_plugins = plugins
+                .iter()
+                .filter(|plugin| !plugin_state.is_enabled(&plugin.id))
+                .map(|plugin| plugin.id.clone())
+                .collect::<Vec<_>>();
+            let enabled_plugins = plugins.len().saturating_sub(disabled_plugins.len());
+            let installed_plugin_ids = plugins
+                .into_iter()
+                .map(|plugin| plugin.id)
+                .collect::<BTreeSet<_>>();
+            let stale_disabled_ids = plugin_state
+                .disabled_plugins
+                .iter()
+                .filter(|plugin_id| !installed_plugin_ids.contains(*plugin_id))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "doctor": {
+                        "plugins_total": report.checked,
+                        "enabled_plugins": enabled_plugins,
+                        "disabled_plugins": disabled_plugins.len(),
+                        "disabled_plugin_ids": disabled_plugins,
+                        "stale_disabled_ids": stale_disabled_ids,
+                        "state_path": plugin_state_path.display().to_string(),
+                        "health_ok": report.ok && stale_disabled_ids.is_empty(),
+                    },
+                    "report": report,
+                }));
+            } else {
+                println!("plugins total: {}", report.checked);
+                println!("enabled plugins: {enabled_plugins}");
+                println!("disabled plugins: {}", disabled_plugins.len());
+                println!("state path: {}", plugin_state_path.display());
+                if !disabled_plugins.is_empty() {
+                    println!("disabled ids: {}", disabled_plugins.join(", "));
+                }
+                if !stale_disabled_ids.is_empty() {
+                    println!("stale disabled ids: {}", stale_disabled_ids.join(", "));
+                }
+                println!(
+                    "doctor health: {}",
+                    if report.ok && stale_disabled_ids.is_empty() {
+                        "ok"
+                    } else {
+                        "warn"
+                    }
+                );
             }
         }
         PluginsCommand::Remove { plugin_id } => {
             let removed = registry.remove_project_plugin(&plugin_id)?;
+            let state_changed = if removed {
+                let changed = plugin_state.set_enabled(&plugin_id, true);
+                if changed {
+                    save_plugin_state(&plugin_state_path, &plugin_state)?;
+                }
+                changed
+            } else {
+                false
+            };
             if cli.json {
                 print_json(&json!({
                     "ok": true,
                     "removed": removed,
                     "plugin_id": plugin_id,
+                    "state_changed": state_changed,
                 }));
             } else if removed {
                 println!("Removed plugin {plugin_id}");
+                if state_changed {
+                    println!("cleared plugin state entry");
+                }
             } else {
                 println!("Plugin {plugin_id} not found in project scope.");
             }
@@ -770,4 +957,67 @@ fn source_matches(requested: Option<ExtensionSource>, actual: ExtensionSource) -
         Some(expected) => expected == actual,
         None => true,
     }
+}
+
+fn plugin_views_with_state(
+    plugins: Vec<PluginEntry>,
+    plugin_state: &PluginStateFile,
+) -> Vec<PluginView> {
+    plugins
+        .into_iter()
+        .map(|plugin| PluginView {
+            enabled: plugin_state.is_enabled(&plugin.id),
+            plugin,
+        })
+        .collect()
+}
+
+fn load_plugin_state(path: &Path) -> Result<PluginStateFile> {
+    if !path.exists() {
+        return Ok(PluginStateFile::default());
+    }
+    let raw = std::fs::read_to_string(path).map_err(|err| {
+        MosaicError::Io(format!(
+            "failed to read plugin state file '{}': {err}",
+            path.display()
+        ))
+    })?;
+    let mut state: PluginStateFile = serde_json::from_str(&raw).map_err(|err| {
+        MosaicError::Validation(format!(
+            "failed to parse plugin state file '{}': {err}",
+            path.display()
+        ))
+    })?;
+    if state.version == 0 {
+        state.version = PLUGIN_STATE_VERSION;
+    }
+    state.disabled_plugins = state
+        .disabled_plugins
+        .iter()
+        .map(|item| item.trim().to_string())
+        .filter(|item| !item.is_empty())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    Ok(state)
+}
+
+fn save_plugin_state(path: &Path, state: &PluginStateFile) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            MosaicError::Io(format!(
+                "failed to create plugin state directory '{}': {err}",
+                parent.display()
+            ))
+        })?;
+    }
+    let rendered = serde_json::to_string_pretty(state)
+        .map_err(|err| MosaicError::Io(format!("failed to serialize plugin state: {err}")))?;
+    std::fs::write(path, rendered).map_err(|err| {
+        MosaicError::Io(format!(
+            "failed to write plugin state file '{}': {err}",
+            path.display()
+        ))
+    })?;
+    Ok(())
 }

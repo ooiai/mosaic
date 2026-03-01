@@ -52,6 +52,20 @@ mosaic --project-state sandbox explain --profile restricted
 3. Existing tool guard (`confirm_dangerous` / `all_confirm` / `unrestricted`)
 4. Command execution and audit log write
 
+## Safety Command Surface
+
+`safety` provides a single entry point that merges sandbox + approvals decisions for one command.
+
+```bash
+mosaic --project-state safety get
+mosaic --project-state safety check --command "cargo test --workspace"
+mosaic --project-state safety report --command "curl https://example.com"
+```
+
+- `safety get`: current approvals+sandbox policies and paths.
+- `safety check`: effective decision (`allow|confirm|deny`) for one command.
+- `safety report`: profile descriptions plus optional merged decision result.
+
 ## Error Codes
 
 - `approval_required`

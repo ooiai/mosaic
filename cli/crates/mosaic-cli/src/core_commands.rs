@@ -1,18 +1,18 @@
 use std::fs;
 use std::io::{self, Read, Write};
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use mosaic_agent::AgentRunOptions;
-use mosaic_core::config::{ConfigManager, ProfileConfig, StateConfig};
+use mosaic_core::config::{ConfigFile, ConfigManager, ProfileConfig, RunGuardMode, StateConfig};
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::models::ModelRoutingStore;
 use mosaic_core::session::SessionStore;
 
 use super::{
-    ChatArgs, Cli, ConfigureArgs, ModelAliasesCommand, ModelFallbacksCommand, ModelsArgs,
-    ModelsCommand, PROJECT_STATE_DIR, SessionArgs, SessionCommand, SetupArgs, build_runtime,
-    print_json, resolve_effective_model, resolve_state_paths,
+    ChatArgs, Cli, ConfigureArgs, ConfigureCommand, ModelAliasesCommand, ModelFallbacksCommand,
+    ModelsArgs, ModelsCommand, PROJECT_STATE_DIR, SessionArgs, SessionCommand, SetupArgs,
+    build_runtime, print_json, resolve_effective_model, resolve_state_paths,
 };
 
 pub(super) fn handle_setup(cli: &Cli, args: SetupArgs) -> Result<()> {
@@ -20,10 +20,7 @@ pub(super) fn handle_setup(cli: &Cli, args: SetupArgs) -> Result<()> {
     paths.ensure_dirs()?;
     let manager = ConfigManager::new(paths.config_path.clone());
     let mut config = manager.load_or_default(paths.mode)?;
-    let profile = config
-        .profiles
-        .entry(cli.profile.clone())
-        .or_insert_with(ProfileConfig::default);
+    let profile = config.profiles.entry(cli.profile.clone()).or_default();
     if let Some(base_url) = args.base_url {
         profile.provider.base_url = base_url;
     }
@@ -69,42 +66,67 @@ pub(super) fn handle_setup(cli: &Cli, args: SetupArgs) -> Result<()> {
 }
 
 pub(super) fn handle_configure(cli: &Cli, args: ConfigureArgs) -> Result<()> {
+    let ConfigureArgs {
+        command,
+        show,
+        base_url,
+        model,
+        api_key_env,
+        temperature,
+        max_turns,
+        tools_enabled,
+        guard_mode,
+    } = args;
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
     let manager = ConfigManager::new(paths.config_path.clone());
     let mut config = manager.load()?;
 
+    if let Some(command) = command {
+        let has_legacy_flags = show
+            || base_url.is_some()
+            || model.is_some()
+            || api_key_env.is_some()
+            || temperature.is_some()
+            || max_turns.is_some()
+            || tools_enabled.is_some()
+            || guard_mode.is_some();
+        if has_legacy_flags {
+            return Err(MosaicError::Validation(
+                "configure subcommands cannot be combined with legacy configure flags".to_string(),
+            ));
+        }
+        return handle_configure_subcommand(cli, &manager, &mut config, command);
+    }
+
     let mut changed = false;
     {
-        let profile = config
-            .profiles
-            .entry(cli.profile.clone())
-            .or_insert_with(ProfileConfig::default);
-        if let Some(base_url) = args.base_url {
+        let profile = config.profiles.entry(cli.profile.clone()).or_default();
+        if let Some(base_url) = base_url {
             profile.provider.base_url = base_url;
             changed = true;
         }
-        if let Some(model) = args.model {
+        if let Some(model) = model {
             profile.provider.model = model;
             changed = true;
         }
-        if let Some(api_key_env) = args.api_key_env {
+        if let Some(api_key_env) = api_key_env {
             profile.provider.api_key_env = api_key_env;
             changed = true;
         }
-        if let Some(temperature) = args.temperature {
+        if let Some(temperature) = temperature {
             profile.agent.temperature = temperature;
             changed = true;
         }
-        if let Some(max_turns) = args.max_turns {
+        if let Some(max_turns) = max_turns {
             profile.agent.max_turns = max_turns;
             changed = true;
         }
-        if let Some(tools_enabled) = args.tools_enabled {
+        if let Some(tools_enabled) = tools_enabled {
             profile.tools.enabled = tools_enabled;
             changed = true;
         }
-        if let Some(guard_mode) = args.guard_mode {
+        if let Some(guard_mode) = guard_mode {
             profile.tools.run.guard_mode = guard_mode.into();
             changed = true;
         }
@@ -123,7 +145,7 @@ pub(super) fn handle_configure(cli: &Cli, args: ConfigureArgs) -> Result<()> {
             "config_path": manager.path().display().to_string(),
             "config": resolved,
         }));
-    } else if args.show || !changed {
+    } else if show || !changed {
         println!("Config path: {}", manager.path().display());
         println!("Profile: {}", resolved.profile_name);
         println!("Provider base URL: {}", resolved.profile.provider.base_url);
@@ -138,6 +160,244 @@ pub(super) fn handle_configure(cli: &Cli, args: ConfigureArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ConfigureKey {
+    ProviderBaseUrl,
+    ProviderModel,
+    ProviderApiKeyEnv,
+    AgentTemperature,
+    AgentMaxTurns,
+    ToolsEnabled,
+    ToolsRunGuardMode,
+}
+
+fn handle_configure_subcommand(
+    cli: &Cli,
+    manager: &ConfigManager,
+    config: &mut ConfigFile,
+    command: ConfigureCommand,
+) -> Result<()> {
+    let profile = config.profiles.entry(cli.profile.clone()).or_default();
+    let (action, key_name, value, changed) = match command {
+        ConfigureCommand::Get { key } => {
+            let key = parse_configure_key(&key)?;
+            (
+                "get",
+                configure_key_name(key).to_string(),
+                configure_value(profile, key),
+                false,
+            )
+        }
+        ConfigureCommand::Set { key, value } => {
+            let key = parse_configure_key(&key)?;
+            let configured = set_configure_value(profile, key, &value)?;
+            ("set", configure_key_name(key).to_string(), configured, true)
+        }
+        ConfigureCommand::Unset { key } => {
+            let key = parse_configure_key(&key)?;
+            let configured = unset_configure_value(profile, key);
+            (
+                "unset",
+                configure_key_name(key).to_string(),
+                configured,
+                true,
+            )
+        }
+    };
+
+    config.active_profile = cli.profile.clone();
+    if changed {
+        manager.save(config)?;
+    }
+
+    if cli.json {
+        print_json(&json!({
+            "ok": true,
+            "action": action,
+            "changed": changed,
+            "profile": cli.profile,
+            "key": key_name,
+            "value": value,
+            "config_path": manager.path().display().to_string(),
+        }));
+    } else {
+        println!("profile: {}", cli.profile);
+        println!("action: {action}");
+        println!("key: {key_name}");
+        println!("value: {}", value);
+        if changed {
+            println!("config path: {}", manager.path().display());
+        }
+    }
+    Ok(())
+}
+
+fn parse_configure_key(raw: &str) -> Result<ConfigureKey> {
+    let key = raw.trim();
+    if key.is_empty() {
+        return Err(MosaicError::Validation(
+            "configure key cannot be empty".to_string(),
+        ));
+    }
+    let normalized = key.to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "provider.base_url" | "base_url" => Ok(ConfigureKey::ProviderBaseUrl),
+        "provider.model" | "model" => Ok(ConfigureKey::ProviderModel),
+        "provider.api_key_env" | "api_key_env" => Ok(ConfigureKey::ProviderApiKeyEnv),
+        "agent.temperature" | "temperature" => Ok(ConfigureKey::AgentTemperature),
+        "agent.max_turns" | "max_turns" => Ok(ConfigureKey::AgentMaxTurns),
+        "tools.enabled" | "tools_enabled" => Ok(ConfigureKey::ToolsEnabled),
+        "tools.run.guard_mode" | "guard_mode" => Ok(ConfigureKey::ToolsRunGuardMode),
+        _ => Err(MosaicError::Validation(format!(
+            "unsupported configure key '{key}'"
+        ))),
+    }
+}
+
+fn configure_key_name(key: ConfigureKey) -> &'static str {
+    match key {
+        ConfigureKey::ProviderBaseUrl => "provider.base_url",
+        ConfigureKey::ProviderModel => "provider.model",
+        ConfigureKey::ProviderApiKeyEnv => "provider.api_key_env",
+        ConfigureKey::AgentTemperature => "agent.temperature",
+        ConfigureKey::AgentMaxTurns => "agent.max_turns",
+        ConfigureKey::ToolsEnabled => "tools.enabled",
+        ConfigureKey::ToolsRunGuardMode => "tools.run.guard_mode",
+    }
+}
+
+fn configure_value(profile: &ProfileConfig, key: ConfigureKey) -> Value {
+    match key {
+        ConfigureKey::ProviderBaseUrl => json!(profile.provider.base_url),
+        ConfigureKey::ProviderModel => json!(profile.provider.model),
+        ConfigureKey::ProviderApiKeyEnv => json!(profile.provider.api_key_env),
+        ConfigureKey::AgentTemperature => json!(profile.agent.temperature),
+        ConfigureKey::AgentMaxTurns => json!(profile.agent.max_turns),
+        ConfigureKey::ToolsEnabled => json!(profile.tools.enabled),
+        ConfigureKey::ToolsRunGuardMode => json!(guard_mode_name(&profile.tools.run.guard_mode)),
+    }
+}
+
+fn set_configure_value(profile: &mut ProfileConfig, key: ConfigureKey, raw: &str) -> Result<Value> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(MosaicError::Validation(
+            "configure value cannot be empty".to_string(),
+        ));
+    }
+    match key {
+        ConfigureKey::ProviderBaseUrl => {
+            profile.provider.base_url = value.to_string();
+            Ok(json!(profile.provider.base_url))
+        }
+        ConfigureKey::ProviderModel => {
+            profile.provider.model = value.to_string();
+            Ok(json!(profile.provider.model))
+        }
+        ConfigureKey::ProviderApiKeyEnv => {
+            profile.provider.api_key_env = value.to_string();
+            Ok(json!(profile.provider.api_key_env))
+        }
+        ConfigureKey::AgentTemperature => {
+            let parsed = value.parse::<f32>().map_err(|err| {
+                MosaicError::Validation(format!("invalid float for agent.temperature: {err}"))
+            })?;
+            if !parsed.is_finite() {
+                return Err(MosaicError::Validation(
+                    "agent.temperature must be finite".to_string(),
+                ));
+            }
+            profile.agent.temperature = parsed;
+            Ok(json!(profile.agent.temperature))
+        }
+        ConfigureKey::AgentMaxTurns => {
+            let parsed = value.parse::<u32>().map_err(|err| {
+                MosaicError::Validation(format!("invalid integer for agent.max_turns: {err}"))
+            })?;
+            if parsed == 0 {
+                return Err(MosaicError::Validation(
+                    "agent.max_turns must be greater than 0".to_string(),
+                ));
+            }
+            profile.agent.max_turns = parsed;
+            Ok(json!(profile.agent.max_turns))
+        }
+        ConfigureKey::ToolsEnabled => {
+            let parsed = parse_bool_value(value)?;
+            profile.tools.enabled = parsed;
+            Ok(json!(profile.tools.enabled))
+        }
+        ConfigureKey::ToolsRunGuardMode => {
+            let parsed = parse_guard_mode(value)?;
+            profile.tools.run.guard_mode = parsed;
+            Ok(json!(guard_mode_name(&profile.tools.run.guard_mode)))
+        }
+    }
+}
+
+fn unset_configure_value(profile: &mut ProfileConfig, key: ConfigureKey) -> Value {
+    let defaults = ProfileConfig::default();
+    match key {
+        ConfigureKey::ProviderBaseUrl => {
+            profile.provider.base_url = defaults.provider.base_url;
+            json!(profile.provider.base_url)
+        }
+        ConfigureKey::ProviderModel => {
+            profile.provider.model = defaults.provider.model;
+            json!(profile.provider.model)
+        }
+        ConfigureKey::ProviderApiKeyEnv => {
+            profile.provider.api_key_env = defaults.provider.api_key_env;
+            json!(profile.provider.api_key_env)
+        }
+        ConfigureKey::AgentTemperature => {
+            profile.agent.temperature = defaults.agent.temperature;
+            json!(profile.agent.temperature)
+        }
+        ConfigureKey::AgentMaxTurns => {
+            profile.agent.max_turns = defaults.agent.max_turns;
+            json!(profile.agent.max_turns)
+        }
+        ConfigureKey::ToolsEnabled => {
+            profile.tools.enabled = defaults.tools.enabled;
+            json!(profile.tools.enabled)
+        }
+        ConfigureKey::ToolsRunGuardMode => {
+            profile.tools.run.guard_mode = defaults.tools.run.guard_mode;
+            json!(guard_mode_name(&profile.tools.run.guard_mode))
+        }
+    }
+}
+
+fn parse_bool_value(raw: &str) -> Result<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "y" | "on" => Ok(true),
+        "false" | "0" | "no" | "n" | "off" => Ok(false),
+        _ => Err(MosaicError::Validation(format!(
+            "invalid boolean value '{raw}', expected true/false"
+        ))),
+    }
+}
+
+fn parse_guard_mode(raw: &str) -> Result<RunGuardMode> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "confirm_dangerous" => Ok(RunGuardMode::ConfirmDangerous),
+        "all_confirm" => Ok(RunGuardMode::AllConfirm),
+        "unrestricted" => Ok(RunGuardMode::Unrestricted),
+        _ => Err(MosaicError::Validation(format!(
+            "invalid guard mode '{raw}', expected confirm_dangerous|all_confirm|unrestricted"
+        ))),
+    }
+}
+
+fn guard_mode_name(mode: &RunGuardMode) -> &'static str {
+    match mode {
+        RunGuardMode::ConfirmDangerous => "confirm_dangerous",
+        RunGuardMode::AllConfirm => "all_confirm",
+        RunGuardMode::Unrestricted => "unrestricted",
+    }
 }
 
 pub(super) async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {

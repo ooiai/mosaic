@@ -11,6 +11,9 @@ mosaic --project-state plugins list --source project
 mosaic --project-state plugins info <plugin-id>
 mosaic --project-state plugins check [plugin-id]
 mosaic --project-state plugins install --path ./my-plugin [--force]
+mosaic --project-state plugins enable <plugin-id>
+mosaic --project-state plugins disable <plugin-id>
+mosaic --project-state plugins doctor
 mosaic --project-state plugins remove <plugin-id>
 
 # Skills
@@ -71,6 +74,14 @@ All commands support `--json`. Successful command envelope:
 - `report.failed`
 - `report.results[]`
 
+`doctor` returns plugin runtime health summary:
+
+- `doctor.plugins_total`
+- `doctor.enabled_plugins`
+- `doctor.disabled_plugins`
+- `doctor.disabled_plugin_ids[]`
+- `doctor.stale_disabled_ids[]`
+
 Missing target IDs return validation error (`exit_code=7`).
 
 ## Install/Remove Behavior
@@ -81,3 +92,9 @@ Missing target IDs return validation error (`exit_code=7`).
   - skill source contains `SKILL.md`
 - If target ID already exists, use `--force` to replace.
 - `remove` only deletes project-scope entries and is a no-op for user/global sources.
+
+## Plugin Enable/Disable State
+
+- Plugin enable/disable state is persisted in `.mosaic/data/plugins-state.json`.
+- Default behavior is enabled unless plugin ID is listed under `disabled_plugins`.
+- `plugins install` auto-enables the installed plugin ID.

@@ -22,6 +22,7 @@ Commands:
   system      
   approvals   [aliases: acp]
   sandbox     
+  safety      
   memory      
   security    
   agents      

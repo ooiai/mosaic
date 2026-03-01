@@ -246,7 +246,71 @@
       "target": "string"
     }
   },
+  "plugins_disable": {
+    "changed": "bool",
+    "enabled": "bool",
+    "ok": "bool",
+    "plugin_id": "string",
+    "state_path": "string"
+  },
+  "plugins_doctor": {
+    "doctor": {
+      "disabled_plugin_ids": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "disabled_plugins": "number",
+      "enabled_plugins": "number",
+      "health_ok": "bool",
+      "plugins_total": "number",
+      "stale_disabled_ids": {
+        "items": [],
+        "type": "array"
+      },
+      "state_path": "string"
+    },
+    "ok": "bool",
+    "report": {
+      "checked": "number",
+      "failed": "number",
+      "kind": "string",
+      "ok": "bool",
+      "results": {
+        "items": [
+          {
+            "checks": {
+              "items": [
+                {
+                  "detail": "string",
+                  "name": "string",
+                  "ok": "bool"
+                }
+              ],
+              "type": "array"
+            },
+            "id": "string",
+            "kind": "string",
+            "ok": "bool",
+            "path": "string",
+            "source": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "target": "null"
+    }
+  },
+  "plugins_enable": {
+    "changed": "bool",
+    "enabled": "bool",
+    "ok": "bool",
+    "plugin_id": "string",
+    "state_path": "string"
+  },
   "plugins_install": {
+    "enabled": "bool",
     "installed": {
       "id": "string",
       "installed_path": "string",
@@ -254,7 +318,9 @@
       "replaced": "bool",
       "source_path": "string"
     },
-    "ok": "bool"
+    "ok": "bool",
+    "state_changed": "bool",
+    "state_path": "string"
   },
   "plugins_list": {
     "count": "number",
@@ -263,6 +329,7 @@
       "items": [
         {
           "description": "null",
+          "enabled": "bool",
           "id": "string",
           "manifest_error": "null",
           "manifest_exists": "bool",
@@ -285,6 +352,7 @@
       "items": [
         {
           "description": "null",
+          "enabled": "bool",
           "id": "string",
           "manifest_error": "null",
           "manifest_exists": "bool",

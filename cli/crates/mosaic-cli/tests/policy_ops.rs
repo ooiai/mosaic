@@ -255,6 +255,66 @@ fn approvals_and_sandbox_commands_json_contract() {
         .clone();
     let sandbox_explain: Value = serde_json::from_slice(&sandbox_explain).expect("sandbox explain");
     assert_eq!(sandbox_explain["profile"]["profile"], "restricted");
+
+    let safety_get = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "safety", "get"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let safety_get: Value = serde_json::from_slice(&safety_get).expect("safety get");
+    assert_eq!(safety_get["ok"], true);
+    assert_eq!(safety_get["approvals"]["policy"]["mode"], "allowlist");
+    assert_eq!(safety_get["sandbox"]["policy"]["profile"], "restricted");
+
+    let safety_check_allow = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "safety",
+            "check",
+            "--command",
+            "cargo test --workspace",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let safety_check_allow: Value =
+        serde_json::from_slice(&safety_check_allow).expect("safety check allow");
+    assert_eq!(safety_check_allow["decision"], "allow");
+    assert_eq!(safety_check_allow["approved_by"], "approval_allowlist");
+    assert_eq!(safety_check_allow["sandbox"]["decision"], "allow");
+    assert_eq!(safety_check_allow["approvals"]["decision"], "auto");
+
+    let safety_report = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "safety",
+            "report",
+            "--command",
+            "curl https://example.com",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let safety_report: Value = serde_json::from_slice(&safety_report).expect("safety report");
+    assert_eq!(safety_report["ok"], true);
+    assert_eq!(
+        safety_report["check"]["decision"], "deny",
+        "restricted sandbox should deny network command in safety report"
+    );
 }
 
 #[test]

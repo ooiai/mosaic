@@ -79,6 +79,114 @@
     },
     "ok": "bool"
   },
+  "safety_check": {
+    "approvals": {
+      "decision": "string",
+      "mode": "string",
+      "reason": "string"
+    },
+    "approved_by": "null",
+    "command": "string",
+    "decision": "string",
+    "ok": "bool",
+    "paths": {
+      "approvals_policy": "string",
+      "sandbox_policy": "string"
+    },
+    "reason": "string",
+    "sandbox": {
+      "decision": "string",
+      "profile": "string",
+      "reason": "null"
+    }
+  },
+  "safety_get": {
+    "approvals": {
+      "path": "string",
+      "policy": {
+        "allowlist": {
+          "items": [
+            "string"
+          ],
+          "type": "array"
+        },
+        "mode": "string",
+        "version": "number"
+      }
+    },
+    "ok": "bool",
+    "sandbox": {
+      "path": "string",
+      "policy": {
+        "profile": "string",
+        "version": "number"
+      }
+    }
+  },
+  "safety_report": {
+    "approvals": {
+      "path": "string",
+      "policy": {
+        "allowlist": {
+          "items": [
+            "string"
+          ],
+          "type": "array"
+        },
+        "mode": "string",
+        "version": "number"
+      }
+    },
+    "check": {
+      "approvals": {
+        "decision": "string",
+        "mode": "string",
+        "reason": "string"
+      },
+      "approved_by": "null",
+      "command": "string",
+      "decision": "string",
+      "reason": "string",
+      "sandbox": {
+        "decision": "string",
+        "profile": "string",
+        "reason": "string"
+      }
+    },
+    "ok": "bool",
+    "sandbox": {
+      "path": "string",
+      "policy": {
+        "profile": "string",
+        "version": "number"
+      },
+      "profile_info": {
+        "blocked_examples": {
+          "items": [
+            "string"
+          ],
+          "type": "array"
+        },
+        "description": "string",
+        "profile": "string"
+      },
+      "profiles": {
+        "items": [
+          {
+            "blocked_examples": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "description": "string",
+            "profile": "string"
+          }
+        ],
+        "type": "array"
+      }
+    }
+  },
   "sandbox_check": {
     "command": "string",
     "decision": "string",

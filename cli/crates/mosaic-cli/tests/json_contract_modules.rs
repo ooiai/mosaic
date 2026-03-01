@@ -1414,6 +1414,61 @@ fn json_core_agent_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&configure_show);
 
+    let configure_set = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "configure",
+                "set",
+                "tools.enabled",
+                "false",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_set);
+
+    let configure_get = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "configure",
+                "get",
+                "tools.enabled",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_get);
+
+    let configure_unset = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "configure",
+                "unset",
+                "tools.enabled",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_unset);
+
     let ask = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1537,6 +1592,9 @@ fn json_core_agent_module_schema_matches_snapshot() {
     let actual_schema = json!({
         "setup": schema_of(&setup),
         "configure_show": schema_of(&configure_show),
+        "configure_set": schema_of(&configure_set),
+        "configure_get": schema_of(&configure_get),
+        "configure_unset": schema_of(&configure_unset),
         "ask": schema_of(&ask),
         "chat_prompt": schema_of(&chat_prompt),
         "session_list": schema_of(&session_list),
@@ -1711,6 +1769,56 @@ fn json_ops_policy_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&sandbox_explain);
 
+    let safety_get = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "safety", "get"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&safety_get);
+
+    let safety_check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "safety",
+                "check",
+                "--command",
+                "cargo test --workspace",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&safety_check);
+
+    let safety_report = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "safety",
+                "report",
+                "--command",
+                "curl https://example.com",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&safety_report);
+
     let system_event = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1787,6 +1895,9 @@ fn json_ops_policy_module_schema_matches_snapshot() {
         "sandbox_set": schema_of(&sandbox_set),
         "sandbox_check": schema_of(&sandbox_check),
         "sandbox_explain": schema_of(&sandbox_explain),
+        "safety_get": schema_of(&safety_get),
+        "safety_check": schema_of(&safety_check),
+        "safety_report": schema_of(&safety_report),
         "system_event": schema_of(&system_event),
         "system_presence": schema_of(&system_presence),
         "system_list": schema_of(&system_list),
@@ -2421,6 +2532,54 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&plugins_check);
 
+    let plugins_disable = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "plugins",
+                "disable",
+                "sample_plugin",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_disable);
+
+    let plugins_doctor = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "plugins", "doctor"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_doctor);
+
+    let plugins_enable = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "plugins",
+                "enable",
+                "sample_plugin",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_enable);
+
     let skills_install = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -2504,6 +2663,9 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         "plugins_list": schema_of(&plugins_list),
         "plugins_list_project": schema_of(&plugins_list_project),
         "plugins_check": schema_of(&plugins_check),
+        "plugins_disable": schema_of(&plugins_disable),
+        "plugins_doctor": schema_of(&plugins_doctor),
+        "plugins_enable": schema_of(&plugins_enable),
         "skills_install": schema_of(&skills_install),
         "skills_list": schema_of(&skills_list),
         "skills_list_project": schema_of(&skills_list_project),
