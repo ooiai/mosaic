@@ -265,6 +265,15 @@
       "enabled_plugins": "number",
       "health_ok": "bool",
       "plugins_total": "number",
+      "runtime_missing_doctor_hooks": {
+        "items": [],
+        "type": "array"
+      },
+      "runtime_missing_run_hooks": {
+        "items": [],
+        "type": "array"
+      },
+      "runtime_runnable_plugins": "number",
       "stale_disabled_ids": {
         "items": [],
         "type": "array"
@@ -337,6 +346,10 @@
           "manifest_valid": "bool",
           "name": "string",
           "path": "string",
+          "runtime": {
+            "doctor": "string",
+            "run": "string"
+          },
           "source": "string",
           "version": "string"
         }
@@ -360,6 +373,10 @@
           "manifest_valid": "bool",
           "name": "string",
           "path": "string",
+          "runtime": {
+            "doctor": "string",
+            "run": "string"
+          },
           "source": "string",
           "version": "string"
         }
@@ -367,6 +384,44 @@
       "type": "array"
     },
     "source_filter": "string"
+  },
+  "plugins_run": {
+    "approved_by": "string",
+    "command": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "program": "string",
+      "rendered": "string"
+    },
+    "duration_ms": "number",
+    "event_log_path": "string",
+    "exit_code": "number",
+    "hook": "string",
+    "hook_path": "string",
+    "ok": "bool",
+    "output_limit_bytes": "number",
+    "plugin_id": "string",
+    "resource_limits": "null",
+    "resource_metrics": {
+      "cpu_system_ms": "number",
+      "cpu_total_ms": "number",
+      "cpu_user_ms": "number",
+      "max_rss_kb": "number"
+    },
+    "resource_rlimits_applied": "bool",
+    "sandbox_profile": "string",
+    "stderr": "string",
+    "stderr_bytes": "number",
+    "stderr_truncated": "bool",
+    "stdout": "string",
+    "stdout_bytes": "number",
+    "stdout_truncated": "bool",
+    "timed_out": "bool",
+    "timeout_ms": "number"
   },
   "skills_check": {
     "ok": "bool",

@@ -24,6 +24,66 @@
     "profile": "string",
     "value": "bool"
   },
+  "configure_keys": {
+    "action": "string",
+    "keys": {
+      "items": [
+        {
+          "aliases": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "default": "string",
+          "description": "string",
+          "name": "string",
+          "type": "string",
+          "value": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "profile": "string"
+  },
+  "configure_patch": {
+    "action": "string",
+    "changed": "bool",
+    "changed_keys": "number",
+    "config_path": "string",
+    "dry_run": "bool",
+    "file": "string",
+    "groups": {
+      "items": [
+        {
+          "changed": "number",
+          "group": "string",
+          "unchanged": "number",
+          "updated": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "profile": "string",
+    "saved": "bool",
+    "updated": "number",
+    "updates": {
+      "items": [
+        {
+          "changed": "bool",
+          "from": "string",
+          "group": "string",
+          "key": "string",
+          "source": "string",
+          "to": "string",
+          "value": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
   "configure_set": {
     "action": "string",
     "changed": "bool",

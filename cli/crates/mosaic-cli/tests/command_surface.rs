@@ -34,6 +34,7 @@ fn root_help_includes_expected_commands() {
         "webhooks",
         "browser",
         "logs",
+        "observability",
         "system",
         "approvals",
         "sandbox",
@@ -156,12 +157,28 @@ fn models_help_includes_resolution_commands() {
 
 #[test]
 #[allow(deprecated)]
-fn configure_help_includes_get_set_unset_commands() {
+fn configure_help_includes_keys_get_set_unset_patch_commands() {
     let help = run_help(&["configure", "--help"]);
-    for token in ["--show", "--base-url", "get", "set", "unset"] {
+    for token in [
+        "--show",
+        "--base-url",
+        "keys",
+        "get",
+        "set",
+        "unset",
+        "patch",
+    ] {
         assert!(
             help.contains(token),
             "configure --help missing expected token: {token}\n{help}"
+        );
+    }
+
+    let patch_help = run_help(&["configure", "patch", "--help"]);
+    for option in ["--set", "--file", "--dry-run"] {
+        assert!(
+            patch_help.contains(option),
+            "configure patch --help missing expected option: {option}\n{patch_help}"
         );
     }
 }
@@ -356,7 +373,7 @@ fn security_help_includes_audit_and_baseline_commands() {
 fn plugins_help_includes_management_commands() {
     let help = run_help(&["plugins", "--help"]);
     let expected = [
-        "list", "info", "check", "install", "enable", "disable", "doctor", "remove",
+        "list", "info", "check", "install", "enable", "disable", "doctor", "run", "remove",
     ];
 
     for name in expected {
@@ -403,6 +420,28 @@ fn logs_help_includes_streaming_options() {
         assert!(
             help.contains(name),
             "logs --help missing expected option: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn observability_help_includes_report_and_export_commands() {
+    let help = run_help(&["observability", "--help"]);
+    let expected = ["report", "export"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "observability --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+
+    let report_help = run_help(&["observability", "report", "--help"]);
+    for option in ["--audit-tail", "--compare-window"] {
+        assert!(
+            report_help.contains(option),
+            "observability report --help missing expected option: {option}\n{report_help}"
         );
     }
 }
@@ -473,6 +512,18 @@ fn safety_help_includes_get_check_report_commands() {
         assert!(
             help.contains(name),
             "safety --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn safety_report_help_includes_audit_tail_option() {
+    let help = run_help(&["safety", "report", "--help"]);
+    for token in ["--command", "--audit-tail", "--compare-window"] {
+        assert!(
+            help.contains(token),
+            "safety report --help missing expected token: {token}\n{help}"
         );
     }
 }

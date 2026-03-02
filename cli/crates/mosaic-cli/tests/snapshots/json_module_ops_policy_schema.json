@@ -79,6 +79,613 @@
     },
     "ok": "bool"
   },
+  "observability_export": {
+    "export_path": "string",
+    "ok": "bool",
+    "report": {
+      "alerts": {
+        "critical": "number",
+        "items": {
+          "items": [
+            {
+              "id": "string",
+              "message": "string",
+              "metric": "string",
+              "severity": "string",
+              "threshold": "bool",
+              "value": "bool"
+            }
+          ],
+          "type": "array"
+        },
+        "min_severity": "string",
+        "suppress_ids": {
+          "items": [],
+          "type": "array"
+        },
+        "suppressed": {
+          "by_reason": {
+            "id_match": "number",
+            "min_severity": "number"
+          },
+          "count": "number",
+          "items": {
+            "items": [],
+            "type": "array"
+          }
+        },
+        "thresholds": {
+          "channel_failure_critical": "number",
+          "channel_failure_warn": "number",
+          "plugin_completion_min": "number",
+          "safety_failure_critical": "number",
+          "safety_failure_warn": "number"
+        },
+        "total": "number",
+        "warning": "number"
+      },
+      "channels": {
+        "errors": {
+          "events": "null",
+          "status": "null"
+        },
+        "ok": "bool",
+        "paths": {
+          "channels_file": "string",
+          "events_dir": "string"
+        },
+        "recent_events": {
+          "items": [],
+          "type": "array"
+        },
+        "status": {
+          "channels_with_errors": "number",
+          "healthy_channels": "number",
+          "kinds": {},
+          "last_send_at": "null",
+          "total_channels": "number"
+        },
+        "summary": {
+          "channels_with_errors": "number",
+          "deduplicated_events": "number",
+          "delivery_status": {},
+          "event_count": "number",
+          "event_kinds": {},
+          "failed_events": "number",
+          "healthy_channels": "number",
+          "http_status": {},
+          "latest_event_ts": "null",
+          "max_attempt": "number",
+          "probe_events": "number",
+          "total_channels": "number"
+        },
+        "tail": "number"
+      },
+      "doctor": {
+        "checks": "null"
+      },
+      "filters": {
+        "audit_tail": "number",
+        "compare_window": "number",
+        "event_name": "null",
+        "events_tail": "number",
+        "include_doctor": "bool",
+        "logs_source": "null",
+        "logs_tail": "number",
+        "plugin_soak_report": "null"
+      },
+      "gateway": {
+        "endpoint_healthy": "bool",
+        "error": "null",
+        "ok": "bool",
+        "paths": {
+          "service_file": "string",
+          "state_file": "string"
+        },
+        "process_alive": "bool",
+        "running": "bool",
+        "service": "null",
+        "state": "null",
+        "target": {
+          "host": "string",
+          "port": "number"
+        }
+      },
+      "generated_at": "string",
+      "logs": {
+        "items": [
+          {
+            "payload": {
+              "data": {
+                "suite": "string"
+              },
+              "name": "string",
+              "ts": "string"
+            },
+            "source": "string",
+            "ts": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "paths": {
+        "approvals_policy": "string",
+        "channel_events_dir": "string",
+        "channels_file": "string",
+        "data_dir": "string",
+        "gateway_service": "string",
+        "gateway_state": "string",
+        "sandbox_policy": "string",
+        "system_events": "string"
+      },
+      "plugin_soak": {
+        "available": "bool",
+        "error": "string",
+        "history": {
+          "appended": "bool",
+          "current_run": "null",
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "null",
+            "delta": {
+              "completion_ratio": "number",
+              "cpu_failure_rate": "number",
+              "cpu_failures": "number",
+              "event_line_drift": {
+                "cpuwatch": "number",
+                "ok": "number",
+                "rss": "number"
+              },
+              "iterations": "number",
+              "ok_runs": "number",
+              "ok_success_rate": "number",
+              "rss_failure_rate": "number",
+              "rss_failures": "number",
+              "warnings_count": "number"
+            },
+            "previous_ts": "null"
+          },
+          "latest": "null",
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "write_error": "null"
+        },
+        "path": "null",
+        "source": "string",
+        "status": "string"
+      },
+      "policy": {
+        "approvals_allowlist_size": "number",
+        "approvals_mode": "string",
+        "sandbox_profile": "string"
+      },
+      "profile": "string",
+      "safety_audit": {
+        "compare_window": "number",
+        "comparison": {
+          "available": "bool",
+          "current": {
+            "average_duration_ms": "number",
+            "blocked_if_restricted": "number",
+            "failed": "number",
+            "failure_rate": "number",
+            "total_entries": "number"
+          },
+          "delta": {
+            "average_duration_ms": "number",
+            "blocked_if_restricted": "number",
+            "failed": "number",
+            "failure_rate": "number",
+            "total_entries": "number"
+          },
+          "enabled": "bool",
+          "previous": {
+            "average_duration_ms": "number",
+            "blocked_if_restricted": "number",
+            "failed": "number",
+            "failure_rate": "number",
+            "total_entries": "number"
+          },
+          "window": "number"
+        },
+        "path": "string",
+        "recent_commands": {
+          "items": [],
+          "type": "array"
+        },
+        "summary": {
+          "approved_by": {},
+          "average_duration_ms": "number",
+          "blocked_if_restricted": "number",
+          "current_policy_decisions": {},
+          "failed": "number",
+          "parse_errors": "number",
+          "succeeded": "number",
+          "top_commands": {
+            "items": [],
+            "type": "array"
+          },
+          "total_entries": "number"
+        },
+        "tail": "number"
+      },
+      "slo": {
+        "channels": {
+          "available": "bool",
+          "met": "bool",
+          "ratio": "number",
+          "samples": "number",
+          "successful_samples": "number",
+          "target": "number"
+        },
+        "gateway": {
+          "healthy_samples": "number",
+          "met": "bool",
+          "ratio": "number",
+          "samples": "number",
+          "target": "number"
+        },
+        "window": "number"
+      },
+      "state_mode": "string",
+      "summary": {
+        "alerts_critical": "number",
+        "alerts_suppressed": "number",
+        "alerts_total": "number",
+        "alerts_warning": "number",
+        "channel_events_count": "number",
+        "channel_failed_events": "number",
+        "channels_total": "number",
+        "channels_with_errors": "number",
+        "doctor_included": "bool",
+        "doctor_ok": "number",
+        "doctor_warn": "number",
+        "gateway_endpoint_healthy": "bool",
+        "gateway_running": "bool",
+        "logs_count": "number",
+        "plugin_soak_available": "bool",
+        "plugin_soak_completion_ratio_delta": "number",
+        "plugin_soak_delta_available": "bool",
+        "plugin_soak_history_count": "number",
+        "plugin_soak_history_pruned": "number",
+        "plugin_soak_status": "string",
+        "safety_audit_entries": "number",
+        "safety_audit_parse_errors": "number",
+        "safety_compare_available": "bool",
+        "safety_failed_delta": "number",
+        "safety_failure_rate_delta": "number",
+        "slo_channels_met": "bool",
+        "slo_gateway_met": "bool",
+        "system_events_count": "number"
+      },
+      "system_events": {
+        "items": [
+          {
+            "data": {
+              "suite": "string"
+            },
+            "name": "string",
+            "ts": "string"
+          }
+        ],
+        "type": "array"
+      }
+    }
+  },
+  "observability_report": {
+    "export_path": "null",
+    "ok": "bool",
+    "report": {
+      "alerts": {
+        "critical": "number",
+        "items": {
+          "items": [
+            {
+              "id": "string",
+              "message": "string",
+              "metric": "string",
+              "severity": "string",
+              "threshold": "bool",
+              "value": "bool"
+            }
+          ],
+          "type": "array"
+        },
+        "min_severity": "string",
+        "suppress_ids": {
+          "items": [],
+          "type": "array"
+        },
+        "suppressed": {
+          "by_reason": {
+            "id_match": "number",
+            "min_severity": "number"
+          },
+          "count": "number",
+          "items": {
+            "items": [],
+            "type": "array"
+          }
+        },
+        "thresholds": {
+          "channel_failure_critical": "number",
+          "channel_failure_warn": "number",
+          "plugin_completion_min": "number",
+          "safety_failure_critical": "number",
+          "safety_failure_warn": "number"
+        },
+        "total": "number",
+        "warning": "number"
+      },
+      "channels": {
+        "errors": {
+          "events": "null",
+          "status": "null"
+        },
+        "ok": "bool",
+        "paths": {
+          "channels_file": "string",
+          "events_dir": "string"
+        },
+        "recent_events": {
+          "items": [],
+          "type": "array"
+        },
+        "status": {
+          "channels_with_errors": "number",
+          "healthy_channels": "number",
+          "kinds": {},
+          "last_send_at": "null",
+          "total_channels": "number"
+        },
+        "summary": {
+          "channels_with_errors": "number",
+          "deduplicated_events": "number",
+          "delivery_status": {},
+          "event_count": "number",
+          "event_kinds": {},
+          "failed_events": "number",
+          "healthy_channels": "number",
+          "http_status": {},
+          "latest_event_ts": "null",
+          "max_attempt": "number",
+          "probe_events": "number",
+          "total_channels": "number"
+        },
+        "tail": "number"
+      },
+      "doctor": {
+        "checks": {
+          "items": [
+            {
+              "detail": "string",
+              "name": "string",
+              "status": "string"
+            }
+          ],
+          "type": "array"
+        }
+      },
+      "filters": {
+        "audit_tail": "number",
+        "compare_window": "number",
+        "event_name": "null",
+        "events_tail": "number",
+        "include_doctor": "bool",
+        "logs_source": "null",
+        "logs_tail": "number",
+        "plugin_soak_report": "null"
+      },
+      "gateway": {
+        "endpoint_healthy": "bool",
+        "error": "null",
+        "ok": "bool",
+        "paths": {
+          "service_file": "string",
+          "state_file": "string"
+        },
+        "process_alive": "bool",
+        "running": "bool",
+        "service": "null",
+        "state": "null",
+        "target": {
+          "host": "string",
+          "port": "number"
+        }
+      },
+      "generated_at": "string",
+      "logs": {
+        "items": [
+          {
+            "payload": {
+              "data": {
+                "suite": "string"
+              },
+              "name": "string",
+              "ts": "string"
+            },
+            "source": "string",
+            "ts": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "paths": {
+        "approvals_policy": "string",
+        "channel_events_dir": "string",
+        "channels_file": "string",
+        "data_dir": "string",
+        "gateway_service": "string",
+        "gateway_state": "string",
+        "sandbox_policy": "string",
+        "system_events": "string"
+      },
+      "plugin_soak": {
+        "available": "bool",
+        "error": "string",
+        "history": {
+          "appended": "bool",
+          "current_run": "null",
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "null",
+            "delta": {
+              "completion_ratio": "number",
+              "cpu_failure_rate": "number",
+              "cpu_failures": "number",
+              "event_line_drift": {
+                "cpuwatch": "number",
+                "ok": "number",
+                "rss": "number"
+              },
+              "iterations": "number",
+              "ok_runs": "number",
+              "ok_success_rate": "number",
+              "rss_failure_rate": "number",
+              "rss_failures": "number",
+              "warnings_count": "number"
+            },
+            "previous_ts": "null"
+          },
+          "latest": "null",
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "write_error": "null"
+        },
+        "path": "null",
+        "source": "string",
+        "status": "string"
+      },
+      "policy": {
+        "approvals_allowlist_size": "number",
+        "approvals_mode": "string",
+        "sandbox_profile": "string"
+      },
+      "profile": "string",
+      "safety_audit": {
+        "compare_window": "number",
+        "comparison": {
+          "available": "bool",
+          "current": {
+            "average_duration_ms": "number",
+            "blocked_if_restricted": "number",
+            "failed": "number",
+            "failure_rate": "number",
+            "total_entries": "number"
+          },
+          "delta": {
+            "average_duration_ms": "number",
+            "blocked_if_restricted": "number",
+            "failed": "number",
+            "failure_rate": "number",
+            "total_entries": "number"
+          },
+          "enabled": "bool",
+          "previous": {
+            "average_duration_ms": "number",
+            "blocked_if_restricted": "number",
+            "failed": "number",
+            "failure_rate": "number",
+            "total_entries": "number"
+          },
+          "window": "number"
+        },
+        "path": "string",
+        "recent_commands": {
+          "items": [],
+          "type": "array"
+        },
+        "summary": {
+          "approved_by": {},
+          "average_duration_ms": "number",
+          "blocked_if_restricted": "number",
+          "current_policy_decisions": {},
+          "failed": "number",
+          "parse_errors": "number",
+          "succeeded": "number",
+          "top_commands": {
+            "items": [],
+            "type": "array"
+          },
+          "total_entries": "number"
+        },
+        "tail": "number"
+      },
+      "slo": {
+        "channels": {
+          "available": "bool",
+          "met": "bool",
+          "ratio": "number",
+          "samples": "number",
+          "successful_samples": "number",
+          "target": "number"
+        },
+        "gateway": {
+          "healthy_samples": "number",
+          "met": "bool",
+          "ratio": "number",
+          "samples": "number",
+          "target": "number"
+        },
+        "window": "number"
+      },
+      "state_mode": "string",
+      "summary": {
+        "alerts_critical": "number",
+        "alerts_suppressed": "number",
+        "alerts_total": "number",
+        "alerts_warning": "number",
+        "channel_events_count": "number",
+        "channel_failed_events": "number",
+        "channels_total": "number",
+        "channels_with_errors": "number",
+        "doctor_included": "bool",
+        "doctor_ok": "number",
+        "doctor_warn": "number",
+        "gateway_endpoint_healthy": "bool",
+        "gateway_running": "bool",
+        "logs_count": "number",
+        "plugin_soak_available": "bool",
+        "plugin_soak_completion_ratio_delta": "number",
+        "plugin_soak_delta_available": "bool",
+        "plugin_soak_history_count": "number",
+        "plugin_soak_history_pruned": "number",
+        "plugin_soak_status": "string",
+        "safety_audit_entries": "number",
+        "safety_audit_parse_errors": "number",
+        "safety_compare_available": "bool",
+        "safety_failed_delta": "number",
+        "safety_failure_rate_delta": "number",
+        "slo_channels_met": "bool",
+        "slo_gateway_met": "bool",
+        "system_events_count": "number"
+      },
+      "system_events": {
+        "items": [
+          {
+            "data": {
+              "suite": "string"
+            },
+            "name": "string",
+            "ts": "string"
+          }
+        ],
+        "type": "array"
+      }
+    }
+  },
   "safety_check": {
     "approvals": {
       "decision": "string",
@@ -136,6 +743,55 @@
         "mode": "string",
         "version": "number"
       }
+    },
+    "audit": {
+      "compare_window": "number",
+      "comparison": {
+        "available": "bool",
+        "current": {
+          "average_duration_ms": "number",
+          "blocked_if_restricted": "number",
+          "failed": "number",
+          "failure_rate": "number",
+          "total_entries": "number"
+        },
+        "delta": {
+          "average_duration_ms": "number",
+          "blocked_if_restricted": "number",
+          "failed": "number",
+          "failure_rate": "number",
+          "total_entries": "number"
+        },
+        "enabled": "bool",
+        "previous": {
+          "average_duration_ms": "number",
+          "blocked_if_restricted": "number",
+          "failed": "number",
+          "failure_rate": "number",
+          "total_entries": "number"
+        },
+        "window": "number"
+      },
+      "path": "string",
+      "recent_commands": {
+        "items": [],
+        "type": "array"
+      },
+      "summary": {
+        "approved_by": {},
+        "average_duration_ms": "number",
+        "blocked_if_restricted": "number",
+        "current_policy_decisions": {},
+        "failed": "number",
+        "parse_errors": "number",
+        "succeeded": "number",
+        "top_commands": {
+          "items": [],
+          "type": "array"
+        },
+        "total_entries": "number"
+      },
+      "tail": "number"
     },
     "check": {
       "approvals": {

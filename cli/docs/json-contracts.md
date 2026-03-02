@@ -17,15 +17,15 @@ This document defines JSON output contract coverage for Mosaic CLI.
 - `tests/json_contract_modules.rs`
   - Locks module-level success JSON schemas.
   - Covered modules:
-    - `core/agent` (`setup`, `configure --show/get/set/unset`, `ask`, `chat --prompt`, `session list/show/clear`, `status`, `health`, `doctor`)
+    - `core/agent` (`setup`, `configure --show/keys/get/set/unset/patch`, `ask`, `chat --prompt`, `session list/show/clear`, `status`, `health`, `doctor`)
     - `models` (`list` and `list --query/--limit` include `query`, `limit`, `total_models`, `matched_models`, `returned_models`)
     - `channels`
     - `channels/admin` (`update`, `login`, `export`, `import`, `rotate-token-env`, `logout`, `remove`)
     - `gateway`
     - `gateway/admin` (`install`, `start`, `status --deep`, `health --verbose`, `restart`, `uninstall`)
-    - `ops/policy` (`approvals get/set/check/allowlist add|list|remove`, `sandbox get/set/check/list/explain`, `safety get/check/report`, `system event/presence/list`, `logs`)
+    - `ops/policy` (`approvals get/set/check/allowlist add|list|remove`, `sandbox get/set/check/list/explain`, `safety get/check/report`, `observability report/export`, `system event/presence/list`, `logs`)
     - `automation` (`hooks`, `cron`, `webhooks`)
-    - `features` (`browser start/status/navigate/history/tabs/show/focus/snapshot/screenshot/clear/close/stop`, `memory index/search/status/clear`, `plugins` doctor/toggle flow, `plugins/skills` list source filters)
+    - `features` (`browser start/status/navigate/history/tabs/show/focus/snapshot/screenshot/clear/close/stop`, `memory index/search/status/clear`, `plugins` doctor/toggle/run flow including run timeout/output-guard/sandbox/approval/resource-limit/resource-metrics/event-log fields, `plugins/skills` list source filters)
     - `compat/discovery/maintenance` (`docs`, `dns`, `tui`, `qr`, `clawbot`, `directory` + diagnostics flags, `dashboard`, `update` + same-version check, `reset`, `uninstall`)
     - `security`
     - `security/baseline` (`show`, `add`, `remove`, `clear`)

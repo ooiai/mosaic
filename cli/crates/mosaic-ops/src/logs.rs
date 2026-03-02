@@ -95,6 +95,23 @@ pub fn collect_logs(data_dir: &Path, tail: usize) -> Result<Vec<UnifiedLogEntry>
         }
     }
 
+    let plugin_events_dir = data_dir.join("plugin-events");
+    if plugin_events_dir.exists() {
+        for entry in std::fs::read_dir(&plugin_events_dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let source = format!(
+                "plugin:{}",
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown")
+            );
+            load_jsonl_file(&mut entries, &path, &source)?;
+        }
+    }
+
     load_browser_history_file(&mut entries, &data_dir.join("browser-history.json"))?;
 
     entries.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
@@ -243,6 +260,31 @@ mod tests {
         let logs = collect_logs(temp.path(), 50).expect("collect logs");
         assert_eq!(logs.len(), 1);
         assert_eq!(logs[0].source, "webhook:wh-1");
+    }
+
+    #[test]
+    fn collect_logs_includes_plugin_events() {
+        let temp = tempdir().expect("tempdir");
+        let plugin_dir = temp.path().join("plugin-events");
+        fs::create_dir_all(&plugin_dir).expect("create plugin-events dir");
+        let path = plugin_dir.join("demo.jsonl");
+        fs::write(
+            &path,
+            format!(
+                "{}\n",
+                json!({
+                    "ts": "2026-03-02T00:00:00Z",
+                    "plugin_id": "demo",
+                    "hook": "run",
+                    "ok": true,
+                })
+            ),
+        )
+        .expect("write plugin event");
+
+        let logs = collect_logs(temp.path(), 50).expect("collect logs");
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].source, "plugin:demo");
     }
 
     #[test]

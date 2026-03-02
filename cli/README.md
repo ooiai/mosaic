@@ -13,7 +13,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
 - Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
 - Browser runtime (`browser start|stop|status|open|navigate|history|tabs|show|focus|snapshot|screenshot|close|clear`)
-- Ops runtime (`logs`, `system`, `approvals`, `sandbox`, `safety`)
+- Ops runtime (`logs`, `observability`, `system`, `approvals`, `sandbox`, `safety`)
 - CLI compatibility/runtime helpers (`completion shell|install`, `directory`)
 - Maintenance runtime (`update`, `reset`, `uninstall`)
 - Discovery/runtime helpers (`docs`, `dns resolve`)
@@ -22,7 +22,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - Memory runtime (`memory index|search|status|clear`)
 - Security runtime (`security audit`)
 - Agents runtime (`agents list|add|update|show|remove|default|route`)
-- Plugins and skills runtime (`plugins list|info|check|install|enable|disable|doctor|remove`, `skills list|info|check|install|remove`)
+- Plugins and skills runtime (`plugins list|info|check|install|enable|disable|doctor|run|remove`, `skills list|info|check|install|remove`)
 - OpenAI-compatible provider
 - Tooling: `read_file`, `write_file`, `search_text`, `run_cmd`
 - Command aliases for legacy naming compatibility:
@@ -151,10 +151,16 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state setup \
 
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state configure --show
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure keys
 cargo run -p mosaic-cli --bin mosaic -- --project-state configure get provider.base_url
 cargo run -p mosaic-cli --bin mosaic -- --project-state configure set tools.enabled false
 cargo run -p mosaic-cli --bin mosaic -- --project-state configure unset tools.enabled
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure patch --set provider.model=gpt-4.1-mini --dry-run
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure patch --set provider.model=gpt-4.1-mini --set agent.max_turns=12
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure patch --file config-patch.json
 ```
+
+`configure patch --json` includes both per-key `updates` and grouped `groups` summaries (`provider/agent/tools`) for easier large-patch review.
 
 ### List Models
 
@@ -439,6 +445,7 @@ cargo test -p mosaic-cli --test error_codes
 cargo test -p mosaic-cli --test json_contract
 cargo test -p mosaic-cli --test json_contract_modules
 SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
+ITERATIONS=200 ./scripts/plugin_resource_soak.sh
 ./scripts/worklog_append.sh --summary "Summary of change" --tests "cargo test --workspace"
 ```
 
@@ -447,6 +454,10 @@ SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state logs --tail 100
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 100 --source system
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 100 --source plugin:sample_plugin
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json observability report --tail 100 --event-tail 50 --audit-tail 100 --compare-window 100
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json observability report --tail 100 --event-tail 50 --audit-tail 100 --compare-window 100 --plugin-soak-report ./reports/plugin-soak-latest.log --no-doctor
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json observability export --out .mosaic/reports/observability.json --tail 100 --event-tail 50 --audit-tail 100 --compare-window 100 --no-doctor
 cargo run -p mosaic-cli --bin mosaic -- --project-state system event deployment --data '{"env":"staging"}'
 cargo run -p mosaic-cli --bin mosaic -- --project-state system presence
 cargo run -p mosaic-cli --bin mosaic -- --project-state system list --tail 50
@@ -463,8 +474,10 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox list
 cargo run -p mosaic-cli --bin mosaic -- --project-state sandbox explain --profile restricted
 cargo run -p mosaic-cli --bin mosaic -- --project-state safety get
 cargo run -p mosaic-cli --bin mosaic -- --project-state safety check --command "cargo test --workspace"
-cargo run -p mosaic-cli --bin mosaic -- --project-state safety report --command "curl https://example.com"
+cargo run -p mosaic-cli --bin mosaic -- --project-state safety report --command "curl https://example.com" --audit-tail 100 --compare-window 100
 ```
+
+`observability report/export` appends plugin soak samples to `.mosaic/data/reports/plugin-soak-history.jsonl` (or XDG equivalent) when `plugin_soak.available=true`, supports retention (`MOSAIC_OBS_PLUGIN_SOAK_HISTORY_MAX_SAMPLES`), exposes history/delta summary fields, includes gateway + channels telemetry slices, and adds alert suppression/SLO controls (`MOSAIC_OBS_ALERT_*`, `MOSAIC_OBS_SLO_*`).
 
 ### Memory Runtime
 
@@ -511,6 +524,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state plugins install --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins enable <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins disable <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins doctor
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes plugins run <plugin-id> --hook run --arg smoke --timeout-ms 10000
 cargo run -p mosaic-cli --bin mosaic -- --project-state plugins remove <plugin-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills list
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills list --source project
@@ -519,6 +533,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state skills check
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills install --path ./writer
 cargo run -p mosaic-cli --bin mosaic -- --project-state skills remove <skill-id>
 ```
+
+Plugin runtime manifests can optionally enforce per-hook output and resource budgets with `[runtime].max_output_bytes`, `[runtime].max_cpu_ms`, and `[runtime].max_rss_kb`; `plugins run --json` emits `output_limit_bytes`, truncation flags, and matching `resource_limits`/`resource_metrics`.
 
 ## Optional Live Smoke Test
 

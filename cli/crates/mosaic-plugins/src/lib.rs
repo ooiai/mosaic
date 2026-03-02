@@ -15,6 +15,26 @@ pub enum ExtensionSource {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginRuntimeConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doctor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cpu_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rss_kb: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_watchdog_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginEntry {
     pub id: String,
     pub name: String,
@@ -26,6 +46,8 @@ pub struct PluginEntry {
     pub manifest_exists: bool,
     pub manifest_valid: bool,
     pub manifest_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<PluginRuntimeConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +182,66 @@ impl ExtensionRegistry {
                     .clone()
                     .unwrap_or_else(|| "manifest parsed".to_string()),
             ));
+            if let Some(runtime) = plugin.runtime.as_ref() {
+                if let Some(run_hook) = runtime.run.as_ref() {
+                    let run_path = path.join(run_hook);
+                    checks.push(check(
+                        "plugin_runtime_run_hook",
+                        run_path.is_file(),
+                        run_path.display().to_string(),
+                    ));
+                }
+                if let Some(doctor_hook) = runtime.doctor.as_ref() {
+                    let doctor_path = path.join(doctor_hook);
+                    checks.push(check(
+                        "plugin_runtime_doctor_hook",
+                        doctor_path.is_file(),
+                        doctor_path.display().to_string(),
+                    ));
+                }
+                if let Some(timeout_ms) = runtime.timeout_ms {
+                    checks.push(check(
+                        "plugin_runtime_timeout_ms",
+                        timeout_ms > 0,
+                        timeout_ms.to_string(),
+                    ));
+                }
+                if let Some(sandbox_profile) = runtime.sandbox_profile.as_ref() {
+                    checks.push(check(
+                        "plugin_runtime_sandbox_profile",
+                        is_valid_sandbox_profile(sandbox_profile),
+                        sandbox_profile.clone(),
+                    ));
+                }
+                if let Some(max_cpu_ms) = runtime.max_cpu_ms {
+                    checks.push(check(
+                        "plugin_runtime_max_cpu_ms",
+                        max_cpu_ms > 0,
+                        max_cpu_ms.to_string(),
+                    ));
+                }
+                if let Some(max_rss_kb) = runtime.max_rss_kb {
+                    checks.push(check(
+                        "plugin_runtime_max_rss_kb",
+                        max_rss_kb > 0,
+                        max_rss_kb.to_string(),
+                    ));
+                }
+                if let Some(max_output_bytes) = runtime.max_output_bytes {
+                    checks.push(check(
+                        "plugin_runtime_max_output_bytes",
+                        max_output_bytes > 0,
+                        max_output_bytes.to_string(),
+                    ));
+                }
+                if let Some(cpu_watchdog_ms) = runtime.cpu_watchdog_ms {
+                    checks.push(check(
+                        "plugin_runtime_cpu_watchdog_ms",
+                        cpu_watchdog_ms > 0,
+                        cpu_watchdog_ms.to_string(),
+                    ));
+                }
+            }
             let ok = checks.iter().all(|item| item.ok);
             if !ok {
                 failed += 1;
@@ -644,10 +726,23 @@ fn copy_dir_recursive(source_dir: &Path, destination_dir: &Path) -> Result<()> {
 #[derive(Debug, Default, Deserialize)]
 struct PluginManifest {
     plugin: Option<PluginManifestPlugin>,
+    runtime: Option<PluginManifestRuntime>,
     id: Option<String>,
     name: Option<String>,
     version: Option<String>,
     description: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+struct PluginManifestRuntime {
+    run: Option<String>,
+    doctor: Option<String>,
+    timeout_ms: Option<u64>,
+    sandbox_profile: Option<String>,
+    max_cpu_ms: Option<u64>,
+    max_rss_kb: Option<u64>,
+    max_output_bytes: Option<u64>,
+    cpu_watchdog_ms: Option<u64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -656,6 +751,7 @@ struct PluginManifestPlugin {
     name: Option<String>,
     version: Option<String>,
     description: Option<String>,
+    runtime: Option<PluginManifestRuntime>,
 }
 
 impl PluginManifest {
@@ -686,6 +782,13 @@ impl PluginManifest {
             .and_then(|plugin| plugin.description.clone())
             .or_else(|| self.description.clone())
     }
+
+    fn plugin_runtime(&self) -> Option<PluginManifestRuntime> {
+        self.plugin
+            .as_ref()
+            .and_then(|plugin| plugin.runtime.clone())
+            .or_else(|| self.runtime.clone())
+    }
 }
 
 fn discover_plugin_entry(source: ExtensionSource, plugin_dir: &Path) -> PluginEntry {
@@ -705,6 +808,7 @@ fn discover_plugin_entry(source: ExtensionSource, plugin_dir: &Path) -> PluginEn
         manifest_exists: manifest_path.is_file(),
         manifest_valid: false,
         manifest_error: None,
+        runtime: None,
     };
 
     if !entry.manifest_exists {
@@ -744,6 +848,47 @@ fn discover_plugin_entry(source: ExtensionSource, plugin_dir: &Path) -> PluginEn
         .plugin_description()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    entry.runtime = parsed.plugin_runtime().and_then(|runtime| {
+        let run = runtime
+            .run
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let doctor = runtime
+            .doctor
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let timeout_ms = runtime.timeout_ms;
+        let sandbox_profile = runtime
+            .sandbox_profile
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        let max_cpu_ms = runtime.max_cpu_ms;
+        let max_rss_kb = runtime.max_rss_kb;
+        let max_output_bytes = runtime.max_output_bytes;
+        let cpu_watchdog_ms = runtime.cpu_watchdog_ms;
+        if run.is_none()
+            && doctor.is_none()
+            && timeout_ms.is_none()
+            && sandbox_profile.is_none()
+            && max_cpu_ms.is_none()
+            && max_rss_kb.is_none()
+            && max_output_bytes.is_none()
+            && cpu_watchdog_ms.is_none()
+        {
+            None
+        } else {
+            Some(PluginRuntimeConfig {
+                run,
+                doctor,
+                timeout_ms,
+                sandbox_profile,
+                max_cpu_ms,
+                max_rss_kb,
+                max_output_bytes,
+                cpu_watchdog_ms,
+            })
+        }
+    });
     entry.manifest_valid = true;
     entry.manifest_error = None;
     entry
@@ -775,6 +920,10 @@ fn extract_skill_summary(content: &str, fallback_title: &str) -> (String, Option
             .unwrap_or_else(|| fallback_title.to_string()),
         description.filter(|value| !value.is_empty()),
     )
+}
+
+fn is_valid_sandbox_profile(value: &str) -> bool {
+    matches!(value, "restricted" | "standard" | "elevated")
 }
 
 #[cfg(test)]
@@ -861,6 +1010,130 @@ mod tests {
         assert!(!report.ok);
         assert_eq!(report.checked, 1);
         assert_eq!(report.failed, 1);
+    }
+
+    #[test]
+    fn plugin_check_fails_when_runtime_hook_missing() {
+        let temp = tempdir().expect("tempdir");
+        let state_root = temp.path().join(".mosaic");
+        let plugin_dir = state_root.join("plugins").join("runtime-missing");
+        std::fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        std::fs::write(
+            plugin_dir.join("plugin.toml"),
+            "[plugin]\nid = \"runtime_missing\"\nname = \"Runtime Missing\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\n",
+        )
+        .expect("write plugin manifest");
+
+        let registry = ExtensionRegistry::new(RegistryRoots {
+            state_root,
+            codex_home: None,
+            user_home: None,
+        });
+        let report = registry
+            .check_plugins(Some("runtime_missing"))
+            .expect("check plugin");
+        assert!(!report.ok);
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.failed, 1);
+        assert!(
+            report.results[0]
+                .checks
+                .iter()
+                .any(|check| check.name == "plugin_runtime_run_hook" && !check.ok)
+        );
+    }
+
+    #[test]
+    fn plugin_check_fails_when_runtime_sandbox_profile_invalid() {
+        let temp = tempdir().expect("tempdir");
+        let state_root = temp.path().join(".mosaic");
+        let plugin_dir = state_root.join("plugins").join("runtime-sandbox-bad");
+        std::fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        std::fs::write(
+            plugin_dir.join("plugin.toml"),
+            "[plugin]\nid = \"runtime_sandbox_bad\"\nname = \"Runtime Sandbox Bad\"\nversion = \"0.1.0\"\n\n[runtime]\nsandbox_profile = \"isolated\"\n",
+        )
+        .expect("write plugin manifest");
+
+        let registry = ExtensionRegistry::new(RegistryRoots {
+            state_root,
+            codex_home: None,
+            user_home: None,
+        });
+        let report = registry
+            .check_plugins(Some("runtime_sandbox_bad"))
+            .expect("check plugin");
+        assert!(!report.ok);
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.failed, 1);
+        assert!(
+            report.results[0]
+                .checks
+                .iter()
+                .any(|check| check.name == "plugin_runtime_sandbox_profile" && !check.ok)
+        );
+    }
+
+    #[test]
+    fn plugin_check_fails_when_runtime_output_limit_invalid() {
+        let temp = tempdir().expect("tempdir");
+        let state_root = temp.path().join(".mosaic");
+        let plugin_dir = state_root.join("plugins").join("runtime-output-bad");
+        std::fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        std::fs::write(
+            plugin_dir.join("plugin.toml"),
+            "[plugin]\nid = \"runtime_output_bad\"\nname = \"Runtime Output Bad\"\nversion = \"0.1.0\"\n\n[runtime]\nmax_output_bytes = 0\n",
+        )
+        .expect("write plugin manifest");
+
+        let registry = ExtensionRegistry::new(RegistryRoots {
+            state_root,
+            codex_home: None,
+            user_home: None,
+        });
+        let report = registry
+            .check_plugins(Some("runtime_output_bad"))
+            .expect("check plugin");
+        assert!(!report.ok);
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.failed, 1);
+        assert!(
+            report.results[0]
+                .checks
+                .iter()
+                .any(|check| check.name == "plugin_runtime_max_output_bytes" && !check.ok)
+        );
+    }
+
+    #[test]
+    fn plugin_check_fails_when_runtime_cpu_watchdog_invalid() {
+        let temp = tempdir().expect("tempdir");
+        let state_root = temp.path().join(".mosaic");
+        let plugin_dir = state_root.join("plugins").join("runtime-watchdog-bad");
+        std::fs::create_dir_all(&plugin_dir).expect("create plugin dir");
+        std::fs::write(
+            plugin_dir.join("plugin.toml"),
+            "[plugin]\nid = \"runtime_watchdog_bad\"\nname = \"Runtime Watchdog Bad\"\nversion = \"0.1.0\"\n\n[runtime]\ncpu_watchdog_ms = 0\n",
+        )
+        .expect("write plugin manifest");
+
+        let registry = ExtensionRegistry::new(RegistryRoots {
+            state_root,
+            codex_home: None,
+            user_home: None,
+        });
+        let report = registry
+            .check_plugins(Some("runtime_watchdog_bad"))
+            .expect("check plugin");
+        assert!(!report.ok);
+        assert_eq!(report.checked, 1);
+        assert_eq!(report.failed, 1);
+        assert!(
+            report.results[0]
+                .checks
+                .iter()
+                .any(|check| check.name == "plugin_runtime_cpu_watchdog_ms" && !check.ok)
+        );
     }
 
     #[test]
