@@ -82,6 +82,31 @@ require_contains "$TMP_ROOT/configure_unset.json" '"ok"[[:space:]]*:[[:space:]]*
 require_contains "$TMP_ROOT/configure_unset.json" '"action"[[:space:]]*:[[:space:]]*"unset"'
 require_contains "$TMP_ROOT/configure_unset.json" '"value"[[:space:]]*:[[:space:]]*true'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure keys >"$TMP_ROOT/configure_keys.json")
+require_contains "$TMP_ROOT/configure_keys.json" '"action"[[:space:]]*:[[:space:]]*"keys"'
+require_contains "$TMP_ROOT/configure_keys.json" '"provider\.base_url"'
+
+cat >"$SRC_DIR/configure-patch.json" <<'EOF'
+{
+  "agent": { "max_turns": 10 },
+  "tools": { "run": { "guard_mode": "all_confirm" } }
+}
+EOF
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure patch --set provider.model=smoke-model-dry-run --dry-run >"$TMP_ROOT/configure_patch_dry_run.json")
+require_contains "$TMP_ROOT/configure_patch_dry_run.json" '"dry_run"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/configure_patch_dry_run.json" '"saved"[[:space:]]*:[[:space:]]*false'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure get provider.model >"$TMP_ROOT/configure_get_model_before_patch.json")
+require_contains "$TMP_ROOT/configure_get_model_before_patch.json" '"value"[[:space:]]*:[[:space:]]*"mock-model"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure patch --file configure-patch.json --set provider.model=smoke-model-v2 >"$TMP_ROOT/configure_patch.json")
+require_contains "$TMP_ROOT/configure_patch.json" '"action"[[:space:]]*:[[:space:]]*"patch"'
+require_contains "$TMP_ROOT/configure_patch.json" '"updated"[[:space:]]*:[[:space:]]*3'
+require_contains "$TMP_ROOT/configure_patch.json" '"saved"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure get provider.model >"$TMP_ROOT/configure_get_model.json")
+require_contains "$TMP_ROOT/configure_get_model.json" '"value"[[:space:]]*:[[:space:]]*"smoke-model-v2"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json models list >"$TMP_ROOT/models.json")
 require_contains "$TMP_ROOT/models.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/models.json" '"mock-model"'
@@ -329,6 +354,20 @@ require_contains "$TMP_ROOT/logs_tail.json" '"source"[[:space:]]*:[[:space:]]*"s
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 50 --source system >"$TMP_ROOT/logs_tail_system.json")
 require_contains "$TMP_ROOT/logs_tail_system.json" '"source"[[:space:]]*:[[:space:]]*"system"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json observability report --tail 30 --event-tail 30 --audit-tail 30 --compare-window 30 --event-name deploy >"$TMP_ROOT/observability_report.json")
+require_contains "$TMP_ROOT/observability_report.json" '"report"'
+require_contains "$TMP_ROOT/observability_report.json" '"doctor_included"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/observability_report.json" '"safety_audit"'
+require_contains "$TMP_ROOT/observability_report.json" '"comparison"'
+require_contains "$TMP_ROOT/observability_report.json" '"safety_compare_available"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json observability export --out "$TMP_ROOT/observability-export.json" --tail 30 --event-tail 30 --audit-tail 30 --compare-window 30 --no-doctor >"$TMP_ROOT/observability_export.json")
+require_contains "$TMP_ROOT/observability_export.json" '"export_path"'
+require_contains "$TMP_ROOT/observability_export.json" '"doctor_included"[[:space:]]*:[[:space:]]*false'
+require_contains "$TMP_ROOT/observability-export.json" '"generated_at"'
+require_contains "$TMP_ROOT/observability-export.json" '"safety_audit"'
+require_contains "$TMP_ROOT/observability-export.json" '"comparison"'
+
 log "Step 7: browser/runtime presence"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser start >"$TMP_ROOT/browser_start.json")
 require_contains "$TMP_ROOT/browser_start.json" '"running"[[:space:]]*:[[:space:]]*true'
@@ -411,10 +450,12 @@ require_contains "$TMP_ROOT/safety_check_deny.json" '"decision"[[:space:]]*:[[:s
 require_contains "$TMP_ROOT/safety_check_deny.json" '"sandbox"'
 require_contains "$TMP_ROOT/safety_check_deny.json" '"approvals"'
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json safety report --command "curl https://example.com" >"$TMP_ROOT/safety_report.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json safety report --command "curl https://example.com" --audit-tail 30 --compare-window 30 >"$TMP_ROOT/safety_report.json")
 require_contains "$TMP_ROOT/safety_report.json" '"profile_info"'
 require_contains "$TMP_ROOT/safety_report.json" '"check"'
 require_contains "$TMP_ROOT/safety_report.json" '"decision"[[:space:]]*:[[:space:]]*"deny"'
+require_contains "$TMP_ROOT/safety_report.json" '"audit"'
+require_contains "$TMP_ROOT/safety_report.json" '"comparison"'
 
 log "Step 9: agents routing + ask"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json agents add --id writer --name Writer --model mock-model --set-default --route ask >"$TMP_ROOT/agents_add.json")
@@ -460,12 +501,30 @@ require_contains "$TMP_ROOT/security_sarif_output.json" '"sarif_output"'
 require_contains "$SRC_DIR/scan.sarif" '"version"[[:space:]]*:[[:space:]]*"2\.1\.0"'
 
 log "Step 12: plugins/skills install/list/check/remove"
+# restore approval mode for plugin hook execution checks
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json approvals set confirm >"$TMP_ROOT/approvals_confirm_for_plugins.json")
+require_contains "$TMP_ROOT/approvals_confirm_for_plugins.json" '"mode"[[:space:]]*:[[:space:]]*"confirm"'
+
 mkdir -p "$SRC_DIR/sample-plugin" "$SRC_DIR/writer"
 cat >"$SRC_DIR/sample-plugin/plugin.toml" <<'EOF'
 [plugin]
 id = "sample_plugin"
 name = "Sample Plugin"
 version = "0.1.0"
+
+[runtime]
+run = "hooks/run.sh"
+doctor = "hooks/doctor.sh"
+sandbox_profile = "standard"
+EOF
+mkdir -p "$SRC_DIR/sample-plugin/hooks"
+cat >"$SRC_DIR/sample-plugin/hooks/run.sh" <<'EOF'
+#!/bin/sh
+echo "sample-plugin-run:$1"
+EOF
+cat >"$SRC_DIR/sample-plugin/hooks/doctor.sh" <<'EOF'
+#!/bin/sh
+echo "sample-plugin-doctor"
 EOF
 cat >"$SRC_DIR/writer/SKILL.md" <<'EOF'
 # Writer
@@ -494,6 +553,18 @@ require_contains "$TMP_ROOT/plugins_doctor.json" '"disabled_plugins"[[:space:]]*
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json plugins enable sample_plugin >"$TMP_ROOT/plugins_enable.json")
 require_contains "$TMP_ROOT/plugins_enable.json" '"enabled"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json plugins run sample_plugin --hook run --arg smoke >"$TMP_ROOT/plugins_run.json")
+require_contains "$TMP_ROOT/plugins_run.json" '"hook"[[:space:]]*:[[:space:]]*"run"'
+require_contains "$TMP_ROOT/plugins_run.json" '"exit_code"[[:space:]]*:[[:space:]]*0'
+require_contains "$TMP_ROOT/plugins_run.json" '"timeout_ms"[[:space:]]*:[[:space:]]*15000'
+require_contains "$TMP_ROOT/plugins_run.json" '"sandbox_profile"[[:space:]]*:[[:space:]]*"standard"'
+require_contains "$TMP_ROOT/plugins_run.json" '"approved_by"[[:space:]]*:[[:space:]]*"flag_yes"'
+require_contains "$TMP_ROOT/plugins_run.json" '"event_log_path"'
+require_contains "$TMP_ROOT/plugins_run.json" 'sample-plugin-run:smoke'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 200 --source plugin:sample_plugin >"$TMP_ROOT/plugin_logs.json")
+require_contains "$TMP_ROOT/plugin_logs.json" '"source"[[:space:]]*:[[:space:]]*"plugin:sample_plugin"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json skills check writer >"$TMP_ROOT/skills_check.json")
 require_contains "$TMP_ROOT/skills_check.json" '"ok"[[:space:]]*:[[:space:]]*true'

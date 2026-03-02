@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use serde_json::Value;
+use std::fs;
 use tempfile::tempdir;
 
 #[test]
@@ -293,6 +294,18 @@ fn approvals_and_sandbox_commands_json_contract() {
     assert_eq!(safety_check_allow["sandbox"]["decision"], "allow");
     assert_eq!(safety_check_allow["approvals"]["decision"], "auto");
 
+    let audit_dir = temp.path().join(".mosaic/data/audit");
+    fs::create_dir_all(&audit_dir).expect("create audit dir");
+    fs::write(
+        audit_dir.join("commands.jsonl"),
+        "{\"id\":\"aud-1\",\"ts\":\"2026-03-01T00:00:00Z\",\"session_id\":\"s-1\",\"command\":\"cargo test --workspace\",\"cwd\":\"/tmp\",\"approved_by\":\"approval_allowlist\",\"exit_code\":0,\"duration_ms\":123}\n\
+{\"id\":\"aud-2\",\"ts\":\"2026-03-01T00:01:00Z\",\"session_id\":\"s-1\",\"command\":\"curl https://example.com\",\"cwd\":\"/tmp\",\"approved_by\":\"flag_yes\",\"exit_code\":1,\"duration_ms\":250}\n\
+this-is-invalid-json\n\
+{\"id\":\"aud-3\",\"ts\":\"2026-03-01T00:02:00Z\",\"session_id\":\"s-1\",\"command\":\"cargo test --workspace\",\"cwd\":\"/tmp\",\"approved_by\":\"approval_allowlist\",\"exit_code\":0,\"duration_ms\":111}\n\
+{\"id\":\"aud-4\",\"ts\":\"2026-03-01T00:03:00Z\",\"session_id\":\"s-1\",\"command\":\"curl https://example.com\",\"cwd\":\"/tmp\",\"approved_by\":\"flag_yes\",\"exit_code\":1,\"duration_ms\":200}\n",
+    )
+    .expect("write audit log");
+
     let safety_report = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -303,6 +316,10 @@ fn approvals_and_sandbox_commands_json_contract() {
             "report",
             "--command",
             "curl https://example.com",
+            "--audit-tail",
+            "2",
+            "--compare-window",
+            "2",
         ])
         .assert()
         .success()
@@ -314,6 +331,16 @@ fn approvals_and_sandbox_commands_json_contract() {
     assert_eq!(
         safety_report["check"]["decision"], "deny",
         "restricted sandbox should deny network command in safety report"
+    );
+    assert_eq!(safety_report["audit"]["summary"]["total_entries"], 2);
+    assert_eq!(safety_report["audit"]["summary"]["parse_errors"], 1);
+    assert_eq!(safety_report["audit"]["comparison"]["enabled"], true);
+    assert_eq!(safety_report["audit"]["comparison"]["available"], true);
+    assert_eq!(safety_report["audit"]["comparison"]["window"], 2);
+    assert_eq!(safety_report["audit"]["comparison"]["delta"]["failed"], 0);
+    assert_eq!(
+        safety_report["audit"]["summary"]["blocked_if_restricted"],
+        1
     );
 }
 
@@ -425,4 +452,38 @@ fn system_event_and_logs_flow() {
             .iter()
             .all(|event| event["name"].as_str() == Some("deploy_start"))
     );
+}
+
+#[test]
+#[allow(deprecated)]
+fn plugins_run_honors_restricted_sandbox_policy() {
+    let temp = tempdir().expect("tempdir");
+    let state_root = temp.path().join(".mosaic");
+    let plugin_dir = state_root.join("plugins").join("net_hook");
+    let hooks_dir = plugin_dir.join("hooks");
+    fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+    fs::write(
+        plugin_dir.join("plugin.toml"),
+        "[plugin]\nid = \"net_hook\"\nname = \"Net Hook\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\nsandbox_profile = \"restricted\"\n",
+    )
+    .expect("write plugin manifest");
+    fs::write(
+        hooks_dir.join("run.sh"),
+        "#!/bin/sh\ncurl https://example.com >/dev/null 2>&1\n",
+    )
+    .expect("write hook script");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "run", "net_hook"])
+        .assert()
+        .failure()
+        .code(12)
+        .get_output()
+        .stdout
+        .clone();
+    let payload: Value = serde_json::from_slice(&output).expect("plugins sandbox deny output");
+    assert_eq!(payload["ok"], false);
+    assert_eq!(payload["error"]["code"], "sandbox_denied");
 }

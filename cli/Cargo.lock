@@ -895,6 +895,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
+ "libc",
  "mosaic-agent",
  "mosaic-agents",
  "mosaic-channels",
@@ -915,6 +916,7 @@ dependencies = [
  "tempfile",
  "tiny_http",
  "tokio",
+ "toml",
 ]
 
 [[package]]

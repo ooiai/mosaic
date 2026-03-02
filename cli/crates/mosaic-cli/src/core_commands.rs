@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
 
@@ -10,9 +11,10 @@ use mosaic_core::models::ModelRoutingStore;
 use mosaic_core::session::SessionStore;
 
 use super::{
-    ChatArgs, Cli, ConfigureArgs, ConfigureCommand, ModelAliasesCommand, ModelFallbacksCommand,
-    ModelsArgs, ModelsCommand, PROJECT_STATE_DIR, SessionArgs, SessionCommand, SetupArgs,
-    build_runtime, print_json, resolve_effective_model, resolve_state_paths,
+    ChatArgs, Cli, ConfigureArgs, ConfigureCommand, ConfigurePatchArgs, ModelAliasesCommand,
+    ModelFallbacksCommand, ModelsArgs, ModelsCommand, PROJECT_STATE_DIR, SessionArgs,
+    SessionCommand, SetupArgs, build_runtime, print_json, resolve_effective_model,
+    resolve_state_paths,
 };
 
 pub(super) fn handle_setup(cli: &Cli, args: SetupArgs) -> Result<()> {
@@ -162,7 +164,7 @@ pub(super) fn handle_configure(cli: &Cli, args: ConfigureArgs) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConfigureKey {
     ProviderBaseUrl,
     ProviderModel,
@@ -173,12 +175,124 @@ enum ConfigureKey {
     ToolsRunGuardMode,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ConfigureKeySpec {
+    key: ConfigureKey,
+    name: &'static str,
+    aliases: &'static [&'static str],
+    value_type: &'static str,
+    description: &'static str,
+}
+
+const CONFIGURE_KEY_SPECS: [ConfigureKeySpec; 7] = [
+    ConfigureKeySpec {
+        key: ConfigureKey::ProviderBaseUrl,
+        name: "provider.base_url",
+        aliases: &["base_url"],
+        value_type: "string",
+        description: "OpenAI-compatible provider base URL",
+    },
+    ConfigureKeySpec {
+        key: ConfigureKey::ProviderModel,
+        name: "provider.model",
+        aliases: &["model"],
+        value_type: "string",
+        description: "default model identifier for ask/chat",
+    },
+    ConfigureKeySpec {
+        key: ConfigureKey::ProviderApiKeyEnv,
+        name: "provider.api_key_env",
+        aliases: &["api_key_env"],
+        value_type: "string",
+        description: "environment variable name for API key",
+    },
+    ConfigureKeySpec {
+        key: ConfigureKey::AgentTemperature,
+        name: "agent.temperature",
+        aliases: &["temperature"],
+        value_type: "float",
+        description: "sampling temperature, expected in range [0.0, 2.0]",
+    },
+    ConfigureKeySpec {
+        key: ConfigureKey::AgentMaxTurns,
+        name: "agent.max_turns",
+        aliases: &["max_turns"],
+        value_type: "integer",
+        description: "maximum turns per run",
+    },
+    ConfigureKeySpec {
+        key: ConfigureKey::ToolsEnabled,
+        name: "tools.enabled",
+        aliases: &["tools_enabled"],
+        value_type: "boolean",
+        description: "toggle tool usage for the agent",
+    },
+    ConfigureKeySpec {
+        key: ConfigureKey::ToolsRunGuardMode,
+        name: "tools.run.guard_mode",
+        aliases: &["guard_mode"],
+        value_type: "enum(confirm_dangerous|all_confirm|unrestricted)",
+        description: "command execution confirmation policy",
+    },
+];
+
 fn handle_configure_subcommand(
     cli: &Cli,
     manager: &ConfigManager,
     config: &mut ConfigFile,
     command: ConfigureCommand,
 ) -> Result<()> {
+    match command {
+        ConfigureCommand::Keys => {
+            let profile = config.profiles.entry(cli.profile.clone()).or_default();
+            let keys = CONFIGURE_KEY_SPECS
+                .iter()
+                .map(|spec| {
+                    json!({
+                        "name": spec.name,
+                        "aliases": spec.aliases,
+                        "type": spec.value_type,
+                        "description": spec.description,
+                        "value": configure_value(profile, spec.key),
+                        "default": configure_default_value(spec.key),
+                    })
+                })
+                .collect::<Vec<_>>();
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "action": "keys",
+                    "profile": cli.profile,
+                    "keys": keys,
+                }));
+            } else {
+                println!("profile: {}", cli.profile);
+                println!("supported keys:");
+                for spec in &CONFIGURE_KEY_SPECS {
+                    let aliases = if spec.aliases.is_empty() {
+                        "<none>".to_string()
+                    } else {
+                        spec.aliases.join(", ")
+                    };
+                    println!(
+                        "- {} ({}) aliases: {}\n  {}\n  current: {}\n  default: {}",
+                        spec.name,
+                        spec.value_type,
+                        aliases,
+                        spec.description,
+                        configure_value(profile, spec.key),
+                        configure_default_value(spec.key)
+                    );
+                }
+            }
+            return Ok(());
+        }
+        ConfigureCommand::Patch(args) => {
+            return handle_configure_patch(cli, manager, config, args);
+        }
+        _ => {}
+    }
+
     let profile = config.profiles.entry(cli.profile.clone()).or_default();
     let (action, key_name, value, changed) = match command {
         ConfigureCommand::Get { key } => {
@@ -205,6 +319,7 @@ fn handle_configure_subcommand(
                 true,
             )
         }
+        ConfigureCommand::Keys | ConfigureCommand::Patch(_) => unreachable!(),
     };
 
     config.active_profile = cli.profile.clone();
@@ -241,30 +356,37 @@ fn parse_configure_key(raw: &str) -> Result<ConfigureKey> {
             "configure key cannot be empty".to_string(),
         ));
     }
-    let normalized = key.to_ascii_lowercase().replace('-', "_");
-    match normalized.as_str() {
-        "provider.base_url" | "base_url" => Ok(ConfigureKey::ProviderBaseUrl),
-        "provider.model" | "model" => Ok(ConfigureKey::ProviderModel),
-        "provider.api_key_env" | "api_key_env" => Ok(ConfigureKey::ProviderApiKeyEnv),
-        "agent.temperature" | "temperature" => Ok(ConfigureKey::AgentTemperature),
-        "agent.max_turns" | "max_turns" => Ok(ConfigureKey::AgentMaxTurns),
-        "tools.enabled" | "tools_enabled" => Ok(ConfigureKey::ToolsEnabled),
-        "tools.run.guard_mode" | "guard_mode" => Ok(ConfigureKey::ToolsRunGuardMode),
-        _ => Err(MosaicError::Validation(format!(
-            "unsupported configure key '{key}'"
-        ))),
+    let normalized = normalize_configure_key(key);
+    for spec in &CONFIGURE_KEY_SPECS {
+        if normalize_configure_key(spec.name) == normalized {
+            return Ok(spec.key);
+        }
+        for alias in spec.aliases {
+            if normalize_configure_key(alias) == normalized {
+                return Ok(spec.key);
+            }
+        }
     }
+    Err(MosaicError::Validation(format!(
+        "unsupported configure key '{key}'. run `mosaic configure keys` to list supported keys"
+    )))
 }
 
 fn configure_key_name(key: ConfigureKey) -> &'static str {
+    CONFIGURE_KEY_SPECS
+        .iter()
+        .find(|spec| spec.key == key)
+        .map(|spec| spec.name)
+        .expect("configure key spec exists")
+}
+
+fn configure_key_group(key: ConfigureKey) -> &'static str {
     match key {
-        ConfigureKey::ProviderBaseUrl => "provider.base_url",
-        ConfigureKey::ProviderModel => "provider.model",
-        ConfigureKey::ProviderApiKeyEnv => "provider.api_key_env",
-        ConfigureKey::AgentTemperature => "agent.temperature",
-        ConfigureKey::AgentMaxTurns => "agent.max_turns",
-        ConfigureKey::ToolsEnabled => "tools.enabled",
-        ConfigureKey::ToolsRunGuardMode => "tools.run.guard_mode",
+        ConfigureKey::ProviderBaseUrl
+        | ConfigureKey::ProviderModel
+        | ConfigureKey::ProviderApiKeyEnv => "provider",
+        ConfigureKey::AgentTemperature | ConfigureKey::AgentMaxTurns => "agent",
+        ConfigureKey::ToolsEnabled | ConfigureKey::ToolsRunGuardMode => "tools",
     }
 }
 
@@ -280,6 +402,11 @@ fn configure_value(profile: &ProfileConfig, key: ConfigureKey) -> Value {
     }
 }
 
+fn configure_default_value(key: ConfigureKey) -> Value {
+    let defaults = ProfileConfig::default();
+    configure_value(&defaults, key)
+}
+
 fn set_configure_value(profile: &mut ProfileConfig, key: ConfigureKey, raw: &str) -> Result<Value> {
     let value = raw.trim();
     if value.is_empty() {
@@ -287,23 +414,32 @@ fn set_configure_value(profile: &mut ProfileConfig, key: ConfigureKey, raw: &str
             "configure value cannot be empty".to_string(),
         ));
     }
+    set_configure_value_from_json(profile, key, &Value::String(value.to_string()))
+}
+
+fn set_configure_value_from_json(
+    profile: &mut ProfileConfig,
+    key: ConfigureKey,
+    value: &Value,
+) -> Result<Value> {
     match key {
         ConfigureKey::ProviderBaseUrl => {
-            profile.provider.base_url = value.to_string();
+            let parsed = require_string_value(value, "provider.base_url")?;
+            profile.provider.base_url = parsed;
             Ok(json!(profile.provider.base_url))
         }
         ConfigureKey::ProviderModel => {
-            profile.provider.model = value.to_string();
+            let parsed = require_string_value(value, "provider.model")?;
+            profile.provider.model = parsed;
             Ok(json!(profile.provider.model))
         }
         ConfigureKey::ProviderApiKeyEnv => {
-            profile.provider.api_key_env = value.to_string();
+            let parsed = require_string_value(value, "provider.api_key_env")?;
+            profile.provider.api_key_env = parsed;
             Ok(json!(profile.provider.api_key_env))
         }
         ConfigureKey::AgentTemperature => {
-            let parsed = value.parse::<f32>().map_err(|err| {
-                MosaicError::Validation(format!("invalid float for agent.temperature: {err}"))
-            })?;
+            let parsed = parse_float_value(value, "agent.temperature")?;
             if !parsed.is_finite() {
                 return Err(MosaicError::Validation(
                     "agent.temperature must be finite".to_string(),
@@ -313,9 +449,7 @@ fn set_configure_value(profile: &mut ProfileConfig, key: ConfigureKey, raw: &str
             Ok(json!(profile.agent.temperature))
         }
         ConfigureKey::AgentMaxTurns => {
-            let parsed = value.parse::<u32>().map_err(|err| {
-                MosaicError::Validation(format!("invalid integer for agent.max_turns: {err}"))
-            })?;
+            let parsed = parse_u32_value(value, "agent.max_turns")?;
             if parsed == 0 {
                 return Err(MosaicError::Validation(
                     "agent.max_turns must be greater than 0".to_string(),
@@ -325,12 +459,12 @@ fn set_configure_value(profile: &mut ProfileConfig, key: ConfigureKey, raw: &str
             Ok(json!(profile.agent.max_turns))
         }
         ConfigureKey::ToolsEnabled => {
-            let parsed = parse_bool_value(value)?;
+            let parsed = parse_bool_from_value(value, "tools.enabled")?;
             profile.tools.enabled = parsed;
             Ok(json!(profile.tools.enabled))
         }
         ConfigureKey::ToolsRunGuardMode => {
-            let parsed = parse_guard_mode(value)?;
+            let parsed = parse_guard_mode_from_value(value, "tools.run.guard_mode")?;
             profile.tools.run.guard_mode = parsed;
             Ok(json!(guard_mode_name(&profile.tools.run.guard_mode)))
         }
@@ -371,12 +505,291 @@ fn unset_configure_value(profile: &mut ProfileConfig, key: ConfigureKey) -> Valu
     }
 }
 
+fn handle_configure_patch(
+    cli: &Cli,
+    manager: &ConfigManager,
+    config: &mut ConfigFile,
+    args: ConfigurePatchArgs,
+) -> Result<()> {
+    let ConfigurePatchArgs { set, file, dry_run } = args;
+    let mut assignments = Vec::<ConfigurePatchAssignment>::new();
+    let mut file_path = None;
+    if let Some(path) = file {
+        assignments.extend(load_configure_patch_file(&path)?);
+        file_path = Some(path);
+    }
+    assignments.extend(
+        set.iter()
+            .map(|entry| parse_configure_patch_set(entry))
+            .collect::<Result<Vec<_>>>()?,
+    );
+    if assignments.is_empty() {
+        return Err(MosaicError::Validation(
+            "configure patch requires at least one update via --set or --file".to_string(),
+        ));
+    }
+
+    // Keep latest assignment when the same key appears multiple times.
+    let mut merged = Vec::<ConfigurePatchAssignment>::new();
+    for assignment in assignments {
+        if let Some(existing) = merged.iter_mut().find(|entry| entry.key == assignment.key) {
+            *existing = assignment;
+        } else {
+            merged.push(assignment);
+        }
+    }
+
+    let current_profile = config
+        .profiles
+        .get(&cli.profile)
+        .cloned()
+        .unwrap_or_default();
+    let mut staged_profile = current_profile.clone();
+    let mut updates = Vec::with_capacity(merged.len());
+    let mut groups = BTreeMap::<&'static str, (usize, usize)>::new();
+    let mut changed_keys = 0usize;
+    for assignment in merged {
+        let from = configure_value(&staged_profile, assignment.key);
+        let value =
+            set_configure_value_from_json(&mut staged_profile, assignment.key, &assignment.value)?;
+        let changed = from != value;
+        let group = configure_key_group(assignment.key);
+        let group_entry = groups.entry(group).or_insert((0, 0));
+        group_entry.0 += 1;
+        if changed {
+            changed_keys += 1;
+            group_entry.1 += 1;
+        }
+        updates.push(json!({
+            "key": configure_key_name(assignment.key),
+            "group": group,
+            "from": from,
+            "to": value.clone(),
+            "value": value,
+            "changed": changed,
+            "source": assignment.source,
+        }));
+    }
+    let group_summaries = groups
+        .into_iter()
+        .map(|(group, (updated, changed))| {
+            json!({
+                "group": group,
+                "updated": updated,
+                "changed": changed,
+                "unchanged": updated.saturating_sub(changed),
+            })
+        })
+        .collect::<Vec<_>>();
+    let changed = changed_keys > 0;
+
+    if !dry_run {
+        config.profiles.insert(cli.profile.clone(), staged_profile);
+        config.active_profile = cli.profile.clone();
+        manager.save(config)?;
+    }
+
+    if cli.json {
+        print_json(&json!({
+            "ok": true,
+            "action": "patch",
+            "changed": changed,
+            "dry_run": dry_run,
+            "saved": !dry_run,
+            "profile": cli.profile,
+            "updated": updates.len(),
+            "changed_keys": changed_keys,
+            "groups": group_summaries,
+            "updates": updates,
+            "file": file_path,
+            "config_path": manager.path().display().to_string(),
+        }));
+    } else {
+        println!("profile: {}", cli.profile);
+        println!("action: patch");
+        println!("dry_run: {dry_run}");
+        println!("saved: {}", !dry_run);
+        println!("updated: {}", updates.len());
+        println!("changed_keys: {changed_keys}");
+        for group in &group_summaries {
+            println!(
+                "* group {}: updated={}, changed={}, unchanged={}",
+                group["group"], group["updated"], group["changed"], group["unchanged"]
+            );
+        }
+        if let Some(path) = file_path {
+            println!("file: {path}");
+        }
+        for update in updates {
+            println!(
+                "- {}: {} -> {} (changed={})",
+                update["key"], update["from"], update["to"], update["changed"]
+            );
+        }
+        if !dry_run {
+            println!("config path: {}", manager.path().display());
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct ConfigurePatchAssignment {
+    key: ConfigureKey,
+    value: Value,
+    source: String,
+}
+
+fn load_configure_patch_file(path: &str) -> Result<Vec<ConfigurePatchAssignment>> {
+    let raw = fs::read_to_string(path).map_err(|err| {
+        MosaicError::Io(format!("failed reading configure patch file {path}: {err}"))
+    })?;
+
+    let parsed = parse_configure_patch_document(path, &raw)?;
+    let object = parsed.as_object().ok_or_else(|| {
+        MosaicError::Validation(format!(
+            "configure patch file '{}' must be a JSON/TOML object",
+            path
+        ))
+    })?;
+    if object.is_empty() {
+        return Err(MosaicError::Validation(format!(
+            "configure patch file '{}' cannot be empty",
+            path
+        )));
+    }
+
+    let mut flattened = Vec::<(String, Value)>::new();
+    flatten_configure_patch_object("", object, &mut flattened)?;
+    let mut updates = Vec::with_capacity(flattened.len());
+    for (key, value) in flattened {
+        let parsed_key = parse_configure_key(&key)?;
+        updates.push(ConfigurePatchAssignment {
+            key: parsed_key,
+            value,
+            source: "file".to_string(),
+        });
+    }
+    Ok(updates)
+}
+
+fn parse_configure_patch_document(path: &str, raw: &str) -> Result<Value> {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".json") {
+        return serde_json::from_str::<Value>(raw).map_err(|err| {
+            MosaicError::Validation(format!(
+                "invalid JSON configure patch file '{}': {err}",
+                path
+            ))
+        });
+    }
+    if lower.ends_with(".toml") {
+        let parsed = toml::from_str::<toml::Value>(raw).map_err(|err| {
+            MosaicError::Validation(format!(
+                "invalid TOML configure patch file '{}': {err}",
+                path
+            ))
+        })?;
+        return serde_json::to_value(parsed).map_err(|err| {
+            MosaicError::Validation(format!(
+                "failed to map TOML configure patch file '{}' to JSON: {err}",
+                path
+            ))
+        });
+    }
+    if let Ok(json_value) = serde_json::from_str::<Value>(raw) {
+        return Ok(json_value);
+    }
+    let parsed = toml::from_str::<toml::Value>(raw).map_err(|err| {
+        MosaicError::Validation(format!(
+            "configure patch file '{}' must be valid JSON or TOML: {err}",
+            path
+        ))
+    })?;
+    serde_json::to_value(parsed).map_err(|err| {
+        MosaicError::Validation(format!(
+            "failed to map configure patch file '{}' to JSON: {err}",
+            path
+        ))
+    })
+}
+
+fn flatten_configure_patch_object(
+    prefix: &str,
+    object: &serde_json::Map<String, Value>,
+    out: &mut Vec<(String, Value)>,
+) -> Result<()> {
+    for (key, value) in object {
+        let next_key = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        match value {
+            Value::Object(nested) => flatten_configure_patch_object(&next_key, nested, out)?,
+            Value::String(_) | Value::Bool(_) | Value::Number(_) => {
+                out.push((next_key, value.clone()));
+            }
+            Value::Array(_) | Value::Null => {
+                return Err(MosaicError::Validation(format!(
+                    "configure patch key '{}' must be a scalar string/number/bool value",
+                    next_key
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_configure_patch_set(raw: &str) -> Result<ConfigurePatchAssignment> {
+    let Some((key, value)) = raw.split_once('=') else {
+        return Err(MosaicError::Validation(format!(
+            "invalid patch assignment '{}', expected KEY=VALUE",
+            raw
+        )));
+    };
+    let parsed_key = parse_configure_key(key)?;
+    let trimmed_value = value.trim();
+    if trimmed_value.is_empty() {
+        return Err(MosaicError::Validation(format!(
+            "invalid patch assignment '{}', value cannot be empty",
+            raw
+        )));
+    }
+    Ok(ConfigurePatchAssignment {
+        key: parsed_key,
+        value: Value::String(trimmed_value.to_string()),
+        source: "set".to_string(),
+    })
+}
+
+fn normalize_configure_key(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase().replace('-', "_")
+}
+
 fn parse_bool_value(raw: &str) -> Result<bool> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "true" | "1" | "yes" | "y" | "on" => Ok(true),
         "false" | "0" | "no" | "n" | "off" => Ok(false),
         _ => Err(MosaicError::Validation(format!(
             "invalid boolean value '{raw}', expected true/false"
+        ))),
+    }
+}
+
+fn parse_bool_from_value(value: &Value, field_name: &str) -> Result<bool> {
+    match value {
+        Value::Bool(parsed) => Ok(*parsed),
+        Value::String(raw) => parse_bool_value(raw),
+        Value::Number(number) => match number.as_i64() {
+            Some(0) => Ok(false),
+            Some(1) => Ok(true),
+            _ => Err(MosaicError::Validation(format!(
+                "{field_name} must be true/false or 0/1"
+            ))),
+        },
+        _ => Err(MosaicError::Validation(format!(
+            "{field_name} must be a boolean-compatible value"
         ))),
     }
 }
@@ -388,6 +801,66 @@ fn parse_guard_mode(raw: &str) -> Result<RunGuardMode> {
         "unrestricted" => Ok(RunGuardMode::Unrestricted),
         _ => Err(MosaicError::Validation(format!(
             "invalid guard mode '{raw}', expected confirm_dangerous|all_confirm|unrestricted"
+        ))),
+    }
+}
+
+fn parse_guard_mode_from_value(value: &Value, field_name: &str) -> Result<RunGuardMode> {
+    match value {
+        Value::String(raw) => parse_guard_mode(raw),
+        _ => Err(MosaicError::Validation(format!(
+            "{field_name} must be a string value"
+        ))),
+    }
+}
+
+fn parse_float_value(value: &Value, field_name: &str) -> Result<f32> {
+    match value {
+        Value::Number(number) => Ok(number.as_f64().ok_or_else(|| {
+            MosaicError::Validation(format!("{field_name} must be a finite float value"))
+        })? as f32),
+        Value::String(raw) => raw.trim().parse::<f32>().map_err(|err| {
+            MosaicError::Validation(format!("invalid float for {field_name}: {err}"))
+        }),
+        _ => Err(MosaicError::Validation(format!(
+            "{field_name} must be a float-compatible value"
+        ))),
+    }
+}
+
+fn parse_u32_value(value: &Value, field_name: &str) -> Result<u32> {
+    match value {
+        Value::Number(number) => {
+            let Some(parsed) = number.as_u64() else {
+                return Err(MosaicError::Validation(format!(
+                    "{field_name} must be a non-negative integer"
+                )));
+            };
+            u32::try_from(parsed)
+                .map_err(|_| MosaicError::Validation(format!("{field_name} is too large for u32")))
+        }
+        Value::String(raw) => raw.trim().parse::<u32>().map_err(|err| {
+            MosaicError::Validation(format!("invalid integer for {field_name}: {err}"))
+        }),
+        _ => Err(MosaicError::Validation(format!(
+            "{field_name} must be an integer-compatible value"
+        ))),
+    }
+}
+
+fn require_string_value(value: &Value, field_name: &str) -> Result<String> {
+    match value {
+        Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return Err(MosaicError::Validation(format!(
+                    "{field_name} cannot be empty"
+                )));
+            }
+            Ok(trimmed.to_string())
+        }
+        _ => Err(MosaicError::Validation(format!(
+            "{field_name} must be a string value"
         ))),
     }
 }

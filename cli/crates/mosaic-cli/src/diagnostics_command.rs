@@ -161,7 +161,7 @@ pub(super) async fn handle_health(cli: &Cli) -> Result<()> {
     emit_checks(cli.json, "health", checks)
 }
 
-pub(super) async fn handle_doctor(cli: &Cli) -> Result<()> {
+pub(super) async fn collect_doctor_checks(cli: &Cli) -> Result<Vec<BTreeMap<String, Value>>> {
     let paths = resolve_state_paths(cli.project_state)?;
     let manager = ConfigManager::new(paths.config_path.clone());
     let channels_repo = ChannelRepository::new(
@@ -424,5 +424,10 @@ pub(super) async fn handle_doctor(cli: &Cli) -> Result<()> {
         }
     }
 
+    Ok(checks)
+}
+
+pub(super) async fn handle_doctor(cli: &Cli) -> Result<()> {
+    let checks = collect_doctor_checks(cli).await?;
     emit_checks(cli.json, "doctor", checks)
 }

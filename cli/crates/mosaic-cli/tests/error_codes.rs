@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use serde_json::Value;
+use std::fs;
 use tempfile::tempdir;
 
 #[test]
@@ -1409,6 +1410,223 @@ fn plugins_disable_missing_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn plugins_run_disabled_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let plugin_dir = temp.path().join(".mosaic/plugins/demo");
+    let hooks_dir = plugin_dir.join("hooks");
+    std::fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        "[plugin]\nid = \"demo\"\nname = \"Demo\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(hooks_dir.join("run.sh"), "#!/bin/sh\necho demo\n").expect("write run hook");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "disable", "demo"])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "run", "demo"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn plugins_run_timeout_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let plugin_dir = temp.path().join(".mosaic/plugins/demo");
+    let hooks_dir = plugin_dir.join("hooks");
+    std::fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        "[plugin]\nid = \"demo\"\nname = \"Demo\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(hooks_dir.join("run.sh"), "#!/bin/sh\necho demo\n").expect("write run hook");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "plugins",
+            "run",
+            "demo",
+            "--timeout-ms",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn plugins_run_output_limit_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let plugin_dir = temp.path().join(".mosaic/plugins/demo");
+    let hooks_dir = plugin_dir.join("hooks");
+    std::fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        "[plugin]\nid = \"demo\"\nname = \"Demo\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\nmax_output_bytes = 0\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(hooks_dir.join("run.sh"), "#!/bin/sh\necho demo\n").expect("write run hook");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--yes",
+            "--json",
+            "plugins",
+            "run",
+            "demo",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn plugins_run_cpu_watchdog_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let plugin_dir = temp.path().join(".mosaic/plugins/demo");
+    let hooks_dir = plugin_dir.join("hooks");
+    std::fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        "[plugin]\nid = \"demo\"\nname = \"Demo\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\ncpu_watchdog_ms = 0\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(hooks_dir.join("run.sh"), "#!/bin/sh\necho demo\n").expect("write run hook");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--yes",
+            "--json",
+            "plugins",
+            "run",
+            "demo",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[cfg(not(unix))]
+#[allow(deprecated)]
+fn plugins_run_non_unix_rejects_rss_limits_with_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let plugin_dir = temp.path().join(".mosaic/plugins/demo");
+    let hooks_dir = plugin_dir.join("hooks");
+    std::fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        "[plugin]\nid = \"demo\"\nname = \"Demo\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\nmax_rss_kb = 1024\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(hooks_dir.join("run.sh"), "#!/bin/sh\necho demo\n").expect("write run hook");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--yes",
+            "--json",
+            "plugins",
+            "run",
+            "demo",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .expect("validation message")
+            .contains("max_rss_kb requires unix-like metrics support")
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn plugins_run_without_yes_returns_approval_required_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let plugin_dir = temp.path().join(".mosaic/plugins/demo");
+    let hooks_dir = plugin_dir.join("hooks");
+    std::fs::create_dir_all(&hooks_dir).expect("create hooks dir");
+    std::fs::write(
+        plugin_dir.join("plugin.toml"),
+        "[plugin]\nid = \"demo\"\nname = \"Demo\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\n",
+    )
+    .expect("write plugin manifest");
+    std::fs::write(hooks_dir.join("run.sh"), "#!/bin/sh\necho demo\n").expect("write run hook");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "plugins", "run", "demo"])
+        .assert()
+        .failure()
+        .code(11)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "approval_required");
+}
+
+#[test]
+#[allow(deprecated)]
 fn configure_set_invalid_key_returns_validation_exit_code() {
     let temp = tempdir().expect("tempdir");
     Command::cargo_bin("mosaic")
@@ -1473,6 +1691,119 @@ fn configure_subcommand_with_legacy_flags_returns_validation_exit_code() {
             "--show",
             "get",
             "provider.base_url",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn configure_patch_without_updates_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "configure", "patch"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn configure_patch_invalid_assignment_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "patch",
+            "--set",
+            "provider.base_url",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn configure_patch_invalid_file_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let patch_file = temp.path().join("invalid-patch.json");
+    fs::write(&patch_file, r#"{"tools":{"enabled":[true,false]}}"#)
+        .expect("write invalid patch file");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "patch",
+            "--file",
+            patch_file.to_string_lossy().as_ref(),
         ])
         .assert()
         .failure()

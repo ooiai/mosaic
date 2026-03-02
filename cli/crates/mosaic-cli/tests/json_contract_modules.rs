@@ -1414,6 +1414,18 @@ fn json_core_agent_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&configure_show);
 
+    let configure_keys = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "configure", "keys"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_keys);
+
     let configure_set = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1432,6 +1444,37 @@ fn json_core_agent_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&configure_set);
+
+    let patch_file = temp.path().join("contract-config-patch.json");
+    std::fs::write(
+        &patch_file,
+        r#"{
+  "provider": { "model": "mock-model-v2" },
+  "tools": { "enabled": true }
+}"#,
+    )
+    .expect("write patch file");
+
+    let configure_patch = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "configure",
+                "patch",
+                "--file",
+                patch_file.to_string_lossy().as_ref(),
+                "--set",
+                "agent.max_turns=10",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_patch);
 
     let configure_get = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -1592,7 +1635,9 @@ fn json_core_agent_module_schema_matches_snapshot() {
     let actual_schema = json!({
         "setup": schema_of(&setup),
         "configure_show": schema_of(&configure_show),
+        "configure_keys": schema_of(&configure_keys),
         "configure_set": schema_of(&configure_set),
+        "configure_patch": schema_of(&configure_patch),
         "configure_get": schema_of(&configure_get),
         "configure_unset": schema_of(&configure_unset),
         "ask": schema_of(&ask),
@@ -1884,6 +1929,51 @@ fn json_ops_policy_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&logs);
 
+    let observability_report = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "observability",
+                "report",
+                "--tail",
+                "20",
+                "--event-tail",
+                "20",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&observability_report);
+
+    let observability_export = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "observability",
+                "export",
+                "--out",
+                "observability-contract.json",
+                "--tail",
+                "20",
+                "--event-tail",
+                "20",
+                "--no-doctor",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&observability_export);
+
     let actual_schema = json!({
         "approvals_get": schema_of(&approvals_get),
         "approvals_set": schema_of(&approvals_set),
@@ -1902,6 +1992,8 @@ fn json_ops_policy_module_schema_matches_snapshot() {
         "system_presence": schema_of(&system_presence),
         "system_list": schema_of(&system_list),
         "logs": schema_of(&logs),
+        "observability_report": schema_of(&observability_report),
+        "observability_export": schema_of(&observability_export),
     });
     assert_json_snapshot(
         "snapshots/json_module_ops_policy_schema.json",
@@ -2450,14 +2542,23 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     assert_success_envelope(&memory_clear);
 
     let plugin_source = temp.path().join("sample-plugin");
+    let plugin_hooks = plugin_source.join("hooks");
     let skill_source = temp.path().join("writer");
     std::fs::create_dir_all(&plugin_source).expect("create plugin source");
+    std::fs::create_dir_all(&plugin_hooks).expect("create plugin hooks");
     std::fs::create_dir_all(&skill_source).expect("create skill source");
     std::fs::write(
         plugin_source.join("plugin.toml"),
-        "[plugin]\nid = \"sample_plugin\"\nname = \"Sample Plugin\"\nversion = \"0.1.0\"\n",
+        "[plugin]\nid = \"sample_plugin\"\nname = \"Sample Plugin\"\nversion = \"0.1.0\"\n\n[runtime]\nrun = \"hooks/run.sh\"\ndoctor = \"hooks/doctor.sh\"\n",
     )
     .expect("write plugin manifest");
+    std::fs::write(plugin_hooks.join("run.sh"), "#!/bin/sh\necho run-ok\n")
+        .expect("write run hook");
+    std::fs::write(
+        plugin_hooks.join("doctor.sh"),
+        "#!/bin/sh\necho doctor-ok\n",
+    )
+    .expect("write doctor hook");
     std::fs::write(
         skill_source.join("SKILL.md"),
         "# Writer\nGenerate concise notes.\n",
@@ -2580,6 +2681,29 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&plugins_enable);
 
+    let plugins_run = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--yes",
+                "--json",
+                "plugins",
+                "run",
+                "sample_plugin",
+                "--hook",
+                "run",
+                "--arg",
+                "schema",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&plugins_run);
+
     let skills_install = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -2666,6 +2790,7 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         "plugins_disable": schema_of(&plugins_disable),
         "plugins_doctor": schema_of(&plugins_doctor),
         "plugins_enable": schema_of(&plugins_enable),
+        "plugins_run": schema_of(&plugins_run),
         "skills_install": schema_of(&skills_install),
         "skills_list": schema_of(&skills_list),
         "skills_list_project": schema_of(&skills_list_project),

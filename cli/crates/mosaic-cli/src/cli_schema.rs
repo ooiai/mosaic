@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -50,6 +50,7 @@ enum Commands {
     Webhooks(WebhooksArgs),
     Browser(BrowserArgs),
     Logs(LogsArgs),
+    Observability(ObservabilityArgs),
     System(SystemArgs),
     #[command(visible_alias = "acp")]
     Approvals(ApprovalsArgs),
@@ -118,6 +119,7 @@ struct ConfigureArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 enum ConfigureCommand {
+    Keys,
     Get {
         key: String,
     },
@@ -128,6 +130,17 @@ enum ConfigureCommand {
     Unset {
         key: String,
     },
+    Patch(ConfigurePatchArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+struct ConfigurePatchArgs {
+    #[arg(long = "set", value_name = "KEY=VALUE", action = ArgAction::Append)]
+    set: Vec<String>,
+    #[arg(long)]
+    file: Option<String>,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -736,6 +749,54 @@ struct LogsArgs {
 }
 
 #[derive(Args, Debug, Clone)]
+struct ObservabilityArgs {
+    #[command(subcommand)]
+    command: ObservabilityCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum ObservabilityCommand {
+    Report {
+        #[arg(long, default_value_t = 100)]
+        tail: usize,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        event_tail: usize,
+        #[arg(long, default_value_t = 50)]
+        audit_tail: usize,
+        #[arg(long, default_value_t = 0)]
+        compare_window: usize,
+        #[arg(long)]
+        event_name: Option<String>,
+        #[arg(long)]
+        no_doctor: bool,
+        #[arg(long)]
+        plugin_soak_report: Option<PathBuf>,
+    },
+    Export {
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long, default_value_t = 100)]
+        tail: usize,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        event_tail: usize,
+        #[arg(long, default_value_t = 50)]
+        audit_tail: usize,
+        #[arg(long, default_value_t = 0)]
+        compare_window: usize,
+        #[arg(long)]
+        event_name: Option<String>,
+        #[arg(long)]
+        no_doctor: bool,
+        #[arg(long)]
+        plugin_soak_report: Option<PathBuf>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
 struct SystemArgs {
     #[command(subcommand)]
     command: SystemCommand,
@@ -827,6 +888,10 @@ enum SafetyCommand {
     Report {
         #[arg(long)]
         command: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        audit_tail: usize,
+        #[arg(long, default_value_t = 0)]
+        compare_window: usize,
     },
 }
 
@@ -1047,9 +1112,24 @@ enum PluginsCommand {
         plugin_id: String,
     },
     Doctor,
+    Run {
+        plugin_id: String,
+        #[arg(long, value_enum, default_value_t = PluginHookArg::Run)]
+        hook: PluginHookArg,
+        #[arg(long)]
+        timeout_ms: Option<u64>,
+        #[arg(long = "arg", action = ArgAction::Append)]
+        args: Vec<String>,
+    },
     Remove {
         plugin_id: String,
     },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy)]
+enum PluginHookArg {
+    Run,
+    Doctor,
 }
 
 #[derive(Args, Debug, Clone)]

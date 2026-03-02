@@ -75,7 +75,20 @@ cd cli
 SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 ```
 
-## 6) CI Alignment
+## 6) Plugin Runtime Soak (resource policies)
+
+```bash
+cd cli
+ITERATIONS=200 ./scripts/plugin_resource_soak.sh
+```
+
+Useful overrides:
+
+- `CPU_TIMEOUT_MS=5000`
+- `MOSAIC_BIN=/path/to/mosaic`
+- `KEEP_TMP=1`
+
+## 7) CI Alignment
 
 For local parity with CI test gates:
 
@@ -90,8 +103,9 @@ CI uploads latest regression report artifact:
 - `rust-cli-Linux-binary` (file: `cli/target/release/mosaic`)
 - `rust-cli-macOS-binary` (file: `cli/target/release/mosaic`)
 - `rust-cli-Windows-binary` (file: `cli/target/release/mosaic.exe`)
+- `rust-cli-plugin-soak-report` (file: `cli/reports/plugin-soak-latest.log`, produced by nightly schedule or manual `workflow_dispatch` with `run_plugin_soak=true`)
 
-## 7) Pre-merge Checklist
+## 8) Pre-merge Checklist
 
 1. Run `./scripts/update_regression_catalog.sh`
 2. Run `./scripts/run_regression_suite.sh`

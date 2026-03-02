@@ -5,6 +5,20 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+    inputs:
+      run_plugin_soak:
+        description: Run plugin runtime soak job
+        required: false
+        type: boolean
+        default: false
+      soak_iterations:
+        description: Iteration count for plugin soak
+        required: false
+        type: string
+        default: '200'
 
 env:
   CARGO_TERM_COLOR: always
@@ -134,6 +148,46 @@ jobs:
       with:
         name: rust-cli-${{ runner.os }}-binary
         path: cli/target/release/mosaic.exe
+
+  rust-cli-plugin-soak:
+    name: Rust CLI Plugin Soak
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_plugin_soak == true)
+    runs-on: ubuntu-latest
+    env:
+      SOAK_ITERATIONS: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_iterations || '200' }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - name: Cache Rust dependencies (CLI)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          cli/target
+        key: ${{ runner.os }}-cli-soak-cargo-${{ hashFiles('cli/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cli-soak-cargo-
+
+    - name: Run plugin resource soak
+      run: |
+        mkdir -p cli/reports
+        cd cli
+        ITERATIONS="${SOAK_ITERATIONS}" ./scripts/plugin_resource_soak.sh | tee reports/plugin-soak-latest.log
+
+    - name: Upload plugin soak report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rust-cli-plugin-soak-report
+        path: cli/reports/plugin-soak-latest.log
 
   desktop-test:
     name: Desktop App Tests

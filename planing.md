@@ -31,7 +31,7 @@ Generated: 2026-02-26
 | Module/Command | Mosaic Equivalent | Status | Parity |
 | --- | --- | --- | --- |
 | `setup`, `onboard` | `setup` + alias `onboard` | done | 100% |
-| `configure`, `config` | `configure` + alias `config` + `configure get/set/unset` | partial | 88% |
+| `configure`, `config` | `configure` + alias `config` + `configure keys/get/set/unset/patch` (`patch --dry-run` + key-level diff fields + grouped diff summaries by provider/agent/tools) | partial | 97% |
 | `models` | `models list/status/resolve/set/aliases/fallbacks` (`list` includes `--query/--limit`) | partial | 82% |
 | `message` | `ask` + alias `message` + stdin prompt (`ask -`) + file/script input (`--prompt-file`, `--script`, including `--script -`) + batch session chaining in script mode | partial | 84% |
 | `agent` | `chat` + alias `agent` + extended REPL commands (`/status`, `/agent`, `/session`, `/new`) + stdin prompt (`chat --prompt -`) + prompt/script files (`--prompt-file`, `--script`) | partial | 82% |
@@ -41,16 +41,17 @@ Generated: 2026-02-26
 | `gateway`, `daemon` | `gateway ...` + alias `daemon` | partial | 85% |
 | `channels` | add/list/login/send/test/status/logs/capabilities/resolve/remove/logout/export/import/rotate | partial | 85% |
 | `logs` | `logs` (`--tail`, `--follow`, `--source`) | partial | 80% |
+| `observability` | `observability report/export` (logs + system + doctor + policy + safety audit aggregate, supports `--audit-tail` + `--compare-window` + optional `--plugin-soak-report`, with plugin soak history persistence + retention + `current_vs_previous` deltas + gateway/channels telemetry slices + alert rollups + suppression controls + SLO view) | partial | 99% |
 | `system` | `system event/presence/list` (includes `--name` filter) | partial | 83% |
 | `approvals`, `acp` | `approvals ...` + alias `acp` + `approvals check --command` + `allowlist list` | partial | 83% |
 | `sandbox` | `sandbox get/set/check/list/explain` | partial | 83% |
-| `safety` | `safety get/check/report` + merged sandbox/approvals decision surface | partial | 82% |
+| `safety` | `safety get/check/report` + merged sandbox/approvals decision surface + audit summary/diff (`--audit-tail`, `--compare-window`) | partial | 91% |
 | `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject`) | partial | 82% |
 | `hooks`, `cron`, `webhooks` | same command families | partial | 80% |
 | `browser` | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | partial | 84% |
 | `memory` | `memory index/search/status/clear` | partial | 82% |
 | `security` | `security audit/baseline` | partial | 90% |
-| `plugins`, `skills` | `plugins`: list (`--source`)/info/check/install/enable/disable/doctor/remove; `skills`: list (`--source`)/info/check/install/remove | partial | 83% |
+| `plugins`, `skills` | `plugins`: list (`--source`)/info/check/install/enable/disable/doctor/run/remove (`run` includes timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog (`cpu_watchdog_ms`) including non-unix CPU-only fallback + supported-unix memory pre-enforcement (`RLIMIT_AS` on linux/android, `RLIMIT_DATA` on BSD) for safe thresholds + non-unix `max_rss_kb` guard); `skills`: list (`--source`)/info/check/install/remove | partial | 99% |
 | `directory` | `directory` (state path introspection + `--ensure` + `--check-writable`) | partial | 80% |
 | `completion` | `completion shell/install` | partial | 80% |
 | `dashboard` | `dashboard` (operational snapshot: config/sessions/agents/channels/gateway/policy/memory/presence) | partial | 80% |
@@ -65,10 +66,10 @@ Generated: 2026-02-26
 
 ## Totals (Current)
 
-- Planned command entries observed: `45`
-- Mosaic covered entries: `45`
+- Planned command entries observed: `46`
+- Mosaic covered entries: `46`
 - Command entry coverage: `100%`
-- Weighted functional parity (estimated): `~99.7%`
+- Weighted functional parity (estimated): `~99.9%`
 
 ## Module Gap Audit (Against Upstream `src`, 2026-03-01)
 
@@ -79,10 +80,9 @@ Upstream `src` modules observed:
 
 | Upstream Module | Mosaic Status | Gap Type | Next Action |
 | --- | --- | --- | --- |
-| `plugins` | partial (now has `enable/disable/doctor`) | runtime polish | add plugin execution/runtime hooks and richer diagnostics |
-| `config` | partial (`configure get/set/unset` done) | refinement | add `configure keys` discovery and bulk profile patch operations |
-| `safety` | partial (`run_cmd` guard + approvals/sandbox + `safety get/check/report`) | policy/report depth | add audit-focused safety summaries and observability integration |
-| `observability` | partial (`logs/system/doctor`) | module split + depth | add observability command group and structured diagnostics exports |
+| `plugins` | partial (now has `enable/disable/doctor/run` + runtime hook diagnostics + timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog + non-unix CPU fallback + supported-unix memory pre-enforcement across linux/android + BSD targets + non-unix `max_rss_kb` validation guard + `plugin_resource_soak.sh` long-run mixed-workload script + nightly/manual CI soak job with report artifact + observability soak trend parsing + persisted soak history deltas + retention/suppress/SLO-driven observability rollups) | hardening | add long-horizon anomaly heuristics for soak trend drift |
+| `config` | partial (`configure keys/get/set/unset/patch` + `patch --dry-run` diff output + grouped provider/agent/tools summaries) | hardening | add profile-aware patch template/preview utilities for large migrations |
+| `observability` | partial (`logs/system/doctor` + `observability report/export` + safety audit summary/diff windows + plugin soak trend metrics + persisted soak history deltas/retention + gateway/channel telemetry slices + alert rollups + configurable thresholds + alert suppression controls + SLO windows) | export depth | add persisted gateway/channel SLO history and noise-dampening hints across windows |
 
 ### Not Implemented Yet (Major)
 
