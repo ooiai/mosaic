@@ -6,13 +6,15 @@ This file tracks Mosaic CLI command/module coverage and pending gaps.
 
 | Module | Mosaic Command Surface | Status |
 | --- | --- | --- |
-| Core agent | `setup` (`onboard` alias), `configure` (`config` alias, supports `keys/get/set/unset/patch` + `patch --dry-run` key-level diff output), `models` (includes `list --query/--limit` and `resolve`), `ask` (`message` alias, supports stdin via `-`, plus `--prompt-file/--script` including `-` stdin source), `chat` (`agent` alias, REPL `/status` `/agent` `/session` `/new`, supports `--prompt -`, `--prompt-file`, `--script`), `session` (`sessions` alias) | Partial |
-| Gateway | `gateway install/start/restart/status/health/probe/discover/call/stop/uninstall` (`daemon` alias) | Partial |
+| Core agent | `setup` (`onboard` alias), `configure` (`config` alias, supports `keys/get/set/unset/patch/preview/template`, with `patch --target-profile`, grouped diff output, JSON/TOML template generation), `models` (includes `list --query/--limit` and `resolve`), `ask` (`message` alias, supports stdin via `-`, plus `--prompt-file/--script` including `-` stdin source), `chat` (`agent` alias, REPL `/status` `/agent` `/session` `/new`, supports `--prompt -`, `--prompt-file`, `--script`), `session` (`sessions` alias) | Partial |
+| Gateway | `gateway install/start/restart/status/health/probe/discover/call/stop/uninstall` (`daemon` alias), with protocol checks in `gateway health --verbose` (`gateway_discover`, `gateway_protocol_methods`, `gateway_call_status`) | Partial |
+| MCP | `mcp list/add/check/enable/disable/remove` with local registry + readiness checks | Partial |
 | Channels | `channels add/update/list/status/login/send/test/logs/capabilities/resolve/export/import/rotate-token-env/remove/logout` | Partial |
 | Nodes/devices/pairing | `nodes` (`node` alias), `devices`, `pairing list/request/approve/reject` | Partial |
 | Hooks | `hooks list/add/remove/enable/disable/run/logs` | Partial |
 | Cron | `cron list/add/remove/enable/disable/run/tick/logs` | Partial |
 | Webhooks | `webhooks list/add/remove/enable/disable/trigger/resolve/logs` | Partial |
+| Realtime | `tts voices/speak`, `voicecall start/status/send/history/stop` | Partial |
 | Browser | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | Partial |
 | Ops | `logs` (tail/follow/source; includes `plugin:*` event streams), `observability report/export` (includes gateway runtime snapshot + channels delivery telemetry + alert rollups + suppression controls + SLO windows + safety audit summary via `--audit-tail`, optional window diff via `--compare-window`, optional plugin soak trend parsing via `--plugin-soak-report`, plus persisted plugin soak history with retention + `current_vs_previous` deltas), `system event/presence/list` (tail/name filter) | Partial |
 | Policy | `approvals` (`acp` alias, includes `check` and `allowlist list`), `sandbox get/set/check/list/explain`, `safety get/check/report` (includes command audit summary via `--audit-tail` and optional diff via `--compare-window`) | Partial |

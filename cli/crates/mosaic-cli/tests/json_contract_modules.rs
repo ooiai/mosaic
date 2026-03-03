@@ -1476,6 +1476,48 @@ fn json_core_agent_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&configure_patch);
 
+    let configure_preview = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "configure",
+                "preview",
+                "--target-profile",
+                "migration",
+                "--set",
+                "provider.model=preview-model",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_preview);
+
+    let configure_template = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "configure",
+                "template",
+                "--target-profile",
+                "migration",
+                "--format",
+                "json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&configure_template);
+
     let configure_get = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -1638,6 +1680,8 @@ fn json_core_agent_module_schema_matches_snapshot() {
         "configure_keys": schema_of(&configure_keys),
         "configure_set": schema_of(&configure_set),
         "configure_patch": schema_of(&configure_patch),
+        "configure_preview": schema_of(&configure_preview),
+        "configure_template": schema_of(&configure_template),
         "configure_get": schema_of(&configure_get),
         "configure_unset": schema_of(&configure_unset),
         "ask": schema_of(&ask),
@@ -3080,6 +3124,232 @@ fn json_compat_discovery_maintenance_module_schema_matches_snapshot() {
     });
     assert_json_snapshot(
         "snapshots/json_module_compat_discovery_maintenance_schema.json",
+        &actual_schema,
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_mcp_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+    let command_path = std::env::current_exe().expect("current exe");
+    let command_path = command_path.to_string_lossy().to_string();
+
+    let add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "add",
+                "--name",
+                "contract-mcp",
+                "--command",
+                &command_path,
+                "--arg",
+                "--version",
+                "--env",
+                "MCP_TOKEN=contract",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&add);
+    let server_id = add["server"]["id"].as_str().expect("server id").to_string();
+
+    let list = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&list);
+
+    let check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "check", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&check);
+
+    let disable = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "disable", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&disable);
+
+    let enable = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "enable", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&enable);
+
+    let remove = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "remove", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&remove);
+
+    let actual_schema = json!({
+        "add": schema_of(&add),
+        "list": schema_of(&list),
+        "check": schema_of(&check),
+        "disable": schema_of(&disable),
+        "enable": schema_of(&enable),
+        "remove": schema_of(&remove),
+    });
+    assert_json_snapshot("snapshots/json_module_mcp_schema.json", &actual_schema);
+}
+
+#[test]
+#[allow(deprecated)]
+fn json_tts_voicecall_module_schema_matches_snapshot() {
+    let temp = tempdir().expect("tempdir");
+
+    let voices = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "tts", "voices"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&voices);
+
+    let speak = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "tts",
+                "speak",
+                "--text",
+                "contract tts",
+                "--voice",
+                "alloy",
+                "--format",
+                "wav",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&speak);
+
+    let start = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "voicecall", "start"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&start);
+
+    let send = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "voicecall",
+                "send",
+                "--text",
+                "contract send",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&send);
+
+    let history = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "voicecall", "history"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&history);
+
+    let status = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "voicecall", "status"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&status);
+
+    let stop = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "voicecall", "stop"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&stop);
+
+    let actual_schema = json!({
+        "tts_voices": schema_of(&voices),
+        "tts_speak": schema_of(&speak),
+        "voicecall_start": schema_of(&start),
+        "voicecall_send": schema_of(&send),
+        "voicecall_history": schema_of(&history),
+        "voicecall_status": schema_of(&status),
+        "voicecall_stop": schema_of(&stop),
+    });
+    assert_json_snapshot(
+        "snapshots/json_module_tts_voicecall_schema.json",
         &actual_schema,
     );
 }

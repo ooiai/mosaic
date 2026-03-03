@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-agent"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-agents"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-channels"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-cli"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "assert_cmd",
  "async-trait",
@@ -901,6 +901,7 @@ dependencies = [
  "mosaic-channels",
  "mosaic-core",
  "mosaic-gateway",
+ "mosaic-mcp",
  "mosaic-memory",
  "mosaic-ops",
  "mosaic-plugins",
@@ -917,11 +918,12 @@ dependencies = [
  "tiny_http",
  "tokio",
  "toml",
+ "uuid",
 ]
 
 [[package]]
 name = "mosaic-core"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -936,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-gateway"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-trait",
  "mosaic-core",
@@ -947,8 +949,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-mcp"
+version = "0.2.0-beta.2"
+dependencies = [
+ "chrono",
+ "mosaic-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "mosaic-memory"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -961,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-ops"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -973,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-plugins"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "dirs",
  "mosaic-core",
@@ -985,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-provider-openai"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "async-trait",
  "mosaic-core",
@@ -997,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-security"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -1012,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-tools"
-version = "0.1.0"
+version = "0.2.0-beta.2"
 dependencies = [
  "mosaic-core",
  "mosaic-ops",

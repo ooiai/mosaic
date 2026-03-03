@@ -107,6 +107,20 @@ require_contains "$TMP_ROOT/configure_patch.json" '"saved"[[:space:]]*:[[:space:
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure get provider.model >"$TMP_ROOT/configure_get_model.json")
 require_contains "$TMP_ROOT/configure_get_model.json" '"value"[[:space:]]*:[[:space:]]*"smoke-model-v2"'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure preview --target-profile migration --set provider.model=migration-preview >"$TMP_ROOT/configure_preview.json")
+require_contains "$TMP_ROOT/configure_preview.json" '"action"[[:space:]]*:[[:space:]]*"preview"'
+require_contains "$TMP_ROOT/configure_preview.json" '"dry_run"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/configure_preview.json" '"target_profile"[[:space:]]*:[[:space:]]*"migration"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure patch --target-profile migration --set provider.model=migration-model >"$TMP_ROOT/configure_patch_target_profile.json")
+require_contains "$TMP_ROOT/configure_patch_target_profile.json" '"target_profile"[[:space:]]*:[[:space:]]*"migration"'
+require_contains "$TMP_ROOT/configure_patch_target_profile.json" '"saved"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json configure template --target-profile migration --format json >"$TMP_ROOT/configure_template_json.json")
+require_contains "$TMP_ROOT/configure_template_json.json" '"action"[[:space:]]*:[[:space:]]*"template"'
+require_contains "$TMP_ROOT/configure_template_json.json" '"format"[[:space:]]*:[[:space:]]*"json"'
+require_contains "$TMP_ROOT/configure_template_json.json" '"migration-model"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json models list >"$TMP_ROOT/models.json")
 require_contains "$TMP_ROOT/models.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/models.json" '"mock-model"'
@@ -188,6 +202,37 @@ require_contains "$TMP_ROOT/clawbot_send_text_file.json" '"response"[[:space:]]*
 
 (cd "$SRC_DIR" && printf "stdin clawbot send text file\n" | MOSAIC_MOCK_CHAT_RESPONSE="mock-clawbot-send-stdin-file-answer" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json clawbot send --text-file - >"$TMP_ROOT/clawbot_send_text_file_stdin.json")
 require_contains "$TMP_ROOT/clawbot_send_text_file_stdin.json" '"response"[[:space:]]*:[[:space:]]*"mock-clawbot-send-stdin-file-answer"'
+
+log "Step 1b: mcp registry and readiness checks"
+MCP_COMMAND_PATH="$(command -v env || command -v sh || true)"
+if [[ -z "$MCP_COMMAND_PATH" ]]; then
+  echo "error: cannot locate executable for mcp smoke check" >&2
+  exit 1
+fi
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp add --name smoke-mcp --command "$MCP_COMMAND_PATH" --arg --help --env MCP_TOKEN=smoke >"$TMP_ROOT/mcp_add.json")
+require_contains "$TMP_ROOT/mcp_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
+MCP_SERVER_ID="$(sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$TMP_ROOT/mcp_add.json" | head -n1)"
+if [[ -z "$MCP_SERVER_ID" ]]; then
+  echo "error: failed to parse mcp server id from add output" >&2
+  cat "$TMP_ROOT/mcp_add.json" >&2
+  exit 1
+fi
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp list >"$TMP_ROOT/mcp_list.json")
+require_contains "$TMP_ROOT/mcp_list.json" "$MCP_SERVER_ID"
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp check "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_check.json")
+require_contains "$TMP_ROOT/mcp_check.json" '"healthy"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp disable "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_disable.json")
+require_contains "$TMP_ROOT/mcp_disable.json" '"enabled"[[:space:]]*:[[:space:]]*false'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp enable "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_enable.json")
+require_contains "$TMP_ROOT/mcp_enable.json" '"enabled"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp remove "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_remove.json")
+require_contains "$TMP_ROOT/mcp_remove.json" '"removed"[[:space:]]*:[[:space:]]*true'
 
 log "Step 2: channels export/import (with success + strict-failure reports)"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels add --name src-slack --kind slack_webhook --endpoint mock-http://200 >"$TMP_ROOT/add_src_slack.json")
@@ -294,6 +339,11 @@ require_contains "$TMP_ROOT/gateway_discover.json" '"nodes.run"'
 
 (cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway call status >"$TMP_ROOT/gateway_call_status.json")
 require_contains "$TMP_ROOT/gateway_call_status.json" '"service"[[:space:]]*:[[:space:]]*"mosaic-gateway"'
+
+(cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway health --verbose >"$TMP_ROOT/gateway_health.json")
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_discover"'
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_protocol_methods"'
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_call_status"'
 
 (cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json nodes run local --command "echo smoke-run" >"$TMP_ROOT/nodes_run.json")
 require_contains "$TMP_ROOT/nodes_run.json" '"accepted"[[:space:]]*:[[:space:]]*true'
@@ -589,7 +639,7 @@ require_contains "$TMP_ROOT/health.json" '"type"[[:space:]]*:[[:space:]]*"health
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json doctor >"$TMP_ROOT/doctor.json")
 require_contains "$TMP_ROOT/doctor.json" '"type"[[:space:]]*:[[:space:]]*"doctor"'
 
-log "Step 14: compatibility command family (docs/dns/tui/qr/clawbot/completion/directory/dashboard/update/reset/uninstall)"
+log "Step 14: compatibility + realtime command family (docs/dns/tts/voicecall/tui/qr/clawbot/completion/directory/dashboard/update/reset/uninstall)"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json docs >"$TMP_ROOT/docs_list.json")
 require_contains "$TMP_ROOT/docs_list.json" '"topics"'
 
@@ -598,6 +648,28 @@ require_contains "$TMP_ROOT/docs_gateway.json" '"topic"[[:space:]]*:[[:space:]]*
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --json dns resolve localhost --port 443 >"$TMP_ROOT/dns_localhost.json")
 require_contains "$TMP_ROOT/dns_localhost.json" '"addresses"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json tts voices >"$TMP_ROOT/tts_voices.json")
+require_contains "$TMP_ROOT/tts_voices.json" '"voices"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json tts speak --text "smoke tts" --voice alloy --format txt --out "$TMP_ROOT/tts/smoke.txt" >"$TMP_ROOT/tts_speak.json")
+require_contains "$TMP_ROOT/tts_speak.json" '"ok"[[:space:]]*:[[:space:]]*true'
+if [[ ! -f "$TMP_ROOT/tts/smoke.txt" ]]; then
+  echo "error: expected tts output at $TMP_ROOT/tts/smoke.txt" >&2
+  exit 1
+fi
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall start --target "smoke-room" >"$TMP_ROOT/voicecall_start.json")
+require_contains "$TMP_ROOT/voicecall_start.json" '"active"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall send --text "smoke call message" >"$TMP_ROOT/voicecall_send.json")
+require_contains "$TMP_ROOT/voicecall_send.json" '"ok"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall history --tail 20 >"$TMP_ROOT/voicecall_history.json")
+require_contains "$TMP_ROOT/voicecall_history.json" '"events"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall stop >"$TMP_ROOT/voicecall_stop.json")
+require_contains "$TMP_ROOT/voicecall_stop.json" '"stopped"[[:space:]]*:[[:space:]]*true'
 
 (cd "$SRC_DIR" && MOSAIC_MOCK_CHAT_RESPONSE="tui-smoke-ok" cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json tui --prompt "hello tui" >"$TMP_ROOT/tui_prompt.json")
 require_contains "$TMP_ROOT/tui_prompt.json" '"response"[[:space:]]*:[[:space:]]*"tui-smoke-ok"'

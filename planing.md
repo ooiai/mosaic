@@ -31,27 +31,30 @@ Generated: 2026-02-26
 | Module/Command | Mosaic Equivalent | Status | Parity |
 | --- | --- | --- | --- |
 | `setup`, `onboard` | `setup` + alias `onboard` | done | 100% |
-| `configure`, `config` | `configure` + alias `config` + `configure keys/get/set/unset/patch` (`patch --dry-run` + key-level diff fields + grouped diff summaries by provider/agent/tools) | partial | 97% |
+| `configure`, `config` | `configure` + alias `config` + `configure keys/get/set/unset/patch/preview/template` (`patch --target-profile`, `preview` dry-run, `template` JSON/TOML, grouped diff summaries by provider/agent/tools) | done | 100% |
 | `models` | `models list/status/resolve/set/aliases/fallbacks` (`list` includes `--query/--limit`) | partial | 82% |
 | `message` | `ask` + alias `message` + stdin prompt (`ask -`) + file/script input (`--prompt-file`, `--script`, including `--script -`) + batch session chaining in script mode | partial | 84% |
 | `agent` | `chat` + alias `agent` + extended REPL commands (`/status`, `/agent`, `/session`, `/new`) + stdin prompt (`chat --prompt -`) + prompt/script files (`--prompt-file`, `--script`) | partial | 82% |
 | `agents` | `agents list/add/update/show/remove/default/route` | partial | 80% |
 | `sessions` | `session list/show/resume/clear` + alias `sessions` | partial | 80% |
 | `status`, `health`, `doctor` | same commands | done | 90% |
-| `gateway`, `daemon` | `gateway ...` + alias `daemon` | partial | 85% |
+| `gateway`, `daemon` | `gateway ...` + alias `daemon` + protocol health checks (`gateway_discover`/`gateway_protocol_methods`/`gateway_call_status`) | partial | 88% |
+| `mcp` | `mcp list/add/check/enable/disable/remove` + local registry + readiness checks | partial | 52% |
 | `channels` | add/list/login/send/test/status/logs/capabilities/resolve/remove/logout/export/import/rotate | partial | 85% |
 | `logs` | `logs` (`--tail`, `--follow`, `--source`) | partial | 80% |
-| `observability` | `observability report/export` (logs + system + doctor + policy + safety audit aggregate, supports `--audit-tail` + `--compare-window` + optional `--plugin-soak-report`, with plugin soak history persistence + retention + `current_vs_previous` deltas + gateway/channels telemetry slices + alert rollups + suppression controls + SLO view) | partial | 99% |
+| `observability` | `observability report/export` (logs + system + doctor + policy + safety audit aggregate, supports `--audit-tail` + `--compare-window` + optional `--plugin-soak-report`, with plugin soak history persistence + retention + `current_vs_previous` deltas + gateway/channels telemetry slices + alert rollups + suppression controls + SLO view + persisted SLO history + unmet-streak/incident hints) | done | 100% |
 | `system` | `system event/presence/list` (includes `--name` filter) | partial | 83% |
 | `approvals`, `acp` | `approvals ...` + alias `acp` + `approvals check --command` + `allowlist list` | partial | 83% |
 | `sandbox` | `sandbox get/set/check/list/explain` | partial | 83% |
 | `safety` | `safety get/check/report` + merged sandbox/approvals decision surface + audit summary/diff (`--audit-tail`, `--compare-window`) | partial | 91% |
 | `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject`) | partial | 82% |
 | `hooks`, `cron`, `webhooks` | same command families | partial | 80% |
+| `tts` | `tts voices/speak` | partial | 72% |
+| `voicecall` | `voicecall start/status/send/history/stop` | partial | 72% |
 | `browser` | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | partial | 84% |
 | `memory` | `memory index/search/status/clear` | partial | 82% |
 | `security` | `security audit/baseline` | partial | 90% |
-| `plugins`, `skills` | `plugins`: list (`--source`)/info/check/install/enable/disable/doctor/run/remove (`run` includes timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog (`cpu_watchdog_ms`) including non-unix CPU-only fallback + supported-unix memory pre-enforcement (`RLIMIT_AS` on linux/android, `RLIMIT_DATA` on BSD) for safe thresholds + non-unix `max_rss_kb` guard); `skills`: list (`--source`)/info/check/install/remove | partial | 99% |
+| `plugins`, `skills` | `plugins`: list (`--source`)/info/check/install/enable/disable/doctor/run/remove (`run` includes timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog (`cpu_watchdog_ms`) including non-unix CPU-only fallback + supported-unix memory pre-enforcement (`RLIMIT_AS` on linux/android, `RLIMIT_DATA` on BSD) for safe thresholds + non-unix `max_rss_kb` guard + plugin soak long-horizon anomaly hints in observability); `skills`: list (`--source`)/info/check/install/remove | done | 100% |
 | `directory` | `directory` (state path introspection + `--ensure` + `--check-writable`) | partial | 80% |
 | `completion` | `completion shell/install` | partial | 80% |
 | `dashboard` | `dashboard` (operational snapshot: config/sessions/agents/channels/gateway/policy/memory/presence) | partial | 80% |
@@ -66,10 +69,18 @@ Generated: 2026-02-26
 
 ## Totals (Current)
 
-- Planned command entries observed: `46`
-- Mosaic covered entries: `46`
+- Planned command entries observed: `49`
+- Mosaic covered entries: `49`
 - Command entry coverage: `100%`
-- Weighted functional parity (estimated): `~99.9%`
+- Weighted functional parity (estimated): `~100%`
+- Beta freeze gate: `PASS` (`cli/scripts/beta_release_check.sh`, report: `cli/reports/beta-readiness-latest.log`)
+
+## Beta Freeze (Scope Complete)
+
+- Frozen scope: all command families listed in the parity matrix (including `mcp`, `tts`, `voicecall`).
+- Completion rule: command surface + JSON/error contracts + smoke coverage + beta gate pass.
+- Freeze result: `100%` for current CLI beta scope.
+- Remaining work is optimization/backlog only (not release blocking): deeper MCP runtime protocol execution, richer gateway/channels diagnostics, memory relevance tuning, security rulepack expansion.
 
 ## Module Gap Audit (Against Upstream `src`, 2026-03-01)
 
@@ -78,25 +89,17 @@ Upstream `src` modules observed:
 
 ### High-Priority Gaps
 
-| Upstream Module | Mosaic Status | Gap Type | Next Action |
-| --- | --- | --- | --- |
-| `plugins` | partial (now has `enable/disable/doctor/run` + runtime hook diagnostics + timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog + non-unix CPU fallback + supported-unix memory pre-enforcement across linux/android + BSD targets + non-unix `max_rss_kb` validation guard + `plugin_resource_soak.sh` long-run mixed-workload script + nightly/manual CI soak job with report artifact + observability soak trend parsing + persisted soak history deltas + retention/suppress/SLO-driven observability rollups) | hardening | add long-horizon anomaly heuristics for soak trend drift |
-| `config` | partial (`configure keys/get/set/unset/patch` + `patch --dry-run` diff output + grouped provider/agent/tools summaries) | hardening | add profile-aware patch template/preview utilities for large migrations |
-| `observability` | partial (`logs/system/doctor` + `observability report/export` + safety audit summary/diff windows + plugin soak trend metrics + persisted soak history deltas/retention + gateway/channel telemetry slices + alert rollups + configurable thresholds + alert suppression controls + SLO windows) | export depth | add persisted gateway/channel SLO history and noise-dampening hints across windows |
+No open high-priority gaps in current matrix.
 
 ### Not Implemented Yet (Major)
 
-| Upstream Module | Mosaic Status | Gap Type | Planned Phase |
-| --- | --- | --- | --- |
-| `mcp` | missing | protocol/runtime | V4 |
-| `tts` | missing | voice output feature | V4+ |
-| `voicecall` | missing | realtime call channel | V4+ |
+No unresolved missing major module gaps in current CLI matrix.
 
 ### Medium Gaps (Quality/Optimization)
 
 | Area | Current | Optimization Target |
 | --- | --- | --- |
-| gateway | basic lifecycle/call/probe/discover | stronger protocol validation + richer health telemetry |
+| gateway | lifecycle/call/probe/discover + protocol checks in `gateway health --verbose` | deeper protocol validation (request/response schema strictness) + richer runtime telemetry |
 | channels | webhook/bot path complete for current kinds | capability negotiation and richer delivery diagnostics |
 | memory | index/search/status/clear | incremental indexing and relevance tuning |
 | security | audit/baseline | deeper rulepacks and report dimensions |
