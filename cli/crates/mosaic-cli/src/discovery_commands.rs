@@ -12,10 +12,12 @@ use serde_json::json;
 use super::utils::print_json;
 use super::{Cli, DnsArgs, DnsCommand, DocsArgs, QrArgs, QrCommand, QrRenderArg};
 
-const DOC_TOPICS: [(&str, &str); 12] = [
+const DOC_TOPICS: [(&str, &str); 14] = [
     ("cli", "cli/README.md"),
     ("channels", "cli/docs/channels-slack.md"),
     ("gateway", "cli/docs/gateway-ops.md"),
+    ("mcp", "cli/docs/mcp.md"),
+    ("beta", "cli/docs/beta-release.md"),
     ("observability", "cli/docs/observability.md"),
     ("security", "cli/docs/security-audit.md"),
     ("approvals", "cli/docs/sandbox-approvals.md"),

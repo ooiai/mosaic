@@ -1737,6 +1737,87 @@ fn configure_patch_without_updates_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn configure_preview_without_updates_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "configure", "preview"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_check_missing_server_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "mcp", "check", "missing"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn tts_speak_invalid_voice_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "tts",
+            "speak",
+            "--text",
+            "hello",
+            "--voice",
+            "invalid",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
 fn configure_patch_invalid_assignment_returns_validation_exit_code() {
     let temp = tempdir().expect("tempdir");
     Command::cargo_bin("mosaic")

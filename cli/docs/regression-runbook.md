@@ -66,6 +66,8 @@ cargo test -p mosaic-cli --test webhooks_ops
 cargo test -p mosaic-cli --test browser_ops
 cargo test -p mosaic-cli --test models_ops
 cargo test -p mosaic-cli --test nodes_devices_pairing
+cargo test -p mosaic-cli --test mcp_ops
+cargo test -p mosaic-mcp
 ```
 
 ## 5) Full Smoke Only (skip workspace tests)
@@ -123,3 +125,11 @@ Canonical log files:
 
 - `../../WORKLOG.md`
 - `docs/progress.md`
+
+## 9) Beta Freeze / Package
+
+```bash
+cd cli
+./scripts/beta_release_check.sh
+./scripts/package_beta.sh --version v0.2.0-beta.1
+```

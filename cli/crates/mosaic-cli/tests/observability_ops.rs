@@ -458,6 +458,99 @@ fn observability_report_exposes_slo_windows_and_targets() {
 
 #[test]
 #[allow(deprecated)]
+fn observability_report_tracks_slo_history_and_incident_hints() {
+    let temp = tempdir().expect("tempdir");
+
+    let first_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_SLO_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_ALERT_REPEAT_HINT_THRESHOLD", "2")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "10",
+            "--event-tail",
+            "10",
+            "--audit-tail",
+            "10",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first: Value = serde_json::from_slice(&first_output).expect("first report json");
+    assert_eq!(first["ok"], true);
+    assert_eq!(first["report"]["summary"]["slo_history_count"], 1);
+
+    let second_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_SLO_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_ALERT_REPEAT_HINT_THRESHOLD", "2")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "10",
+            "--event-tail",
+            "10",
+            "--audit-tail",
+            "10",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second: Value = serde_json::from_slice(&second_output).expect("second report json");
+    assert_eq!(second["ok"], true);
+    assert_eq!(second["report"]["summary"]["slo_history_count"], 2);
+    assert_eq!(
+        second["report"]["slo"]["history"]["current_vs_previous"]["available"],
+        true
+    );
+    assert!(
+        second["report"]["summary"]["slo_gateway_unmet_streak"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        second["report"]["summary"]["slo_incident_hints"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        second["report"]["slo"]["history"]["incident_hints"]
+            .as_array()
+            .expect("incident hints")
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("slo.gateway_unmet_streak"))
+    );
+    assert!(
+        second["report"]["slo"]["history"]["incident_hints"]
+            .as_array()
+            .expect("incident hints")
+            .iter()
+            .any(|hint| {
+                hint["id"].as_str() == Some("alerts.repeated")
+                    && hint["alert_id"].as_str() == Some("gateway.not_running")
+            })
+    );
+}
+
+#[test]
+#[allow(deprecated)]
 fn observability_report_alert_thresholds_can_be_overridden_by_env() {
     let temp = tempdir().expect("tempdir");
 
@@ -799,5 +892,139 @@ workspace=/tmp/mosaic-soak\n",
             .filter(|line| !line.trim().is_empty())
             .count(),
         1
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn observability_report_detects_plugin_soak_repeated_anomalies() {
+    let temp = tempdir().expect("tempdir");
+    let soak_first = temp.path().join("plugin-soak-anomaly-first.log");
+    let soak_second = temp.path().join("plugin-soak-anomaly-second.log");
+
+    fs::write(
+        &soak_first,
+        "[soak] completed\n\
+iterations=6\n\
+ok_runs=6 cpu_failures=6 rss_failures=5\n\
+event_lines.ok=6\n\
+event_lines.cpuwatch=6\n\
+event_lines.rss=3\n\
+workspace=/tmp/mosaic-soak\n",
+    )
+    .expect("write first anomaly soak log");
+    fs::write(
+        &soak_second,
+        "[soak] completed\n\
+iterations=6\n\
+ok_runs=6 cpu_failures=6 rss_failures=4\n\
+event_lines.ok=6\n\
+event_lines.cpuwatch=6\n\
+event_lines.rss=1\n\
+workspace=/tmp/mosaic-soak\n",
+    )
+    .expect("write second anomaly soak log");
+
+    let _ = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_PLUGIN_SOAK_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_PLUGIN_SOAK_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_PLUGIN_SOAK_DRIFT_ABS_THRESHOLD", "1")
+        .env("MOSAIC_OBS_PLUGIN_SOAK_COMPLETION_DROP_WARN", "0.01")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "10",
+            "--event-tail",
+            "10",
+            "--audit-tail",
+            "10",
+            "--no-doctor",
+            "--plugin-soak-report",
+            soak_first.to_str().expect("first soak path"),
+        ])
+        .assert()
+        .success();
+
+    let second_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_PLUGIN_SOAK_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_PLUGIN_SOAK_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_PLUGIN_SOAK_DRIFT_ABS_THRESHOLD", "1")
+        .env("MOSAIC_OBS_PLUGIN_SOAK_COMPLETION_DROP_WARN", "0.01")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "10",
+            "--event-tail",
+            "10",
+            "--audit-tail",
+            "10",
+            "--no-doctor",
+            "--plugin-soak-report",
+            soak_second.to_str().expect("second soak path"),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second: Value = serde_json::from_slice(&second_output).expect("second report json");
+    assert_eq!(second["ok"], true);
+    assert!(
+        second["report"]["summary"]["plugin_soak_incident_hints"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 3
+    );
+    assert!(
+        second["report"]["summary"]["plugin_soak_completion_unmet_streak"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        second["report"]["summary"]["plugin_soak_status_unmet_streak"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        second["report"]["plugin_soak"]["history"]["window"]["recent_drift_count"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+
+    let hints = second["report"]["plugin_soak"]["history"]["incident_hints"]
+        .as_array()
+        .expect("incident hints");
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("plugin_soak.completion_unmet_streak"))
+    );
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("plugin_soak.drift_repeated"))
+    );
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("plugin_soak.warnings_repeated"))
+    );
+    assert!(
+        hints
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("plugin_soak.completion_regression"))
     );
 }

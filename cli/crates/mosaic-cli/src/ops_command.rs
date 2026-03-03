@@ -237,6 +237,28 @@ pub(super) async fn handle_observability(cli: &Cli, args: ObservabilityArgs) -> 
                 .unwrap_or(false)
         );
         println!(
+            "slo_history_count: {}",
+            report["summary"]["slo_history_count"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "slo_gateway_unmet_streak: {}",
+            report["summary"]["slo_gateway_unmet_streak"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "slo_channels_unmet_streak: {}",
+            report["summary"]["slo_channels_unmet_streak"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "slo_incident_hints: {}",
+            report["summary"]["slo_incident_hints"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
             "safety_compare_available: {}",
             report["summary"]["safety_compare_available"]
                 .as_bool()
@@ -286,6 +308,12 @@ pub(super) async fn handle_observability(cli: &Cli, args: ObservabilityArgs) -> 
                 .as_bool()
                 .unwrap_or(false)
         );
+        println!(
+            "plugin_soak_incident_hints: {}",
+            report["summary"]["plugin_soak_incident_hints"]
+                .as_u64()
+                .unwrap_or(0)
+        );
         if report["summary"]["plugin_soak_available"]
             .as_bool()
             .unwrap_or(false)
@@ -313,6 +341,18 @@ pub(super) async fn handle_observability(cli: &Cli, args: ObservabilityArgs) -> 
                         .unwrap_or(0.0)
                 );
             }
+            println!(
+                "plugin_soak_completion_unmet_streak: {}",
+                report["summary"]["plugin_soak_completion_unmet_streak"]
+                    .as_u64()
+                    .unwrap_or(0)
+            );
+            println!(
+                "plugin_soak_status_unmet_streak: {}",
+                report["summary"]["plugin_soak_status_unmet_streak"]
+                    .as_u64()
+                    .unwrap_or(0)
+            );
         }
         if report["summary"]["doctor_included"]
             .as_bool()
@@ -375,7 +415,11 @@ async fn build_observability_report(
     .await;
     let channels = build_channels_observability(&paths.data_dir, options.tail);
     let alerts = build_observability_alerts(&gateway, &channels, &safety_audit, &plugin_soak);
-    let slo = build_observability_slo(&gateway, &channels);
+    let mut slo = build_observability_slo(&gateway, &channels);
+    let slo_history = build_observability_slo_history(&slo, &alerts, &paths.data_dir);
+    if let Value::Object(object) = &mut slo {
+        object.insert("history".to_string(), slo_history.clone());
+    }
 
     let (doctor_checks, doctor_ok, doctor_warn) = if options.include_doctor {
         let checks = super::diagnostics_command::collect_doctor_checks(cli).await?;
@@ -436,6 +480,12 @@ async fn build_observability_report(
             "safety_failure_rate_delta": safety_audit["comparison"]["delta"]["failure_rate"],
             "slo_gateway_met": slo["gateway"]["met"],
             "slo_channels_met": slo["channels"]["met"],
+            "slo_history_count": slo_history["sample_count"],
+            "slo_gateway_ratio_delta": slo_history["current_vs_previous"]["delta"]["gateway_ratio"],
+            "slo_channels_ratio_delta": slo_history["current_vs_previous"]["delta"]["channels_ratio"],
+            "slo_gateway_unmet_streak": slo_history["streaks"]["gateway_unmet"],
+            "slo_channels_unmet_streak": slo_history["streaks"]["channels_unmet"],
+            "slo_incident_hints": slo_history["incident_hints_count"],
             "doctor_included": options.include_doctor,
             "doctor_ok": doctor_ok,
             "doctor_warn": doctor_warn,
@@ -445,6 +495,9 @@ async fn build_observability_report(
             "plugin_soak_history_pruned": plugin_soak_history["retention"]["pruned"],
             "plugin_soak_delta_available": plugin_soak_history["current_vs_previous"]["available"],
             "plugin_soak_completion_ratio_delta": plugin_soak_history["current_vs_previous"]["delta"]["completion_ratio"],
+            "plugin_soak_incident_hints": plugin_soak_history["incident_hints_count"],
+            "plugin_soak_completion_unmet_streak": plugin_soak_history["streaks"]["completion_unmet"],
+            "plugin_soak_status_unmet_streak": plugin_soak_history["streaks"]["status_not_ok"],
         },
         "policy": {
             "approvals_mode": approvals_policy.mode,
@@ -938,6 +991,374 @@ fn read_positive_usize(env_key: &str, default_value: usize) -> usize {
 
 fn read_ratio_threshold(env_key: &str, default_value: f64) -> f64 {
     read_alert_threshold(env_key, default_value).clamp(0.0, 1.0)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ObservabilitySloHistoryEntry {
+    ts: String,
+    gateway_ratio: f64,
+    gateway_met: bool,
+    channels_ratio: f64,
+    channels_met: bool,
+    channels_available: bool,
+    alert_ids: Vec<String>,
+}
+
+fn slo_history_path(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join("reports")
+        .join("observability-slo-history.jsonl")
+}
+
+fn read_slo_history(
+    history_path: &Path,
+) -> (Vec<ObservabilitySloHistoryEntry>, usize, Option<String>) {
+    if !history_path.exists() {
+        return (Vec::new(), 0, None);
+    }
+    let raw = match std::fs::read_to_string(history_path) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                Vec::new(),
+                0,
+                Some(format!(
+                    "failed to read slo history '{}': {err}",
+                    history_path.display()
+                )),
+            );
+        }
+    };
+    let mut entries = Vec::new();
+    let mut parse_errors = 0usize;
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<ObservabilitySloHistoryEntry>(line) {
+            Ok(entry) => entries.push(entry),
+            Err(_) => parse_errors += 1,
+        }
+    }
+    (entries, parse_errors, None)
+}
+
+fn append_slo_history_entry(
+    history_path: &Path,
+    entry: &ObservabilitySloHistoryEntry,
+) -> std::result::Result<(), String> {
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create slo history directory '{}': {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut rendered = serde_json::to_string(entry)
+        .map_err(|err| format!("failed to serialize slo history entry: {err}"))?;
+    rendered.push('\n');
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(history_path)
+        .map_err(|err| {
+            format!(
+                "failed to open slo history file '{}': {err}",
+                history_path.display()
+            )
+        })?;
+    file.write_all(rendered.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write slo history file '{}': {err}",
+            history_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn rewrite_slo_history_entries(
+    history_path: &Path,
+    entries: &[ObservabilitySloHistoryEntry],
+) -> std::result::Result<(), String> {
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create slo history directory '{}': {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut rendered = String::new();
+    for entry in entries {
+        let line = serde_json::to_string(entry)
+            .map_err(|err| format!("failed to serialize slo history entry: {err}"))?;
+        rendered.push_str(&line);
+        rendered.push('\n');
+    }
+    std::fs::write(history_path, rendered).map_err(|err| {
+        format!(
+            "failed to rewrite slo history file '{}': {err}",
+            history_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn slo_history_entry_from_report(
+    slo: &Value,
+    alerts: &Value,
+) -> std::result::Result<ObservabilitySloHistoryEntry, String> {
+    let gateway = slo
+        .get("gateway")
+        .ok_or_else(|| "missing slo.gateway".to_string())?;
+    let channels = slo
+        .get("channels")
+        .ok_or_else(|| "missing slo.channels".to_string())?;
+    let alert_ids = alerts
+        .get("items")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(Value::as_str).map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let extract_f64 = |container: &Value, key: &str| -> std::result::Result<f64, String> {
+        container
+            .get(key)
+            .and_then(Value::as_f64)
+            .ok_or_else(|| format!("missing slo field '{key}'"))
+    };
+    let extract_bool = |container: &Value, key: &str| -> std::result::Result<bool, String> {
+        container
+            .get(key)
+            .and_then(Value::as_bool)
+            .ok_or_else(|| format!("missing slo field '{key}'"))
+    };
+
+    Ok(ObservabilitySloHistoryEntry {
+        ts: chrono::Utc::now().to_rfc3339(),
+        gateway_ratio: extract_f64(gateway, "ratio")?,
+        gateway_met: extract_bool(gateway, "met")?,
+        channels_ratio: extract_f64(channels, "ratio")?,
+        channels_met: extract_bool(channels, "met")?,
+        channels_available: extract_bool(channels, "available")?,
+        alert_ids,
+    })
+}
+
+fn slo_history_entry_json(entry: &ObservabilitySloHistoryEntry) -> Value {
+    json!({
+        "ts": entry.ts,
+        "gateway_ratio": entry.gateway_ratio,
+        "gateway_met": entry.gateway_met,
+        "channels_ratio": entry.channels_ratio,
+        "channels_met": entry.channels_met,
+        "channels_available": entry.channels_available,
+        "alert_ids": entry.alert_ids,
+    })
+}
+
+fn slo_history_delta(
+    current: &ObservabilitySloHistoryEntry,
+    previous: &ObservabilitySloHistoryEntry,
+) -> Value {
+    json!({
+        "gateway_ratio": current.gateway_ratio - previous.gateway_ratio,
+        "channels_ratio": current.channels_ratio - previous.channels_ratio,
+        "gateway_met_changed": current.gateway_met != previous.gateway_met,
+        "channels_met_changed": current.channels_met != previous.channels_met,
+    })
+}
+
+fn empty_slo_history_delta() -> Value {
+    json!({
+        "gateway_ratio": 0.0,
+        "channels_ratio": 0.0,
+        "gateway_met_changed": false,
+        "channels_met_changed": false,
+    })
+}
+
+fn count_gateway_unmet_streak(entries: &[ObservabilitySloHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| !entry.gateway_met)
+        .count()
+}
+
+fn count_channels_unmet_streak(entries: &[ObservabilitySloHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.channels_available && !entry.channels_met)
+        .count()
+}
+
+fn count_repeated_alert_streak(entries: &[ObservabilitySloHistoryEntry], alert_id: &str) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.alert_ids.iter().any(|id| id == alert_id))
+        .count()
+}
+
+fn build_slo_incident_hints(
+    entries: &[ObservabilitySloHistoryEntry],
+    current: Option<&ObservabilitySloHistoryEntry>,
+    incident_window: usize,
+    repeat_threshold: usize,
+) -> Vec<Value> {
+    let mut hints = Vec::<Value>::new();
+    let gateway_unmet_streak = count_gateway_unmet_streak(entries);
+    if gateway_unmet_streak >= incident_window {
+        hints.push(json!({
+            "id": "slo.gateway_unmet_streak",
+            "severity": "warning",
+            "message": format!("gateway SLO has been unmet for {gateway_unmet_streak} consecutive samples"),
+            "streak": gateway_unmet_streak,
+            "threshold": incident_window,
+        }));
+    }
+
+    let channels_unmet_streak = count_channels_unmet_streak(entries);
+    if channels_unmet_streak >= incident_window {
+        hints.push(json!({
+            "id": "slo.channels_unmet_streak",
+            "severity": "warning",
+            "message": format!("channels SLO has been unmet for {channels_unmet_streak} consecutive samples"),
+            "streak": channels_unmet_streak,
+            "threshold": incident_window,
+        }));
+    }
+
+    if let Some(current_entry) = current {
+        for alert_id in &current_entry.alert_ids {
+            let repeat_count = count_repeated_alert_streak(entries, alert_id);
+            if repeat_count >= repeat_threshold {
+                hints.push(json!({
+                    "id": "alerts.repeated",
+                    "severity": "info",
+                    "message": format!("alert '{alert_id}' repeated for {repeat_count} consecutive samples"),
+                    "alert_id": alert_id,
+                    "streak": repeat_count,
+                    "threshold": repeat_threshold,
+                }));
+            }
+        }
+    }
+
+    hints
+}
+
+fn build_observability_slo_history(slo: &Value, alerts: &Value, data_dir: &Path) -> Value {
+    let history_path = slo_history_path(data_dir);
+    let max_samples = read_positive_usize("MOSAIC_OBS_SLO_HISTORY_MAX_SAMPLES", 500);
+    let incident_window = read_positive_usize("MOSAIC_OBS_SLO_INCIDENT_WINDOW", 5);
+    let repeat_threshold = read_positive_usize("MOSAIC_OBS_ALERT_REPEAT_HINT_THRESHOLD", 3);
+    let (mut entries, parse_errors, read_error) = read_slo_history(&history_path);
+    let mut appended = false;
+    let mut write_error = None::<String>;
+    let mut pruned = 0usize;
+
+    let current_entry = match slo_history_entry_from_report(slo, alerts) {
+        Ok(entry) => {
+            if let Err(err) = append_slo_history_entry(&history_path, &entry) {
+                write_error = Some(err);
+            } else {
+                appended = true;
+                entries.push(entry.clone());
+            }
+            Some(entry)
+        }
+        Err(err) => {
+            write_error = Some(err);
+            None
+        }
+    };
+
+    let current_vs_previous = if let Some(current) = current_entry.as_ref() {
+        let previous = if appended {
+            if entries.len() >= 2 {
+                entries.get(entries.len() - 2).cloned()
+            } else {
+                None
+            }
+        } else {
+            entries.last().cloned()
+        };
+
+        if let Some(previous) = previous {
+            json!({
+                "available": true,
+                "current_ts": current.ts,
+                "previous_ts": previous.ts,
+                "delta": slo_history_delta(current, &previous),
+            })
+        } else {
+            json!({
+                "available": false,
+                "current_ts": current.ts,
+                "previous_ts": null,
+                "delta": empty_slo_history_delta(),
+            })
+        }
+    } else {
+        json!({
+            "available": false,
+            "current_ts": null,
+            "previous_ts": null,
+            "delta": empty_slo_history_delta(),
+        })
+    };
+
+    if entries.len() > max_samples {
+        pruned = entries.len() - max_samples;
+        entries.drain(0..pruned);
+        if let Err(err) = rewrite_slo_history_entries(&history_path, &entries)
+            && write_error.is_none()
+        {
+            write_error = Some(err);
+        }
+    }
+
+    let incident_hints = build_slo_incident_hints(
+        &entries,
+        current_entry.as_ref(),
+        incident_window,
+        repeat_threshold,
+    );
+    let gateway_unmet_streak = count_gateway_unmet_streak(&entries);
+    let channels_unmet_streak = count_channels_unmet_streak(&entries);
+    let latest = entries.last().cloned();
+
+    json!({
+        "path": history_path.display().to_string(),
+        "sample_count": entries.len(),
+        "retention": {
+            "max_samples": max_samples,
+            "pruned": pruned,
+        },
+        "parse_errors": parse_errors,
+        "appended": appended,
+        "read_error": read_error,
+        "write_error": write_error,
+        "latest": latest.as_ref().map(slo_history_entry_json),
+        "current_run": current_entry.as_ref().map(slo_history_entry_json),
+        "current_vs_previous": current_vs_previous,
+        "streaks": {
+            "gateway_unmet": gateway_unmet_streak,
+            "channels_unmet": channels_unmet_streak,
+        },
+        "incident_window": incident_window,
+        "alert_repeat_threshold": repeat_threshold,
+        "incident_hints_count": incident_hints.len(),
+        "incident_hints": incident_hints,
+    })
 }
 
 #[derive(Default)]
@@ -1489,9 +1910,148 @@ fn empty_plugin_soak_history_delta() -> Value {
     })
 }
 
+fn plugin_soak_total_drift(entry: &PluginSoakHistoryEntry) -> i64 {
+    entry.event_line_drift_ok.abs()
+        + entry.event_line_drift_cpuwatch.abs()
+        + entry.event_line_drift_rss.abs()
+}
+
+fn count_plugin_soak_completion_unmet_streak(
+    entries: &[PluginSoakHistoryEntry],
+    completion_target: f64,
+) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.completion_ratio < completion_target)
+        .count()
+}
+
+fn count_plugin_soak_status_unmet_streak(entries: &[PluginSoakHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.status != "ok")
+        .count()
+}
+
+struct PluginSoakIncidentHintConfig {
+    completion_target: f64,
+    completion_drop_warn: f64,
+    drift_abs_threshold: i64,
+    incident_window: usize,
+    repeat_threshold: usize,
+}
+
+fn build_plugin_soak_incident_hints(
+    entries: &[PluginSoakHistoryEntry],
+    current: Option<&PluginSoakHistoryEntry>,
+    previous: Option<&PluginSoakHistoryEntry>,
+    config: &PluginSoakIncidentHintConfig,
+) -> Vec<Value> {
+    let mut hints = Vec::<Value>::new();
+    let completion_unmet_streak =
+        count_plugin_soak_completion_unmet_streak(entries, config.completion_target);
+    if completion_unmet_streak >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "plugin_soak.completion_unmet_streak",
+            "severity": "warning",
+            "message": format!(
+                "plugin soak completion ratio stayed below target for {completion_unmet_streak} runs"
+            ),
+            "completion_target": config.completion_target,
+            "streak": completion_unmet_streak,
+        }));
+    }
+
+    let status_unmet_streak = count_plugin_soak_status_unmet_streak(entries);
+    if status_unmet_streak >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "plugin_soak.status_unmet_streak",
+            "severity": "warning",
+            "message": format!("plugin soak status stayed non-ok for {status_unmet_streak} runs"),
+            "streak": status_unmet_streak,
+        }));
+    }
+
+    let recent_entries = entries
+        .iter()
+        .rev()
+        .take(config.incident_window)
+        .collect::<Vec<_>>();
+    let recent_drift_count = recent_entries
+        .iter()
+        .filter(|entry| plugin_soak_total_drift(entry) >= config.drift_abs_threshold)
+        .count();
+    if recent_drift_count >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "plugin_soak.drift_repeated",
+            "severity": "warning",
+            "message": format!(
+                "plugin soak drift exceeded threshold in {recent_drift_count}/{} recent runs",
+                config.incident_window
+            ),
+            "window": config.incident_window,
+            "repeat_threshold": config.repeat_threshold,
+            "drift_abs_threshold": config.drift_abs_threshold,
+            "repeated": recent_drift_count,
+        }));
+    }
+
+    let recent_warning_count = recent_entries
+        .iter()
+        .filter(|entry| entry.warnings_count > 0)
+        .count();
+    if recent_warning_count >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "plugin_soak.warnings_repeated",
+            "severity": "warning",
+            "message": format!(
+                "plugin soak report emitted warnings in {recent_warning_count}/{} recent runs",
+                config.incident_window
+            ),
+            "window": config.incident_window,
+            "repeat_threshold": config.repeat_threshold,
+            "repeated": recent_warning_count,
+        }));
+    }
+
+    if let (Some(current), Some(previous)) = (current, previous) {
+        let completion_ratio_delta = current.completion_ratio - previous.completion_ratio;
+        if completion_ratio_delta <= -config.completion_drop_warn {
+            hints.push(json!({
+                "id": "plugin_soak.completion_regression",
+                "severity": "warning",
+                "message": format!(
+                    "plugin soak completion ratio dropped by {:.4} between consecutive runs",
+                    completion_ratio_delta.abs()
+                ),
+                "drop": completion_ratio_delta,
+                "threshold": -config.completion_drop_warn,
+            }));
+        }
+    }
+
+    hints
+}
+
 fn build_plugin_soak_history(plugin_soak: &Value, data_dir: &Path) -> Value {
     let history_path = plugin_soak_history_path(data_dir);
     let max_samples = read_positive_usize("MOSAIC_OBS_PLUGIN_SOAK_HISTORY_MAX_SAMPLES", 200);
+    let completion_target = read_ratio_threshold("MOSAIC_OBS_ALERT_PLUGIN_COMPLETION_MIN", 1.0);
+    let completion_drop_warn =
+        read_ratio_threshold("MOSAIC_OBS_PLUGIN_SOAK_COMPLETION_DROP_WARN", 0.02);
+    let incident_window = read_positive_usize("MOSAIC_OBS_PLUGIN_SOAK_INCIDENT_WINDOW", 5);
+    let repeat_threshold = read_positive_usize("MOSAIC_OBS_PLUGIN_SOAK_REPEAT_HINT_THRESHOLD", 3);
+    let drift_abs_threshold =
+        read_positive_usize("MOSAIC_OBS_PLUGIN_SOAK_DRIFT_ABS_THRESHOLD", 1) as i64;
+    let incident_hint_config = PluginSoakIncidentHintConfig {
+        completion_target,
+        completion_drop_warn,
+        drift_abs_threshold,
+        incident_window,
+        repeat_threshold,
+    };
     let (mut entries, parse_errors, read_error) = read_plugin_soak_history(&history_path);
     let mut appended = false;
     let mut write_error = None::<String>;
@@ -1520,8 +2080,8 @@ fn build_plugin_soak_history(plugin_soak: &Value, data_dir: &Path) -> Value {
     } else {
         None
     };
-    let current_vs_previous = if let Some(current) = current_entry.as_ref() {
-        let previous = if appended {
+    let previous_for_current = if current_entry.is_some() {
+        if appended {
             if entries.len() >= 2 {
                 entries.get(entries.len() - 2).cloned()
             } else {
@@ -1529,14 +2089,17 @@ fn build_plugin_soak_history(plugin_soak: &Value, data_dir: &Path) -> Value {
             }
         } else {
             entries.last().cloned()
-        };
-
-        if let Some(previous) = previous {
+        }
+    } else {
+        None
+    };
+    let current_vs_previous = if let Some(current) = current_entry.as_ref() {
+        if let Some(previous) = previous_for_current.as_ref() {
             json!({
                 "available": true,
                 "current_ts": current.ts,
                 "previous_ts": previous.ts,
-                "delta": plugin_soak_history_delta(current, &previous),
+                "delta": plugin_soak_history_delta(current, previous),
             })
         } else {
             json!({
@@ -1566,6 +2129,21 @@ fn build_plugin_soak_history(plugin_soak: &Value, data_dir: &Path) -> Value {
     }
 
     let latest = entries.last().cloned();
+    let completion_unmet_streak =
+        count_plugin_soak_completion_unmet_streak(&entries, completion_target);
+    let status_unmet_streak = count_plugin_soak_status_unmet_streak(&entries);
+    let recent_drift_count = entries
+        .iter()
+        .rev()
+        .take(incident_window)
+        .filter(|entry| plugin_soak_total_drift(entry) >= drift_abs_threshold)
+        .count();
+    let incident_hints = build_plugin_soak_incident_hints(
+        &entries,
+        current_entry.as_ref(),
+        previous_for_current.as_ref(),
+        &incident_hint_config,
+    );
 
     json!({
         "path": history_path.display().to_string(),
@@ -1581,6 +2159,19 @@ fn build_plugin_soak_history(plugin_soak: &Value, data_dir: &Path) -> Value {
         "latest": latest.as_ref().map(plugin_soak_history_entry_json),
         "current_run": current_entry.as_ref().map(plugin_soak_history_entry_json),
         "current_vs_previous": current_vs_previous,
+        "window": {
+            "size": incident_window,
+            "repeat_threshold": repeat_threshold,
+            "completion_target": completion_target,
+            "drift_abs_threshold": drift_abs_threshold,
+            "recent_drift_count": recent_drift_count,
+        },
+        "streaks": {
+            "completion_unmet": completion_unmet_streak,
+            "status_not_ok": status_unmet_streak,
+        },
+        "incident_hints_count": incident_hints.len(),
+        "incident_hints": incident_hints,
     })
 }
 

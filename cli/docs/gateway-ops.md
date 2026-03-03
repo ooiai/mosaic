@@ -22,6 +22,10 @@ Notes:
 - `gateway start` keeps backward compatibility with `gateway run` alias.
 - `gateway install` stores desired host/port in `.mosaic/data/gateway-service.json`.
 - `gateway status --deep` includes process/endpoint diagnostics and resolved target.
+- `gateway health --verbose` includes protocol checks:
+  - `gateway_discover`
+  - `gateway_protocol_methods` (required `health,status`)
+  - `gateway_call_status`
 
 ## `gateway call`
 

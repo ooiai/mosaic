@@ -40,6 +40,7 @@ enum Commands {
     Session(SessionArgs),
     #[command(visible_alias = "daemon")]
     Gateway(GatewayArgs),
+    Mcp(McpArgs),
     Channels(ChannelsArgs),
     #[command(visible_alias = "node")]
     Nodes(NodesArgs),
@@ -48,6 +49,8 @@ enum Commands {
     Hooks(HooksArgs),
     Cron(CronArgs),
     Webhooks(WebhooksArgs),
+    Tts(TtsArgs),
+    Voicecall(VoicecallArgs),
     Browser(BrowserArgs),
     Logs(LogsArgs),
     Observability(ObservabilityArgs),
@@ -131,6 +134,8 @@ enum ConfigureCommand {
         key: String,
     },
     Patch(ConfigurePatchArgs),
+    Preview(ConfigurePreviewArgs),
+    Template(ConfigureTemplateArgs),
 }
 
 #[derive(Args, Debug, Clone)]
@@ -140,7 +145,35 @@ struct ConfigurePatchArgs {
     #[arg(long)]
     file: Option<String>,
     #[arg(long)]
+    target_profile: Option<String>,
+    #[arg(long)]
     dry_run: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ConfigurePreviewArgs {
+    #[arg(long = "set", value_name = "KEY=VALUE", action = ArgAction::Append)]
+    set: Vec<String>,
+    #[arg(long)]
+    file: Option<String>,
+    #[arg(long)]
+    target_profile: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+struct ConfigureTemplateArgs {
+    #[arg(long, value_enum, default_value_t = ConfigureTemplateFormatArg::Json)]
+    format: ConfigureTemplateFormatArg,
+    #[arg(long)]
+    defaults: bool,
+    #[arg(long)]
+    target_profile: Option<String>,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigureTemplateFormatArg {
+    Json,
+    Toml,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -248,6 +281,43 @@ enum SessionCommand {
 struct GatewayArgs {
     #[command(subcommand)]
     command: GatewayCommand,
+}
+
+#[derive(Args, Debug, Clone)]
+struct McpArgs {
+    #[command(subcommand)]
+    command: McpCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum McpCommand {
+    List,
+    Add {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        command: String,
+        #[arg(long = "arg", action = ArgAction::Append, allow_hyphen_values = true)]
+        args: Vec<String>,
+        #[arg(long = "env", value_name = "KEY=VALUE", action = ArgAction::Append)]
+        env: Vec<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        disabled: bool,
+    },
+    Check {
+        server_id: String,
+    },
+    Enable {
+        server_id: String,
+    },
+    Disable {
+        server_id: String,
+    },
+    Remove {
+        server_id: String,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -479,6 +549,53 @@ enum CronCommand {
 struct WebhooksArgs {
     #[command(subcommand)]
     command: WebhooksCommand,
+}
+
+#[derive(Args, Debug, Clone)]
+struct TtsArgs {
+    #[command(subcommand)]
+    command: TtsCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum TtsCommand {
+    Voices,
+    Speak {
+        #[arg(long)]
+        text: String,
+        #[arg(long, default_value = "alloy")]
+        voice: String,
+        #[arg(long, default_value = "wav")]
+        format: String,
+        #[arg(long)]
+        out: Option<String>,
+    },
+}
+
+#[derive(Args, Debug, Clone)]
+struct VoicecallArgs {
+    #[command(subcommand)]
+    command: VoicecallCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum VoicecallCommand {
+    Start {
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        channel_id: Option<String>,
+    },
+    Status,
+    Send {
+        #[arg(long)]
+        text: String,
+    },
+    History {
+        #[arg(long, default_value_t = 20)]
+        tail: usize,
+    },
+    Stop,
 }
 
 #[derive(Subcommand, Debug, Clone)]

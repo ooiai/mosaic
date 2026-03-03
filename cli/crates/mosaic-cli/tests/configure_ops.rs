@@ -405,3 +405,187 @@ temperature = 0.1
         serde_json::from_slice(&get_tools_enabled).expect("get tools.enabled");
     assert_eq!(get_tools_enabled_json["value"], false);
 }
+
+#[test]
+#[allow(deprecated)]
+fn configure_preview_template_and_target_profile_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    let preview_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "preview",
+            "--target-profile",
+            "migration",
+            "--set",
+            "provider.model=migrated-model",
+            "--set",
+            "tools.enabled=false",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let preview_json: Value = serde_json::from_slice(&preview_output).expect("preview json");
+    assert_eq!(preview_json["ok"], true);
+    assert_eq!(preview_json["action"], "preview");
+    assert_eq!(preview_json["target_profile"], "migration");
+    assert_eq!(preview_json["target_profile_exists"], false);
+    assert_eq!(preview_json["dry_run"], true);
+    assert_eq!(preview_json["saved"], false);
+    assert_eq!(preview_json["updated"], 2);
+    assert_eq!(preview_json["changed_keys"], 2);
+
+    let config_path = temp.path().join(".mosaic/config.toml");
+    let config_raw_before = fs::read_to_string(&config_path).expect("read config before patch");
+    assert!(
+        !config_raw_before.contains("[profiles.migration"),
+        "preview must not persist target profile"
+    );
+
+    let patch_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "patch",
+            "--target-profile",
+            "migration",
+            "--set",
+            "provider.model=migrated-model",
+            "--set",
+            "tools.enabled=false",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let patch_json: Value = serde_json::from_slice(&patch_output).expect("patch json");
+    assert_eq!(patch_json["ok"], true);
+    assert_eq!(patch_json["action"], "patch");
+    assert_eq!(patch_json["target_profile"], "migration");
+    assert_eq!(patch_json["target_profile_exists"], false);
+    assert_eq!(patch_json["dry_run"], false);
+    assert_eq!(patch_json["saved"], true);
+    assert_eq!(patch_json["updated"], 2);
+
+    let config_raw_after = fs::read_to_string(&config_path).expect("read config after patch");
+    assert!(
+        config_raw_after.contains("[profiles.migration"),
+        "patch with target-profile should persist migration profile"
+    );
+
+    let get_migration_model = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--profile",
+            "migration",
+            "--json",
+            "configure",
+            "get",
+            "provider.model",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let get_migration_model_json: Value =
+        serde_json::from_slice(&get_migration_model).expect("get migration model");
+    assert_eq!(get_migration_model_json["value"], "migrated-model");
+
+    let template_json_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "template",
+            "--target-profile",
+            "migration",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let template_json: Value =
+        serde_json::from_slice(&template_json_output).expect("template json");
+    assert_eq!(template_json["ok"], true);
+    assert_eq!(template_json["action"], "template");
+    assert_eq!(template_json["target_profile"], "migration");
+    assert_eq!(template_json["target_profile_exists"], true);
+    assert_eq!(template_json["defaults"], false);
+    assert_eq!(template_json["format"], "json");
+    assert_eq!(
+        template_json["template_json"]["provider"]["model"],
+        "migrated-model"
+    );
+    let rendered_template_json: Value = serde_json::from_str(
+        template_json["template"]
+            .as_str()
+            .expect("json template string"),
+    )
+    .expect("parse rendered json template");
+    assert_eq!(
+        rendered_template_json["provider"]["model"],
+        "migrated-model"
+    );
+
+    let template_toml_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "configure",
+            "template",
+            "--target-profile",
+            "migration",
+            "--format",
+            "toml",
+            "--defaults",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let template_toml: Value =
+        serde_json::from_slice(&template_toml_output).expect("template toml");
+    assert_eq!(template_toml["ok"], true);
+    assert_eq!(template_toml["format"], "toml");
+    assert_eq!(template_toml["defaults"], true);
+    let template_toml_text = template_toml["template"]
+        .as_str()
+        .expect("toml template string");
+    assert!(template_toml_text.contains("model = \"gpt-4o-mini\""));
+    assert!(template_toml_text.contains("guard_mode = \"confirm_dangerous\""));
+}

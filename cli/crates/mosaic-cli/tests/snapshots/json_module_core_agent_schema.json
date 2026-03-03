@@ -68,6 +68,47 @@
     "ok": "bool",
     "profile": "string",
     "saved": "bool",
+    "target_profile": "string",
+    "target_profile_exists": "bool",
+    "updated": "number",
+    "updates": {
+      "items": [
+        {
+          "changed": "bool",
+          "from": "string",
+          "group": "string",
+          "key": "string",
+          "source": "string",
+          "to": "string",
+          "value": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "configure_preview": {
+    "action": "string",
+    "changed": "bool",
+    "changed_keys": "number",
+    "config_path": "string",
+    "dry_run": "bool",
+    "file": "null",
+    "groups": {
+      "items": [
+        {
+          "changed": "number",
+          "group": "string",
+          "unchanged": "number",
+          "updated": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "profile": "string",
+    "saved": "bool",
+    "target_profile": "string",
+    "target_profile_exists": "bool",
     "updated": "number",
     "updates": {
       "items": [
@@ -123,6 +164,34 @@
     "config_path": "string",
     "ok": "bool",
     "profile": "string"
+  },
+  "configure_template": {
+    "action": "string",
+    "config_path": "string",
+    "defaults": "bool",
+    "format": "string",
+    "ok": "bool",
+    "profile": "string",
+    "target_profile": "string",
+    "target_profile_exists": "bool",
+    "template": "string",
+    "template_json": {
+      "agent": {
+        "max_turns": "number",
+        "temperature": "number"
+      },
+      "provider": {
+        "api_key_env": "string",
+        "base_url": "string",
+        "model": "string"
+      },
+      "tools": {
+        "enabled": "bool",
+        "run": {
+          "guard_mode": "string"
+        }
+      }
+    }
   },
   "configure_unset": {
     "action": "string",

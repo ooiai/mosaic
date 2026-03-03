@@ -14,6 +14,7 @@ mosaic-agents = { path = "../mosaic-agents" }
 mosaic-channels = { path = "../mosaic-channels" }
 mosaic-core = { path = "../mosaic-core" }
 mosaic-gateway = { path = "../mosaic-gateway" }
+mosaic-mcp = { path = "../mosaic-mcp" }
 mosaic-memory = { path = "../mosaic-memory" }
 mosaic-ops = { path = "../mosaic-ops" }
 mosaic-plugins = { path = "../mosaic-plugins" }
@@ -33,6 +34,7 @@ tiny_http.workspace = true
 png.workspace = true
 qrcodegen.workspace = true
 libc.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

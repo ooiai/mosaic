@@ -10,6 +10,7 @@ Commands:
   chat           [aliases: agent]
   session        [aliases: sessions]
   gateway        [aliases: daemon]
+  mcp            
   channels       
   nodes          [aliases: node]
   devices        
@@ -17,6 +18,8 @@ Commands:
   hooks          
   cron           
   webhooks       
+  tts            
+  voicecall      
   browser        
   logs           
   observability  

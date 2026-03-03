@@ -245,6 +245,11 @@
             },
             "previous_ts": "null"
           },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
           "latest": "null",
           "parse_errors": "number",
           "path": "string",
@@ -254,6 +259,17 @@
             "pruned": "number"
           },
           "sample_count": "number",
+          "streaks": {
+            "completion_unmet": "number",
+            "status_not_ok": "number"
+          },
+          "window": {
+            "completion_target": "number",
+            "drift_abs_threshold": "number",
+            "recent_drift_count": "number",
+            "repeat_threshold": "number",
+            "size": "number"
+          },
           "write_error": "null"
         },
         "path": "null",
@@ -331,6 +347,68 @@
           "samples": "number",
           "target": "number"
         },
+        "history": {
+          "alert_repeat_threshold": "number",
+          "appended": "bool",
+          "current_run": {
+            "alert_ids": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "channels_available": "bool",
+            "channels_met": "bool",
+            "channels_ratio": "number",
+            "gateway_met": "bool",
+            "gateway_ratio": "number",
+            "ts": "string"
+          },
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "string",
+            "delta": {
+              "channels_met_changed": "bool",
+              "channels_ratio": "number",
+              "gateway_met_changed": "bool",
+              "gateway_ratio": "number"
+            },
+            "previous_ts": "string"
+          },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
+          "incident_window": "number",
+          "latest": {
+            "alert_ids": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "channels_available": "bool",
+            "channels_met": "bool",
+            "channels_ratio": "number",
+            "gateway_met": "bool",
+            "gateway_ratio": "number",
+            "ts": "string"
+          },
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "streaks": {
+            "channels_unmet": "number",
+            "gateway_unmet": "number"
+          },
+          "write_error": "null"
+        },
         "window": "number"
       },
       "state_mode": "string",
@@ -351,17 +429,26 @@
         "logs_count": "number",
         "plugin_soak_available": "bool",
         "plugin_soak_completion_ratio_delta": "number",
+        "plugin_soak_completion_unmet_streak": "number",
         "plugin_soak_delta_available": "bool",
         "plugin_soak_history_count": "number",
         "plugin_soak_history_pruned": "number",
+        "plugin_soak_incident_hints": "number",
         "plugin_soak_status": "string",
+        "plugin_soak_status_unmet_streak": "number",
         "safety_audit_entries": "number",
         "safety_audit_parse_errors": "number",
         "safety_compare_available": "bool",
         "safety_failed_delta": "number",
         "safety_failure_rate_delta": "number",
         "slo_channels_met": "bool",
+        "slo_channels_ratio_delta": "number",
+        "slo_channels_unmet_streak": "number",
         "slo_gateway_met": "bool",
+        "slo_gateway_ratio_delta": "number",
+        "slo_gateway_unmet_streak": "number",
+        "slo_history_count": "number",
+        "slo_incident_hints": "number",
         "system_events_count": "number"
       },
       "system_events": {
@@ -553,6 +640,11 @@
             },
             "previous_ts": "null"
           },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
           "latest": "null",
           "parse_errors": "number",
           "path": "string",
@@ -562,6 +654,17 @@
             "pruned": "number"
           },
           "sample_count": "number",
+          "streaks": {
+            "completion_unmet": "number",
+            "status_not_ok": "number"
+          },
+          "window": {
+            "completion_target": "number",
+            "drift_abs_threshold": "number",
+            "recent_drift_count": "number",
+            "repeat_threshold": "number",
+            "size": "number"
+          },
           "write_error": "null"
         },
         "path": "null",
@@ -639,6 +742,68 @@
           "samples": "number",
           "target": "number"
         },
+        "history": {
+          "alert_repeat_threshold": "number",
+          "appended": "bool",
+          "current_run": {
+            "alert_ids": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "channels_available": "bool",
+            "channels_met": "bool",
+            "channels_ratio": "number",
+            "gateway_met": "bool",
+            "gateway_ratio": "number",
+            "ts": "string"
+          },
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "string",
+            "delta": {
+              "channels_met_changed": "bool",
+              "channels_ratio": "number",
+              "gateway_met_changed": "bool",
+              "gateway_ratio": "number"
+            },
+            "previous_ts": "null"
+          },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
+          "incident_window": "number",
+          "latest": {
+            "alert_ids": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "channels_available": "bool",
+            "channels_met": "bool",
+            "channels_ratio": "number",
+            "gateway_met": "bool",
+            "gateway_ratio": "number",
+            "ts": "string"
+          },
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "streaks": {
+            "channels_unmet": "number",
+            "gateway_unmet": "number"
+          },
+          "write_error": "null"
+        },
         "window": "number"
       },
       "state_mode": "string",
@@ -659,17 +824,26 @@
         "logs_count": "number",
         "plugin_soak_available": "bool",
         "plugin_soak_completion_ratio_delta": "number",
+        "plugin_soak_completion_unmet_streak": "number",
         "plugin_soak_delta_available": "bool",
         "plugin_soak_history_count": "number",
         "plugin_soak_history_pruned": "number",
+        "plugin_soak_incident_hints": "number",
         "plugin_soak_status": "string",
+        "plugin_soak_status_unmet_streak": "number",
         "safety_audit_entries": "number",
         "safety_audit_parse_errors": "number",
         "safety_compare_available": "bool",
         "safety_failed_delta": "number",
         "safety_failure_rate_delta": "number",
         "slo_channels_met": "bool",
+        "slo_channels_ratio_delta": "number",
+        "slo_channels_unmet_streak": "number",
         "slo_gateway_met": "bool",
+        "slo_gateway_ratio_delta": "number",
+        "slo_gateway_unmet_streak": "number",
+        "slo_history_count": "number",
+        "slo_incident_hints": "number",
         "system_events_count": "number"
       },
       "system_events": {

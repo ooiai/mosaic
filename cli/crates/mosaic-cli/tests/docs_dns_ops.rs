@@ -17,6 +17,8 @@ fn docs_lists_topics_in_json() {
     let topics = json["topics"].as_array().expect("topics array");
     assert!(topics.iter().any(|item| item["topic"] == "cli"));
     assert!(topics.iter().any(|item| item["topic"] == "gateway"));
+    assert!(topics.iter().any(|item| item["topic"] == "mcp"));
+    assert!(topics.iter().any(|item| item["topic"] == "beta"));
     assert!(topics.iter().any(|item| item["topic"] == "observability"));
 }
 

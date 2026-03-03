@@ -1,0 +1,142 @@
+{
+  "add": {
+    "ok": "bool",
+    "path": "string",
+    "server": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "command": "string",
+      "created_at": "string",
+      "cwd": "null",
+      "enabled": "bool",
+      "env": {
+        "MCP_TOKEN": "string"
+      },
+      "id": "string",
+      "last_check_at": "null",
+      "last_check_error": "null",
+      "name": "string",
+      "updated_at": "string"
+    }
+  },
+  "check": {
+    "check": {
+      "checked_at": "string",
+      "cwd_exists": "bool",
+      "enabled": "bool",
+      "executable_resolved": "string",
+      "healthy": "bool",
+      "issues": {
+        "items": [],
+        "type": "array"
+      },
+      "server_id": "string"
+    },
+    "healthy": "bool",
+    "ok": "bool",
+    "server": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "command": "string",
+      "created_at": "string",
+      "cwd": "null",
+      "enabled": "bool",
+      "env": {
+        "MCP_TOKEN": "string"
+      },
+      "id": "string",
+      "last_check_at": "string",
+      "last_check_error": "null",
+      "name": "string",
+      "updated_at": "string"
+    }
+  },
+  "disable": {
+    "ok": "bool",
+    "server": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "command": "string",
+      "created_at": "string",
+      "cwd": "null",
+      "enabled": "bool",
+      "env": {
+        "MCP_TOKEN": "string"
+      },
+      "id": "string",
+      "last_check_at": "string",
+      "last_check_error": "null",
+      "name": "string",
+      "updated_at": "string"
+    }
+  },
+  "enable": {
+    "ok": "bool",
+    "server": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "command": "string",
+      "created_at": "string",
+      "cwd": "null",
+      "enabled": "bool",
+      "env": {
+        "MCP_TOKEN": "string"
+      },
+      "id": "string",
+      "last_check_at": "string",
+      "last_check_error": "null",
+      "name": "string",
+      "updated_at": "string"
+    }
+  },
+  "list": {
+    "ok": "bool",
+    "path": "string",
+    "servers": {
+      "items": [
+        {
+          "args": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "command": "string",
+          "created_at": "string",
+          "cwd": "null",
+          "enabled": "bool",
+          "env": {
+            "MCP_TOKEN": "string"
+          },
+          "id": "string",
+          "last_check_at": "null",
+          "last_check_error": "null",
+          "name": "string",
+          "updated_at": "string"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "remove": {
+    "ok": "bool",
+    "removed": "bool",
+    "server_id": "string"
+  }
+}

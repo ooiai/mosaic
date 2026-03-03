@@ -11,10 +11,10 @@ use mosaic_core::models::ModelRoutingStore;
 use mosaic_core::session::SessionStore;
 
 use super::{
-    ChatArgs, Cli, ConfigureArgs, ConfigureCommand, ConfigurePatchArgs, ModelAliasesCommand,
-    ModelFallbacksCommand, ModelsArgs, ModelsCommand, PROJECT_STATE_DIR, SessionArgs,
-    SessionCommand, SetupArgs, build_runtime, print_json, resolve_effective_model,
-    resolve_state_paths,
+    ChatArgs, Cli, ConfigureArgs, ConfigureCommand, ConfigurePatchArgs, ConfigureTemplateArgs,
+    ConfigureTemplateFormatArg, ModelAliasesCommand, ModelFallbacksCommand, ModelsArgs,
+    ModelsCommand, PROJECT_STATE_DIR, SessionArgs, SessionCommand, SetupArgs, build_runtime,
+    print_json, resolve_effective_model, resolve_state_paths,
 };
 
 pub(super) fn handle_setup(cli: &Cli, args: SetupArgs) -> Result<()> {
@@ -236,6 +236,52 @@ const CONFIGURE_KEY_SPECS: [ConfigureKeySpec; 7] = [
     },
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigurePatchOperation {
+    Patch,
+    Preview,
+}
+
+impl ConfigurePatchOperation {
+    fn action_name(self) -> &'static str {
+        match self {
+            Self::Patch => "patch",
+            Self::Preview => "preview",
+        }
+    }
+
+    fn dry_run(self, requested_dry_run: bool) -> bool {
+        match self {
+            Self::Patch => requested_dry_run,
+            Self::Preview => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigureTemplateFormat {
+    Json,
+    Toml,
+}
+
+impl ConfigureTemplateFormat {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Toml => "toml",
+        }
+    }
+}
+
+impl From<ConfigureTemplateFormatArg> for ConfigureTemplateFormat {
+    fn from(value: ConfigureTemplateFormatArg) -> Self {
+        match value {
+            ConfigureTemplateFormatArg::Json => Self::Json,
+            ConfigureTemplateFormatArg::Toml => Self::Toml,
+        }
+    }
+}
+
 fn handle_configure_subcommand(
     cli: &Cli,
     manager: &ConfigManager,
@@ -288,7 +334,31 @@ fn handle_configure_subcommand(
             return Ok(());
         }
         ConfigureCommand::Patch(args) => {
-            return handle_configure_patch(cli, manager, config, args);
+            return handle_configure_patch(
+                cli,
+                manager,
+                config,
+                args,
+                ConfigurePatchOperation::Patch,
+            );
+        }
+        ConfigureCommand::Preview(args) => {
+            let patch_args = ConfigurePatchArgs {
+                set: args.set,
+                file: args.file,
+                target_profile: args.target_profile,
+                dry_run: true,
+            };
+            return handle_configure_patch(
+                cli,
+                manager,
+                config,
+                patch_args,
+                ConfigurePatchOperation::Preview,
+            );
+        }
+        ConfigureCommand::Template(args) => {
+            return handle_configure_template(cli, manager, config, args);
         }
         _ => {}
     }
@@ -319,7 +389,10 @@ fn handle_configure_subcommand(
                 true,
             )
         }
-        ConfigureCommand::Keys | ConfigureCommand::Patch(_) => unreachable!(),
+        ConfigureCommand::Keys
+        | ConfigureCommand::Patch(_)
+        | ConfigureCommand::Preview(_)
+        | ConfigureCommand::Template(_) => unreachable!(),
     };
 
     config.active_profile = cli.profile.clone();
@@ -510,8 +583,18 @@ fn handle_configure_patch(
     manager: &ConfigManager,
     config: &mut ConfigFile,
     args: ConfigurePatchArgs,
+    operation: ConfigurePatchOperation,
 ) -> Result<()> {
-    let ConfigurePatchArgs { set, file, dry_run } = args;
+    let ConfigurePatchArgs {
+        set,
+        file,
+        target_profile,
+        dry_run,
+    } = args;
+    let action_name = operation.action_name();
+    let dry_run = operation.dry_run(dry_run);
+    let target_profile = target_profile.unwrap_or_else(|| cli.profile.clone());
+    let target_profile_exists = config.profiles.contains_key(&target_profile);
     let mut assignments = Vec::<ConfigurePatchAssignment>::new();
     let mut file_path = None;
     if let Some(path) = file {
@@ -524,9 +607,10 @@ fn handle_configure_patch(
             .collect::<Result<Vec<_>>>()?,
     );
     if assignments.is_empty() {
-        return Err(MosaicError::Validation(
-            "configure patch requires at least one update via --set or --file".to_string(),
-        ));
+        return Err(MosaicError::Validation(format!(
+            "configure {} requires at least one update via --set or --file",
+            action_name
+        )));
     }
 
     // Keep latest assignment when the same key appears multiple times.
@@ -541,7 +625,7 @@ fn handle_configure_patch(
 
     let current_profile = config
         .profiles
-        .get(&cli.profile)
+        .get(&target_profile)
         .cloned()
         .unwrap_or_default();
     let mut staged_profile = current_profile.clone();
@@ -584,19 +668,22 @@ fn handle_configure_patch(
     let changed = changed_keys > 0;
 
     if !dry_run {
-        config.profiles.insert(cli.profile.clone(), staged_profile);
-        config.active_profile = cli.profile.clone();
+        config
+            .profiles
+            .insert(target_profile.clone(), staged_profile);
         manager.save(config)?;
     }
 
     if cli.json {
         print_json(&json!({
             "ok": true,
-            "action": "patch",
+            "action": action_name,
             "changed": changed,
             "dry_run": dry_run,
             "saved": !dry_run,
             "profile": cli.profile,
+            "target_profile": target_profile,
+            "target_profile_exists": target_profile_exists,
             "updated": updates.len(),
             "changed_keys": changed_keys,
             "groups": group_summaries,
@@ -606,7 +693,8 @@ fn handle_configure_patch(
         }));
     } else {
         println!("profile: {}", cli.profile);
-        println!("action: patch");
+        println!("target_profile: {}", target_profile);
+        println!("action: {action_name}");
         println!("dry_run: {dry_run}");
         println!("saved: {}", !dry_run);
         println!("updated: {}", updates.len());
@@ -631,6 +719,95 @@ fn handle_configure_patch(
         }
     }
     Ok(())
+}
+
+fn handle_configure_template(
+    cli: &Cli,
+    manager: &ConfigManager,
+    config: &ConfigFile,
+    args: ConfigureTemplateArgs,
+) -> Result<()> {
+    let ConfigureTemplateArgs {
+        format,
+        defaults,
+        target_profile,
+    } = args;
+    let format = ConfigureTemplateFormat::from(format);
+    let target_profile = target_profile.unwrap_or_else(|| cli.profile.clone());
+    let target_profile_exists = config.profiles.contains_key(&target_profile);
+    let template_profile = if defaults {
+        ProfileConfig::default()
+    } else {
+        config
+            .profiles
+            .get(&target_profile)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let template_json = build_configure_patch_template_value(&template_profile);
+    let template = render_configure_patch_template(&template_json, format)?;
+
+    if cli.json {
+        print_json(&json!({
+            "ok": true,
+            "action": "template",
+            "profile": cli.profile,
+            "target_profile": target_profile,
+            "target_profile_exists": target_profile_exists,
+            "defaults": defaults,
+            "format": format.as_str(),
+            "template": template,
+            "template_json": template_json,
+            "config_path": manager.path().display().to_string(),
+        }));
+    } else {
+        println!("profile: {}", cli.profile);
+        println!("target_profile: {}", target_profile);
+        println!("format: {}", format.as_str());
+        println!("defaults: {defaults}");
+        println!();
+        print!("{template}");
+        if !template.ends_with('\n') {
+            println!();
+        }
+    }
+    Ok(())
+}
+
+fn build_configure_patch_template_value(profile: &ProfileConfig) -> Value {
+    json!({
+        "provider": {
+            "base_url": profile.provider.base_url,
+            "model": profile.provider.model,
+            "api_key_env": profile.provider.api_key_env,
+        },
+        "agent": {
+            "temperature": profile.agent.temperature,
+            "max_turns": profile.agent.max_turns,
+        },
+        "tools": {
+            "enabled": profile.tools.enabled,
+            "run": {
+                "guard_mode": guard_mode_name(&profile.tools.run.guard_mode),
+            },
+        },
+    })
+}
+
+fn render_configure_patch_template(
+    template_json: &Value,
+    format: ConfigureTemplateFormat,
+) -> Result<String> {
+    match format {
+        ConfigureTemplateFormat::Json => {
+            serde_json::to_string_pretty(template_json).map_err(|err| {
+                MosaicError::Validation(format!("failed to render JSON template: {err}"))
+            })
+        }
+        ConfigureTemplateFormat::Toml => toml::to_string_pretty(template_json).map_err(|err| {
+            MosaicError::Validation(format!("failed to render TOML template: {err}"))
+        }),
+    }
 }
 
 #[derive(Debug, Clone)]

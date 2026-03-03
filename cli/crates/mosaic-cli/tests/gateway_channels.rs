@@ -1058,6 +1058,35 @@ fn gateway_probe_discover_call_flow() {
     assert_eq!(call_json["ok"], true);
     assert_eq!(call_json["data"]["service"], "mosaic-gateway");
 
+    let health_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "health",
+            "--verbose",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let health_json: Value = serde_json::from_slice(&health_output).expect("health json");
+    assert_eq!(health_json["ok"], true);
+    let checks = health_json["checks"].as_array().expect("checks array");
+    let find_check = |name: &str| {
+        checks
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("missing check: {name}"))
+    };
+    assert_eq!(find_check("gateway_discover")["status"], "ok");
+    assert_eq!(find_check("gateway_protocol_methods")["status"], "ok");
+    assert_eq!(find_check("gateway_call_status")["status"], "ok");
+
     Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())

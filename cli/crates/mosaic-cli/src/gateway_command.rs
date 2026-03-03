@@ -206,6 +206,141 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     },
                 ),
             ];
+            if gateway_test_mode() {
+                let running = status.state.as_ref().is_some_and(|value| value.running);
+                checks.push(run_check(
+                    "gateway_discover",
+                    running,
+                    if running {
+                        "test mode discover surface available"
+                    } else {
+                        "test mode runtime not running"
+                    },
+                ));
+                checks.push(run_check(
+                    "gateway_protocol_methods",
+                    running,
+                    if running {
+                        "required methods available: health,status"
+                    } else {
+                        "required methods unknown (runtime not running)"
+                    },
+                ));
+                checks.push(run_check(
+                    "gateway_call_status",
+                    running,
+                    if running {
+                        "test mode status method callable"
+                    } else {
+                        "status method check skipped (runtime not running)"
+                    },
+                ));
+            } else if status.endpoint_healthy {
+                match HttpGatewayClient::new(&status.target_host, status.target_port) {
+                    Ok(client) => {
+                        let discovery_result = client.discover().await;
+                        match discovery_result {
+                            Ok(discovery) => {
+                                let method_count = discovery.methods.len();
+                                let missing_required = ["health", "status"]
+                                    .iter()
+                                    .filter(|required| {
+                                        !discovery.methods.iter().any(|value| value == **required)
+                                    })
+                                    .copied()
+                                    .collect::<Vec<_>>();
+                                checks.push(run_check(
+                                    "gateway_discover",
+                                    true,
+                                    format!("discover endpoint reachable ({method_count} methods)"),
+                                ));
+                                checks.push(run_check(
+                                    "gateway_protocol_methods",
+                                    missing_required.is_empty(),
+                                    if missing_required.is_empty() {
+                                        "required methods available: health,status".to_string()
+                                    } else {
+                                        format!(
+                                            "missing required methods: {}",
+                                            missing_required.join(",")
+                                        )
+                                    },
+                                ));
+                            }
+                            Err(err) => {
+                                checks.push(run_check(
+                                    "gateway_discover",
+                                    false,
+                                    format!("discover check failed: {err}"),
+                                ));
+                                checks.push(run_check(
+                                    "gateway_protocol_methods",
+                                    false,
+                                    "required methods unknown (discover failed)",
+                                ));
+                            }
+                        }
+
+                        match client.call(GatewayRequest::new("status", None)).await {
+                            Ok(response) => {
+                                let has_data = response
+                                    .result
+                                    .as_ref()
+                                    .is_some_and(|value| !value.is_null());
+                                checks.push(run_check(
+                                    "gateway_call_status",
+                                    true,
+                                    if has_data {
+                                        "status method callable"
+                                    } else {
+                                        "status method callable (empty payload)"
+                                    },
+                                ));
+                            }
+                            Err(err) => {
+                                checks.push(run_check(
+                                    "gateway_call_status",
+                                    false,
+                                    format!("status call failed: {err}"),
+                                ));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        checks.push(run_check(
+                            "gateway_discover",
+                            false,
+                            format!("gateway client init failed: {err}"),
+                        ));
+                        checks.push(run_check(
+                            "gateway_protocol_methods",
+                            false,
+                            "required methods unknown (gateway client init failed)",
+                        ));
+                        checks.push(run_check(
+                            "gateway_call_status",
+                            false,
+                            "status method check skipped (gateway client init failed)",
+                        ));
+                    }
+                }
+            } else {
+                checks.push(run_check(
+                    "gateway_discover",
+                    false,
+                    "discover check skipped (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_protocol_methods",
+                    false,
+                    "required methods unknown (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_call_status",
+                    false,
+                    "status method check skipped (endpoint unreachable)",
+                ));
+            }
             if let Some(state) = status.state {
                 checks.push(run_check(
                     "gateway_target",

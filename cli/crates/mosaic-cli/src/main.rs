@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::sync::atomic::AtomicU64;
 
 use serde_json::json;
@@ -26,6 +28,7 @@ mod feature_commands;
 mod gateway_command;
 mod gateway_runtime;
 mod maintenance_commands;
+mod mcp_command;
 mod nodes_command;
 mod ops_command;
 mod runtime_context;
@@ -33,6 +36,7 @@ mod security_command;
 mod state_records;
 #[cfg(test)]
 mod tests;
+mod tts_voicecall_command;
 mod utils;
 
 use agents_command::handle_agents;
@@ -60,6 +64,7 @@ use gateway_runtime::{
     start_gateway_runtime, stop_gateway_runtime, upsert_gateway_service,
 };
 use maintenance_commands::{handle_reset, handle_uninstall, handle_update};
+use mcp_command::handle_mcp;
 use nodes_command::handle_nodes;
 use ops_command::{
     handle_approvals, handle_logs, handle_observability, handle_safety, handle_sandbox,
@@ -81,6 +86,7 @@ use state_records::{
     save_pairing_requests, save_webhooks, webhook_events_dir, webhook_events_file_path,
     webhooks_file_path,
 };
+use tts_voicecall_command::{handle_tts, handle_voicecall};
 use utils::{
     binary_in_path, load_json_file_opt, normalize_non_empty_list, parse_json_input, preview_text,
     print_json, remove_matching, resolve_baseline_path, resolve_output_path, save_json_file,
@@ -132,6 +138,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Chat(args) => handle_chat(&cli, args).await,
         Commands::Session(args) => handle_session(&cli, args).await,
         Commands::Gateway(args) => handle_gateway(&cli, args).await,
+        Commands::Mcp(args) => handle_mcp(&cli, args),
         Commands::Channels(args) => handle_channels(&cli, args).await,
         Commands::Nodes(args) => handle_nodes(&cli, args).await,
         Commands::Devices(args) => handle_devices(&cli, args),
@@ -139,6 +146,8 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Hooks(args) => handle_hooks(&cli, args),
         Commands::Cron(args) => handle_cron(&cli, args),
         Commands::Webhooks(args) => handle_webhooks(&cli, args),
+        Commands::Tts(args) => handle_tts(&cli, args),
+        Commands::Voicecall(args) => handle_voicecall(&cli, args),
         Commands::Browser(args) => handle_browser(&cli, args).await,
         Commands::Logs(args) => handle_logs(&cli, args).await,
         Commands::Observability(args) => handle_observability(&cli, args).await,

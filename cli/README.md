@@ -7,11 +7,13 @@ This workspace ships a pure CLI with no frontend dependency.
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `dashboard`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway install|start|restart|status|health|probe|discover|call|stop|uninstall`)
+- MCP runtime (`mcp list|add|check|enable|disable|remove`)
 - Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
 - Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve|reject`)
 - Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
 - Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
 - Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
+- Realtime compatibility runtime (`tts voices|speak`, `voicecall start|status|send|history|stop`)
 - Browser runtime (`browser start|stop|status|open|navigate|history|tabs|show|focus|snapshot|screenshot|close|clear`)
 - Ops runtime (`logs`, `observability`, `system`, `approvals`, `sandbox`, `safety`)
 - CLI compatibility/runtime helpers (`completion shell|install`, `directory`)
@@ -44,6 +46,7 @@ cli/
     mosaic-core
     mosaic-agent
     mosaic-agents
+    mosaic-mcp
     mosaic-channels
     mosaic-gateway
     mosaic-ops
@@ -158,9 +161,13 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state configure unset tools.en
 cargo run -p mosaic-cli --bin mosaic -- --project-state configure patch --set provider.model=gpt-4.1-mini --dry-run
 cargo run -p mosaic-cli --bin mosaic -- --project-state configure patch --set provider.model=gpt-4.1-mini --set agent.max_turns=12
 cargo run -p mosaic-cli --bin mosaic -- --project-state configure patch --file config-patch.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure preview --target-profile migration --set provider.model=gpt-4.1-mini
+cargo run -p mosaic-cli --bin mosaic -- --project-state configure patch --target-profile migration --set provider.model=gpt-4.1-mini
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json configure template --target-profile migration --format json
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json configure template --target-profile migration --format toml --defaults
 ```
 
-`configure patch --json` includes both per-key `updates` and grouped `groups` summaries (`provider/agent/tools`) for easier large-patch review.
+`configure patch/preview --json` includes per-key `updates`, grouped `groups` summaries (`provider/agent/tools`), and `target_profile` metadata for profile-aware migration previews.
 
 ### List Models
 
@@ -243,6 +250,29 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state gateway discover
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway call status
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway stop
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway uninstall
+```
+
+### TTS / Voicecall Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json tts voices
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json tts speak --text "hello" --voice alloy --format wav --out .mosaic/tts/hello.wav
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall start --target ops-room
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall send --text "deployment started"
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall history --tail 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall stop
+```
+
+### MCP Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp list
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp add --name local-mcp --command /usr/bin/env --arg bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check <server-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp disable <server-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp enable <server-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp remove <server-id>
 ```
 
 ### Nodes/Devices/Pairing Runtime

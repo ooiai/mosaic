@@ -25,6 +25,7 @@ fn root_help_includes_expected_commands() {
         "chat",
         "session",
         "gateway",
+        "mcp",
         "channels",
         "nodes",
         "devices",
@@ -32,6 +33,8 @@ fn root_help_includes_expected_commands() {
         "hooks",
         "cron",
         "webhooks",
+        "tts",
+        "voicecall",
         "browser",
         "logs",
         "observability",
@@ -135,6 +138,20 @@ fn gateway_help_includes_lifecycle_commands() {
 
 #[test]
 #[allow(deprecated)]
+fn mcp_help_includes_management_commands() {
+    let help = run_help(&["mcp", "--help"]);
+    let expected = ["list", "add", "check", "enable", "disable", "remove"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "mcp --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
 fn models_help_includes_resolution_commands() {
     let help = run_help(&["models", "--help"]);
     let expected = ["list", "status", "resolve", "set", "aliases", "fallbacks"];
@@ -157,7 +174,7 @@ fn models_help_includes_resolution_commands() {
 
 #[test]
 #[allow(deprecated)]
-fn configure_help_includes_keys_get_set_unset_patch_commands() {
+fn configure_help_includes_keys_get_set_unset_patch_preview_template_commands() {
     let help = run_help(&["configure", "--help"]);
     for token in [
         "--show",
@@ -167,6 +184,8 @@ fn configure_help_includes_keys_get_set_unset_patch_commands() {
         "set",
         "unset",
         "patch",
+        "preview",
+        "template",
     ] {
         assert!(
             help.contains(token),
@@ -175,10 +194,26 @@ fn configure_help_includes_keys_get_set_unset_patch_commands() {
     }
 
     let patch_help = run_help(&["configure", "patch", "--help"]);
-    for option in ["--set", "--file", "--dry-run"] {
+    for option in ["--set", "--file", "--target-profile", "--dry-run"] {
         assert!(
             patch_help.contains(option),
             "configure patch --help missing expected option: {option}\n{patch_help}"
+        );
+    }
+
+    let preview_help = run_help(&["configure", "preview", "--help"]);
+    for option in ["--set", "--file", "--target-profile"] {
+        assert!(
+            preview_help.contains(option),
+            "configure preview --help missing expected option: {option}\n{preview_help}"
+        );
+    }
+
+    let template_help = run_help(&["configure", "template", "--help"]);
+    for option in ["--format", "--defaults", "--target-profile"] {
+        assert!(
+            template_help.contains(option),
+            "configure template --help missing expected option: {option}\n{template_help}"
         );
     }
 }
@@ -249,6 +284,34 @@ fn webhooks_help_includes_lifecycle_commands() {
         assert!(
             help.contains(name),
             "webhooks --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn tts_help_includes_voices_and_speak_commands() {
+    let help = run_help(&["tts", "--help"]);
+    let expected = ["voices", "speak"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "tts --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn voicecall_help_includes_start_status_send_history_stop_commands() {
+    let help = run_help(&["voicecall", "--help"]);
+    let expected = ["start", "status", "send", "history", "stop"];
+
+    for name in expected {
+        assert!(
+            help.contains(name),
+            "voicecall --help missing expected subcommand: {name}\n{help}"
         );
     }
 }

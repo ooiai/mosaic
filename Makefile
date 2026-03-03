@@ -84,3 +84,19 @@ cli-json-contract:
 cli-regression:
 	@echo "===> Rust CLI full regression."
 	cd cli && ./scripts/run_regression_suite.sh
+
+# Rust CLI beta readiness gate.
+# Usage: make cli-beta-check
+cli-beta-check:
+	@echo "===> Rust CLI beta readiness gate."
+	cd cli && ./scripts/beta_release_check.sh
+
+# Rust CLI beta package.
+# Usage: make cli-beta-package v=v0.2.0-beta.1
+cli-beta-package:
+	@if [ -z "$(v)" ]; then \
+		echo "error: missing version. usage: make cli-beta-package v=v0.2.0-beta.1"; \
+		exit 1; \
+	fi
+	@echo "===> Rust CLI beta package ($(v))."
+	cd cli && ./scripts/package_beta.sh --version "$(v)"

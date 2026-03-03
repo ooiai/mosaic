@@ -182,6 +182,8 @@ pnpm build
 - `make cli-json-contract` - 运行 Rust CLI JSON 契约门禁（`error_codes + json_contract + json_contract_modules + help_snapshot`）
 - `make cli-test` - 运行 Rust CLI 工作区测试（`cli/`）
 - `make cli-regression` - 运行 Rust CLI 全量回归（`cli/scripts/run_regression_suite.sh`）
+- `make cli-beta-check` - 运行 Rust CLI 封测发布门禁（`cli/scripts/beta_release_check.sh`）
+- `make cli-beta-package v=v0.2.0-beta.1` - 打包封测版本二进制产物
 
 ### 桌面应用 (`apps/desktop`)
 
