@@ -140,13 +140,13 @@ cd cli
 cd cli
 
 # package one target (after building that target)
-./scripts/package_release_asset.sh --version v0.2.0-beta.3 --target aarch64-apple-darwin
+./scripts/package_release_asset.sh --version v0.2.0-beta.4 --target aarch64-apple-darwin
 
 # generate Homebrew/Scoop manifests from collected assets
 ./scripts/update_distribution_manifests.sh \
-  --version v0.2.0-beta.3 \
-  --assets-dir ./dist/v0.2.0-beta.3 \
-  --output-dir ./dist/v0.2.0-beta.3
+  --version v0.2.0-beta.4 \
+  --assets-dir ./dist/v0.2.0-beta.4 \
+  --output-dir ./dist/v0.2.0-beta.4
 ```
 
 GitHub release automation:

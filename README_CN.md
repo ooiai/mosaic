@@ -190,8 +190,8 @@ pnpm build
 - `make cli-regression` - 运行 Rust CLI 全量回归（`cli/scripts/run_regression_suite.sh`）
 - `make cli-beta-check` - 运行 Rust CLI 封测发布门禁（`cli/scripts/beta_release_check.sh`）
 - `make cli-beta-package v=v0.2.0-beta.1` - 打包封测版本二进制产物
-- `make cli-release-assets v=v0.2.0-beta.3 t=aarch64-apple-darwin` - 为指定目标打包发布产物
-- `make cli-release-manifests v=v0.2.0-beta.3 assets=dist/v0.2.0-beta.3 out=dist/v0.2.0-beta.3` - 生成 Homebrew/Scoop 清单
+- `make cli-release-assets v=v0.2.0-beta.4 t=aarch64-apple-darwin` - 为指定目标打包发布产物
+- `make cli-release-manifests v=v0.2.0-beta.4 assets=dist/v0.2.0-beta.4 out=dist/v0.2.0-beta.4` - 生成 Homebrew/Scoop 清单
 
 ### 桌面应用 (`apps/desktop`)
 
