@@ -495,10 +495,10 @@ ITERATIONS=200 ./scripts/plugin_resource_soak.sh
 ./scripts/worklog_append.sh --summary "Summary of change" --tests "cargo test --workspace"
 
 # package one platform release asset
-./scripts/package_release_asset.sh --version v0.2.0-beta.2 --target aarch64-apple-darwin
+./scripts/package_release_asset.sh --version v0.2.0-beta.3 --target aarch64-apple-darwin
 
 # generate brew/scoop manifests from collected assets
-./scripts/update_distribution_manifests.sh --version v0.2.0-beta.2 --assets-dir ./dist/v0.2.0-beta.2 --output-dir ./dist/v0.2.0-beta.2
+./scripts/update_distribution_manifests.sh --version v0.2.0-beta.3 --assets-dir ./dist/v0.2.0-beta.3 --output-dir ./dist/v0.2.0-beta.3
 ```
 
 ### Ops Runtime
