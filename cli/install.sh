@@ -2,19 +2,22 @@
 set -euo pipefail
 
 REPO="ooiai/mosaic"
+GIT_URL="https://github.com/${REPO}.git"
 VERSION=""
 INSTALL_DIR="${MOSAIC_INSTALL_DIR:-$HOME/.local/bin}"
+FROM_SOURCE=0
 
 usage() {
   cat <<USAGE
-Install Mosaic CLI from GitHub Releases.
+Install Mosaic CLI.
 
 Usage:
-  $0 [--version <tag>] [--install-dir <path>]
+  $0 [--version <tag>] [--install-dir <path>] [--from-source]
 
 Examples:
   $0
-  $0 --version v0.2.0-beta.2
+  $0 --version v0.2.0-beta.5
+  $0 --from-source
   $0 --install-dir /usr/local/bin
 USAGE
 }
@@ -28,6 +31,10 @@ while [[ $# -gt 0 ]]; do
     --install-dir)
       INSTALL_DIR="${2:-}"
       shift 2
+      ;;
+    --from-source)
+      FROM_SOURCE=1
+      shift 1
       ;;
     -h|--help)
       usage
@@ -48,9 +55,6 @@ require_cmd() {
   fi
 }
 
-require_cmd curl
-require_cmd tar
-
 detect_platform() {
   local os
   local arch
@@ -63,9 +67,7 @@ detect_platform() {
         arm64|aarch64) echo "darwin-arm64" ;;
         x86_64) echo "darwin-x64" ;;
         *)
-          echo "error: unsupported macOS architecture: $arch" >&2
-          exit 1
-          ;;
+          echo "unsupported" ;;
       esac
       ;;
     Linux)
@@ -73,39 +75,79 @@ detect_platform() {
         x86_64) echo "linux-x64" ;;
         aarch64|arm64) echo "linux-arm64" ;;
         *)
-          echo "error: unsupported Linux architecture: $arch" >&2
-          exit 1
-          ;;
+          echo "unsupported" ;;
       esac
       ;;
     *)
-      echo "error: unsupported operating system: $os" >&2
-      exit 1
-      ;;
+      echo "unsupported" ;;
   esac
 }
 
 resolve_latest_version() {
   local api_url="https://api.github.com/repos/${REPO}/releases/latest"
   local response
-  response="$(curl -fsSL "$api_url")"
+  if ! response="$(curl -fsSL "$api_url")"; then
+    return 1
+  fi
   local tag
   tag="$(printf '%s\n' "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-  if [[ -z "$tag" ]]; then
-    echo "error: failed to resolve latest release tag from $api_url" >&2
-    echo "hint: pass --version <tag> explicitly" >&2
-    exit 1
-  fi
+  [[ -n "$tag" ]] || return 1
   echo "$tag"
 }
 
-PLATFORM="$(detect_platform)"
-if [[ -z "$VERSION" ]]; then
-  VERSION="$(resolve_latest_version)"
-fi
+install_from_source() {
+  require_cmd cargo
+  local source_root="$TMP_DIR/cargo-root"
+  mkdir -p "$source_root"
+  local cmd=(cargo install --git "$GIT_URL" --locked --force --root "$source_root")
+  if [[ -n "$VERSION" ]]; then
+    cmd+=(--tag "$VERSION")
+  fi
+  cmd+=(mosaic-cli)
+  echo "Installing mosaic from source"
+  "${cmd[@]}"
+  if [[ ! -x "$source_root/bin/mosaic" ]]; then
+    echo "error: cargo install succeeded but mosaic binary not found" >&2
+    exit 1
+  fi
+  mkdir -p "$INSTALL_DIR"
+  install -m 0755 "$source_root/bin/mosaic" "$INSTALL_DIR/mosaic"
+}
 
-ASSET="mosaic-${VERSION}-${PLATFORM}.tar.gz"
-URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
+install_from_release() {
+  require_cmd curl
+  require_cmd tar
+
+  if [[ -z "$VERSION" ]]; then
+    VERSION="$(resolve_latest_version || true)"
+    if [[ -z "$VERSION" ]]; then
+      return 1
+    fi
+  fi
+
+  local platform
+  platform="$(detect_platform)"
+  case "$platform" in
+    darwin-arm64|darwin-x64|linux-x64) ;;
+    *)
+      return 1 ;;
+  esac
+
+  local asset="mosaic-${VERSION}-${platform}.tar.gz"
+  local url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+  echo "Installing mosaic ${VERSION} (${platform})"
+  echo "Download: $url"
+  if ! curl -fL "$url" -o "$TMP_DIR/$asset"; then
+    return 1
+  fi
+  tar -xzf "$TMP_DIR/$asset" -C "$TMP_DIR"
+  local extracted_dir="$TMP_DIR/mosaic-${VERSION}-${platform}"
+  if [[ ! -x "$extracted_dir/mosaic" ]]; then
+    return 1
+  fi
+  mkdir -p "$INSTALL_DIR"
+  install -m 0755 "$extracted_dir/mosaic" "$INSTALL_DIR/mosaic"
+}
 
 TMP_DIR="$(mktemp -d)"
 cleanup() {
@@ -113,20 +155,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Installing mosaic ${VERSION} (${PLATFORM})"
-echo "Download: $URL"
-
-curl -fL "$URL" -o "$TMP_DIR/$ASSET"
-tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR"
-
-EXTRACTED_DIR="$TMP_DIR/mosaic-${VERSION}-${PLATFORM}"
-if [[ ! -x "$EXTRACTED_DIR/mosaic" ]]; then
-  echo "error: extracted package does not contain executable 'mosaic'" >&2
-  exit 1
+if [[ "$FROM_SOURCE" -eq 1 ]]; then
+  install_from_source
+else
+  if ! install_from_release; then
+    echo "warning: release asset install unavailable; falling back to source build" >&2
+    install_from_source
+  fi
 fi
-
-mkdir -p "$INSTALL_DIR"
-install -m 0755 "$EXTRACTED_DIR/mosaic" "$INSTALL_DIR/mosaic"
 
 echo "Installed: $INSTALL_DIR/mosaic"
 if command -v mosaic >/dev/null 2>&1; then
@@ -135,6 +171,5 @@ else
   echo "Add to PATH if needed:"
   echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
 fi
-
 echo "Verify:"
 echo "  mosaic --help"

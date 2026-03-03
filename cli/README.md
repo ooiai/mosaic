@@ -66,20 +66,22 @@ cargo test --workspace
 
 ### Install Binary (`mosaic`)
 
-From GitHub release assets:
+From source (no release dependency):
 
 ```bash
-# macOS (Homebrew formula from release asset)
-brew install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.rb
+# macOS (Homebrew tap + formula in repo)
+brew tap ooiai/mosaic https://github.com/ooiai/mosaic
+brew install mosaic
 
 # Linux/macOS installer script
-curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh | bash -s -- --from-source
 
 # Windows (PowerShell)
-# irm https://github.com/ooiai/mosaic/releases/latest/download/install.ps1 | iex
+irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -FromSource
 ```
 
-From local source:
+From local workspace source:
 
 ```bash
 cd cli

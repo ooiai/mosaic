@@ -20,38 +20,32 @@ Auxiliary install assets:
 - `install.sh` (Linux/macOS installer)
 - `install.ps1` (Windows installer)
 
-## Install methods
+## Install methods (no release required)
 
 ### macOS (Homebrew)
 
 ```bash
-brew install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.rb
+brew tap ooiai/mosaic https://github.com/ooiai/mosaic
+brew install mosaic
 ```
 
-### Linux / macOS (script)
+### Linux / macOS (script, source build)
 
 ```bash
-curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh | bash -s -- --from-source
 ```
 
 Pin version:
 
 ```bash
-curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash -s -- --version v0.2.0-beta.5
+curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh | bash -s -- --from-source --version v0.2.0-beta.5
 ```
 
-### Windows (Scoop or installer script)
-
-Scoop:
+### Windows (PowerShell script, source build)
 
 ```powershell
-scoop install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.json
-```
-
-Installer script:
-
-```powershell
-irm https://github.com/ooiai/mosaic/releases/latest/download/install.ps1 | iex
+irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -FromSource
 ```
 
 ## Release pipeline
