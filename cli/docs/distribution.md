@@ -37,7 +37,7 @@ curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh |
 Pin version:
 
 ```bash
-curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash -s -- --version v0.2.0-beta.4
+curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash -s -- --version v0.2.0-beta.5
 ```
 
 ### Windows (Scoop or installer script)
@@ -70,14 +70,14 @@ Workflow: `.github/workflows/cli-release.yml`
 Create one platform asset locally after building target binary:
 
 ```bash
-./cli/scripts/package_release_asset.sh --version v0.2.0-beta.4 --target aarch64-apple-darwin
+./cli/scripts/package_release_asset.sh --version v0.2.0-beta.5 --target aarch64-apple-darwin
 ```
 
 Generate manifests/checksums from collected release assets:
 
 ```bash
 ./cli/scripts/update_distribution_manifests.sh \
-  --version v0.2.0-beta.4 \
+  --version v0.2.0-beta.5 \
   --assets-dir ./release-assets \
   --output-dir ./release-assets
 ```

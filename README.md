@@ -189,8 +189,8 @@ This will create platform-specific installers in `apps/desktop/src-tauri/target/
 - `make cli-regression` - Run Rust CLI full regression suite (`cli/scripts/run_regression_suite.sh`)
 - `make cli-beta-check` - Run Rust CLI beta readiness gate (`cli/scripts/beta_release_check.sh`)
 - `make cli-beta-package v=v0.2.0-beta.1` - Build and package internal beta artifact
-- `make cli-release-assets v=v0.2.0-beta.4 t=aarch64-apple-darwin` - Package one release asset for a target
-- `make cli-release-manifests v=v0.2.0-beta.4 assets=dist/v0.2.0-beta.4 out=dist/v0.2.0-beta.4` - Generate Homebrew/Scoop manifests from release assets
+- `make cli-release-assets v=v0.2.0-beta.5 t=aarch64-apple-darwin` - Package one release asset for a target
+- `make cli-release-manifests v=v0.2.0-beta.5 assets=dist/v0.2.0-beta.5 out=dist/v0.2.0-beta.5` - Generate Homebrew/Scoop manifests from release assets
 
 ### Desktop App (`apps/desktop`)
 

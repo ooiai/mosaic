@@ -102,20 +102,20 @@ cli-beta-package:
 	cd cli && ./scripts/package_beta.sh --version "$(v)"
 
 # Rust CLI release asset package (single target).
-# Usage: make cli-release-assets v=v0.2.0-beta.4 t=aarch64-apple-darwin
+# Usage: make cli-release-assets v=v0.2.0-beta.5 t=aarch64-apple-darwin
 cli-release-assets:
 	@if [ -z "$(v)" ] || [ -z "$(t)" ]; then \
-		echo "error: missing args. usage: make cli-release-assets v=v0.2.0-beta.4 t=aarch64-apple-darwin"; \
+		echo "error: missing args. usage: make cli-release-assets v=v0.2.0-beta.5 t=aarch64-apple-darwin"; \
 		exit 1; \
 	fi
 	@echo "===> Rust CLI release asset ($(v), $(t))."
 	cd cli && ./scripts/package_release_asset.sh --version "$(v)" --target "$(t)"
 
 # Generate Homebrew/Scoop manifests from release assets.
-# Usage: make cli-release-manifests v=v0.2.0-beta.4 assets=dist/v0.2.0-beta.4 out=dist/v0.2.0-beta.4
+# Usage: make cli-release-manifests v=v0.2.0-beta.5 assets=dist/v0.2.0-beta.5 out=dist/v0.2.0-beta.5
 cli-release-manifests:
 	@if [ -z "$(v)" ] || [ -z "$(assets)" ]; then \
-		echo "error: missing args. usage: make cli-release-manifests v=v0.2.0-beta.4 assets=dist/v0.2.0-beta.4 [out=dist/v0.2.0-beta.4]"; \
+		echo "error: missing args. usage: make cli-release-manifests v=v0.2.0-beta.5 assets=dist/v0.2.0-beta.5 [out=dist/v0.2.0-beta.5]"; \
 		exit 1; \
 	fi
 	@echo "===> Rust CLI release manifests ($(v))."
