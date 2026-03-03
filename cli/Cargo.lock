@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-agent"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -861,7 +861,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-agents"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-channels"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-cli"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "assert_cmd",
  "async-trait",
@@ -923,7 +923,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-core"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-gateway"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "async-trait",
  "mosaic-core",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-mcp"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-memory"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -975,7 +975,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-ops"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -987,7 +987,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-plugins"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "dirs",
  "mosaic-core",
@@ -999,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-provider-openai"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "async-trait",
  "mosaic-core",
@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-security"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "chrono",
  "mosaic-core",
@@ -1026,7 +1026,7 @@ dependencies = [
 
 [[package]]
 name = "mosaic-tools"
-version = "0.2.0-beta.2"
+version = "0.2.0-beta.3"
 dependencies = [
  "mosaic-core",
  "mosaic-ops",
