@@ -25,6 +25,7 @@ This file tracks Mosaic CLI command/module coverage and pending gaps.
 | Diagnostics | `dashboard` (operational snapshot), `status`, `health`, `doctor`, `directory` (`--ensure`, `--check-writable`), `completion shell/install` | Partial |
 | Maintenance | `update` (semantic compare), `reset`, top-level `uninstall` | Partial |
 | Discovery | `docs [topic]`, `dns resolve <host> [--port]` | Partial |
+| Distribution | Cross-platform release workflow (`.github/workflows/cli-release.yml`), install scripts (`install.sh`/`install.ps1`), generated Homebrew/Scoop manifests (`mosaic.rb`/`mosaic.json`) | Partial |
 | UX shim | `tui` (routes to existing chat runtime) | Partial |
 | QR | `qr encode`, `qr pairing` with payload/ascii/png render | Partial |
 | Clawbot | `clawbot ask` (supports `--prompt-file` and `--script`, including stdin source `-`), `clawbot chat` (supports `--prompt-file` and `--script`), `clawbot send` (supports `--text-file`, including stdin source `-`), `clawbot status` | Partial |

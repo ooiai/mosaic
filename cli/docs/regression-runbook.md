@@ -133,3 +133,27 @@ cd cli
 ./scripts/beta_release_check.sh
 ./scripts/package_beta.sh --version v0.2.0-beta.1
 ```
+
+## 10) Cross-platform Release Packaging
+
+```bash
+cd cli
+
+# package one target (after building that target)
+./scripts/package_release_asset.sh --version v0.2.0-beta.2 --target aarch64-apple-darwin
+
+# generate Homebrew/Scoop manifests from collected assets
+./scripts/update_distribution_manifests.sh \
+  --version v0.2.0-beta.2 \
+  --assets-dir ./dist/v0.2.0-beta.2 \
+  --output-dir ./dist/v0.2.0-beta.2
+```
+
+GitHub release automation:
+
+- workflow: `../.github/workflows/cli-release.yml`
+- release assets include:
+  - platform archives (`darwin/linux/windows`)
+  - checksums (`*.sha256`, `SHA256SUMS`)
+  - installers (`install.sh`, `install.ps1`)
+  - package manifests (`mosaic.rb`, `mosaic.json`)

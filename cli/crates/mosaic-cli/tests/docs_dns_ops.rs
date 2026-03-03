@@ -19,6 +19,7 @@ fn docs_lists_topics_in_json() {
     assert!(topics.iter().any(|item| item["topic"] == "gateway"));
     assert!(topics.iter().any(|item| item["topic"] == "mcp"));
     assert!(topics.iter().any(|item| item["topic"] == "beta"));
+    assert!(topics.iter().any(|item| item["topic"] == "distribution"));
     assert!(topics.iter().any(|item| item["topic"] == "observability"));
 }
 

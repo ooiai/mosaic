@@ -66,3 +66,20 @@ A module is treated as 100% for beta when all are true:
 5. No failing items in beta readiness report.
 
 Anything outside beta scope is tracked as post-beta backlog and does not block release.
+
+## 6) Cross-platform Distribution
+
+For installable delivery (macOS/Linux/Windows), use:
+
+- workflow: `.github/workflows/cli-release.yml`
+- packaging script: `cli/scripts/package_release_asset.sh`
+- manifest generator: `cli/scripts/update_distribution_manifests.sh`
+- installers: `cli/install.sh`, `cli/install.ps1`
+
+Release assets include:
+
+- `mosaic-<tag>-darwin-arm64.tar.gz`
+- `mosaic-<tag>-darwin-x64.tar.gz`
+- `mosaic-<tag>-linux-x64.tar.gz`
+- `mosaic-<tag>-windows-x64.zip`
+- `mosaic.rb` (Homebrew), `mosaic.json` (Scoop), `SHA256SUMS`

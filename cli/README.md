@@ -66,6 +66,21 @@ cargo test --workspace
 
 ### Install Binary (`mosaic`)
 
+From GitHub release assets:
+
+```bash
+# macOS (Homebrew formula from release asset)
+brew install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.rb
+
+# Linux/macOS installer script
+curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash
+
+# Windows (PowerShell)
+# irm https://github.com/ooiai/mosaic/releases/latest/download/install.ps1 | iex
+```
+
+From local source:
+
 ```bash
 cd cli
 cargo install --path crates/mosaic-cli --force
@@ -453,6 +468,7 @@ Security audit guide: `docs/security-audit.md`
 Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
 Azure OpenAI provider guide: `docs/provider-azure-openai.md`
+Distribution guide (brew/linux/windows): `docs/distribution.md`
 Coverage map: `docs/parity-map.md`
 JSON contracts guide: `docs/json-contracts.md`
 Regression catalog (all docs + all test cases): `docs/regression-catalog.md`
@@ -477,6 +493,12 @@ cargo test -p mosaic-cli --test json_contract_modules
 SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 ITERATIONS=200 ./scripts/plugin_resource_soak.sh
 ./scripts/worklog_append.sh --summary "Summary of change" --tests "cargo test --workspace"
+
+# package one platform release asset
+./scripts/package_release_asset.sh --version v0.2.0-beta.2 --target aarch64-apple-darwin
+
+# generate brew/scoop manifests from collected assets
+./scripts/update_distribution_manifests.sh --version v0.2.0-beta.2 --assets-dir ./dist/v0.2.0-beta.2 --output-dir ./dist/v0.2.0-beta.2
 ```
 
 ### Ops Runtime
