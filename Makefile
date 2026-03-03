@@ -100,3 +100,23 @@ cli-beta-package:
 	fi
 	@echo "===> Rust CLI beta package ($(v))."
 	cd cli && ./scripts/package_beta.sh --version "$(v)"
+
+# Rust CLI release asset package (single target).
+# Usage: make cli-release-assets v=v0.2.0-beta.2 t=aarch64-apple-darwin
+cli-release-assets:
+	@if [ -z "$(v)" ] || [ -z "$(t)" ]; then \
+		echo "error: missing args. usage: make cli-release-assets v=v0.2.0-beta.2 t=aarch64-apple-darwin"; \
+		exit 1; \
+	fi
+	@echo "===> Rust CLI release asset ($(v), $(t))."
+	cd cli && ./scripts/package_release_asset.sh --version "$(v)" --target "$(t)"
+
+# Generate Homebrew/Scoop manifests from release assets.
+# Usage: make cli-release-manifests v=v0.2.0-beta.2 assets=dist/v0.2.0-beta.2 out=dist/v0.2.0-beta.2
+cli-release-manifests:
+	@if [ -z "$(v)" ] || [ -z "$(assets)" ]; then \
+		echo "error: missing args. usage: make cli-release-manifests v=v0.2.0-beta.2 assets=dist/v0.2.0-beta.2 [out=dist/v0.2.0-beta.2]"; \
+		exit 1; \
+	fi
+	@echo "===> Rust CLI release manifests ($(v))."
+	cd cli && ./scripts/update_distribution_manifests.sh --version "$(v)" --assets-dir "$(assets)" $(if $(out),--output-dir "$(out)",)

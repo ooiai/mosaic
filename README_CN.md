@@ -52,6 +52,12 @@ cargo test --workspace
 SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 ```
 
+二进制安装：
+
+- macOS (Homebrew): `brew install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.rb`
+- Linux/macOS (脚本): `curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash`
+- Windows (Scoop): `scoop install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.json`
+
 ## 🗺️ 产品路线图
 
 ### 第一期：VIBECODING（当前重点）
@@ -184,6 +190,8 @@ pnpm build
 - `make cli-regression` - 运行 Rust CLI 全量回归（`cli/scripts/run_regression_suite.sh`）
 - `make cli-beta-check` - 运行 Rust CLI 封测发布门禁（`cli/scripts/beta_release_check.sh`）
 - `make cli-beta-package v=v0.2.0-beta.1` - 打包封测版本二进制产物
+- `make cli-release-assets v=v0.2.0-beta.2 t=aarch64-apple-darwin` - 为指定目标打包发布产物
+- `make cli-release-manifests v=v0.2.0-beta.2 assets=dist/v0.2.0-beta.2 out=dist/v0.2.0-beta.2` - 生成 Homebrew/Scoop 清单
 
 ### 桌面应用 (`apps/desktop`)
 

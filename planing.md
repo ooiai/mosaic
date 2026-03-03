@@ -66,6 +66,7 @@ Generated: 2026-02-26
 | `tui` | `tui` shim (reuses `chat` runtime and options) | partial | 70% |
 | `qr` | `qr encode` + `qr pairing` with payload/ascii/png render | partial | 85% |
 | `clawbot` | `clawbot ask/chat/send/status` (routes to existing runtime; supports `--prompt-file`/`--script`/`--text-file`, including stdin source `-`) | partial | 96% |
+| `distribution` | cross-platform release packaging (`linux/mac/windows`) + installers (`install.sh`/`install.ps1`) + Homebrew/Scoop manifest generation | partial | 86% |
 
 ## Totals (Current)
 
@@ -103,6 +104,7 @@ No unresolved missing major module gaps in current CLI matrix.
 | channels | webhook/bot path complete for current kinds | capability negotiation and richer delivery diagnostics |
 | memory | index/search/status/clear | incremental indexing and relevance tuning |
 | security | audit/baseline | deeper rulepacks and report dimensions |
+| distribution | release artifacts + installer scripts + generated manifests | run periodic install verification on clean VMs and publish stable brew tap/scoop bucket |
 
 ## Implementation Queue (Execute In Order)
 
