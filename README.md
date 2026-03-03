@@ -54,9 +54,9 @@ SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 
 Install binaries:
 
-- macOS (Homebrew): `brew install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.rb`
-- Linux/macOS (script): `curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash`
-- Windows (Scoop): `scoop install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.json`
+- macOS (Homebrew tap): `brew tap ooiai/mosaic https://github.com/ooiai/mosaic && brew install mosaic`
+- Linux/macOS (source install script): `curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh | bash -s -- --from-source`
+- Windows (source install script): `irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\\install.ps1 -FromSource`
 
 ## 🗺️ Product Roadmap
 

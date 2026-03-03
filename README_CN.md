@@ -54,9 +54,9 @@ SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
 
 二进制安装：
 
-- macOS (Homebrew): `brew install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.rb`
-- Linux/macOS (脚本): `curl -fsSL https://github.com/ooiai/mosaic/releases/latest/download/install.sh | bash`
-- Windows (Scoop): `scoop install https://github.com/ooiai/mosaic/releases/latest/download/mosaic.json`
+- macOS (Homebrew tap): `brew tap ooiai/mosaic https://github.com/ooiai/mosaic && brew install mosaic`
+- Linux/macOS (源码安装脚本): `curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh | bash -s -- --from-source`
+- Windows (源码安装脚本): `irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\\install.ps1 -FromSource`
 
 ## 🗺️ 产品路线图
 
