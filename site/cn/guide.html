@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 教程</title>
+    <meta name="description" content="Mosaic CLI 使用教程。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-c"></div>
+
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html">首页</a>
+        <a href="guide.html" class="active">教程</a>
+        <a href="install.html">安装</a>
+        <a href="configure.html">配置</a>
+        <a href="troubleshooting.html">排障</a>
+        <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+      <a class="lang-chip" href="../guide.html">EN</a>
+    </header>
+
+    <main class="wrap guide">
+      <p class="eyebrow">使用路径</p>
+      <h1>从 0 到稳定日常使用</h1>
+      <div class="topic-grid">
+        <article class="topic-card">
+          <h2>第 1 步：安装</h2>
+          <p>按平台安装并确认 `mosaic --help` 可执行。</p>
+          <a class="btn btn-primary" href="install.html">进入安装页</a>
+        </article>
+        <article class="topic-card">
+          <h2>第 2 步：配置</h2>
+          <p>设置 provider 地址、密钥环境变量和模型 profile。</p>
+          <a class="btn btn-primary" href="configure.html">进入配置页</a>
+        </article>
+        <article class="topic-card">
+          <h2>第 3 步：排障</h2>
+          <p>用内置诊断命令快速定位网络、模型、权限和路径问题。</p>
+          <a class="btn btn-primary" href="troubleshooting.html">进入排障页</a>
+        </article>
+      </div>
+    </main>
+
+    <footer class="wrap footer">
+      <a href="https://github.com/ooiai/mosaic/blob/main/cli/README.md" target="_blank" rel="noreferrer">CLI 完整文档</a>
+    </footer>
+  </body>
+</html>

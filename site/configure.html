@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Configure</title>
+    <meta name="description" content="Configure Mosaic CLI with OpenAI-compatible providers." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-c"></div>
+
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="install.html">Install</a>
+        <a href="configure.html" class="active">Configure</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+      </nav>
+      <a class="lang-chip" href="cn/configure.html">中文</a>
+    </header>
+
+    <main class="wrap guide">
+      <p class="eyebrow">Configure</p>
+      <h1>Set profile and provider in project state</h1>
+
+      <section class="guide-card">
+        <h2>OpenAI-compatible (default)</h2>
+        <pre><code>export OPENAI_API_KEY=your_key
+mosaic --project-state --profile default setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile default models list</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>Azure OpenAI example</h2>
+        <pre><code>export AZURE_OPENAI_BASE_URL="https://<resource>.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="<your-key>"
+
+mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile az-openai models list</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>First run</h2>
+        <pre><code>mosaic --project-state --profile az-openai ask "hello"
+mosaic --project-state --profile az-openai chat</code></pre>
+      </section>
+    </main>
+
+    <footer class="wrap footer">
+      <a href="guide.html">Back to Guide</a>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Troubleshooting</title>
+    <meta name="description" content="Troubleshoot Mosaic CLI setup, network, and provider errors." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-b"></div>
+
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="guide.html">Guide</a>
+        <a href="install.html">Install</a>
+        <a href="configure.html">Configure</a>
+        <a href="troubleshooting.html" class="active">Troubleshooting</a>
+      </nav>
+      <a class="lang-chip" href="cn/troubleshooting.html">中文</a>
+    </header>
+
+    <main class="wrap guide">
+      <p class="eyebrow">Troubleshooting</p>
+      <h1>Fast diagnosis commands</h1>
+
+      <section class="guide-card">
+        <h2>Essential checks</h2>
+        <pre><code>mosaic --project-state status
+mosaic --project-state health
+mosaic --project-state doctor</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>404 or model list failed</h2>
+        <pre><code># check configured URL and key env name
+mosaic --project-state configure --show
+
+# Azure base URL should be:
+# https://<resource>.openai.azure.com/openai/v1
+# avoid duplicated /v1 in URL value</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>Command not found: mosaic</h2>
+        <pre><code># zsh
+export PATH="$HOME/.cargo/bin:$PATH"
+source ~/.zshrc
+
+# verify
+which mosaic
+mosaic --version</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>Channel/gateway operations</h2>
+        <pre><code>mosaic --project-state channels list
+mosaic --project-state channels logs --channel all --tail 50
+mosaic --project-state gateway probe
+mosaic --project-state logs --tail 80</code></pre>
+      </section>
+    </main>
+
+    <footer class="wrap footer">
+      <a href="guide.html">Back to Guide</a>
+    </footer>
+  </body>
+</html>

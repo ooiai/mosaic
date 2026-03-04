@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 安装</title>
+    <meta name="description" content="在 macOS、Linux、Windows 安装 Mosaic CLI。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-a"></div>
+
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html">首页</a>
+        <a href="guide.html">教程</a>
+        <a href="install.html" class="active">安装</a>
+        <a href="configure.html">配置</a>
+        <a href="troubleshooting.html">排障</a>
+      </nav>
+      <a class="lang-chip" href="../install.html">EN</a>
+    </header>
+
+    <main class="wrap guide">
+      <p class="eyebrow">安装</p>
+      <h1>在 macOS / Linux / Windows 安装 Mosaic CLI</h1>
+
+      <section class="guide-card">
+        <h2>macOS (Homebrew)</h2>
+        <pre><code>brew tap ooiai/mosaic https://github.com/ooiai/mosaic
+brew install mosaic
+mosaic --help</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>Linux / macOS（源码安装脚本）</h2>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
+bash -s -- --from-source
+mosaic --help</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>Windows（PowerShell）</h2>
+        <pre><code>irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -FromSource
+mosaic --help</code></pre>
+      </section>
+    </main>
+
+    <footer class="wrap footer">
+      <a href="guide.html">返回教程</a>
+    </footer>
+  </body>
+</html>

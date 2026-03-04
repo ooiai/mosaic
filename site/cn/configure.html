@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 配置</title>
+    <meta name="description" content="配置 Mosaic CLI 的 OpenAI-compatible provider。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-c"></div>
+
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html">首页</a>
+        <a href="guide.html">教程</a>
+        <a href="install.html">安装</a>
+        <a href="configure.html" class="active">配置</a>
+        <a href="troubleshooting.html">排障</a>
+      </nav>
+      <a class="lang-chip" href="../configure.html">EN</a>
+    </header>
+
+    <main class="wrap guide">
+      <p class="eyebrow">配置</p>
+      <h1>在项目状态下设置 provider 与 profile</h1>
+
+      <section class="guide-card">
+        <h2>OpenAI-compatible（默认）</h2>
+        <pre><code>export OPENAI_API_KEY=your_key
+mosaic --project-state --profile default setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile default models list</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>Azure OpenAI 示例</h2>
+        <pre><code>export AZURE_OPENAI_BASE_URL="https://<resource>.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="<your-key>"
+
+mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile az-openai models list</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>首次执行</h2>
+        <pre><code>mosaic --project-state --profile az-openai ask "hello"
+mosaic --project-state --profile az-openai chat</code></pre>
+      </section>
+    </main>
+
+    <footer class="wrap footer">
+      <a href="guide.html">返回教程</a>
+    </footer>
+  </body>
+</html>

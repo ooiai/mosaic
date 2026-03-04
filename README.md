@@ -5,6 +5,7 @@ Rust-first local agent runtime and operations CLI.
 Mosaic is a standalone rewrite focused on a production-usable CLI core: agent loop, tools, channels, gateway ops, policy/sandbox, and diagnostics. Web/Desktop UI is explicitly out of this phase.
 
 - Docs site: https://ooiai.github.io/mosaic/
+- Chinese docs site: https://ooiai.github.io/mosaic/cn/
 - Chinese README: `README_CN.md`
 - Legacy long docs: `README.legacy.md`, `README_CN.legacy.md`
 

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 文档站</title>
+    <meta name="description" content="Mosaic CLI：Rust 本地 Agent 运行时与运维工具。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html" class="active">首页</a>
+        <a href="guide.html">教程</a>
+        <a href="install.html">安装</a>
+        <a href="configure.html">配置</a>
+        <a href="troubleshooting.html">排障</a>
+        <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+      <a class="lang-chip" href="../index.html">EN</a>
+    </header>
+
+    <main class="wrap hero">
+      <p class="eyebrow">Rust 本地 Agent 运行时</p>
+      <h1>一个实用、可落地的 AI CLI 工作台。</h1>
+      <p class="subtitle">
+        Mosaic 重点解决实际运行问题：Agent 回路、工具系统、channels、gateway 运维、策略沙箱与诊断观测。
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="guide.html">2 分钟开始</a>
+        <a class="btn btn-ghost" href="https://github.com/ooiai/mosaic/tree/main/cli" target="_blank" rel="noreferrer">查看 CLI 源码</a>
+      </div>
+    </main>
+
+    <section class="wrap cards">
+      <article class="card">
+        <h2>安装</h2>
+        <p>支持 macOS Homebrew、Linux/macOS 安装脚本、Windows PowerShell。</p>
+        <a class="text-link" href="install.html">查看安装文档</a>
+      </article>
+      <article class="card">
+        <h2>配置</h2>
+        <p>按 profile 管理 OpenAI-compatible 提供方，支持 Azure OpenAI 基础配置。</p>
+        <a class="text-link" href="configure.html">查看配置文档</a>
+      </article>
+      <article class="card">
+        <h2>运维</h2>
+        <p>内置 status/health/doctor 与 logs/gateway/channels 诊断命令。</p>
+        <a class="text-link" href="troubleshooting.html">查看排障文档</a>
+      </article>
+    </section>
+
+    <section class="wrap install">
+      <h2>快速命令</h2>
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
+bash -s -- --from-source
+
+mosaic --project-state setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini</code></pre>
+    </section>
+
+    <footer class="wrap footer">
+      <span>MIT License</span>
+      <span>© Mosaic</span>
+    </footer>
+  </body>
+</html>

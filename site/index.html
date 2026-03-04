@@ -13,57 +13,60 @@
   <body>
     <div class="bg-orb orb-a"></div>
     <div class="bg-orb orb-b"></div>
+
     <header class="wrap nav">
       <div class="brand">Mosaic CLI</div>
       <nav>
         <a href="index.html" class="active">Home</a>
         <a href="guide.html">Guide</a>
+        <a href="install.html">Install</a>
+        <a href="configure.html">Configure</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
       </nav>
+      <a class="lang-chip" href="cn/index.html">中文</a>
     </header>
 
     <main class="wrap hero">
       <p class="eyebrow">Rust-first local agent runtime</p>
-      <h1>Build, operate, and scale local AI workflows from one CLI.</h1>
+      <h1>A practical CLI for local AI workflows.</h1>
       <p class="subtitle">
-        Mosaic focuses on practical command-line capability: agent loop, tools, channels, gateway ops,
-        policy/sandbox, diagnostics, and automation modules.
+        Mosaic focuses on what matters in production: agent loop, tooling, channels, gateway operations,
+        policy/sandbox, and diagnostics.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="guide.html">Start in 2 minutes</a>
-        <a class="btn btn-ghost" href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">View source</a>
+        <a class="btn btn-primary" href="guide.html">Get Started</a>
+        <a class="btn btn-ghost" href="https://github.com/ooiai/mosaic/tree/main/cli" target="_blank" rel="noreferrer">CLI Source</a>
       </div>
     </main>
 
     <section class="wrap cards">
       <article class="card">
-        <h2>Install Anywhere</h2>
-        <p>macOS via Homebrew, Linux/macOS via source installer, Windows via PowerShell installer.</p>
+        <h2>Install</h2>
+        <p>macOS Homebrew tap, Linux/macOS installer, Windows PowerShell installer.</p>
+        <a class="text-link" href="install.html">Open install guide</a>
       </article>
       <article class="card">
-        <h2>Ops Included</h2>
-        <p>Status, health, doctor, logs, system events, gateway probes, and channel diagnostics.</p>
+        <h2>Configure</h2>
+        <p>Project-state setup for OpenAI-compatible providers, including Azure OpenAI endpoints.</p>
+        <a class="text-link" href="configure.html">Open config guide</a>
       </article>
       <article class="card">
-        <h2>Module Ready</h2>
-        <p>Channels, MCP, memory, security, plugins, skills, agents, browser, webhooks, and more.</p>
+        <h2>Operate</h2>
+        <p>Use status, health, doctor, channels logs, and gateway probe for fast incident diagnosis.</p>
+        <a class="text-link" href="troubleshooting.html">Open troubleshooting</a>
       </article>
     </section>
 
     <section class="wrap install">
-      <h2>Quick Install</h2>
-      <div class="grid-2">
-        <div>
-          <h3>macOS</h3>
-          <pre><code>brew tap ooiai/mosaic https://github.com/ooiai/mosaic
-brew install mosaic</code></pre>
-        </div>
-        <div>
-          <h3>Linux/macOS</h3>
-          <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
-bash -s -- --from-source</code></pre>
-        </div>
-      </div>
+      <h2>Quick Command</h2>
+      <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
+bash -s -- --from-source
+
+mosaic --project-state setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini</code></pre>
     </section>
 
     <footer class="wrap footer">
