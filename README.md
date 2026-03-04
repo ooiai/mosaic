@@ -9,12 +9,20 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 - Quickstart tutorial: https://ooiai.github.io/mosaic/quickstart.html
 - Learning path tutorial: https://ooiai.github.io/mosaic/learning-path.html
 - Agents module tutorial: https://ooiai.github.io/mosaic/agents.html
+- Memory module tutorial: https://ooiai.github.io/mosaic/memory.html
+- Plugins module tutorial: https://ooiai.github.io/mosaic/plugins.html
+- Skills module tutorial: https://ooiai.github.io/mosaic/skills.html
+- Gateway module tutorial: https://ooiai.github.io/mosaic/gateway.html
 - Operations tutorial: https://ooiai.github.io/mosaic/operations.html
 - Chinese docs site: https://ooiai.github.io/mosaic/cn/
 - 中文路径导航: https://ooiai.github.io/mosaic/cn/guide.html
 - 中文 10 分钟上手: https://ooiai.github.io/mosaic/cn/quickstart.html
 - 中文分阶段学习: https://ooiai.github.io/mosaic/cn/learning-path.html
 - 中文 Agents 教程: https://ooiai.github.io/mosaic/cn/agents.html
+- 中文 Memory 教程: https://ooiai.github.io/mosaic/cn/memory.html
+- 中文 Plugins 教程: https://ooiai.github.io/mosaic/cn/plugins.html
+- 中文 Skills 教程: https://ooiai.github.io/mosaic/cn/skills.html
+- 中文 Gateway 教程: https://ooiai.github.io/mosaic/cn/gateway.html
 - 中文生产运维教程: https://ooiai.github.io/mosaic/cn/operations.html
 - Chinese README: `README_CN.md`
 - Legacy long docs: `README.legacy.md`, `README_CN.legacy.md`

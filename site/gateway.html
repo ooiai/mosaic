@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | Gateway Module</title>
+    <meta name="description" content="Step-by-step tutorial for Mosaic gateway module and call interface." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>          <a class="active" href="guide.html">Guide</a>          <a href="quickstart.html">Quickstart</a>          <a href="operations.html">Operations</a>          <a href="install.html">Install</a>          <a href="configure.html">Configure</a>          <a href="troubleshooting.html">Troubleshooting</a>          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/gateway.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Modules</p>
+        <a class="side-link" href="learning-path.html">Learning Path</a>
+        <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="memory.html">Memory</a>
+        <a class="side-link" href="plugins.html">Plugins</a>
+        <a class="side-link" href="skills.html">Skills</a>
+        <a class="side-link active" href="gateway.html">Gateway</a>
+        <a class="side-link" href="operations.html">Operations</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Gateway</span></nav>
+          <p class="kicker">Gateway</p>
+          <h1>Gateway Module: Step-by-Step Tutorial</h1>
+          <p class="lead">Control gateway lifecycle and test the method-call interface through CLI commands.</p>
+
+          <h2>Step 1: Install local gateway runtime</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787</code></pre>
+
+          <h2>Step 2: Start gateway process</h2>
+          <pre><code>mosaic --project-state gateway start
+# optional explicit host/port
+mosaic --project-state gateway start --host 127.0.0.1 --port 8787</code></pre>
+
+          <h2>Step 3: Check status and health</h2>
+          <pre><code>mosaic --project-state gateway status
+mosaic --project-state gateway status --deep
+mosaic --project-state gateway health
+mosaic --project-state gateway health --verbose</code></pre>
+
+          <h2>Step 4: Probe and discover</h2>
+          <pre><code>mosaic --project-state gateway probe
+mosaic --project-state gateway discover</code></pre>
+
+          <h2>Step 5: Execute call interface</h2>
+          <pre><code>mosaic --project-state gateway call status
+mosaic --project-state gateway call status --params '{"detail":true}'
+mosaic --project-state --json gateway call status</code></pre>
+          <p><code>call</code> forwards <code>method</code> and optional JSON <code>params</code> to the active gateway service.</p>
+
+          <h2>Step 6: Restart and controlled shutdown</h2>
+          <pre><code>mosaic --project-state gateway restart
+mosaic --project-state gateway stop</code></pre>
+
+          <h2>Step 7: Uninstall when cleaning up</h2>
+          <pre><code>mosaic --project-state gateway uninstall</code></pre>
+
+          <h2>Step 8: Operational checklist</h2>
+          <ul>
+            <li><code>status</code>, <code>health</code>, and <code>probe</code> must all succeed.</li>
+            <li><code>call status</code> must return valid payload for automation.</li>
+            <li>After restart, probe result should remain healthy.</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="operations.html">Operations</a>
+            <a href="learning-path.html">Learning Path</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>
