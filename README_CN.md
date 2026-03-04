@@ -5,7 +5,9 @@
 Mosaic 当前是独立重写路线，重点是“可真实使用的 CLI 核心能力”：Agent 回路、工具系统、channels、gateway 运维、策略沙箱、诊断观测。此阶段不做 Web/Desktop UI。
 
 - 文档站点: https://ooiai.github.io/mosaic/cn/
+- 中文完整教程: https://ooiai.github.io/mosaic/cn/guide.html
 - 英文站点: https://ooiai.github.io/mosaic/
+- Full usage tutorial: https://ooiai.github.io/mosaic/guide.html
 - 英文 README: `README.md`
 - 旧版长文档备份: `README.legacy.md`, `README_CN.legacy.md`
 

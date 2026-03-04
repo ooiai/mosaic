@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mosaic CLI Docs | Guide</title>
-    <meta name="description" content="Mosaic CLI quick guide." />
+    <meta name="description" content="Mosaic CLI end-to-end usage tutorial." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -47,30 +47,170 @@
         <article class="doc">
           <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Guide</span></nav>
           <p class="kicker">Guide</p>
-          <h1>From install to daily usage</h1>
-          <p class="lead">Recommended sequence for first-time users. Complete once, then use troubleshooting as your runbook.</p>
+          <h1>End-to-End Usage Tutorial</h1>
+          <p class="lead">
+            This is the full operator path for Mosaic: install, configure, run, connect channels, operate gateway, and keep daily diagnostics.
+            Every command below is copy-runnable.
+          </p>
 
-          <h2>Step 1: Install</h2>
-          <p>Choose the platform path in Install and verify with <code>mosaic --help</code>.</p>
+          <div class="callout">
+            <strong>Recommended mode:</strong> use <code>--project-state</code> so all state stays inside your repo at <code>.mosaic/</code>.
+          </div>
 
-          <h2>Step 2: Setup project state</h2>
-          <pre><code>mosaic --project-state setup \
+          <h2>1. Install and verify</h2>
+          <pre><code># after installation
+mosaic --version
+mosaic --help
+mosaic --project-state directory --ensure --check-writable</code></pre>
+          <p>If <code>mosaic</code> is not found, add <code>$HOME/.cargo/bin</code> to your shell PATH.</p>
+
+          <h2>2. Initialize one profile</h2>
+          <pre><code>export OPENAI_API_KEY=&lt;your_key&gt;
+
+mosaic --project-state --profile default setup \
   --base-url https://api.openai.com \
   --api-key-env OPENAI_API_KEY \
   --model gpt-4o-mini</code></pre>
 
-          <h2>Step 3: Validate model access</h2>
-          <pre><code>mosaic --project-state models list
-mosaic --project-state health</code></pre>
+          <h2>3. Multi-profile setup (OpenAI + Azure)</h2>
+          <pre><code># OpenAI profile
+mosaic --project-state --profile openai setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini
 
-          <h2>Step 4: Start runtime</h2>
-          <pre><code>mosaic --project-state ask "hello"
-mosaic --project-state chat</code></pre>
+# Azure profile (must end with /openai/v1)
+export AZURE_OPENAI_BASE_URL="https://&lt;resource&gt;.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="&lt;your_key&gt;"
 
-          <h2>Step 5: Keep diagnostics close</h2>
+mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini</code></pre>
+
+          <h2>4. Validate model connectivity</h2>
+          <pre><code>mosaic --project-state --profile az-openai models list
+mosaic --project-state --profile az-openai models status
+mosaic --project-state --profile az-openai models resolve
+mosaic --project-state --profile az-openai health</code></pre>
+
+          <h2>5. Configure model aliases and fallback</h2>
+          <pre><code>mosaic --project-state --profile az-openai models aliases set fast gpt-4o-mini
+mosaic --project-state --profile az-openai models aliases list
+
+mosaic --project-state --profile az-openai models fallbacks add gpt-4.1-mini
+mosaic --project-state --profile az-openai models fallbacks list</code></pre>
+
+          <h2>6. Run ask/chat/session workflow</h2>
+          <pre><code># single turn
+mosaic --project-state --profile az-openai ask "summarize this repo"
+
+# multiline via file
+mosaic --project-state --profile az-openai ask --prompt-file prompts/ask.txt
+
+# interactive REPL
+mosaic --project-state --profile az-openai chat
+# in REPL: /help, /status, /new, /exit</code></pre>
+          <pre><code># session management
+mosaic --project-state session list
+mosaic --project-state session show &lt;session_id&gt;
+mosaic --project-state session resume &lt;session_id&gt;
+mosaic --project-state --yes session clear</code></pre>
+
+          <h2>7. Configure channels (terminal/slack/telegram)</h2>
+          <pre><code># terminal/local output channel
+mosaic --project-state channels add --name local-terminal --kind terminal
+
+# Slack webhook channel
+mosaic --project-state channels add \
+  --name team-slack \
+  --kind slack_webhook \
+  --endpoint https://hooks.slack.com/services/XXX/YYY/ZZZ
+
+# Telegram bot channel
+mosaic --project-state channels add \
+  --name team-telegram \
+  --kind telegram_bot \
+  --chat-id &lt;chat_id&gt; \
+  --token-env MOSAIC_TELEGRAM_BOT_TOKEN</code></pre>
+          <pre><code># test + send + inspect
+mosaic --project-state channels list
+mosaic --project-state channels test &lt;channel_id&gt;
+mosaic --project-state channels send &lt;channel_id&gt; --text "deployment started"
+mosaic --project-state channels status
+mosaic --project-state channels logs --channel &lt;channel_id&gt; --tail 30</code></pre>
+
+          <h2>8. Start and probe gateway</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway status
+mosaic --project-state gateway probe
+mosaic --project-state gateway discover
+mosaic --project-state gateway call status
+
+# stop when needed
+mosaic --project-state gateway stop</code></pre>
+
+          <h2>9. Apply execution policies (approvals + sandbox)</h2>
+          <pre><code>mosaic --project-state approvals get
+mosaic --project-state approvals set confirm
+mosaic --project-state approvals allowlist add "git status"
+
+mosaic --project-state sandbox get
+mosaic --project-state sandbox set standard
+mosaic --project-state sandbox explain --profile elevated</code></pre>
+
+          <h2>10. Day-2 observability and diagnosis</h2>
           <pre><code>mosaic --project-state status
+mosaic --project-state health
 mosaic --project-state doctor
-mosaic --project-state logs --tail 80</code></pre>
+mosaic --project-state dashboard
+
+mosaic --project-state logs --tail 120
+mosaic --project-state logs --follow
+mosaic --project-state system presence
+mosaic --project-state system event deploy.started --data '{"env":"prod"}'</code></pre>
+
+          <h2>11. Optional advanced modules</h2>
+          <pre><code># memory
+mosaic --project-state memory index --path .
+mosaic --project-state memory search "channel retry" --limit 10
+mosaic --project-state memory status
+
+# security
+mosaic --project-state security audit --path . --deep
+
+# agents/plugins/skills
+mosaic --project-state agents list
+mosaic --project-state plugins list
+mosaic --project-state skills list</code></pre>
+
+          <h2>12. JSON automation and maintenance commands</h2>
+          <pre><code># machine-readable output
+mosaic --project-state --json status
+mosaic --project-state --json channels list
+mosaic --project-state --json gateway probe
+
+# maintenance
+mosaic update
+mosaic update --check
+
+# destructive (requires explicit --yes)
+mosaic --project-state --yes reset
+mosaic --project-state --yes uninstall</code></pre>
+
+          <div class="callout warn">
+            <strong>Safety note:</strong> keep <code>approvals=confirm</code> and <code>sandbox=standard</code> in shared environments.
+          </div>
+
+          <h2>13. Regression checklist (quick)</h2>
+          <ul>
+            <li><code>setup</code> succeeds for at least one profile.</li>
+            <li><code>models list</code>, <code>ask</code>, and <code>chat</code> all run successfully.</li>
+            <li><code>channels add/test/send</code> works for your primary channel.</li>
+            <li><code>gateway start/probe/call</code> returns healthy results.</li>
+            <li><code>status/health/doctor/logs</code> outputs are readable and complete.</li>
+          </ul>
 
           <div class="quick-links">
             <a href="install.html">Install</a>

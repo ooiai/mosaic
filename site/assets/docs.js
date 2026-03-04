@@ -5,14 +5,14 @@
   const index = {
     en: [
       { title: "Overview", url: "index.html", desc: "Project scope and first commands", keywords: "overview intro start" },
-      { title: "Usage Guide", url: "guide.html", desc: "Step-by-step path from install to daily usage", keywords: "guide quickstart" },
+      { title: "Usage Guide", url: "guide.html", desc: "Full end-to-end tutorial from setup to operations", keywords: "guide tutorial setup channels gateway ops" },
       { title: "Install", url: "install.html", desc: "Install on macOS Linux Windows", keywords: "brew powershell install.sh" },
       { title: "Configure", url: "configure.html", desc: "Provider model profile setup", keywords: "azure openai base-url api-key-env" },
       { title: "Troubleshooting", url: "troubleshooting.html", desc: "Common failures and diagnosis commands", keywords: "404 path health doctor logs" }
     ],
     zh: [
       { title: "总览", url: "index.html", desc: "项目范围与首批命令", keywords: "总览 入门" },
-      { title: "使用路径", url: "guide.html", desc: "从安装到日常使用", keywords: "教程 上手" },
+      { title: "使用路径", url: "guide.html", desc: "从初始化到运维的完整实战教程", keywords: "教程 上手 全流程 channels gateway 运维" },
       { title: "安装", url: "install.html", desc: "macOS Linux Windows 安装方式", keywords: "brew powershell 安装脚本" },
       { title: "配置", url: "configure.html", desc: "provider model profile 配置", keywords: "azure openai base-url api-key-env" },
       { title: "排障", url: "troubleshooting.html", desc: "常见故障定位与修复", keywords: "404 doctor health logs" }
