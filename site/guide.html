@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Guide</title>
+    <meta name="description" content="Mosaic CLI usage guide." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-c"></div>
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html">Home</a>
+        <a href="guide.html" class="active">Guide</a>
+        <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+    </header>
+
+    <main class="wrap guide">
+      <p class="eyebrow">Usage tutorial</p>
+      <h1>From install to first agent session</h1>
+
+      <section class="guide-card">
+        <h2>1. Install</h2>
+        <pre><code># macOS
+brew tap ooiai/mosaic https://github.com/ooiai/mosaic
+brew install mosaic
+
+# Linux/macOS
+curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
+bash -s -- --from-source</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>2. Configure</h2>
+        <pre><code>export OPENAI_API_KEY=your_key
+mosaic --project-state setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>3. Run</h2>
+        <pre><code>mosaic --project-state models list
+mosaic --project-state ask "summarize this repository"
+mosaic --project-state chat</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>4. Operate</h2>
+        <pre><code>mosaic --project-state status
+mosaic --project-state health
+mosaic --project-state doctor
+mosaic --project-state channels list</code></pre>
+      </section>
+    </main>
+
+    <footer class="wrap footer">
+      <a href="https://github.com/ooiai/mosaic/blob/main/cli/README.md" target="_blank" rel="noreferrer">Full CLI Docs</a>
+    </footer>
+  </body>
+</html>
