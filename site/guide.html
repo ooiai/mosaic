@@ -3,54 +3,76 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mosaic CLI Guide</title>
-    <meta name="description" content="Mosaic CLI usage guide." />
+    <title>Mosaic CLI Docs | Guide</title>
+    <meta name="description" content="Mosaic CLI quick guide." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="assets/style.css" />
   </head>
   <body>
-    <div class="bg-orb orb-a"></div>
-    <div class="bg-orb orb-c"></div>
-
-    <header class="wrap nav">
-      <div class="brand">Mosaic CLI</div>
-      <nav>
-        <a href="index.html">Home</a>
-        <a href="guide.html" class="active">Guide</a>
-        <a href="install.html">Install</a>
-        <a href="configure.html">Configure</a>
-        <a href="troubleshooting.html">Troubleshooting</a>
-        <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
-      </nav>
-      <a class="lang-chip" href="cn/guide.html">中文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>
+          <a class="active" href="guide.html">Guide</a>
+          <a href="install.html">Install</a>
+          <a href="configure.html">Configure</a>
+          <a href="troubleshooting.html">Troubleshooting</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <a class="lang-switch" href="cn/guide.html">中文</a>
+      </div>
     </header>
 
-    <main class="wrap guide">
-      <p class="eyebrow">Usage path</p>
-      <h1>From zero to stable daily usage</h1>
-      <div class="topic-grid">
-        <article class="topic-card">
-          <h2>Step 1: Install</h2>
-          <p>Pick your OS path and verify `mosaic --help`.</p>
-          <a class="btn btn-primary" href="install.html">Open Install</a>
-        </article>
-        <article class="topic-card">
-          <h2>Step 2: Configure</h2>
-          <p>Configure OpenAI-compatible endpoint, key env, and model profile.</p>
-          <a class="btn btn-primary" href="configure.html">Open Configure</a>
-        </article>
-        <article class="topic-card">
-          <h2>Step 3: Troubleshoot</h2>
-          <p>Use built-in diagnostics to resolve setup/network/model issues quickly.</p>
-          <a class="btn btn-primary" href="troubleshooting.html">Open Troubleshooting</a>
-        </article>
-      </div>
-    </main>
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Getting Started</p>
+        <a class="side-link" href="index.html">Overview</a>
+        <a class="side-link active" href="guide.html">Usage Guide</a>
+        <a class="side-link" href="install.html">Install</a>
+        <a class="side-link" href="configure.html">Configure</a>
+        <a class="side-link" href="troubleshooting.html">Troubleshooting</a>
+      </aside>
 
-    <footer class="wrap footer">
-      <a href="https://github.com/ooiai/mosaic/blob/main/cli/README.md" target="_blank" rel="noreferrer">Full CLI docs</a>
-    </footer>
+      <main class="content">
+        <article class="doc">
+          <p class="kicker">Guide</p>
+          <h1>From install to daily usage</h1>
+          <p class="lead">Recommended path for new users. Follow this order once, then keep the troubleshooting page open in your workflow.</p>
+
+          <h2>Step 1. Install binary</h2>
+          <p>Choose your platform method from the install page and verify with <code>mosaic --help</code>.</p>
+
+          <h2>Step 2. Setup project state</h2>
+          <pre><code>mosaic --project-state setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini</code></pre>
+
+          <h2>Step 3. Validate provider and model</h2>
+          <pre><code>mosaic --project-state models list
+mosaic --project-state health</code></pre>
+
+          <h2>Step 4. Start using agent runtime</h2>
+          <pre><code>mosaic --project-state ask "hello"
+mosaic --project-state chat</code></pre>
+
+          <h2>Step 5. Operate and diagnose</h2>
+          <pre><code>mosaic --project-state status
+mosaic --project-state doctor
+mosaic --project-state logs --tail 80</code></pre>
+
+          <div class="quick-links">
+            <a href="install.html">Install</a>
+            <a href="configure.html">Configure</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+        </article>
+      </main>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
   </body>
 </html>

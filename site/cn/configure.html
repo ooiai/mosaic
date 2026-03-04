@@ -3,46 +3,56 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mosaic CLI 配置</title>
-    <meta name="description" content="配置 Mosaic CLI 的 OpenAI-compatible provider。" />
+    <title>Mosaic CLI 文档 | 配置</title>
+    <meta name="description" content="配置 Mosaic CLI 的 provider、model 与 profile。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/style.css" />
   </head>
   <body>
-    <div class="bg-orb orb-c"></div>
-
-    <header class="wrap nav">
-      <div class="brand">Mosaic CLI</div>
-      <nav>
-        <a href="index.html">首页</a>
-        <a href="guide.html">教程</a>
-        <a href="install.html">安装</a>
-        <a href="configure.html" class="active">配置</a>
-        <a href="troubleshooting.html">排障</a>
-      </nav>
-      <a class="lang-chip" href="../configure.html">EN</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>
+          <a href="guide.html">上手</a>
+          <a href="install.html">安装</a>
+          <a class="active" href="configure.html">配置</a>
+          <a href="troubleshooting.html">排障</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <a class="lang-switch" href="../configure.html">EN</a>
+      </div>
     </header>
 
-    <main class="wrap guide">
-      <p class="eyebrow">配置</p>
-      <h1>在项目状态下设置 provider 与 profile</h1>
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">快速开始</p>
+        <a class="side-link" href="index.html">总览</a>
+        <a class="side-link" href="guide.html">使用路径</a>
+        <a class="side-link" href="install.html">安装</a>
+        <a class="side-link active" href="configure.html">配置</a>
+        <a class="side-link" href="troubleshooting.html">排障</a>
+      </aside>
 
-      <section class="guide-card">
-        <h2>OpenAI-compatible（默认）</h2>
-        <pre><code>export OPENAI_API_KEY=your_key
+      <main class="content">
+        <article class="doc">
+          <p class="kicker">配置</p>
+          <h1>Provider / model / profile 配置</h1>
+          <p class="lead">Mosaic 采用 OpenAI-compatible 协议。建议按 profile 管理不同环境。</p>
+
+          <h2>默认 profile</h2>
+          <pre><code>export OPENAI_API_KEY=your_key
 mosaic --project-state --profile default setup \
   --base-url https://api.openai.com \
   --api-key-env OPENAI_API_KEY \
   --model gpt-4o-mini
 
 mosaic --project-state --profile default models list</code></pre>
-      </section>
 
-      <section class="guide-card">
-        <h2>Azure OpenAI 示例</h2>
-        <pre><code>export AZURE_OPENAI_BASE_URL="https://<resource>.openai.azure.com/openai/v1"
+          <h2>Azure OpenAI profile</h2>
+          <pre><code>export AZURE_OPENAI_BASE_URL="https://<resource>.openai.azure.com/openai/v1"
 export AZURE_OPENAI_API_KEY="<your-key>"
 
 mosaic --project-state --profile az-openai setup \
@@ -51,17 +61,18 @@ mosaic --project-state --profile az-openai setup \
   --model gpt-4o-mini
 
 mosaic --project-state --profile az-openai models list</code></pre>
-      </section>
 
-      <section class="guide-card">
-        <h2>首次执行</h2>
-        <pre><code>mosaic --project-state --profile az-openai ask "hello"
+          <div class="callout warn">
+            <strong>注意：</strong>Azure 的 URL 应以 <code>/openai/v1</code> 结尾，避免出现 <code>/v1/v1/models</code>。
+          </div>
+
+          <h2>使用指定 profile</h2>
+          <pre><code>mosaic --project-state --profile az-openai ask "hello"
 mosaic --project-state --profile az-openai chat</code></pre>
-      </section>
-    </main>
+        </article>
+      </main>
+    </div>
 
-    <footer class="wrap footer">
-      <a href="guide.html">返回教程</a>
-    </footer>
+    <footer class="footer">MIT License · Mosaic</footer>
   </body>
 </html>
