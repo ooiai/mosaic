@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 文档 | Memory 模块</title>
+    <meta name="description" content="Mosaic memory 模块分步教程。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">跳转到正文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>          <a class="active" href="guide.html">路径</a>          <a href="quickstart.html">10 分钟上手</a>          <a href="operations.html">生产运维</a>          <a href="install.html">安装</a>          <a href="configure.html">配置</a>          <a href="troubleshooting.html">排障</a>          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="../memory.html">EN</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">模块专题</p>
+        <a class="side-link" href="learning-path.html">分阶段学习</a>
+        <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link active" href="memory.html">Memory</a>
+        <a class="side-link" href="plugins.html">Plugins</a>
+        <a class="side-link" href="skills.html">Skills</a>
+        <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="operations.html">生产运维</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>Memory</span></nav>
+          <p class="kicker">Memory</p>
+          <h1>Memory 模块：一步一步教程</h1>
+          <p class="lead">用于为项目建立轻量索引并执行文本检索，帮助日常诊断和上下文定位。</p>
+
+          <h2>步骤 1：查看当前 memory 状态</h2>
+          <pre><code>mosaic --project-state memory status</code></pre>
+          <p>预期：即使未索引过，也会有可读状态输出。</p>
+
+          <h2>步骤 2：执行首次索引</h2>
+          <pre><code>mosaic --project-state memory index \
+  --path . \
+  --max-files 500 \
+  --max-file-size 262144 \
+  --max-content-bytes 16384</code></pre>
+
+          <h2>步骤 3：检索索引内容</h2>
+          <pre><code>mosaic --project-state memory search "gateway retry" --limit 20
+mosaic --project-state memory search "agents route" --limit 10</code></pre>
+
+          <h2>步骤 4：按目录重建索引</h2>
+          <pre><code>mosaic --project-state memory index --path cli --max-files 300
+mosaic --project-state memory status</code></pre>
+          <p>大仓库建议按目录分批索引以提升迭代速度。</p>
+
+          <h2>步骤 5：需要时清理索引</h2>
+          <pre><code>mosaic --project-state memory clear
+mosaic --project-state memory status</code></pre>
+
+          <h2>步骤 6：JSON 自动化检查</h2>
+          <pre><code>mosaic --project-state --json memory status
+mosaic --project-state --json memory search "security" --limit 5</code></pre>
+
+          <div class="quick-links">
+            <a href="learning-path.html">分阶段学习</a>
+            <a href="operations.html">生产运维</a>
+            <a href="troubleshooting.html">排障手册</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

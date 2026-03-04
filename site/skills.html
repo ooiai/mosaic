@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | Skills Module</title>
+    <meta name="description" content="Step-by-step tutorial for Mosaic skills module." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>          <a class="active" href="guide.html">Guide</a>          <a href="quickstart.html">Quickstart</a>          <a href="operations.html">Operations</a>          <a href="install.html">Install</a>          <a href="configure.html">Configure</a>          <a href="troubleshooting.html">Troubleshooting</a>          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/skills.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Modules</p>
+        <a class="side-link" href="learning-path.html">Learning Path</a>
+        <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="memory.html">Memory</a>
+        <a class="side-link" href="plugins.html">Plugins</a>
+        <a class="side-link active" href="skills.html">Skills</a>
+        <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="operations.html">Operations</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Skills</span></nav>
+          <p class="kicker">Skills</p>
+          <h1>Skills Module: Step-by-Step Tutorial</h1>
+          <p class="lead">Use skills as reusable execution knowledge units. This page focuses on lifecycle operations.</p>
+
+          <h2>Step 1: Discover installed skills</h2>
+          <pre><code>mosaic --project-state skills list
+mosaic --project-state skills list --source all</code></pre>
+
+          <h2>Step 2: Inspect skill metadata</h2>
+          <pre><code>mosaic --project-state skills info &lt;skill_id&gt;
+mosaic --project-state skills check &lt;skill_id&gt;</code></pre>
+
+          <h2>Step 3: Install skill from local path</h2>
+          <pre><code>mosaic --project-state skills install --path ./skills/example-skill
+# overwrite existing installation
+mosaic --project-state skills install --path ./skills/example-skill --force</code></pre>
+
+          <h2>Step 4: Validate all skills</h2>
+          <pre><code>mosaic --project-state skills check</code></pre>
+
+          <h2>Step 5: Remove stale skill</h2>
+          <pre><code>mosaic --project-state skills remove &lt;skill_id&gt;
+mosaic --project-state skills list</code></pre>
+
+          <h2>Step 6: JSON output for scripts</h2>
+          <pre><code>mosaic --project-state --json skills list
+mosaic --project-state --json skills check</code></pre>
+
+          <div class="quick-links">
+            <a href="plugins.html">Plugins Guide</a>
+            <a href="operations.html">Operations</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

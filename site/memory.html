@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | Memory Module</title>
+    <meta name="description" content="Step-by-step tutorial for Mosaic memory module." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>          <a class="active" href="guide.html">Guide</a>          <a href="quickstart.html">Quickstart</a>          <a href="operations.html">Operations</a>          <a href="install.html">Install</a>          <a href="configure.html">Configure</a>          <a href="troubleshooting.html">Troubleshooting</a>          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/memory.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Modules</p>
+        <a class="side-link" href="learning-path.html">Learning Path</a>
+        <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link active" href="memory.html">Memory</a>
+        <a class="side-link" href="plugins.html">Plugins</a>
+        <a class="side-link" href="skills.html">Skills</a>
+        <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="operations.html">Operations</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Memory</span></nav>
+          <p class="kicker">Memory</p>
+          <h1>Memory Module: Step-by-Step Tutorial</h1>
+          <p class="lead">Use this module to index project content and run lightweight text retrieval for operational context.</p>
+
+          <h2>Step 1: Check current memory status</h2>
+          <pre><code>mosaic --project-state memory status</code></pre>
+          <p>Expected: status output exists even before first index.</p>
+
+          <h2>Step 2: Build first index</h2>
+          <pre><code>mosaic --project-state memory index \
+  --path . \
+  --max-files 500 \
+  --max-file-size 262144 \
+  --max-content-bytes 16384</code></pre>
+          <p>Expected: index completes without read/permission failures.</p>
+
+          <h2>Step 3: Search indexed content</h2>
+          <pre><code>mosaic --project-state memory search "gateway retry" --limit 20
+mosaic --project-state memory search "agents route" --limit 10</code></pre>
+          <p>Expected: relevant snippets are returned for your query terms.</p>
+
+          <h2>Step 4: Re-index with tighter scope</h2>
+          <pre><code>mosaic --project-state memory index --path cli --max-files 300
+mosaic --project-state memory status</code></pre>
+          <p>Use scoped index runs for faster iteration on large repositories.</p>
+
+          <h2>Step 5: Clear memory cache when needed</h2>
+          <pre><code>mosaic --project-state memory clear
+mosaic --project-state memory status</code></pre>
+          <p>Use clear after major repo reshaping or test resets.</p>
+
+          <h2>Step 6: CI-friendly JSON checks</h2>
+          <pre><code>mosaic --project-state --json memory status
+mosaic --project-state --json memory search "security" --limit 5</code></pre>
+
+          <div class="quick-links">
+            <a href="learning-path.html">Learning Path</a>
+            <a href="operations.html">Operations</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>
