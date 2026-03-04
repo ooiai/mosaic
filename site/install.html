@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mosaic CLI Install</title>
+    <title>Mosaic CLI Docs | Install</title>
     <meta name="description" content="Install Mosaic CLI on macOS, Linux, and Windows." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,48 +11,63 @@
     <link rel="stylesheet" href="assets/style.css" />
   </head>
   <body>
-    <div class="bg-orb orb-a"></div>
-
-    <header class="wrap nav">
-      <div class="brand">Mosaic CLI</div>
-      <nav>
-        <a href="index.html">Home</a>
-        <a href="guide.html">Guide</a>
-        <a href="install.html" class="active">Install</a>
-        <a href="configure.html">Configure</a>
-        <a href="troubleshooting.html">Troubleshooting</a>
-      </nav>
-      <a class="lang-chip" href="cn/install.html">中文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>
+          <a href="guide.html">Guide</a>
+          <a class="active" href="install.html">Install</a>
+          <a href="configure.html">Configure</a>
+          <a href="troubleshooting.html">Troubleshooting</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <a class="lang-switch" href="cn/install.html">中文</a>
+      </div>
     </header>
 
-    <main class="wrap guide">
-      <p class="eyebrow">Install</p>
-      <h1>Install Mosaic CLI on macOS, Linux, Windows</h1>
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Getting Started</p>
+        <a class="side-link" href="index.html">Overview</a>
+        <a class="side-link" href="guide.html">Usage Guide</a>
+        <a class="side-link active" href="install.html">Install</a>
+        <a class="side-link" href="configure.html">Configure</a>
+        <a class="side-link" href="troubleshooting.html">Troubleshooting</a>
+      </aside>
 
-      <section class="guide-card">
-        <h2>macOS (Homebrew)</h2>
-        <pre><code>brew tap ooiai/mosaic https://github.com/ooiai/mosaic
+      <main class="content">
+        <article class="doc">
+          <p class="kicker">Install</p>
+          <h1>Install Mosaic CLI</h1>
+          <p class="lead">Use one of the following methods. Source installers are supported when release assets are unavailable.</p>
+
+          <h2>macOS (Homebrew)</h2>
+          <pre><code>brew tap ooiai/mosaic https://github.com/ooiai/mosaic
 brew install mosaic
 mosaic --help</code></pre>
-      </section>
 
-      <section class="guide-card">
-        <h2>Linux / macOS (source installer)</h2>
-        <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
+          <h2>Linux / macOS (source installer)</h2>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
 bash -s -- --from-source
 mosaic --help</code></pre>
-      </section>
 
-      <section class="guide-card">
-        <h2>Windows (PowerShell)</h2>
-        <pre><code>irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
+          <h2>Windows (PowerShell)</h2>
+          <pre><code>irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -FromSource
 mosaic --help</code></pre>
-      </section>
-    </main>
 
-    <footer class="wrap footer">
-      <a href="guide.html">Back to Guide</a>
-    </footer>
+          <div class="callout">
+            <strong>Tip:</strong> if shell says <code>command not found</code>, add Cargo bin to your PATH and restart terminal.
+          </div>
+
+          <h2>Verify install</h2>
+          <pre><code>mosaic --version
+mosaic --help</code></pre>
+        </article>
+      </main>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
   </body>
 </html>

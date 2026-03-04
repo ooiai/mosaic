@@ -3,75 +3,100 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mosaic CLI</title>
-    <meta name="description" content="Mosaic CLI: Rust-first local agent runtime and operations toolkit." />
+    <title>Mosaic CLI Docs | Overview</title>
+    <meta name="description" content="Mosaic CLI documentation overview." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="assets/style.css" />
   </head>
   <body>
-    <div class="bg-orb orb-a"></div>
-    <div class="bg-orb orb-b"></div>
-
-    <header class="wrap nav">
-      <div class="brand">Mosaic CLI</div>
-      <nav>
-        <a href="index.html" class="active">Home</a>
-        <a href="guide.html">Guide</a>
-        <a href="install.html">Install</a>
-        <a href="configure.html">Configure</a>
-        <a href="troubleshooting.html">Troubleshooting</a>
-        <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
-      </nav>
-      <a class="lang-chip" href="cn/index.html">中文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a class="active" href="index.html">Overview</a>
+          <a href="guide.html">Guide</a>
+          <a href="install.html">Install</a>
+          <a href="configure.html">Configure</a>
+          <a href="troubleshooting.html">Troubleshooting</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <a class="lang-switch" href="cn/index.html">中文</a>
+      </div>
     </header>
 
-    <main class="wrap hero">
-      <p class="eyebrow">Rust-first local agent runtime</p>
-      <h1>A practical CLI for local AI workflows.</h1>
-      <p class="subtitle">
-        Mosaic focuses on what matters in production: agent loop, tooling, channels, gateway operations,
-        policy/sandbox, and diagnostics.
-      </p>
-      <div class="cta-row">
-        <a class="btn btn-primary" href="guide.html">Get Started</a>
-        <a class="btn btn-ghost" href="https://github.com/ooiai/mosaic/tree/main/cli" target="_blank" rel="noreferrer">CLI Source</a>
-      </div>
-    </main>
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Getting Started</p>
+        <a class="side-link active" href="index.html">Overview</a>
+        <a class="side-link" href="guide.html">Usage Guide</a>
+        <a class="side-link" href="install.html">Install</a>
+        <a class="side-link" href="configure.html">Configure</a>
+        <a class="side-link" href="troubleshooting.html">Troubleshooting</a>
 
-    <section class="wrap cards">
-      <article class="card">
-        <h2>Install</h2>
-        <p>macOS Homebrew tap, Linux/macOS installer, Windows PowerShell installer.</p>
-        <a class="text-link" href="install.html">Open install guide</a>
-      </article>
-      <article class="card">
-        <h2>Configure</h2>
-        <p>Project-state setup for OpenAI-compatible providers, including Azure OpenAI endpoints.</p>
-        <a class="text-link" href="configure.html">Open config guide</a>
-      </article>
-      <article class="card">
-        <h2>Operate</h2>
-        <p>Use status, health, doctor, channels logs, and gateway probe for fast incident diagnosis.</p>
-        <a class="text-link" href="troubleshooting.html">Open troubleshooting</a>
-      </article>
-    </section>
+        <p class="sidebar-title">References</p>
+        <a class="side-link" href="https://github.com/ooiai/mosaic/blob/main/README.md" target="_blank" rel="noreferrer">README</a>
+        <a class="side-link" href="https://github.com/ooiai/mosaic/blob/main/cli/README.md" target="_blank" rel="noreferrer">CLI README</a>
+      </aside>
 
-    <section class="wrap install">
-      <h2>Quick Command</h2>
-      <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
-bash -s -- --from-source
+      <main class="content">
+        <article class="doc">
+          <p class="kicker">Overview</p>
+          <h1>Mosaic CLI documentation</h1>
+          <p class="lead">
+            Mosaic is a Rust-first local agent runtime and operations CLI. This docs site is focused on practical setup,
+            profile configuration, and day-to-day diagnosis.
+          </p>
 
-mosaic --project-state setup \
+          <div class="callout">
+            <strong>Scope:</strong> CLI-first delivery. Web/Desktop shell is not part of this phase.
+          </div>
+
+          <h2>What is available now</h2>
+          <ul>
+            <li>Core: <code>setup</code>, <code>configure</code>, <code>models</code>, <code>ask</code>, <code>chat</code>, <code>session</code></li>
+            <li>Ops: <code>status</code>, <code>health</code>, <code>doctor</code>, <code>logs</code>, <code>system</code></li>
+            <li>Runtime modules: <code>channels</code>, <code>gateway</code>, <code>approvals</code>, <code>sandbox</code>, <code>memory</code>, <code>security</code></li>
+          </ul>
+
+          <h2>First commands</h2>
+          <pre><code>mosaic --project-state setup \
   --base-url https://api.openai.com \
   --api-key-env OPENAI_API_KEY \
-  --model gpt-4o-mini</code></pre>
-    </section>
+  --model gpt-4o-mini
 
-    <footer class="wrap footer">
-      <span>MIT License</span>
-      <span>© Mosaic</span>
-    </footer>
+mosaic --project-state models list
+mosaic --project-state ask "summarize this repository"
+mosaic --project-state chat</code></pre>
+
+          <h2>Navigation</h2>
+          <div class="card-grid">
+            <section class="doc-card">
+              <h3>Install</h3>
+              <p>Platform-specific install methods for macOS, Linux, and Windows.</p>
+              <a href="install.html">Open Install</a>
+            </section>
+            <section class="doc-card">
+              <h3>Configure</h3>
+              <p>Setup provider/model/profile, including Azure OpenAI examples.</p>
+              <a href="configure.html">Open Configure</a>
+            </section>
+            <section class="doc-card">
+              <h3>Troubleshooting</h3>
+              <p>Common failures and direct commands for diagnosis and recovery.</p>
+              <a href="troubleshooting.html">Open Troubleshooting</a>
+            </section>
+          </div>
+
+          <div class="quick-links">
+            <a href="guide.html">Start Guide</a>
+            <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">Repository</a>
+          </div>
+        </article>
+      </main>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
   </body>
 </html>

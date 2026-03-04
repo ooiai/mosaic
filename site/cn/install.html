@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mosaic CLI 安装</title>
+    <title>Mosaic CLI 文档 | 安装</title>
     <meta name="description" content="在 macOS、Linux、Windows 安装 Mosaic CLI。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,48 +11,63 @@
     <link rel="stylesheet" href="../assets/style.css" />
   </head>
   <body>
-    <div class="bg-orb orb-a"></div>
-
-    <header class="wrap nav">
-      <div class="brand">Mosaic CLI</div>
-      <nav>
-        <a href="index.html">首页</a>
-        <a href="guide.html">教程</a>
-        <a href="install.html" class="active">安装</a>
-        <a href="configure.html">配置</a>
-        <a href="troubleshooting.html">排障</a>
-      </nav>
-      <a class="lang-chip" href="../install.html">EN</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>
+          <a href="guide.html">上手</a>
+          <a class="active" href="install.html">安装</a>
+          <a href="configure.html">配置</a>
+          <a href="troubleshooting.html">排障</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <a class="lang-switch" href="../install.html">EN</a>
+      </div>
     </header>
 
-    <main class="wrap guide">
-      <p class="eyebrow">安装</p>
-      <h1>在 macOS / Linux / Windows 安装 Mosaic CLI</h1>
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">快速开始</p>
+        <a class="side-link" href="index.html">总览</a>
+        <a class="side-link" href="guide.html">使用路径</a>
+        <a class="side-link active" href="install.html">安装</a>
+        <a class="side-link" href="configure.html">配置</a>
+        <a class="side-link" href="troubleshooting.html">排障</a>
+      </aside>
 
-      <section class="guide-card">
-        <h2>macOS (Homebrew)</h2>
-        <pre><code>brew tap ooiai/mosaic https://github.com/ooiai/mosaic
+      <main class="content">
+        <article class="doc">
+          <p class="kicker">安装</p>
+          <h1>安装 Mosaic CLI</h1>
+          <p class="lead">以下方式均可用。release 资产不可用时，推荐源码安装脚本。</p>
+
+          <h2>macOS (Homebrew)</h2>
+          <pre><code>brew tap ooiai/mosaic https://github.com/ooiai/mosaic
 brew install mosaic
 mosaic --help</code></pre>
-      </section>
 
-      <section class="guide-card">
-        <h2>Linux / macOS（源码安装脚本）</h2>
-        <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
+          <h2>Linux / macOS（源码安装脚本）</h2>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
 bash -s -- --from-source
 mosaic --help</code></pre>
-      </section>
 
-      <section class="guide-card">
-        <h2>Windows（PowerShell）</h2>
-        <pre><code>irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
+          <h2>Windows（PowerShell）</h2>
+          <pre><code>irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -FromSource
 mosaic --help</code></pre>
-      </section>
-    </main>
 
-    <footer class="wrap footer">
-      <a href="guide.html">返回教程</a>
-    </footer>
+          <div class="callout">
+            <strong>提示：</strong>如出现 <code>command not found</code>，请补全 PATH 后重启终端。
+          </div>
+
+          <h2>安装验证</h2>
+          <pre><code>mosaic --version
+mosaic --help</code></pre>
+        </article>
+      </main>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
   </body>
 </html>
