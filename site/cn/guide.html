@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mosaic CLI 文档 | 上手</title>
-    <meta name="description" content="Mosaic CLI 快速上手路径。" />
+    <meta name="description" content="Mosaic CLI 上手路径。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +23,10 @@
           <a href="troubleshooting.html">排障</a>
           <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
         <a class="lang-switch" href="../guide.html">EN</a>
       </div>
     </header>
@@ -40,26 +45,26 @@
         <article class="doc">
           <p class="kicker">上手</p>
           <h1>从安装到日常使用</h1>
-          <p class="lead">建议首次按顺序完成以下步骤。之后可把排障页作为常驻手册使用。</p>
+          <p class="lead">建议首次按顺序完成以下步骤。完成后可将排障页作为常驻运行手册。</p>
 
-          <h2>第 1 步：安装</h2>
-          <p>按平台选择安装方式，先确保 <code>mosaic --help</code> 可执行。</p>
+          <h2>步骤 1：安装</h2>
+          <p>按平台选择安装方式，并确认 <code>mosaic --help</code> 可执行。</p>
 
-          <h2>第 2 步：初始化项目状态</h2>
+          <h2>步骤 2：初始化项目状态</h2>
           <pre><code>mosaic --project-state setup \
   --base-url https://api.openai.com \
   --api-key-env OPENAI_API_KEY \
   --model gpt-4o-mini</code></pre>
 
-          <h2>第 3 步：验证模型与连通性</h2>
+          <h2>步骤 3：验证模型可用性</h2>
           <pre><code>mosaic --project-state models list
 mosaic --project-state health</code></pre>
 
-          <h2>第 4 步：进入 Agent 使用</h2>
+          <h2>步骤 4：进入运行时</h2>
           <pre><code>mosaic --project-state ask "hello"
 mosaic --project-state chat</code></pre>
 
-          <h2>第 5 步：运维与诊断</h2>
+          <h2>步骤 5：保持诊断命令可用</h2>
           <pre><code>mosaic --project-state status
 mosaic --project-state doctor
 mosaic --project-state logs --tail 80</code></pre>
@@ -71,6 +76,11 @@ mosaic --project-state logs --tail 80</code></pre>
           </div>
         </article>
       </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
     </div>
 
     <footer class="footer">MIT License · Mosaic</footer>

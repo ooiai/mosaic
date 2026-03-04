@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mosaic CLI 文档 | 安装</title>
-    <meta name="description" content="在 macOS、Linux、Windows 安装 Mosaic CLI。" />
+    <meta name="description" content="在 macOS Linux Windows 安装 Mosaic CLI。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +23,10 @@
           <a href="troubleshooting.html">排障</a>
           <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
         <a class="lang-switch" href="../install.html">EN</a>
       </div>
     </header>
@@ -40,7 +45,7 @@
         <article class="doc">
           <p class="kicker">安装</p>
           <h1>安装 Mosaic CLI</h1>
-          <p class="lead">以下方式均可用。release 资产不可用时，推荐源码安装脚本。</p>
+          <p class="lead">按平台选择安装方式。release 资产不可用时，优先使用源码安装脚本。</p>
 
           <h2>macOS (Homebrew)</h2>
           <pre><code>brew tap ooiai/mosaic https://github.com/ooiai/mosaic
@@ -58,7 +63,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -FromSource
 mosaic --help</code></pre>
 
           <div class="callout">
-            <strong>提示：</strong>如出现 <code>command not found</code>，请补全 PATH 后重启终端。
+            <strong>提示：</strong>若提示命令不存在，请把 <code>$HOME/.cargo/bin</code> 加入 PATH 并重启终端。
           </div>
 
           <h2>安装验证</h2>
@@ -66,6 +71,11 @@ mosaic --help</code></pre>
 mosaic --help</code></pre>
         </article>
       </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
     </div>
 
     <footer class="footer">MIT License · Mosaic</footer>

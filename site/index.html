@@ -7,8 +7,9 @@
     <meta name="description" content="Mosaic CLI documentation overview." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +23,10 @@
           <a href="troubleshooting.html">Troubleshooting</a>
           <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
         <a class="lang-switch" href="cn/index.html">中文</a>
       </div>
     </header>
@@ -43,48 +48,48 @@
       <main class="content">
         <article class="doc">
           <p class="kicker">Overview</p>
-          <h1>Mosaic CLI documentation</h1>
+          <h1>Mosaic CLI Documentation</h1>
           <p class="lead">
-            Mosaic is a Rust-first local agent runtime and operations CLI. This docs site is focused on practical setup,
-            profile configuration, and day-to-day diagnosis.
+            Mosaic is a Rust-first local agent runtime and operations CLI. This documentation is structured for fast setup,
+            profile configuration, and production diagnosis.
           </p>
 
           <div class="callout">
-            <strong>Scope:</strong> CLI-first delivery. Web/Desktop shell is not part of this phase.
+            <strong>Scope:</strong> CLI-first delivery. Web and desktop shells are out of this phase.
           </div>
 
-          <h2>What is available now</h2>
+          <h2>Current command scope</h2>
           <ul>
             <li>Core: <code>setup</code>, <code>configure</code>, <code>models</code>, <code>ask</code>, <code>chat</code>, <code>session</code></li>
-            <li>Ops: <code>status</code>, <code>health</code>, <code>doctor</code>, <code>logs</code>, <code>system</code></li>
-            <li>Runtime modules: <code>channels</code>, <code>gateway</code>, <code>approvals</code>, <code>sandbox</code>, <code>memory</code>, <code>security</code></li>
+            <li>Operations: <code>status</code>, <code>health</code>, <code>doctor</code>, <code>logs</code>, <code>system</code></li>
+            <li>Runtime: <code>channels</code>, <code>gateway</code>, <code>approvals</code>, <code>sandbox</code>, <code>memory</code>, <code>security</code></li>
           </ul>
 
-          <h2>First commands</h2>
+          <h2>First 4 commands</h2>
           <pre><code>mosaic --project-state setup \
   --base-url https://api.openai.com \
   --api-key-env OPENAI_API_KEY \
   --model gpt-4o-mini
 
 mosaic --project-state models list
-mosaic --project-state ask "summarize this repository"
+mosaic --project-state ask "hello"
 mosaic --project-state chat</code></pre>
 
-          <h2>Navigation</h2>
+          <h2>Reading map</h2>
           <div class="card-grid">
             <section class="doc-card">
               <h3>Install</h3>
-              <p>Platform-specific install methods for macOS, Linux, and Windows.</p>
+              <p>macOS/Linux/Windows install methods.</p>
               <a href="install.html">Open Install</a>
             </section>
             <section class="doc-card">
               <h3>Configure</h3>
-              <p>Setup provider/model/profile, including Azure OpenAI examples.</p>
+              <p>Provider and profile setup with Azure examples.</p>
               <a href="configure.html">Open Configure</a>
             </section>
             <section class="doc-card">
               <h3>Troubleshooting</h3>
-              <p>Common failures and direct commands for diagnosis and recovery.</p>
+              <p>Common failure matrix and direct fix commands.</p>
               <a href="troubleshooting.html">Open Troubleshooting</a>
             </section>
           </div>
@@ -95,6 +100,11 @@ mosaic --project-state chat</code></pre>
           </div>
         </article>
       </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
     </div>
 
     <footer class="footer">MIT License · Mosaic</footer>

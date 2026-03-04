@@ -7,8 +7,9 @@
     <meta name="description" content="Mosaic CLI 文档总览。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +23,10 @@
           <a href="troubleshooting.html">排障</a>
           <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
         <a class="lang-switch" href="../index.html">EN</a>
       </div>
     </header>
@@ -44,17 +49,17 @@
         <article class="doc">
           <p class="kicker">总览</p>
           <h1>Mosaic CLI 文档站</h1>
-          <p class="lead">Mosaic 是一个 Rust 优先的本地 Agent 运行时与运维 CLI。本站重点覆盖安装、配置、日常运行与故障定位。</p>
+          <p class="lead">Mosaic 是 Rust 优先的本地 Agent 运行时与运维 CLI。本文档聚焦安装、配置、日常运行和故障定位。</p>
 
           <div class="callout">
-            <strong>范围说明：</strong> 当前阶段为 CLI 核心能力，不包含 Web/Desktop 外壳交互。
+            <strong>范围说明：</strong>当前阶段为 CLI 核心能力，不包含 Web/Desktop 外壳交互。
           </div>
 
-          <h2>当前可用能力</h2>
+          <h2>当前命令范围</h2>
           <ul>
             <li>核心命令：<code>setup</code>、<code>configure</code>、<code>models</code>、<code>ask</code>、<code>chat</code>、<code>session</code></li>
             <li>运维命令：<code>status</code>、<code>health</code>、<code>doctor</code>、<code>logs</code>、<code>system</code></li>
-            <li>扩展模块：<code>channels</code>、<code>gateway</code>、<code>approvals</code>、<code>sandbox</code>、<code>memory</code>、<code>security</code></li>
+            <li>运行模块：<code>channels</code>、<code>gateway</code>、<code>approvals</code>、<code>sandbox</code>、<code>memory</code>、<code>security</code></li>
           </ul>
 
           <h2>首批命令</h2>
@@ -67,21 +72,21 @@ mosaic --project-state models list
 mosaic --project-state ask "hello"
 mosaic --project-state chat</code></pre>
 
-          <h2>文档导航</h2>
+          <h2>阅读路径</h2>
           <div class="card-grid">
             <section class="doc-card">
               <h3>安装</h3>
-              <p>按平台完成可执行安装，确认命令可运行。</p>
+              <p>按平台完成安装并验证命令可执行。</p>
               <a href="install.html">进入安装页</a>
             </section>
             <section class="doc-card">
               <h3>配置</h3>
-              <p>配置 provider / model / profile，含 Azure OpenAI 示例。</p>
+              <p>配置 provider / model / profile，含 Azure 示例。</p>
               <a href="configure.html">进入配置页</a>
             </section>
             <section class="doc-card">
               <h3>排障</h3>
-              <p>常见错误定位表与标准诊断命令集合。</p>
+              <p>常见错误矩阵与修复命令。</p>
               <a href="troubleshooting.html">进入排障页</a>
             </section>
           </div>
@@ -92,6 +97,11 @@ mosaic --project-state chat</code></pre>
           </div>
         </article>
       </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
     </div>
 
     <footer class="footer">MIT License · Mosaic</footer>

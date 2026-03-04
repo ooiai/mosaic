@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mosaic CLI Docs | Troubleshooting</title>
-    <meta name="description" content="Troubleshoot Mosaic CLI setup and provider issues." />
+    <meta name="description" content="Troubleshoot setup and provider issues." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +23,10 @@
           <a class="active" href="troubleshooting.html">Troubleshooting</a>
           <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
         <a class="lang-switch" href="cn/troubleshooting.html">中文</a>
       </div>
     </header>
@@ -40,9 +45,9 @@
         <article class="doc">
           <p class="kicker">Troubleshooting</p>
           <h1>Common issues and direct fixes</h1>
-          <p class="lead">Run these checks first, then use the table to identify the most likely fix path.</p>
+          <p class="lead">Run baseline diagnosis first, then use the matrix below to identify the likely fix path.</p>
 
-          <h2>Baseline checks</h2>
+          <h2>Baseline diagnosis</h2>
           <pre><code>mosaic --project-state status
 mosaic --project-state health
 mosaic --project-state doctor
@@ -59,29 +64,34 @@ mosaic --project-state logs --tail 80</code></pre>
             </thead>
             <tbody>
               <tr>
-                <td><code>404 Not Found</code> on models</td>
+                <td><code>models list</code> returns 404</td>
                 <td><code>mosaic configure --show</code></td>
-                <td>Fix base URL, avoid duplicated <code>/v1</code> in Azure path</td>
+                <td>Fix base URL, avoid duplicated <code>/v1</code> on Azure endpoint</td>
               </tr>
               <tr>
                 <td><code>command not found: mosaic</code></td>
                 <td><code>which mosaic</code></td>
-                <td>Add <code>$HOME/.cargo/bin</code> to PATH and restart shell</td>
+                <td>Add Cargo bin to PATH and restart shell</td>
               </tr>
               <tr>
-                <td>Provider auth/network errors</td>
-                <td><code>mosaic health</code>, env vars</td>
-                <td>Check key env name/value and endpoint reachability</td>
+                <td>Auth or network error</td>
+                <td><code>mosaic health</code> + env vars</td>
+                <td>Verify key env name/value and endpoint reachability</td>
               </tr>
             </tbody>
           </table>
 
-          <h2>Channels and gateway diagnostics</h2>
+          <h2>channels and gateway checks</h2>
           <pre><code>mosaic --project-state channels list
 mosaic --project-state channels logs --channel all --tail 50
 mosaic --project-state gateway probe</code></pre>
         </article>
       </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
     </div>
 
     <footer class="footer">MIT License · Mosaic</footer>
