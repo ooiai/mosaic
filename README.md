@@ -1,335 +1,91 @@
-# 🎨 Mosaic
+# Mosaic CLI
 
-Mosaic is an AI-powered visual frontend development platform that revolutionizes how developers create user interfaces. Through conversational AI, developers can generate, modify, and iterate on frontend code with natural language, making UI development more intuitive and efficient.
+Rust-first local agent runtime and operations CLI.
 
-## ✨ Features
+Mosaic is a standalone rewrite focused on a production-usable CLI core: agent loop, tools, channels, gateway ops, policy/sandbox, and diagnostics. Web/Desktop UI is explicitly out of this phase.
 
-### 🎯 **Phase 1: VIBECODING - Visual Frontend Generation**
+- Docs site: https://ooiai.github.io/mosaic/
+- Chinese README: `README_CN.md`
+- Legacy long docs: `README.legacy.md`, `README_CN.legacy.md`
 
-- 💬 **Conversational UI Development**: Generate frontend components through natural language dialogue
-- 🎨 **Visual Code Editor**: Interactive interface for creating and editing React components
-- 🔧 **Targeted Module Updates**: Specify and modify individual components or sections
-- ⚡ **Real-time Preview**: See changes instantly as you describe them
-- 🧩 **Component Library**: Build and reuse custom components across projects
+## Current Scope
 
-### 🚀 **Phase 2: Requirements to Frontend Pipeline**
+- Core: `setup`, `configure`, `models`, `ask`, `chat`, `session`
+- Ops: `status`, `health`, `doctor`, `logs`, `system`, `dashboard`
+- Gateway: `gateway install|start|status|probe|discover|call|stop|uninstall`
+- Channels: `add|update|list|status|test|send|logs|capabilities|resolve|remove|logout`
+- Policy runtime: `approvals`, `sandbox`, `safety`
+- Extended modules: `mcp`, `memory`, `security`, `plugins`, `skills`, `agents`, `nodes`, `devices`, `pairing`, `hooks`, `cron`, `webhooks`, `browser`, `tts`, `voicecall`
 
-- 📝 **Natural Language Requirements**: Transform plain English requirements into complete frontend applications
-- 🎯 **Intelligent Architecture**: Automatically structure projects based on requirements
-- 🔄 **Iterative Refinement**: Continuously improve generated code through conversation
-- 📊 **Project Management Integration**: Seamlessly connect requirements to implementation
+## Install
 
-### 🌟 **Phase 3: Full-Stack Generation**
-
-- 🗄️ **Backend Generation**: Create complete backend services from requirements
-- 🔗 **API Integration**: Automatically generate and connect frontend to backend APIs
-- 🏗️ **Database Design**: Intelligent database schema generation and migration management
-- 🚀 **Deployment Ready**: End-to-end application generation ready for production
-
-### 🛠️ **Core Technology Features**
-
-- 🌐 **Universal Frontend**: Single React codebase runs in both web browsers and as a native desktop app
-- ⚡ **Fast & Lightweight**: Built with Vite for lightning-fast development and optimized builds
-- 🦀 **Rust Backend**: Secure and performant native backend powered by Tauri
-- 📱 **Cross-Platform**: Supports Windows, macOS, and Linux
-- 🎯 **Modular Architecture**: Clean separation between frontend and desktop concerns
-- 🔧 **Developer Friendly**: Hot reload, TypeScript support, and modern tooling
-
-## 🦀 Rust CLI
-
-This repository also includes a full Rust CLI workspace for local-agent workflows:
-
-- Workspace: `cli/`
-- Command binary: `mosaic`
-- Command docs and runtime guides: `cli/README.md`
-- Capability map and regression docs: `cli/docs/parity-map.md`, `cli/docs/regression-runbook.md`
-
-Quick start:
+### macOS (Homebrew)
 
 ```bash
-cd cli
-cargo test --workspace
-SKIP_WORKSPACE_TESTS=1 ./scripts/from_scratch_smoke.sh
+brew tap ooiai/mosaic https://github.com/ooiai/mosaic
+brew install mosaic
 ```
 
-Install binaries:
-
-- macOS (Homebrew tap): `brew tap ooiai/mosaic https://github.com/ooiai/mosaic && brew install mosaic`
-- Linux/macOS (source install script): `curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh | bash -s -- --from-source`
-- Windows (source install script): `irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1; powershell -ExecutionPolicy Bypass -File .\\install.ps1 -FromSource`
-
-## 🗺️ Product Roadmap
-
-### Phase 1: VIBECODING (Current Focus)
-
-**Visual Frontend Development Platform**
-
-- ✅ Conversational UI generation
-- ✅ Component-level modifications
-- 🔄 Visual code editor interface
-- 🔄 Advanced component library
-- 🔄 Project templates and scaffolding
-
-### Phase 2: Requirements Engine
-
-**Natural Language to Frontend Pipeline**
-
-- 📋 Requirement parsing and analysis
-- 🏗️ Architecture generation from specs
-- 🔄 Iterative requirement refinement
-- 📊 Project structure automation
-- 🎯 Multi-page application generation
-
-### Phase 3: Full-Stack Generation
-
-**Complete Application Development**
-
-- 🗄️ Backend API generation
-- 🔗 Database schema creation
-- 🚀 Deployment configuration
-- 🔧 DevOps pipeline setup
-- 📈 Performance optimization
-
-## 🏗️ Project Structure
-
-```
-mosaic/
-├── apps/
-│   ├── desktop/           # Tauri desktop application
-│   │   └── src-tauri/     # Rust backend code
-│   └── web/               # React frontend application (VIBECODING UI)
-├── packages/              # Shared packages (AI models, code generators)
-├── crates/               # Rust crates (code analysis, generation engines)
-└── pnpm-workspace.yaml   # Workspace configuration
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18 or later)
-- [pnpm](https://pnpm.io/) (recommended package manager)
-- [Rust](https://rustup.rs/) (for desktop app development)
-
-### Installation
-
-1. Clone the repository:
-
-   ```bash
-   git clone git@github.com:ooiai/mosaic.git
-   cd mosaic
-   ```
-
-2. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-
-## 🛠️ Development
-
-### Web Application
-
-Run the web version for fast development:
+### Linux / macOS (source installer)
 
 ```bash
-cd apps/web
-pnpm dev
+curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh | bash -s -- --from-source
 ```
 
-The web app will be available at `http://localhost:5173`
+### Windows (PowerShell, source installer)
 
-### Desktop Application
+```powershell
+irm https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -FromSource
+```
 
-Run the desktop application with hot reload:
+Verify:
 
 ```bash
-cd apps/desktop
-pnpm dev
+mosaic --version
+mosaic --help
 ```
 
-This will:
-
-1. Start the web development server
-2. Launch the Tauri desktop app
-3. Enable hot reload for both frontend and backend changes
-
-## 📦 Building
-
-### Web Application
-
-Build the optimized web application:
+## 2-Minute Quick Start
 
 ```bash
-cd apps/web
-pnpm build
+# 1) configure project-local state
+mosaic --project-state setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+# 2) list models
+mosaic --project-state models list
+
+# 3) one-shot ask
+mosaic --project-state ask "summarize this repository"
+
+# 4) interactive chat
+mosaic --project-state chat
 ```
 
-### Desktop Application
+## Workspace
 
-Build the desktop application for your platform:
+- CLI workspace: `cli/`
+- Main binary crate: `cli/crates/mosaic-cli`
+- Core docs: `cli/README.md`
+- Distribution docs: `cli/docs/distribution.md`
+- Parity/progress: `planing.md`
+
+## Development
 
 ```bash
-cd apps/desktop
-pnpm build
+# fast quality gate
+make cli-quality
+
+# full CLI tests
+make cli-test
+
+# full regression
+make cli-regression
 ```
 
-This will create platform-specific installers in `apps/desktop/src-tauri/target/release/bundle/`
+## License
 
-## 🧪 Available Scripts
-
-### Root Level
-
-- `pnpm dev:web` - Start web development server
-- `pnpm build:web` - Build web application
-- `pnpm preview:web` - Preview built web application
-- `pnpm lint:web` - Lint web application code
-- `make cli-quality` - Run Rust CLI fast quality gate (`check + clippy + command_surface + mosaic-cli tests`)
-- `make cli-json-contract` - Run Rust CLI JSON contract gate (`error_codes + json_contract + json_contract_modules + help_snapshot`)
-- `make cli-test` - Run Rust CLI workspace tests (`cli/`)
-- `make cli-regression` - Run Rust CLI full regression suite (`cli/scripts/run_regression_suite.sh`)
-- `make cli-beta-check` - Run Rust CLI beta readiness gate (`cli/scripts/beta_release_check.sh`)
-- `make cli-beta-package v=v0.2.0-beta.1` - Build and package internal beta artifact
-- `make cli-release-assets v=v0.2.0-beta.5 t=aarch64-apple-darwin` - Package one release asset for a target
-- `make cli-release-manifests v=v0.2.0-beta.5 assets=dist/v0.2.0-beta.5 out=dist/v0.2.0-beta.5` - Generate Homebrew/Scoop manifests from release assets
-
-### Desktop App (`apps/desktop`)
-
-- `pnpm dev` - Start desktop app in development mode
-- `pnpm build` - Build desktop app for production
-- `pnpm tauri` - Run Tauri CLI commands
-
-### Web App (`apps/web`)
-
-- `pnpm dev` - Start development server
-- `pnpm build` - Build for production
-- `pnpm preview` - Preview production build
-- `pnpm lint` - Lint code
-
-## 🏛️ Architecture
-
-### Frontend (React + Vite)
-
-- **Location**: `apps/web/`
-- **Framework**: React 19 with TypeScript
-- **Build Tool**: Vite (using Rolldown)
-- **Features**:
-  - Environment detection (web vs Tauri)
-  - Conditional Tauri API usage
-  - Hot module replacement
-
-### Desktop Backend (Rust + Tauri)
-
-- **Location**: `apps/desktop/src-tauri/`
-- **Framework**: Tauri v2
-- **Features**:
-  - Native system integration
-  - Secure IPC communication
-  - Cross-platform compatibility
-
-### Key Design Decisions
-
-1. **Shared Frontend**: The same React application runs in both environments
-2. **Environment Detection**: Runtime detection of Tauri vs web environment
-3. **Graceful Degradation**: Web features work standalone, desktop features enhance the experience
-4. **Monorepo Structure**: Organized for scalability and code sharing
-
-## 🔧 Configuration
-
-### Tauri Configuration
-
-The desktop app configuration is in `apps/desktop/src-tauri/tauri.conf.json`:
-
-- **Development**: Uses web dev server at `localhost:5173`
-- **Production**: Uses built web assets from `apps/web/dist`
-- **Window**: 800x600 default size, customizable
-
-### Vite Configuration
-
-Web application uses standard Vite configuration with React plugin.
-
-## 🚀 Deployment
-
-### Web Deployment
-
-The web application can be deployed to any static hosting service:
-
-```bash
-cd apps/web
-pnpm build
-# Deploy the dist/ folder
-```
-
-Recommended platforms:
-
-- Vercel
-- Netlify
-- GitHub Pages
-- Cloudflare Pages
-
-### Desktop Distribution
-
-Desktop applications are built as platform-specific installers:
-
-- **Windows**: `.msi` installer
-- **macOS**: `.dmg` disk image
-- **Linux**: `.AppImage`, `.deb`, or `.rpm` packages
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🎯 Vision
-
-Mosaic aims to democratize frontend development by making it as simple as describing what you want to build. Our vision is to eliminate the complexity barrier in web development, enabling anyone to create sophisticated user interfaces through natural conversation.
-
-By combining AI-powered code generation with visual development tools, we're building the future where ideas can be transformed into working applications in minutes, not months.
-
-## 🤖 AI Integration
-
-Mosaic leverages cutting-edge AI technologies to understand developer intent and generate high-quality, maintainable code:
-
-- **Natural Language Processing**: Understands complex UI requirements and design specifications
-- **Code Intelligence**: Generates semantic, accessible, and performant React components
-- **Context Awareness**: Maintains project consistency and follows established patterns
-- **Iterative Learning**: Improves suggestions based on user feedback and preferences
-
-## 🔗 Links
-
-- **Repository**: [https://github.com/ooiai/mosaic](https://github.com/ooiai/mosaic)
-- **Issues**: [https://github.com/ooiai/mosaic/issues](https://github.com/ooiai/mosaic/issues)
-- **Releases**: [https://github.com/ooiai/mosaic/releases](https://github.com/ooiai/mosaic/releases)
-- **Organization**: [OOIAI on GitHub](https://github.com/ooiai)
-
-## 🙏 Acknowledgments
-
-- [Tauri](https://tauri.app/) - For the amazing Rust-based desktop framework
-- [React](https://reactjs.org/) - For the powerful frontend library
-- [Vite](https://vitejs.dev/) - For the blazing-fast build tool
-- [pnpm](https://pnpm.io/) - For efficient package management
-
----
-
-<p align="center">
-  <a href="https://github.com/ooiai/mosaic">
-    <img src="https://img.shields.io/github/stars/ooiai/mosaic?style=social" alt="GitHub stars">
-  </a>
-  <a href="https://github.com/ooiai/mosaic/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/ooiai/mosaic" alt="License">
-  </a>
-  <a href="https://github.com/ooiai/mosaic/releases">
-    <img src="https://img.shields.io/github/v/release/ooiai/mosaic" alt="Latest Release">
-  </a>
-</p>
-
-<p align="center">
-  🎨 Revolutionizing Frontend Development with AI<br>
-  Built with ❤️ by <a href="https://github.com/ooiai">OOIAI</a> using React and Tauri
-</p>
+MIT
