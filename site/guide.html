@@ -13,57 +13,44 @@
   <body>
     <div class="bg-orb orb-a"></div>
     <div class="bg-orb orb-c"></div>
+
     <header class="wrap nav">
       <div class="brand">Mosaic CLI</div>
       <nav>
         <a href="index.html">Home</a>
         <a href="guide.html" class="active">Guide</a>
+        <a href="install.html">Install</a>
+        <a href="configure.html">Configure</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
       </nav>
+      <a class="lang-chip" href="cn/guide.html">中文</a>
     </header>
 
     <main class="wrap guide">
-      <p class="eyebrow">Usage tutorial</p>
-      <h1>From install to first agent session</h1>
-
-      <section class="guide-card">
-        <h2>1. Install</h2>
-        <pre><code># macOS
-brew tap ooiai/mosaic https://github.com/ooiai/mosaic
-brew install mosaic
-
-# Linux/macOS
-curl -fsSL https://raw.githubusercontent.com/ooiai/mosaic/main/cli/install.sh |
-bash -s -- --from-source</code></pre>
-      </section>
-
-      <section class="guide-card">
-        <h2>2. Configure</h2>
-        <pre><code>export OPENAI_API_KEY=your_key
-mosaic --project-state setup \
-  --base-url https://api.openai.com \
-  --api-key-env OPENAI_API_KEY \
-  --model gpt-4o-mini</code></pre>
-      </section>
-
-      <section class="guide-card">
-        <h2>3. Run</h2>
-        <pre><code>mosaic --project-state models list
-mosaic --project-state ask "summarize this repository"
-mosaic --project-state chat</code></pre>
-      </section>
-
-      <section class="guide-card">
-        <h2>4. Operate</h2>
-        <pre><code>mosaic --project-state status
-mosaic --project-state health
-mosaic --project-state doctor
-mosaic --project-state channels list</code></pre>
-      </section>
+      <p class="eyebrow">Usage path</p>
+      <h1>From zero to stable daily usage</h1>
+      <div class="topic-grid">
+        <article class="topic-card">
+          <h2>Step 1: Install</h2>
+          <p>Pick your OS path and verify `mosaic --help`.</p>
+          <a class="btn btn-primary" href="install.html">Open Install</a>
+        </article>
+        <article class="topic-card">
+          <h2>Step 2: Configure</h2>
+          <p>Configure OpenAI-compatible endpoint, key env, and model profile.</p>
+          <a class="btn btn-primary" href="configure.html">Open Configure</a>
+        </article>
+        <article class="topic-card">
+          <h2>Step 3: Troubleshoot</h2>
+          <p>Use built-in diagnostics to resolve setup/network/model issues quickly.</p>
+          <a class="btn btn-primary" href="troubleshooting.html">Open Troubleshooting</a>
+        </article>
+      </div>
     </main>
 
     <footer class="wrap footer">
-      <a href="https://github.com/ooiai/mosaic/blob/main/cli/README.md" target="_blank" rel="noreferrer">Full CLI Docs</a>
+      <a href="https://github.com/ooiai/mosaic/blob/main/cli/README.md" target="_blank" rel="noreferrer">Full CLI docs</a>
     </footer>
   </body>
 </html>

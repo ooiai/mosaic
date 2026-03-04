@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 排障</title>
+    <meta name="description" content="Mosaic CLI 常见问题与诊断命令。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+  </head>
+  <body>
+    <div class="bg-orb orb-b"></div>
+
+    <header class="wrap nav">
+      <div class="brand">Mosaic CLI</div>
+      <nav>
+        <a href="index.html">首页</a>
+        <a href="guide.html">教程</a>
+        <a href="install.html">安装</a>
+        <a href="configure.html">配置</a>
+        <a href="troubleshooting.html" class="active">排障</a>
+      </nav>
+      <a class="lang-chip" href="../troubleshooting.html">EN</a>
+    </header>
+
+    <main class="wrap guide">
+      <p class="eyebrow">排障</p>
+      <h1>高频问题快速定位</h1>
+
+      <section class="guide-card">
+        <h2>必跑检查</h2>
+        <pre><code>mosaic --project-state status
+mosaic --project-state health
+mosaic --project-state doctor</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>404 或 models list 失败</h2>
+        <pre><code># 看当前配置
+mosaic --project-state configure --show
+
+# Azure base URL 应为：
+# https://<resource>.openai.azure.com/openai/v1
+# 避免把 /v1 写重复导致 /v1/v1/models</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>zsh: command not found: mosaic</h2>
+        <pre><code>export PATH="$HOME/.cargo/bin:$PATH"
+source ~/.zshrc
+which mosaic
+mosaic --version</code></pre>
+      </section>
+
+      <section class="guide-card">
+        <h2>channels / gateway 诊断</h2>
+        <pre><code>mosaic --project-state channels list
+mosaic --project-state channels logs --channel all --tail 50
+mosaic --project-state gateway probe
+mosaic --project-state logs --tail 80</code></pre>
+      </section>
+    </main>
+
+    <footer class="wrap footer">
+      <a href="guide.html">返回教程</a>
+    </footer>
+  </body>
+</html>
