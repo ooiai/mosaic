@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | Operations</title>
+    <meta name="description" content="Production operations tutorial for Mosaic CLI." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>
+          <a href="guide.html">Guide</a>
+          <a href="install.html">Install</a>
+          <a href="configure.html">Configure</a>
+          <a href="troubleshooting.html">Troubleshooting</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/operations.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Operations</p>
+        <a class="side-link" href="index.html">Overview</a>
+        <a class="side-link" href="guide.html">Guide Hub</a>
+        <a class="side-link" href="quickstart.html">Quickstart</a>
+        <a class="side-link active" href="operations.html">Operations</a>
+        <a class="side-link" href="configure.html">Configure</a>
+        <a class="side-link" href="troubleshooting.html">Troubleshooting</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Operations</span></nav>
+          <p class="kicker">Operations</p>
+          <h1>Production Operations Runbook</h1>
+          <p class="lead">
+            Use this page after quickstart. It focuses on stable daily operations: channels, gateway, safety policy, observability, and regression gates.
+          </p>
+
+          <h2>1. Baseline profile and model policy</h2>
+          <pre><code>mosaic --project-state configure --show
+mosaic --project-state models status
+mosaic --project-state models aliases list
+mosaic --project-state models fallbacks list</code></pre>
+          <p>Keep at least one fallback model for network/provider instability scenarios.</p>
+
+          <h2>2. Delivery channels (terminal/slack/telegram)</h2>
+          <pre><code># add channels
+mosaic --project-state channels add --name local-terminal --kind terminal
+mosaic --project-state channels add --name team-slack --kind slack_webhook --endpoint https://hooks.slack.com/services/XXX/YYY/ZZZ
+mosaic --project-state channels add --name team-telegram --kind telegram_bot --chat-id &lt;chat_id&gt; --token-env MOSAIC_TELEGRAM_BOT_TOKEN
+
+# validate channels
+mosaic --project-state channels list
+mosaic --project-state channels test &lt;channel_id&gt;
+mosaic --project-state channels capabilities
+mosaic --project-state channels status</code></pre>
+
+          <h2>3. Gateway lifecycle</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway status
+mosaic --project-state gateway probe
+mosaic --project-state gateway discover
+mosaic --project-state gateway call status</code></pre>
+          <pre><code># maintenance operations
+mosaic --project-state gateway restart
+mosaic --project-state gateway stop</code></pre>
+
+          <h2>4. Safety controls (approvals + sandbox)</h2>
+          <pre><code>mosaic --project-state approvals get
+mosaic --project-state approvals set confirm
+mosaic --project-state approvals allowlist add "git status"
+
+mosaic --project-state sandbox get
+mosaic --project-state sandbox set standard
+mosaic --project-state sandbox explain --profile restricted</code></pre>
+
+          <div class="callout warn">
+            <strong>Team default:</strong> keep <code>approvals=confirm</code> and <code>sandbox=standard</code> unless you have a controlled reason to relax.
+          </div>
+
+          <h2>5. Observability and diagnosis</h2>
+          <pre><code>mosaic --project-state status
+mosaic --project-state health
+mosaic --project-state doctor
+mosaic --project-state dashboard
+
+mosaic --project-state logs --tail 120
+mosaic --project-state logs --follow
+mosaic --project-state system presence
+mosaic --project-state system event deploy.started --data '{"env":"prod"}'</code></pre>
+
+          <h2>6. Optional hardening checks</h2>
+          <pre><code>mosaic --project-state memory index --path .
+mosaic --project-state memory search "retry"
+
+mosaic --project-state security audit --path . --deep
+mosaic --project-state --json security audit --path . --sarif --sarif-output reports/security.sarif.json</code></pre>
+
+          <h2>7. Machine-readable operation mode</h2>
+          <pre><code>mosaic --project-state --json status
+mosaic --project-state --json channels list
+mosaic --project-state --json gateway probe
+mosaic --project-state --json doctor</code></pre>
+
+          <h2>8. Regression gates (before release)</h2>
+          <ul>
+            <li>At least one profile passes <code>setup</code>, <code>models list</code>, and <code>ask</code>.</li>
+            <li>Main channel passes <code>channels test</code> and one real <code>channels send</code>.</li>
+            <li>Gateway is healthy in <code>status/probe/call</code>.</li>
+            <li><code>status/health/doctor/logs</code> output contains no blocking errors.</li>
+            <li><code>--json</code> outputs are parsable by your CI scripts.</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="quickstart.html">Back to Quickstart</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+            <a href="guide.html">Guide Hub</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>
