@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 文档 | 生产运维</title>
+    <meta name="description" content="Mosaic CLI 生产运维与回归运行手册。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">跳转到正文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>
+          <a href="guide.html">上手</a>
+          <a href="install.html">安装</a>
+          <a href="configure.html">配置</a>
+          <a href="troubleshooting.html">排障</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="../operations.html">EN</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">运维</p>
+        <a class="side-link" href="index.html">总览</a>
+        <a class="side-link" href="guide.html">路径导航</a>
+        <a class="side-link" href="quickstart.html">10 分钟上手</a>
+        <a class="side-link active" href="operations.html">生产运维</a>
+        <a class="side-link" href="configure.html">配置</a>
+        <a class="side-link" href="troubleshooting.html">排障</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>生产运维</span></nav>
+          <p class="kicker">运维</p>
+          <h1>生产运维运行手册</h1>
+          <p class="lead">
+            本页用于快速上手之后的日常稳定运行：通道、网关、策略、可观测、回归门禁。
+          </p>
+
+          <h2>1. profile 与模型基线</h2>
+          <pre><code>mosaic --project-state configure --show
+mosaic --project-state models status
+mosaic --project-state models aliases list
+mosaic --project-state models fallbacks list</code></pre>
+          <p>建议至少配置一个 fallback model，降低 provider 波动影响。</p>
+
+          <h2>2. 通道能力（terminal/slack/telegram）</h2>
+          <pre><code># 添加通道
+mosaic --project-state channels add --name local-terminal --kind terminal
+mosaic --project-state channels add --name team-slack --kind slack_webhook --endpoint https://hooks.slack.com/services/XXX/YYY/ZZZ
+mosaic --project-state channels add --name team-telegram --kind telegram_bot --chat-id &lt;chat_id&gt; --token-env MOSAIC_TELEGRAM_BOT_TOKEN
+
+# 验证通道
+mosaic --project-state channels list
+mosaic --project-state channels test &lt;channel_id&gt;
+mosaic --project-state channels capabilities
+mosaic --project-state channels status</code></pre>
+
+          <h2>3. 网关生命周期</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway status
+mosaic --project-state gateway probe
+mosaic --project-state gateway discover
+mosaic --project-state gateway call status</code></pre>
+          <pre><code># 维护操作
+mosaic --project-state gateway restart
+mosaic --project-state gateway stop</code></pre>
+
+          <h2>4. 安全策略（approvals + sandbox）</h2>
+          <pre><code>mosaic --project-state approvals get
+mosaic --project-state approvals set confirm
+mosaic --project-state approvals allowlist add "git status"
+
+mosaic --project-state sandbox get
+mosaic --project-state sandbox set standard
+mosaic --project-state sandbox explain --profile restricted</code></pre>
+
+          <div class="callout warn">
+            <strong>团队默认建议：</strong>保持 <code>approvals=confirm</code> + <code>sandbox=standard</code>，除非受控场景下确实需要放宽。
+          </div>
+
+          <h2>5. 可观测与诊断</h2>
+          <pre><code>mosaic --project-state status
+mosaic --project-state health
+mosaic --project-state doctor
+mosaic --project-state dashboard
+
+mosaic --project-state logs --tail 120
+mosaic --project-state logs --follow
+mosaic --project-state system presence
+mosaic --project-state system event deploy.started --data '{"env":"prod"}'</code></pre>
+
+          <h2>6. 可选加固检查</h2>
+          <pre><code>mosaic --project-state memory index --path .
+mosaic --project-state memory search "retry"
+
+mosaic --project-state security audit --path . --deep
+mosaic --project-state --json security audit --path . --sarif --sarif-output reports/security.sarif.json</code></pre>
+
+          <h2>7. 机器可读运行模式</h2>
+          <pre><code>mosaic --project-state --json status
+mosaic --project-state --json channels list
+mosaic --project-state --json gateway probe
+mosaic --project-state --json doctor</code></pre>
+
+          <h2>8. 发版前回归门禁</h2>
+          <ul>
+            <li>至少一个 profile 能通过 <code>setup</code>、<code>models list</code>、<code>ask</code>。</li>
+            <li>主通道通过 <code>channels test</code> 且完成一次真实 <code>send</code>。</li>
+            <li>网关在 <code>status/probe/call</code> 下均健康。</li>
+            <li><code>status/health/doctor/logs</code> 无阻断性错误。</li>
+            <li><code>--json</code> 输出可被你的 CI 脚本正常解析。</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="quickstart.html">返回 10 分钟上手</a>
+            <a href="troubleshooting.html">排障手册</a>
+            <a href="guide.html">返回路径导航</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>
