@@ -1,5 +1,6 @@
 (function () {
   const lang = document.documentElement.lang && document.documentElement.lang.startsWith("zh") ? "zh" : "en";
+  const STORAGE_THEME_KEY = "mosaic_docs_theme";
 
   const index = {
     en: [
@@ -26,6 +27,35 @@
       .replace(/[^\w\u4e00-\u9fa5-]/g, "")
       .replace(/-+/g, "-")
       .replace(/^-|-$/g, "");
+  }
+
+  function preferredTheme() {
+    const stored = window.localStorage.getItem(STORAGE_THEME_KEY);
+    if (stored === "light" || stored === "dark") return stored;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  function setTheme(mode) {
+    document.documentElement.setAttribute("data-theme", mode);
+    window.localStorage.setItem(STORAGE_THEME_KEY, mode);
+    const btn = document.getElementById("theme-toggle");
+    if (btn) {
+      const isDark = mode === "dark";
+      btn.textContent = isDark ? "☀" : "☾";
+      btn.title = lang === "zh" ? "切换主题" : "Toggle theme";
+      btn.setAttribute("aria-label", lang === "zh" ? "切换主题" : "Toggle theme");
+    }
+  }
+
+  function setupThemeToggle() {
+    const btn = document.getElementById("theme-toggle");
+    if (!btn) return;
+
+    setTheme(preferredTheme());
+    btn.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") || "light";
+      setTheme(current === "dark" ? "light" : "dark");
+    });
   }
 
   function buildToc() {
@@ -105,7 +135,10 @@
       const hits = list
         .map((item) => {
           const haystack = `${item.title} ${item.desc} ${item.keywords}`.toLowerCase();
-          return { item, score: haystack.includes(q) ? (item.title.toLowerCase().includes(q) ? 2 : 1) : 0 };
+          return {
+            item,
+            score: haystack.includes(q) ? (item.title.toLowerCase().includes(q) ? 3 : 1) : 0
+          };
         })
         .filter((x) => x.score > 0)
         .sort((a, b) => b.score - a.score)
@@ -148,8 +181,42 @@
     });
   }
 
+  function setupCodeCopy() {
+    const blocks = Array.from(document.querySelectorAll("pre"));
+    blocks.forEach((pre) => {
+      const code = pre.querySelector("code");
+      if (!code) return;
+
+      pre.classList.add("has-copy");
+      const btn = document.createElement("button");
+      btn.className = "copy-btn";
+      btn.type = "button";
+      btn.textContent = lang === "zh" ? "复制" : "Copy";
+
+      btn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(code.innerText);
+          const old = btn.textContent;
+          btn.textContent = lang === "zh" ? "已复制" : "Copied";
+          window.setTimeout(() => {
+            btn.textContent = old;
+          }, 1200);
+        } catch (_err) {
+          btn.textContent = lang === "zh" ? "失败" : "Failed";
+          window.setTimeout(() => {
+            btn.textContent = lang === "zh" ? "复制" : "Copy";
+          }, 1200);
+        }
+      });
+
+      pre.appendChild(btn);
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
+    setupThemeToggle();
     buildToc();
     setupSearch();
+    setupCodeCopy();
   });
 })();
