@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mosaic CLI 文档 | 排障</title>
-    <meta name="description" content="Mosaic CLI 常见错误定位与修复。" />
+    <meta name="description" content="常见问题与修复路径。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +23,10 @@
           <a class="active" href="troubleshooting.html">排障</a>
           <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
         <a class="lang-switch" href="../troubleshooting.html">EN</a>
       </div>
     </header>
@@ -40,9 +45,9 @@
         <article class="doc">
           <p class="kicker">排障</p>
           <h1>常见问题与快速修复</h1>
-          <p class="lead">先跑基础诊断，再按问题矩阵定位修复路径。</p>
+          <p class="lead">先执行基础诊断，再用问题矩阵定位最短修复路径。</p>
 
-          <h2>基础诊断命令</h2>
+          <h2>基础诊断</h2>
           <pre><code>mosaic --project-state status
 mosaic --project-state health
 mosaic --project-state doctor
@@ -53,7 +58,7 @@ mosaic --project-state logs --tail 80</code></pre>
             <thead>
               <tr>
                 <th>现象</th>
-                <th>检查命令</th>
+                <th>检查</th>
                 <th>常见修复</th>
               </tr>
             </thead>
@@ -66,7 +71,7 @@ mosaic --project-state logs --tail 80</code></pre>
               <tr>
                 <td><code>command not found: mosaic</code></td>
                 <td><code>which mosaic</code></td>
-                <td>补全 <code>$HOME/.cargo/bin</code> 到 PATH 并重启终端</td>
+                <td>补齐 PATH 并重启终端</td>
               </tr>
               <tr>
                 <td>鉴权或网络错误</td>
@@ -76,12 +81,17 @@ mosaic --project-state logs --tail 80</code></pre>
             </tbody>
           </table>
 
-          <h2>channels / gateway 诊断</h2>
+          <h2>channels / gateway 检查</h2>
           <pre><code>mosaic --project-state channels list
 mosaic --project-state channels logs --channel all --tail 50
 mosaic --project-state gateway probe</code></pre>
         </article>
       </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
     </div>
 
     <footer class="footer">MIT License · Mosaic</footer>

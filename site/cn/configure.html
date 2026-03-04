@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mosaic CLI 文档 | 配置</title>
-    <meta name="description" content="配置 Mosaic CLI 的 provider、model 与 profile。" />
+    <meta name="description" content="配置 provider model profile。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
   </head>
   <body>
     <header class="topbar">
@@ -22,6 +23,10 @@
           <a href="troubleshooting.html">排障</a>
           <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
         </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
         <a class="lang-switch" href="../configure.html">EN</a>
       </div>
     </header>
@@ -39,10 +44,10 @@
       <main class="content">
         <article class="doc">
           <p class="kicker">配置</p>
-          <h1>Provider / model / profile 配置</h1>
-          <p class="lead">Mosaic 采用 OpenAI-compatible 协议。建议按 profile 管理不同环境。</p>
+          <h1>Provider、model、profile 配置</h1>
+          <p class="lead">Mosaic 使用 OpenAI-compatible 协议。建议按 profile 区分不同环境。</p>
 
-          <h2>默认 profile</h2>
+          <h2>默认 profile 配置</h2>
           <pre><code>export OPENAI_API_KEY=your_key
 mosaic --project-state --profile default setup \
   --base-url https://api.openai.com \
@@ -51,7 +56,7 @@ mosaic --project-state --profile default setup \
 
 mosaic --project-state --profile default models list</code></pre>
 
-          <h2>Azure OpenAI profile</h2>
+          <h2>Azure OpenAI profile 配置</h2>
           <pre><code>export AZURE_OPENAI_BASE_URL="https://<resource>.openai.azure.com/openai/v1"
 export AZURE_OPENAI_API_KEY="<your-key>"
 
@@ -63,14 +68,19 @@ mosaic --project-state --profile az-openai setup \
 mosaic --project-state --profile az-openai models list</code></pre>
 
           <div class="callout warn">
-            <strong>注意：</strong>Azure 的 URL 应以 <code>/openai/v1</code> 结尾，避免出现 <code>/v1/v1/models</code>。
+            <strong>注意：</strong>Azure base URL 必须以 <code>/openai/v1</code> 结尾，避免重复 <code>/v1</code>。
           </div>
 
-          <h2>使用指定 profile</h2>
+          <h2>按 profile 执行</h2>
           <pre><code>mosaic --project-state --profile az-openai ask "hello"
 mosaic --project-state --profile az-openai chat</code></pre>
         </article>
       </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
     </div>
 
     <footer class="footer">MIT License · Mosaic</footer>
