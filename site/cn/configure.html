@@ -7,11 +7,12 @@
     <meta name="description" content="配置 provider model profile。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="../assets/style.css" />
     <script src="../assets/docs.js" defer></script>
   </head>
   <body>
+    <a class="skip-link" href="#doc-main">跳转到正文</a>
     <header class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="index.html">Mosaic CLI 文档</a>
@@ -42,8 +43,9 @@
         <a class="side-link" href="troubleshooting.html">排障</a>
       </aside>
 
-      <main class="content">
+      <main id="doc-main" class="content">
         <article class="doc">
+          <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>配置</span></nav>
           <p class="kicker">配置</p>
           <h1>Provider、model、profile 配置</h1>
           <p class="lead">Mosaic 使用 OpenAI-compatible 协议。建议按 profile 区分不同环境。</p>
