@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mosaic CLI 文档 | 上手</title>
-    <meta name="description" content="Mosaic CLI 上手路径。" />
+    <meta name="description" content="Mosaic CLI 全链路使用教程。" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -47,30 +47,169 @@
         <article class="doc">
           <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>上手</span></nav>
           <p class="kicker">上手</p>
-          <h1>从安装到日常使用</h1>
-          <p class="lead">建议首次按顺序完成以下步骤。完成后可将排障页作为常驻运行手册。</p>
+          <h1>全链路使用教程</h1>
+          <p class="lead">
+            本页按实战顺序覆盖 Mosaic 的完整使用路径：安装、配置、对话、通道、网关、策略、观测与回归。
+            每条命令都可以直接复制执行。
+          </p>
 
-          <h2>步骤 1：安装</h2>
-          <p>按平台选择安装方式，并确认 <code>mosaic --help</code> 可执行。</p>
+          <div class="callout">
+            <strong>推荐模式：</strong>使用 <code>--project-state</code>，把状态固定在当前项目的 <code>.mosaic/</code> 目录。
+          </div>
 
-          <h2>步骤 2：初始化项目状态</h2>
-          <pre><code>mosaic --project-state setup \
+          <h2>1. 安装后先做环境校验</h2>
+          <pre><code>mosaic --version
+mosaic --help
+mosaic --project-state directory --ensure --check-writable</code></pre>
+          <p>如果提示找不到 <code>mosaic</code>，先把 <code>$HOME/.cargo/bin</code> 加入 PATH。</p>
+
+          <h2>2. 初始化一个可用 profile</h2>
+          <pre><code>export OPENAI_API_KEY=&lt;your_key&gt;
+
+mosaic --project-state --profile default setup \
   --base-url https://api.openai.com \
   --api-key-env OPENAI_API_KEY \
   --model gpt-4o-mini</code></pre>
 
-          <h2>步骤 3：验证模型可用性</h2>
-          <pre><code>mosaic --project-state models list
-mosaic --project-state health</code></pre>
+          <h2>3. 多 profile（OpenAI + Azure）</h2>
+          <pre><code># OpenAI profile
+mosaic --project-state --profile openai setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini
 
-          <h2>步骤 4：进入运行时</h2>
-          <pre><code>mosaic --project-state ask "hello"
-mosaic --project-state chat</code></pre>
+# Azure profile（注意必须以 /openai/v1 结尾）
+export AZURE_OPENAI_BASE_URL="https://&lt;resource&gt;.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="&lt;your_key&gt;"
 
-          <h2>步骤 5：保持诊断命令可用</h2>
+mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini</code></pre>
+
+          <h2>4. 验证模型与连通性</h2>
+          <pre><code>mosaic --project-state --profile az-openai models list
+mosaic --project-state --profile az-openai models status
+mosaic --project-state --profile az-openai models resolve
+mosaic --project-state --profile az-openai health</code></pre>
+
+          <h2>5. 模型别名与回退策略</h2>
+          <pre><code>mosaic --project-state --profile az-openai models aliases set fast gpt-4o-mini
+mosaic --project-state --profile az-openai models aliases list
+
+mosaic --project-state --profile az-openai models fallbacks add gpt-4.1-mini
+mosaic --project-state --profile az-openai models fallbacks list</code></pre>
+
+          <h2>6. 核心问答链路（ask/chat/session）</h2>
+          <pre><code># 单轮问答
+mosaic --project-state --profile az-openai ask "summarize this repo"
+
+# 从文件读 prompt
+mosaic --project-state --profile az-openai ask --prompt-file prompts/ask.txt
+
+# 进入 REPL
+mosaic --project-state --profile az-openai chat
+# REPL 内可用: /help /status /new /exit</code></pre>
+          <pre><code># 会话管理
+mosaic --project-state session list
+mosaic --project-state session show &lt;session_id&gt;
+mosaic --project-state session resume &lt;session_id&gt;
+mosaic --project-state --yes session clear</code></pre>
+
+          <h2>7. 配置通道（terminal/slack/telegram）</h2>
+          <pre><code># terminal 本地输出通道
+mosaic --project-state channels add --name local-terminal --kind terminal
+
+# Slack webhook 通道
+mosaic --project-state channels add \
+  --name team-slack \
+  --kind slack_webhook \
+  --endpoint https://hooks.slack.com/services/XXX/YYY/ZZZ
+
+# Telegram bot 通道
+mosaic --project-state channels add \
+  --name team-telegram \
+  --kind telegram_bot \
+  --chat-id &lt;chat_id&gt; \
+  --token-env MOSAIC_TELEGRAM_BOT_TOKEN</code></pre>
+          <pre><code># 连通性 + 发送 + 观察
+mosaic --project-state channels list
+mosaic --project-state channels test &lt;channel_id&gt;
+mosaic --project-state channels send &lt;channel_id&gt; --text "deployment started"
+mosaic --project-state channels status
+mosaic --project-state channels logs --channel &lt;channel_id&gt; --tail 30</code></pre>
+
+          <h2>8. 网关运行与探测</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway status
+mosaic --project-state gateway probe
+mosaic --project-state gateway discover
+mosaic --project-state gateway call status
+
+# 不用时停止
+mosaic --project-state gateway stop</code></pre>
+
+          <h2>9. 执行策略（approvals + sandbox）</h2>
+          <pre><code>mosaic --project-state approvals get
+mosaic --project-state approvals set confirm
+mosaic --project-state approvals allowlist add "git status"
+
+mosaic --project-state sandbox get
+mosaic --project-state sandbox set standard
+mosaic --project-state sandbox explain --profile elevated</code></pre>
+
+          <h2>10. 日常观测与诊断</h2>
           <pre><code>mosaic --project-state status
+mosaic --project-state health
 mosaic --project-state doctor
-mosaic --project-state logs --tail 80</code></pre>
+mosaic --project-state dashboard
+
+mosaic --project-state logs --tail 120
+mosaic --project-state logs --follow
+mosaic --project-state system presence
+mosaic --project-state system event deploy.started --data '{"env":"prod"}'</code></pre>
+
+          <h2>11. 可选高级模块</h2>
+          <pre><code># memory
+mosaic --project-state memory index --path .
+mosaic --project-state memory search "channel retry" --limit 10
+mosaic --project-state memory status
+
+# security
+mosaic --project-state security audit --path . --deep
+
+# agents/plugins/skills
+mosaic --project-state agents list
+mosaic --project-state plugins list
+mosaic --project-state skills list</code></pre>
+
+          <h2>12. JSON 输出与维护命令</h2>
+          <pre><code># 机器可读输出
+mosaic --project-state --json status
+mosaic --project-state --json channels list
+mosaic --project-state --json gateway probe
+
+# 维护
+mosaic update
+mosaic update --check
+
+# 破坏性命令（必须显式 --yes）
+mosaic --project-state --yes reset
+mosaic --project-state --yes uninstall</code></pre>
+
+          <div class="callout warn">
+            <strong>安全建议：</strong>团队环境优先保持 <code>approvals=confirm</code> + <code>sandbox=standard</code>，避免误执行高风险命令。
+          </div>
+
+          <h2>13. 回归清单（快速）</h2>
+          <ul>
+            <li>至少一个 profile 的 <code>setup</code> 成功。</li>
+            <li><code>models list</code>、<code>ask</code>、<code>chat</code> 可用。</li>
+            <li>主通道的 <code>channels add/test/send</code> 可用。</li>
+            <li><code>gateway start/probe/call</code> 返回健康结果。</li>
+            <li><code>status/health/doctor/logs</code> 输出完整可读。</li>
+          </ul>
 
           <div class="quick-links">
             <a href="install.html">安装</a>
