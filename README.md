@@ -7,10 +7,14 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 - Docs site: https://ooiai.github.io/mosaic/
 - Guide hub: https://ooiai.github.io/mosaic/guide.html
 - Quickstart tutorial: https://ooiai.github.io/mosaic/quickstart.html
+- Learning path tutorial: https://ooiai.github.io/mosaic/learning-path.html
+- Agents module tutorial: https://ooiai.github.io/mosaic/agents.html
 - Operations tutorial: https://ooiai.github.io/mosaic/operations.html
 - Chinese docs site: https://ooiai.github.io/mosaic/cn/
 - 中文路径导航: https://ooiai.github.io/mosaic/cn/guide.html
 - 中文 10 分钟上手: https://ooiai.github.io/mosaic/cn/quickstart.html
+- 中文分阶段学习: https://ooiai.github.io/mosaic/cn/learning-path.html
+- 中文 Agents 教程: https://ooiai.github.io/mosaic/cn/agents.html
 - 中文生产运维教程: https://ooiai.github.io/mosaic/cn/operations.html
 - Chinese README: `README_CN.md`
 - Legacy long docs: `README.legacy.md`, `README_CN.legacy.md`

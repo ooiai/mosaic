@@ -5,8 +5,10 @@
   const index = {
     en: [
       { title: "Overview", url: "index.html", desc: "Project scope and first commands", keywords: "overview intro start" },
-      { title: "Guide Hub", url: "guide.html", desc: "Choose quickstart or operations path", keywords: "guide hub path quickstart operations" },
+      { title: "Guide Hub", url: "guide.html", desc: "Choose quickstart, learning path, agents, or operations", keywords: "guide hub path quickstart learning agents operations" },
       { title: "Quickstart", url: "quickstart.html", desc: "10-minute first success path", keywords: "quickstart 10 minute setup ask chat" },
+      { title: "Learning Path", url: "learning-path.html", desc: "Detailed stage-by-stage learning from basic to advanced", keywords: "learning path step by step beginner advanced" },
+      { title: "Agents Guide", url: "agents.html", desc: "Module tutorial for agents and route management", keywords: "agents route add update default ask chat" },
       { title: "Operations", url: "operations.html", desc: "Production runbook for channels gateway policy diagnostics", keywords: "operations runbook channels gateway approvals sandbox logs" },
       { title: "Install", url: "install.html", desc: "Install on macOS Linux Windows", keywords: "brew powershell install.sh" },
       { title: "Configure", url: "configure.html", desc: "Provider model profile setup", keywords: "azure openai base-url api-key-env" },
@@ -14,8 +16,10 @@
     ],
     zh: [
       { title: "总览", url: "index.html", desc: "项目范围与首批命令", keywords: "总览 入门" },
-      { title: "路径导航", url: "guide.html", desc: "在 10 分钟上手与生产运维之间选择路径", keywords: "路径 导航 10分钟 上手 运维" },
+      { title: "路径导航", url: "guide.html", desc: "在入门、分阶段学习、Agents 专项、生产运维间选择路径", keywords: "路径 导航 10分钟 分阶段 agents 运维" },
       { title: "10 分钟上手", url: "quickstart.html", desc: "最短路径跑通 setup ask chat", keywords: "10分钟 上手 setup ask chat" },
+      { title: "分阶段学习", url: "learning-path.html", desc: "从最简单到复杂的阶段化教程", keywords: "学习路径 分阶段 一步一步 入门 进阶" },
+      { title: "Agents 专项", url: "agents.html", desc: "agents 与路由管理的详细教程", keywords: "agents 路由 add update default ask chat" },
       { title: "生产运维", url: "operations.html", desc: "日常稳定运行的通道、网关、策略与诊断", keywords: "运维 通道 网关 approvals sandbox logs" },
       { title: "安装", url: "install.html", desc: "macOS Linux Windows 安装方式", keywords: "brew powershell 安装脚本" },
       { title: "配置", url: "configure.html", desc: "provider model profile 配置", keywords: "azure openai base-url api-key-env" },
@@ -154,7 +158,7 @@
         })
         .filter((x) => x.score > 0)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 8);
+        .slice(0, 12);
 
       if (!hits.length) {
         panel.innerHTML = `<div class="search-empty">${lang === "zh" ? "没有匹配结果" : "No matching results"}</div>`;

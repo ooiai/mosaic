@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 文档 | 分阶段学习路径</title>
+    <meta name="description" content="从最简单到复杂的 Mosaic 分阶段实战教程。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">跳转到正文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>          <a class="active" href="guide.html">路径</a>          <a href="quickstart.html">10 分钟上手</a>          <a href="operations.html">生产运维</a>          <a href="install.html">安装</a>          <a href="configure.html">配置</a>          <a href="troubleshooting.html">排障</a>          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="../learning-path.html">EN</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">学习路径</p>
+        <a class="side-link" href="index.html">总览</a>
+        <a class="side-link" href="guide.html">路径导航</a>
+        <a class="side-link" href="quickstart.html">10 分钟上手</a>
+        <a class="side-link active" href="learning-path.html">分阶段学习</a>
+        <a class="side-link" href="agents.html">Agents 专项</a>
+        <a class="side-link" href="operations.html">生产运维</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>分阶段学习</span></nav>
+          <p class="kicker">学习路径</p>
+          <h1>从最简单到复杂（一步一步）</h1>
+          <p class="lead">
+            这是完整教学主线。按阶段顺序执行。每个阶段都有目标、命令和完成判定。
+          </p>
+
+          <div class="callout">
+            <strong>运行模式：</strong>示例统一使用 <code>--project-state</code>，状态落在当前项目 <code>.mosaic/</code>。
+          </div>
+
+          <h2>阶段 0：环境与安装校验</h2>
+          <pre><code>mosaic --version
+mosaic --help
+mosaic --project-state directory --ensure --check-writable</code></pre>
+          <p>完成判定：CLI 可执行，状态目录可写。</p>
+
+          <h2>阶段 1：首个 provider 初始化</h2>
+          <pre><code>export OPENAI_API_KEY=&lt;your_key&gt;
+
+mosaic --project-state --profile default setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini</code></pre>
+          <p>完成判定：setup 成功，配置文件已生成。</p>
+
+          <h2>阶段 2：连通性与模型基线</h2>
+          <pre><code>mosaic --project-state --profile default models list
+mosaic --project-state --profile default models status
+mosaic --project-state --profile default health
+mosaic --project-state --profile default status</code></pre>
+          <p>完成判定：models list 返回有效模型，health 无阻断错误。</p>
+
+          <h2>阶段 3：首个对话链路</h2>
+          <pre><code>mosaic --project-state --profile default ask "hello"
+mosaic --project-state --profile default chat</code></pre>
+          <pre><code>mosaic --project-state session list
+mosaic --project-state session show &lt;session_id&gt;</code></pre>
+          <p>完成判定：至少一个 ask 与一个 chat 会话已记录。</p>
+
+          <h2>阶段 4：多 profile（Azure 示例）</h2>
+          <pre><code>export AZURE_OPENAI_BASE_URL="https://&lt;resource&gt;.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="&lt;your_key&gt;"
+
+mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile az-openai models list</code></pre>
+          <p>完成判定：多个 profile 可以独立工作。</p>
+
+          <h2>阶段 5：通道与通知</h2>
+          <pre><code>mosaic --project-state channels add --name local-terminal --kind terminal
+mosaic --project-state channels list
+mosaic --project-state channels test &lt;channel_id&gt;
+mosaic --project-state channels send &lt;channel_id&gt; --text "stage-5-ok"</code></pre>
+          <p>完成判定：至少一个通道 test/send 都成功。</p>
+
+          <h2>阶段 6：网关生命周期</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway status
+mosaic --project-state gateway probe
+mosaic --project-state gateway call status</code></pre>
+          <p>完成判定：probe 与 call 返回成功状态。</p>
+
+          <h2>阶段 7：安全策略与门禁</h2>
+          <pre><code>mosaic --project-state approvals get
+mosaic --project-state approvals set confirm
+mosaic --project-state approvals allowlist add "git status"
+
+mosaic --project-state sandbox get
+mosaic --project-state sandbox set standard
+mosaic --project-state sandbox explain --profile standard</code></pre>
+          <p>完成判定：审批与沙箱策略符合预期。</p>
+
+          <h2>阶段 8：日常可观测</h2>
+          <pre><code>mosaic --project-state dashboard
+mosaic --project-state doctor
+mosaic --project-state logs --tail 120
+mosaic --project-state system presence</code></pre>
+          <p>完成判定：dashboard/doctor/logs 输出可用于日常运维。</p>
+
+          <h2>阶段 9：Agents 模块入门</h2>
+          <pre><code>mosaic --project-state agents list
+mosaic --project-state agents add --name Writer --id writer --set-default --route ask --route chat
+mosaic --project-state agents show writer
+mosaic --project-state ask --agent writer "summarize this repo"</code></pre>
+          <p>完成判定：自定义 agent 能创建并用于 ask/chat。</p>
+
+          <h2>阶段 10：高级检查与发版门禁</h2>
+          <pre><code>mosaic --project-state memory index --path .
+mosaic --project-state memory search "retry"
+mosaic --project-state security audit --path . --deep
+mosaic --project-state --json status</code></pre>
+          <ul>
+            <li>核心命令链路可用：<code>setup/models/ask/chat/session</code>。</li>
+            <li>主通道与网关健康。</li>
+            <li>策略与诊断输出稳定。</li>
+            <li><code>--json</code> 输出可被脚本解析。</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="quickstart.html">10 分钟上手</a>
+            <a href="agents.html">Agents 专项</a>
+            <a href="operations.html">生产运维</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>
