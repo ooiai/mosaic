@@ -85,10 +85,18 @@
       used.add(id);
       heading.id = id;
 
+      if (!heading.querySelector(".heading-anchor")) {
+        const anchor = document.createElement("a");
+        anchor.className = "heading-anchor";
+        anchor.href = `#${id}`;
+        anchor.textContent = "#";
+        heading.prepend(anchor);
+      }
+
       const a = document.createElement("a");
       a.className = `toc-link ${level === "h3" ? "toc-sub" : ""}`;
       a.href = `#${id}`;
-      a.textContent = heading.textContent || id;
+      a.textContent = heading.textContent ? heading.textContent.replace(/^#\s*/, "") : id;
       container.appendChild(a);
       links.push({ id, link: a });
     });
