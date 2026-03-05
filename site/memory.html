@@ -33,11 +33,14 @@
         <p class="sidebar-title">Modules</p>
         <a class="side-link" href="learning-path.html">Learning Path</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link active" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -64,23 +67,55 @@
 mosaic --project-state memory search "agents route" --limit 10</code></pre>
           <p>Expected: relevant snippets are returned for your query terms.</p>
 
-          <h2>Step 4: Re-index with tighter scope</h2>
-          <pre><code>mosaic --project-state memory index --path cli --max-files 300
-mosaic --project-state memory status</code></pre>
-          <p>Use scoped index runs for faster iteration on large repositories.</p>
+          <h2>Step 4: Re-index with tighter scope and namespace</h2>
+          <pre><code>mosaic --project-state memory index \
+  --path cli \
+  --namespace ops \
+  --max-files 300 \
+  --incremental \
+  --stale-after-hours 24 \
+  --retain-missing
+mosaic --project-state memory status --namespace ops</code></pre>
+          <p>Use namespace + incremental runs for faster iteration and safer memory lifecycle control.</p>
 
           <h2>Step 5: Clear memory cache when needed</h2>
           <pre><code>mosaic --project-state memory clear
 mosaic --project-state memory status</code></pre>
           <p>Use clear after major repo reshaping or test resets.</p>
 
-          <h2>Step 6: CI-friendly JSON checks</h2>
-          <pre><code>mosaic --project-state --json memory status
-mosaic --project-state --json memory search "security" --limit 5</code></pre>
+          <h2>Step 6: Review and prune namespaces</h2>
+          <pre><code>mosaic --project-state memory status --all-namespaces
+mosaic --project-state memory prune --max-namespaces 5 --dry-run
+mosaic --project-state memory prune --max-documents-per-namespace 1000 --dry-run
+mosaic --project-state memory prune --max-namespaces 5 --max-age-hours 168</code></pre>
+          <p>`memory prune` now supports size quota cleanup per namespace and returns reason breakdown in JSON output.</p>
+
+          <h2>Step 7: CI-friendly JSON checks</h2>
+          <pre><code>mosaic --project-state --json memory status --namespace ops
+mosaic --project-state --json memory search "security" --namespace ops --limit 5</code></pre>
+
+          <h2>Step 8: Persist cleanup policy and run it</h2>
+          <pre><code>mosaic --project-state memory policy get
+mosaic --project-state memory policy set --enabled true --max-documents-per-namespace 1000 --min-interval-minutes 60
+mosaic --project-state memory policy apply
+mosaic --project-state --json memory policy apply --dry-run --force</code></pre>
+
+          <h2>Step 9: Run policy automatically via cron event</h2>
+          <pre><code>mosaic --project-state --json cron add \
+  --name memory-cleanup \
+  --event mosaic.memory.cleanup \
+  --every 3600 \
+  --data '{"dry_run":false}'
+mosaic --project-state --yes --json cron tick
+mosaic --project-state --json cron run &lt;job-id&gt; --data '{"force":true}'</code></pre>
+          <p>`mosaic.memory.cleanup` (or `memory.cleanup`) uses persisted policy limits and supports payload booleans `dry_run` and `force`.</p>
 
           <div class="quick-links">
             <a href="learning-path.html">Learning Path</a>
+            <a href="channels.html">Channels Guide</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">Operations</a>
+            <a href="regression.html">Regression Guide</a>
             <a href="troubleshooting.html">Troubleshooting</a>
           </div>
         </article>

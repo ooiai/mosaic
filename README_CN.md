@@ -8,22 +8,36 @@ Mosaic 当前是独立重写路线，重点是“可真实使用的 CLI 核心�
 - 中文路径导航: https://ooiai.github.io/mosaic/cn/guide.html
 - 中文 10 分钟上手: https://ooiai.github.io/mosaic/cn/quickstart.html
 - 中文分阶段学习: https://ooiai.github.io/mosaic/cn/learning-path.html
+- 中文 Models 与 Profiles 教程: https://ooiai.github.io/mosaic/cn/models-profiles.html
+- 中文 Sessions 教程: https://ooiai.github.io/mosaic/cn/sessions.html
+- 中文策略教程: https://ooiai.github.io/mosaic/cn/policy.html
+- 中文 Azure 运维剧本: https://ooiai.github.io/mosaic/cn/playbook-azure-ops.html
 - 中文 Agents 教程: https://ooiai.github.io/mosaic/cn/agents.html
+- 中文 Channels 教程: https://ooiai.github.io/mosaic/cn/channels.html
 - 中文 Memory 教程: https://ooiai.github.io/mosaic/cn/memory.html
 - 中文 Plugins 教程: https://ooiai.github.io/mosaic/cn/plugins.html
 - 中文 Skills 教程: https://ooiai.github.io/mosaic/cn/skills.html
 - 中文 Gateway 教程: https://ooiai.github.io/mosaic/cn/gateway.html
+- 中文 Gateway Call API: https://ooiai.github.io/mosaic/cn/gateway-call.html
 - 中文生产运维教程: https://ooiai.github.io/mosaic/cn/operations.html
+- 中文回归测试教程: https://ooiai.github.io/mosaic/cn/regression.html
 - 英文站点: https://ooiai.github.io/mosaic/
 - Guide hub: https://ooiai.github.io/mosaic/guide.html
 - Quickstart tutorial: https://ooiai.github.io/mosaic/quickstart.html
 - Learning path tutorial: https://ooiai.github.io/mosaic/learning-path.html
+- Models & profiles tutorial: https://ooiai.github.io/mosaic/models-profiles.html
+- Sessions tutorial: https://ooiai.github.io/mosaic/sessions.html
+- Policy tutorial (approvals + sandbox): https://ooiai.github.io/mosaic/policy.html
+- Azure end-to-end ops playbook: https://ooiai.github.io/mosaic/playbook-azure-ops.html
 - Agents module tutorial: https://ooiai.github.io/mosaic/agents.html
+- Channels module tutorial: https://ooiai.github.io/mosaic/channels.html
 - Memory module tutorial: https://ooiai.github.io/mosaic/memory.html
 - Plugins module tutorial: https://ooiai.github.io/mosaic/plugins.html
 - Skills module tutorial: https://ooiai.github.io/mosaic/skills.html
 - Gateway module tutorial: https://ooiai.github.io/mosaic/gateway.html
+- Gateway Call API tutorial: https://ooiai.github.io/mosaic/gateway-call.html
 - Operations tutorial: https://ooiai.github.io/mosaic/operations.html
+- Regression tutorial: https://ooiai.github.io/mosaic/regression.html
 - 英文 README: `README.md`
 - 旧版长文档备份: `README.legacy.md`, `README_CN.legacy.md`
 

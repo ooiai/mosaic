@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | Azure End-to-End Ops Playbook</title>
+    <meta name="description" content="One end-to-end Azure playbook: profile, models, channels, gateway, policy, and regression." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>
+          <a class="active" href="guide.html">Guide</a>
+          <a href="quickstart.html">Quickstart</a>
+          <a href="operations.html">Operations</a>
+          <a href="install.html">Install</a>
+          <a href="configure.html">Configure</a>
+          <a href="troubleshooting.html">Troubleshooting</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/playbook-azure-ops.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Playbook</p>
+        <a class="side-link" href="models-profiles.html">Models & Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions</a>
+        <a class="side-link" href="channels.html">Channels</a>
+        <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="policy.html">Policy</a>
+        <a class="side-link" href="regression.html">Regression</a>
+        <a class="side-link active" href="playbook-azure-ops.html">Azure Ops Playbook</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Azure Ops Playbook</span></nav>
+          <p class="kicker">Playbook</p>
+          <h1>Azure End-to-End Operations Playbook</h1>
+          <p class="lead">Run this once to build a production-grade baseline: Azure profile, model routing, channels, gateway, safety policy, observability, and regression gates.</p>
+
+          <div class="callout warn">
+            <strong>Important:</strong> Azure base URL should be <code>https://&lt;resource&gt;.openai.azure.com/openai/v1</code>. Do not append another <code>/v1</code>.
+          </div>
+
+          <h2>Step 0: Environment prerequisites</h2>
+          <pre><code>mosaic --version
+mosaic --project-state directory --ensure --check-writable
+
+export AZURE_OPENAI_BASE_URL="https://&lt;resource&gt;.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="&lt;your_key&gt;"</code></pre>
+          <pre><code># optional: run one command for the whole playbook
+cd cli
+./scripts/azure_ops_playbook.sh --profile az-openai --run-regression</code></pre>
+          <pre><code># machine-readable summary output
+./scripts/azure_ops_playbook.sh \
+  --profile az-openai \
+  --json-summary \
+  --summary-out reports/azure-playbook-summary.json</code></pre>
+
+          <h2>Step 1: Create Azure profile</h2>
+          <pre><code>mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile az-openai configure --show</code></pre>
+
+          <h2>Step 2: Verify model visibility and routing</h2>
+          <pre><code>mosaic --project-state --profile az-openai models list
+mosaic --project-state --profile az-openai models status
+mosaic --project-state --profile az-openai models aliases set fast gpt-4o-mini
+mosaic --project-state --profile az-openai models fallbacks add gpt-4.1-mini
+mosaic --project-state --profile az-openai models aliases list
+mosaic --project-state --profile az-openai models fallbacks list</code></pre>
+
+          <h2>Step 3: Core ask/chat/session chain</h2>
+          <pre><code>mosaic --project-state --profile az-openai ask "hello from azure profile"
+mosaic --project-state --profile az-openai chat
+mosaic --project-state --profile az-openai session list</code></pre>
+
+          <h2>Step 4: Add channels</h2>
+          <pre><code># terminal channel (always recommended)
+mosaic --project-state channels add --name local-terminal --kind terminal
+
+# optional Slack webhook channel
+mosaic --project-state channels add \
+  --name team-slack \
+  --kind slack_webhook \
+  --endpoint https://hooks.slack.com/services/XXX/YYY/ZZZ
+
+# optional Telegram bot channel
+export MOSAIC_TELEGRAM_BOT_TOKEN=&lt;bot_token&gt;
+mosaic --project-state channels add \
+  --name team-telegram \
+  --kind telegram_bot \
+  --chat-id &lt;chat_id&gt; \
+  --token-env MOSAIC_TELEGRAM_BOT_TOKEN
+
+mosaic --project-state channels list
+mosaic --project-state channels status</code></pre>
+
+          <h2>Step 5: Test channel delivery</h2>
+          <pre><code>mosaic --project-state channels test &lt;channel_id&gt;
+mosaic --project-state channels send &lt;channel_id&gt; --text "azure playbook send ok"
+mosaic --project-state channels logs --channel &lt;channel_id&gt; --tail 20</code></pre>
+
+          <h2>Step 6: Operate gateway lifecycle</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway probe
+mosaic --project-state gateway call status --params '{"detail":true}'
+mosaic --project-state gateway health --verbose</code></pre>
+
+          <h2>Step 7: Apply safety baseline</h2>
+          <pre><code>mosaic --project-state approvals set confirm
+mosaic --project-state approvals allowlist add "git status"
+mosaic --project-state sandbox set standard
+mosaic --project-state safety check --command "git status"
+mosaic --project-state safety check --command "curl https://example.com"</code></pre>
+
+          <h2>Step 8: Observability baseline</h2>
+          <pre><code>mosaic --project-state status
+mosaic --project-state health
+mosaic --project-state doctor
+mosaic --project-state logs --tail 120
+mosaic --project-state dashboard
+mosaic --project-state safety report --audit-tail 50 --compare-window 24h</code></pre>
+
+          <h2>Step 9: Regression gate before release</h2>
+          <pre><code>cd cli
+./scripts/run_regression_suite.sh
+
+# optional live smoke with your Azure profile
+LIVE=1 \
+BASE_URL="$AZURE_OPENAI_BASE_URL" \
+API_KEY_ENV=AZURE_OPENAI_API_KEY \
+MODEL=gpt-4o-mini \
+./scripts/tutorial_regression.sh --profile az-openai</code></pre>
+
+          <h2>Acceptance checklist</h2>
+          <ul>
+            <li>Azure profile passes <code>setup/models list/ask</code>.</li>
+            <li>At least one channel passes <code>test + send</code>.</li>
+            <li>Gateway <code>probe + call</code> are healthy.</li>
+            <li>Policy baseline active: <code>approvals=confirm</code>, <code>sandbox=standard</code>.</li>
+            <li>Regression scripts complete without critical failures.</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="models-profiles.html">Models & Profiles</a>
+            <a href="channels.html">Channels Guide</a>
+            <a href="gateway-call.html">Gateway Call API</a>
+            <a href="policy.html">Policy Guide</a>
+            <a href="regression.html">Regression Guide</a>
+            <a href="operations.html">Operations</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

@@ -9,6 +9,8 @@ mosaic --project-state security audit --path .
 mosaic --project-state security audit --path . --deep
 mosaic --project-state security audit --path . --update-baseline
 mosaic --project-state security audit --path . --no-baseline
+mosaic --project-state security audit --path . --min-severity medium
+mosaic --project-state security audit --path . --category supply_chain --category cors --top 20
 mosaic --project-state security audit --path . --sarif
 mosaic --project-state security audit --path . --sarif-output scan.sarif
 
@@ -35,6 +37,11 @@ mosaic --project-state security baseline clear
   - `fingerprint`
   - `severity`, `category`, `title`, `detail`
   - `path`, `line`, `suggestion`
+- `filters`
+  - `min_severity`, `categories`, `top`, `filtered_out`
+- `dimensions`
+  - `categories` (count by category)
+  - `severities.high|medium|low`
 - `baseline`
   - `enabled`, `updated`, `added`, `path`
 - `sarif_output` (when `--sarif-output` is used)
@@ -46,13 +53,19 @@ mosaic --project-state security baseline clear
 - AWS access key style pattern (`AKIA...`)
 - `curl ... | sh/bash` patterns
 - Plain `http://` endpoint detection
+- TLS verification disabled patterns (`InsecureSkipVerify=true`, `rejectUnauthorized=false`, etc.)
 - Wildcard CORS header (`Access-Control-Allow-Origin: *`)
+- Weak hash usage (`md5(...)`, `sha1(...)`)
+- Default credential literals (`changeme`, `default`, `123456`, etc.)
 - `eval()` usage detection
 
 ## Limits
 
 - `--max-files` (default `800`)
 - `--max-file-size` (default `262144` bytes)
+- `--min-severity <low|medium|high>` to keep only findings at/above a severity threshold
+- `--category <name>` (repeatable) to keep only selected categories
+- `--top <n>` to cap returned findings after sorting by severity/path/line
 - Skips common folders: `.git`, `target`, `node_modules`, `.pnpm-store`, `.mosaic`
 
 ## Baseline

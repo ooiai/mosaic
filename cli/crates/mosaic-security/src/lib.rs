@@ -369,10 +369,13 @@ impl SecurityAuditor {
 #[derive(Debug)]
 struct Rules {
     hardcoded_secret: Regex,
+    default_secret_literal: Regex,
     aws_access_key: Regex,
     insecure_http: Regex,
+    insecure_tls_disable: Regex,
     curl_pipe_shell: Regex,
     wildcard_cors: Regex,
+    weak_hash_usage: Regex,
     javascript_eval: Regex,
 }
 
@@ -383,14 +386,24 @@ impl Rules {
                 r#"(?i)\b(api[_-]?key|secret|token|password)\b[^\n]{0,48}[:=][^\n]{0,8}["'][^"'\s]{12,}["']"#,
             )
             .map_err(|err| MosaicError::Validation(format!("invalid regex hardcoded_secret: {err}")))?,
+            default_secret_literal: Regex::new(
+                r#"(?i)\b(api[_-]?key|secret|token|password|passwd|jwt[_-]?secret)\b[^\n]{0,48}[:=][^\n]{0,8}["'](changeme|change_me|default|password|123456|admin)["']"#,
+            )
+            .map_err(|err| MosaicError::Validation(format!("invalid regex default_secret_literal: {err}")))?,
             aws_access_key: Regex::new(r"\bAKIA[0-9A-Z]{16}\b")
                 .map_err(|err| MosaicError::Validation(format!("invalid regex aws_access_key: {err}")))?,
             insecure_http: Regex::new(r#"http://[^\s"'<>]+"#)
                 .map_err(|err| MosaicError::Validation(format!("invalid regex insecure_http: {err}")))?,
+            insecure_tls_disable: Regex::new(
+                r#"(?i)(insecureskipverify\s*[:=]\s*true|rejectunauthorized\s*[:=]\s*false|tlsinsecure\s*[:=]\s*true|verify\s*[:=]\s*false)"#,
+            )
+            .map_err(|err| MosaicError::Validation(format!("invalid regex insecure_tls_disable: {err}")))?,
             curl_pipe_shell: Regex::new(r"(?i)curl\s+[^\n|]+\|\s*(sh|bash)")
                 .map_err(|err| MosaicError::Validation(format!("invalid regex curl_pipe_shell: {err}")))?,
             wildcard_cors: Regex::new(r#"(?i)access-control-allow-origin\s*[:=]\s*["']\*["']"#)
                 .map_err(|err| MosaicError::Validation(format!("invalid regex wildcard_cors: {err}")))?,
+            weak_hash_usage: Regex::new(r"(?i)\b(md5|sha1)\s*\(")
+                .map_err(|err| MosaicError::Validation(format!("invalid regex weak_hash_usage: {err}")))?,
             javascript_eval: Regex::new(r"\beval\s*\(")
                 .map_err(|err| MosaicError::Validation(format!("invalid regex javascript_eval: {err}")))?,
         })
@@ -468,6 +481,28 @@ fn scan_content(
             );
         }
 
+        if rules.default_secret_literal.is_match(line) {
+            push_finding(
+                findings,
+                keys,
+                SecurityFinding {
+                    id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
+                    severity: SecuritySeverity::Medium,
+                    category: "credential_hygiene".to_string(),
+                    title: "Default credential literal detected".to_string(),
+                    detail: "Secret-like variable appears to use a default placeholder value."
+                        .to_string(),
+                    path: path.to_string(),
+                    line: Some(line_number + 1),
+                    suggestion: Some(
+                        "Replace defaults with rotated secrets provided by runtime secret storage."
+                            .to_string(),
+                    ),
+                },
+            );
+        }
+
         if rules.curl_pipe_shell.is_match(line) {
             push_finding(
                 findings,
@@ -507,6 +542,27 @@ fn scan_content(
             );
         }
 
+        if rules.insecure_tls_disable.is_match(line) {
+            push_finding(
+                findings,
+                keys,
+                SecurityFinding {
+                    id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
+                    severity: SecuritySeverity::High,
+                    category: "transport_security".to_string(),
+                    title: "TLS verification disabled".to_string(),
+                    detail: "Code disables TLS certificate verification.".to_string(),
+                    path: path.to_string(),
+                    line: Some(line_number + 1),
+                    suggestion: Some(
+                        "Enable certificate verification and trust only approved roots."
+                            .to_string(),
+                    ),
+                },
+            );
+        }
+
         if rules.wildcard_cors.is_match(line) {
             push_finding(
                 findings,
@@ -522,6 +578,28 @@ fn scan_content(
                     line: Some(line_number + 1),
                     suggestion: Some(
                         "Use explicit trusted origins instead of wildcard.".to_string(),
+                    ),
+                },
+            );
+        }
+
+        if rules.weak_hash_usage.is_match(line) {
+            push_finding(
+                findings,
+                keys,
+                SecurityFinding {
+                    id: format!("sec_{}", uuid::Uuid::new_v4()),
+                    fingerprint: String::new(),
+                    severity: SecuritySeverity::Low,
+                    category: "crypto_hardening".to_string(),
+                    title: "Weak hash function usage detected".to_string(),
+                    detail: "Detected md5/sha1 usage which is weak for security-sensitive contexts."
+                        .to_string(),
+                    path: path.to_string(),
+                    line: Some(line_number + 1),
+                    suggestion: Some(
+                        "Prefer modern hashes like SHA-256 (or password KDFs such as Argon2)."
+                            .to_string(),
                     ),
                 },
             );
@@ -758,6 +836,37 @@ mod tests {
                 .findings
                 .iter()
                 .any(|finding| finding.category == "transport_security")
+        );
+    }
+
+    #[test]
+    fn audit_detects_tls_disable_and_weak_hash() {
+        let temp = tempdir().expect("tempdir");
+        std::fs::write(
+            temp.path().join("tls.js"),
+            "const opts = { rejectUnauthorized: false };\nconst value = sha1(payload);",
+        )
+        .expect("write tls fixture");
+
+        let auditor = SecurityAuditor::new();
+        let report = auditor
+            .audit(SecurityAuditOptions {
+                root: temp.path().to_path_buf(),
+                ..SecurityAuditOptions::default()
+            })
+            .expect("audit report");
+
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.title == "TLS verification disabled")
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.category == "crypto_hardening")
         );
     }
 

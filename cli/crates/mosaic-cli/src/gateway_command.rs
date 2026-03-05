@@ -557,6 +557,194 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                 }
             }
         }
+        GatewayCommand::Diagnose { method, params } => {
+            let requested_method = method.unwrap_or_else(|| "status".to_string());
+            let parsed_params = params
+                .as_deref()
+                .map(|value| parse_json_input(value, "gateway diagnose params"))
+                .transpose()?;
+
+            if gateway_test_mode() {
+                let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
+                if !state.as_ref().is_some_and(|value| value.running) {
+                    return Err(MosaicError::GatewayUnavailable(
+                        "gateway is not running in test mode".to_string(),
+                    ));
+                }
+
+                let steps = vec![
+                    json!({
+                        "name": "probe",
+                        "ok": true,
+                        "latency_ms": 0u128,
+                        "detail": "gateway test mode probe",
+                        "error_code": Value::Null,
+                    }),
+                    json!({
+                        "name": "discover",
+                        "ok": true,
+                        "latency_ms": 0u128,
+                        "detail": "gateway test mode discover",
+                        "error_code": Value::Null,
+                    }),
+                    json!({
+                        "name": "call",
+                        "ok": true,
+                        "latency_ms": 0u128,
+                        "detail": format!("gateway test mode call: {}", requested_method),
+                        "error_code": Value::Null,
+                    }),
+                ];
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "diagnose": {
+                            "target": { "host": "127.0.0.1", "port": 8787 },
+                            "method": requested_method,
+                            "params": parsed_params,
+                            "steps": steps,
+                            "summary": {
+                                "total": 3,
+                                "passed": 3,
+                                "failed": 0,
+                            }
+                        }
+                    }));
+                } else {
+                    println!("gateway diagnose (test mode)");
+                    println!("target: 127.0.0.1:8787");
+                    println!("method: {}", requested_method);
+                    println!("steps: total=3 passed=3 failed=0");
+                    println!("- probe: ok");
+                    println!("- discover: ok");
+                    println!("- call: ok");
+                }
+                return Ok(());
+            }
+
+            let (host, port) = resolve_gateway_target(&gateway_path, &gateway_service_path)?;
+            let client = HttpGatewayClient::new(&host, port)?;
+            let mut steps = Vec::new();
+            let mut passed = 0usize;
+            let mut failed = 0usize;
+
+            let probe_started = std::time::Instant::now();
+            match client.probe().await {
+                Ok(probe) => {
+                    passed += 1;
+                    steps.push(json!({
+                        "name": "probe",
+                        "ok": true,
+                        "latency_ms": probe_started.elapsed().as_millis(),
+                        "detail": probe.detail,
+                        "error_code": Value::Null,
+                    }));
+                }
+                Err(err) => {
+                    failed += 1;
+                    let code = err.code().to_string();
+                    steps.push(json!({
+                        "name": "probe",
+                        "ok": false,
+                        "latency_ms": probe_started.elapsed().as_millis(),
+                        "detail": err.to_string(),
+                        "error_code": code,
+                    }));
+                }
+            }
+
+            let discover_started = std::time::Instant::now();
+            match client.discover().await {
+                Ok(discovery) => {
+                    passed += 1;
+                    steps.push(json!({
+                        "name": "discover",
+                        "ok": true,
+                        "latency_ms": discover_started.elapsed().as_millis(),
+                        "detail": format!("methods={}", discovery.methods.len()),
+                        "methods": discovery.methods,
+                        "error_code": Value::Null,
+                    }));
+                }
+                Err(err) => {
+                    failed += 1;
+                    let code = err.code().to_string();
+                    steps.push(json!({
+                        "name": "discover",
+                        "ok": false,
+                        "latency_ms": discover_started.elapsed().as_millis(),
+                        "detail": err.to_string(),
+                        "error_code": code,
+                    }));
+                }
+            }
+
+            let call_started = std::time::Instant::now();
+            let request = GatewayRequest::new(requested_method.clone(), parsed_params.clone());
+            match client.call(request).await {
+                Ok(response) => {
+                    passed += 1;
+                    steps.push(json!({
+                        "name": "call",
+                        "ok": true,
+                        "latency_ms": call_started.elapsed().as_millis(),
+                        "detail": format!("method '{}' callable", requested_method),
+                        "result_present": response.result.is_some(),
+                        "error_code": Value::Null,
+                    }));
+                }
+                Err(err) => {
+                    failed += 1;
+                    let code = err.code().to_string();
+                    steps.push(json!({
+                        "name": "call",
+                        "ok": false,
+                        "latency_ms": call_started.elapsed().as_millis(),
+                        "detail": err.to_string(),
+                        "error_code": code,
+                    }));
+                }
+            }
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "diagnose": {
+                        "target": { "host": host, "port": port },
+                        "method": requested_method,
+                        "params": parsed_params,
+                        "steps": steps,
+                        "summary": {
+                            "total": passed + failed,
+                            "passed": passed,
+                            "failed": failed,
+                        }
+                    }
+                }));
+            } else {
+                println!("gateway diagnose");
+                println!("target: {}:{}", host, port);
+                println!("method: {}", requested_method);
+                println!(
+                    "steps: total={} passed={} failed={}",
+                    passed + failed,
+                    passed,
+                    failed
+                );
+                for step in steps {
+                    println!(
+                        "- {}: {} ({})",
+                        step["name"].as_str().unwrap_or("-"),
+                        if step["ok"].as_bool().unwrap_or(false) {
+                            "ok"
+                        } else {
+                            "failed"
+                        },
+                        step["detail"].as_str().unwrap_or("-")
+                    );
+                }
+            }
+        }
         GatewayCommand::Stop => {
             let stop = stop_gateway_runtime(&gateway_path, true)?;
             let next = stop.state.ok_or_else(|| {

@@ -33,11 +33,14 @@
         <p class="sidebar-title">模块专题</p>
         <a class="side-link" href="learning-path.html">分阶段学习</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link active" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">生产运维</a>
+        <a class="side-link" href="regression.html">回归测试</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -71,23 +74,32 @@ mosaic --project-state gateway call status --params '{"detail":true}'
 mosaic --project-state --json gateway call status</code></pre>
           <p><code>call</code> 会把 <code>method</code> 与可选 JSON <code>params</code> 透传到当前网关服务。</p>
 
-          <h2>步骤 6：重启与停机</h2>
+          <h2>步骤 6：执行端到端诊断</h2>
+          <pre><code>mosaic --project-state gateway diagnose --method status
+mosaic --project-state --json gateway diagnose --method status --params '{"detail":true}'</code></pre>
+          <p><code>diagnose</code> 会依次执行 <code>probe -> discover -> call</code>，并输出每一步的健康状态、耗时和错误码。</p>
+
+          <h2>步骤 7：重启与停机</h2>
           <pre><code>mosaic --project-state gateway restart
 mosaic --project-state gateway stop</code></pre>
 
-          <h2>步骤 7：清理卸载</h2>
+          <h2>步骤 8：清理卸载</h2>
           <pre><code>mosaic --project-state gateway uninstall</code></pre>
 
-          <h2>步骤 8：运维验收清单</h2>
+          <h2>步骤 9：运维验收清单</h2>
           <ul>
             <li><code>status</code>、<code>health</code>、<code>probe</code> 全部成功。</li>
+            <li><code>diagnose</code> 在稳定环境下应为 failed=0。</li>
             <li><code>call status</code> 返回可用于自动化消费的有效结果。</li>
             <li>重启后网关仍保持健康。</li>
           </ul>
 
           <div class="quick-links">
+            <a href="channels.html">Channels 教程</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">生产运维</a>
             <a href="learning-path.html">分阶段学习</a>
+            <a href="regression.html">回归测试教程</a>
             <a href="troubleshooting.html">排障手册</a>
           </div>
         </article>

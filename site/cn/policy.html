@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 文档 | Approvals 与 Sandbox</title>
+    <meta name="description" content="approvals 与 sandbox 策略分步教程。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">跳转到正文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>
+          <a class="active" href="guide.html">路径</a>
+          <a href="quickstart.html">10 分钟上手</a>
+          <a href="operations.html">生产运维</a>
+          <a href="install.html">安装</a>
+          <a href="configure.html">配置</a>
+          <a href="troubleshooting.html">排障</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="../policy.html">EN</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">策略</p>
+        <a class="side-link" href="quickstart.html">10 分钟上手</a>
+        <a class="side-link" href="models-profiles.html">Models 与 Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions 教程</a>
+        <a class="side-link active" href="policy.html">Approvals 与 Sandbox</a>
+        <a class="side-link" href="operations.html">生产运维</a>
+        <a class="side-link" href="regression.html">回归测试</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>Approvals 与 Sandbox</span></nav>
+          <p class="kicker">Policy</p>
+          <h1>Approvals + Sandbox：实用策略基线</h1>
+          <p class="lead">用策略层控制高风险命令，建立可预期、可审计的本地运行安全基线。</p>
+
+          <h2>步骤 1：查看当前策略状态</h2>
+          <pre><code>mosaic --project-state approvals get
+mosaic --project-state sandbox get
+mosaic --project-state safety get</code></pre>
+
+          <h2>步骤 2：设置 approvals 模式</h2>
+          <pre><code>mosaic --project-state approvals set confirm
+mosaic --project-state approvals get
+
+# 更严格
+mosaic --project-state approvals set deny
+
+# 自动化白名单模式
+mosaic --project-state approvals set allowlist</code></pre>
+
+          <h2>步骤 3：管理 allowlist 前缀</h2>
+          <pre><code>mosaic --project-state approvals allowlist add "git status"
+mosaic --project-state approvals allowlist add "git diff"
+mosaic --project-state approvals allowlist list
+mosaic --project-state approvals allowlist remove "git diff"</code></pre>
+
+          <h2>步骤 4：按命令检查 approvals 判定</h2>
+          <pre><code>mosaic --project-state approvals check --command "git status"
+mosaic --project-state approvals check --command "rm -rf /tmp/x"</code></pre>
+
+          <h2>步骤 5：设置并解释 sandbox profile</h2>
+          <pre><code>mosaic --project-state sandbox list
+mosaic --project-state sandbox set standard
+mosaic --project-state sandbox explain --profile restricted
+mosaic --project-state sandbox explain --profile elevated</code></pre>
+
+          <h2>步骤 6：按命令检查 sandbox 判定</h2>
+          <pre><code>mosaic --project-state sandbox check --command "git status"
+mosaic --project-state sandbox check --command "curl https://example.com"</code></pre>
+
+          <h2>步骤 7：验证合并后的 safety 决策</h2>
+          <pre><code>mosaic --project-state safety check --command "git status"
+mosaic --project-state safety check --command "curl https://example.com"
+mosaic --project-state safety report --audit-tail 50 --compare-window 24h</code></pre>
+
+          <h2>步骤 8：团队默认建议</h2>
+          <ul>
+            <li>默认策略：<code>approvals=confirm</code> + <code>sandbox=standard</code>。</li>
+            <li><code>allowlist</code> 仅用于明确受控的 CI 前缀命令。</li>
+            <li>发版前固定执行 <code>doctor</code> 与 <code>safety report</code>。</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="models-profiles.html">Models 与 Profiles</a>
+            <a href="sessions.html">Sessions 教程</a>
+            <a href="operations.html">生产运维</a>
+            <a href="regression.html">回归测试教程</a>
+            <a href="troubleshooting.html">排障手册</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

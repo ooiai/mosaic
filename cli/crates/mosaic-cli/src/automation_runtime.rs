@@ -4,6 +4,10 @@ use serde_json::{Value, json};
 use mosaic_core::config::RunGuardMode;
 use mosaic_core::error::MosaicError;
 use mosaic_core::state::StatePaths;
+use mosaic_memory::{
+    MemoryCleanupPolicy, MemoryCleanupPolicyStore, MemoryPruneOptions, memory_cleanup_policy_path,
+    prune_memory_namespaces,
+};
 use mosaic_ops::{
     ApprovalStore, RuntimePolicy, SandboxStore, SystemEventStore, system_events_path,
 };
@@ -17,6 +21,9 @@ use super::{
     load_hooks_or_default, preview_text, save_hooks, webhook_events_dir, webhook_events_file_path,
 };
 
+const MEMORY_CLEANUP_EVENT: &str = "mosaic.memory.cleanup";
+const MEMORY_CLEANUP_EVENT_ALIAS: &str = "memory.cleanup";
+
 pub(super) fn dispatch_system_event(
     cli: &Cli,
     paths: &StatePaths,
@@ -25,11 +32,91 @@ pub(super) fn dispatch_system_event(
 ) -> Result<SystemEventDispatch> {
     let store = SystemEventStore::new(system_events_path(&paths.data_dir));
     let event = store.append_event(event_name, data.clone())?;
+    run_builtin_system_event_handlers(paths, event_name, &data)?;
     let hook_reports = run_hooks_for_system_event(cli, paths, event_name, data)?;
     Ok(SystemEventDispatch {
         event,
         hook_reports,
     })
+}
+
+fn run_builtin_system_event_handlers(
+    paths: &StatePaths,
+    event_name: &str,
+    data: &Value,
+) -> Result<()> {
+    match event_name {
+        MEMORY_CLEANUP_EVENT | MEMORY_CLEANUP_EVENT_ALIAS => {
+            execute_memory_cleanup_event(paths, event_name, data)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn execute_memory_cleanup_event(paths: &StatePaths, event_name: &str, data: &Value) -> Result<()> {
+    let dry_run = parse_optional_event_bool(event_name, data, "dry_run")?.unwrap_or(false);
+    let force = parse_optional_event_bool(event_name, data, "force")?.unwrap_or(false);
+
+    let store = MemoryCleanupPolicyStore::new(memory_cleanup_policy_path(&paths.policy_dir));
+    let policy = store.load_or_default()?;
+    if !policy.enabled {
+        return Ok(());
+    }
+    if !force
+        && let Some(wait_minutes) = memory_policy_remaining_wait_minutes(&policy, Utc::now())
+        && wait_minutes > 0
+    {
+        return Ok(());
+    }
+
+    let prune = prune_memory_namespaces(
+        &paths.data_dir,
+        MemoryPruneOptions {
+            max_namespaces: policy.max_namespaces,
+            max_age_hours: policy.max_age_hours,
+            max_documents_per_namespace: policy.max_documents_per_namespace,
+            dry_run,
+        },
+    )?;
+    if !dry_run {
+        let _ = store.mark_run(prune.removed_count)?;
+    }
+    Ok(())
+}
+
+fn parse_optional_event_bool(event_name: &str, data: &Value, key: &str) -> Result<Option<bool>> {
+    match data {
+        Value::Null => Ok(None),
+        Value::Object(map) => match map.get(key) {
+            None => Ok(None),
+            Some(Value::Bool(value)) => Ok(Some(*value)),
+            Some(_) => Err(MosaicError::Validation(format!(
+                "system event '{event_name}' field '{key}' must be a boolean"
+            ))),
+        },
+        _ => Err(MosaicError::Validation(format!(
+            "system event '{event_name}' data must be an object or null"
+        ))),
+    }
+}
+
+fn memory_policy_remaining_wait_minutes(
+    policy: &MemoryCleanupPolicy,
+    now: DateTime<Utc>,
+) -> Option<u64> {
+    let interval_minutes = policy.min_interval_minutes?;
+    let last_run_at = policy.last_run_at?;
+    let interval = i64::try_from(interval_minutes).ok()?;
+    let elapsed = now.signed_duration_since(last_run_at).num_minutes();
+    if elapsed >= interval {
+        return None;
+    }
+    let remaining = if elapsed <= 0 {
+        interval
+    } else {
+        interval - elapsed
+    };
+    u64::try_from(remaining).ok()
 }
 
 fn run_hooks_for_system_event(

@@ -35,6 +35,9 @@
         <a class="side-link active" href="guide.html">路径导航</a>
         <a class="side-link" href="quickstart.html">10 分钟上手</a>
         <a class="side-link" href="learning-path.html">分阶段学习</a>
+        <a class="side-link" href="models-profiles.html">Models 与 Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions 教程</a>
+        <a class="side-link" href="policy.html">策略教程</a>
         <a class="side-link" href="agents.html">Agents 专项</a>
         <a class="side-link" href="operations.html">生产运维</a>
         <a class="side-link" href="install.html">安装</a>
@@ -43,10 +46,13 @@
 
         <p class="sidebar-title">模块</p>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
+        <a class="side-link" href="regression.html">回归测试</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -70,14 +76,49 @@
               <a href="learning-path.html">进入分阶段学习</a>
             </section>
             <section class="doc-card">
+              <h3>Models 与 Profiles</h3>
+              <p>多 provider、多模型 alias/fallback、profile 安全变更。</p>
+              <a href="models-profiles.html">进入 Models 与 Profiles</a>
+            </section>
+            <section class="doc-card">
+              <h3>Sessions 生命周期</h3>
+              <p>会话创建、查看、恢复、清理与脚本化复用。</p>
+              <a href="sessions.html">进入 Sessions 教程</a>
+            </section>
+            <section class="doc-card">
+              <h3>策略基线</h3>
+              <p>approvals + sandbox 策略配置与命令级判定。</p>
+              <a href="policy.html">进入策略教程</a>
+            </section>
+            <section class="doc-card">
+              <h3>Azure 运维剧本</h3>
+              <p>一条完整可执行路径：Azure profile、channels、gateway、策略与回归门禁。</p>
+              <a href="playbook-azure-ops.html">进入 Azure 运维剧本</a>
+            </section>
+            <section class="doc-card">
               <h3>Agents 专项</h3>
               <p><code>agents</code> 与路由控制的完整分步教程。</p>
               <a href="agents.html">进入 Agents 教程</a>
             </section>
             <section class="doc-card">
+              <h3>Channels 模块</h3>
+              <p>Terminal/Slack/Telegram 通道运维与可靠投递验证。</p>
+              <a href="channels.html">进入 Channels 教程</a>
+            </section>
+            <section class="doc-card">
+              <h3>Gateway Call API</h3>
+              <p><code>gateway call</code> 的契约与自动化调用细节。</p>
+              <a href="gateway-call.html">进入 Gateway Call API</a>
+            </section>
+            <section class="doc-card">
               <h3>生产运维</h3>
               <p>面向日常稳定运行：channels、gateway、策略、诊断、回归门禁。</p>
               <a href="operations.html">进入生产运维</a>
+            </section>
+            <section class="doc-card">
+              <h3>回归测试教程</h3>
+              <p>从基础检查到发版门禁的脚本化回归路径。</p>
+              <a href="regression.html">进入回归测试教程</a>
             </section>
           </div>
 
@@ -103,8 +144,12 @@
           <p>适用于需要系统化掌握能力细节的场景。</p>
           <ul>
             <li>按 <a href="learning-path.html">分阶段学习</a> 从入门走到高级。</li>
+            <li>按 <a href="models-profiles.html">Models 与 Profiles</a> 固化模型路由与配置基线。</li>
+            <li>按 <a href="sessions.html">Sessions 教程</a> 建立可回放会话流程。</li>
+            <li>按 <a href="policy.html">策略教程</a> 建立 approvals/sandbox 安全基线。</li>
+            <li>按 <a href="playbook-azure-ops.html">Azure 运维剧本</a> 一次性跑通生产基线。</li>
             <li>按 <a href="agents.html">Agents 专项</a> 完整掌握 agent 与路由。</li>
-            <li>按模块教程补齐 <a href="memory.html">Memory</a>、<a href="plugins.html">Plugins</a>、<a href="skills.html">Skills</a>、<a href="gateway.html">Gateway</a>。</li>
+            <li>按模块教程补齐 <a href="channels.html">Channels</a>、<a href="memory.html">Memory</a>、<a href="plugins.html">Plugins</a>、<a href="skills.html">Skills</a>、<a href="gateway.html">Gateway</a>、<a href="gateway-call.html">Gateway Call API</a>。</li>
           </ul>
 
           <h2>建议顺序</h2>
@@ -113,14 +158,22 @@
             <li>再走完 <a href="learning-path.html">分阶段学习</a>。</li>
             <li>补完 <a href="agents.html">Agents 专项</a>。</li>
             <li>进入 <a href="operations.html">生产运维</a>。</li>
+            <li>发版前执行 <a href="regression.html">回归测试教程</a>中的门禁流程。</li>
             <li>把 <a href="troubleshooting.html">排障页</a> 作为运行手册兜底。</li>
           </ol>
 
           <div class="quick-links">
             <a href="quickstart.html">开始 10 分钟上手</a>
             <a href="learning-path.html">分阶段学习</a>
+            <a href="models-profiles.html">Models 与 Profiles</a>
+            <a href="sessions.html">Sessions 教程</a>
+            <a href="policy.html">策略教程</a>
+            <a href="playbook-azure-ops.html">Azure 运维剧本</a>
             <a href="agents.html">Agents 专项</a>
+            <a href="channels.html">Channels 教程</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">进入生产运维</a>
+            <a href="regression.html">回归测试教程</a>
             <a href="troubleshooting.html">排障手册</a>
           </div>
         </article>

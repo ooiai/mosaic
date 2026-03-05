@@ -35,12 +35,18 @@
         <a class="side-link" href="guide.html">Guide Hub</a>
         <a class="side-link" href="quickstart.html">Quickstart</a>
         <a class="side-link" href="learning-path.html">Learning Path</a>
+        <a class="side-link" href="models-profiles.html">Models & Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions</a>
+        <a class="side-link" href="policy.html">Policy</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link active" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
         <a class="side-link" href="configure.html">Configure</a>
         <a class="side-link" href="troubleshooting.html">Troubleshooting</a>
       </aside>
@@ -60,6 +66,7 @@ mosaic --project-state models status
 mosaic --project-state models aliases list
 mosaic --project-state models fallbacks list</code></pre>
           <p>Keep at least one fallback model for network/provider instability scenarios.</p>
+          <p>Detailed setup: <a href="models-profiles.html">Models & Profiles</a>.</p>
 
           <h2>2. Delivery channels (terminal/slack/telegram)</h2>
           <pre><code># add channels
@@ -72,6 +79,7 @@ mosaic --project-state channels list
 mosaic --project-state channels test &lt;channel_id&gt;
 mosaic --project-state channels capabilities
 mosaic --project-state channels status</code></pre>
+          <p>Detailed walkthrough: <a href="channels.html">Channels Guide</a>.</p>
 
           <h2>3. Gateway lifecycle</h2>
           <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
@@ -80,6 +88,7 @@ mosaic --project-state gateway status
 mosaic --project-state gateway probe
 mosaic --project-state gateway discover
 mosaic --project-state gateway call status</code></pre>
+          <p>Lifecycle details: <a href="gateway.html">Gateway Guide</a>. Call contract details: <a href="gateway-call.html">Gateway Call API</a>.</p>
           <pre><code># maintenance operations
 mosaic --project-state gateway restart
 mosaic --project-state gateway stop</code></pre>
@@ -92,6 +101,7 @@ mosaic --project-state approvals allowlist add "git status"
 mosaic --project-state sandbox get
 mosaic --project-state sandbox set standard
 mosaic --project-state sandbox explain --profile restricted</code></pre>
+          <p>Detailed setup: <a href="policy.html">Approvals & Sandbox Policy</a>.</p>
 
           <div class="callout warn">
             <strong>Team default:</strong> keep <code>approvals=confirm</code> and <code>sandbox=standard</code> unless you have a controlled reason to relax.
@@ -109,10 +119,11 @@ mosaic --project-state system presence
 mosaic --project-state system event deploy.started --data '{"env":"prod"}'</code></pre>
 
           <h2>6. Optional hardening checks</h2>
-          <pre><code>mosaic --project-state memory index --path .
+          <pre><code>mosaic --project-state memory index --path . --namespace ops --incremental --stale-after-hours 24 --retain-missing
 mosaic --project-state memory search "retry"
 
 mosaic --project-state security audit --path . --deep
+mosaic --project-state security audit --path . --min-severity medium --category supply_chain --category crypto_hardening --top 20
 mosaic --project-state --json security audit --path . --sarif --sarif-output reports/security.sarif.json</code></pre>
 
           <h2>7. Machine-readable operation mode</h2>
@@ -129,15 +140,28 @@ mosaic --project-state --json doctor</code></pre>
             <li><code>status/health/doctor/logs</code> output contains no blocking errors.</li>
             <li><code>--json</code> outputs are parsable by your CI scripts.</li>
           </ul>
+          <pre><code>cd cli
+./scripts/run_regression_suite.sh
+./scripts/tutorial_regression.sh
+# optional live smoke
+LIVE=1 BASE_URL=https://api.openai.com MODEL=gpt-4o-mini ./scripts/tutorial_regression.sh</code></pre>
+          <p>Full regression tutorial: <a href="regression.html">Regression Guide</a>.</p>
 
           <div class="quick-links">
             <a href="quickstart.html">Back to Quickstart</a>
             <a href="learning-path.html">Learning Path</a>
+            <a href="models-profiles.html">Models & Profiles</a>
+            <a href="sessions.html">Sessions Guide</a>
+            <a href="policy.html">Policy Guide</a>
+            <a href="playbook-azure-ops.html">Azure Playbook</a>
             <a href="agents.html">Agents Guide</a>
+            <a href="channels.html">Channels Guide</a>
             <a href="memory.html">Memory Guide</a>
             <a href="plugins.html">Plugins Guide</a>
             <a href="skills.html">Skills Guide</a>
             <a href="gateway.html">Gateway Guide</a>
+            <a href="gateway-call.html">Gateway Call API</a>
+            <a href="regression.html">Regression Guide</a>
             <a href="troubleshooting.html">Troubleshooting</a>
             <a href="guide.html">Guide Hub</a>
           </div>

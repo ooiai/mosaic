@@ -84,6 +84,49 @@
     },
     "ok": "bool"
   },
+  "logs_summary": {
+    "channel": "string",
+    "events": {
+      "items": [
+        {
+          "attempt": "number",
+          "channel_id": "string",
+          "deduplicated": "bool",
+          "delivery_status": "string",
+          "error": "null",
+          "http_status": "number",
+          "idempotency_key": "null",
+          "kind": "string",
+          "parse_mode": "null",
+          "rate_limited_ms": "null",
+          "text_preview": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "summary": {
+      "channels": {
+        "items": [
+          {
+            "channel_id": "string",
+            "failed_events": "number",
+            "last_error": "null",
+            "last_event_at": "string",
+            "success_events": "number",
+            "total_events": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "deduplicated_events": "number",
+      "failed_events": "number",
+      "probe_events": "number",
+      "success_events": "number",
+      "total_events": "number"
+    }
+  },
   "resolve": {
     "channel": "string",
     "entries": {

@@ -230,6 +230,28 @@ fn json_channels_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&logs);
 
+    let logs_summary = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "logs",
+                "--channel",
+                &channel_id,
+                "--tail",
+                "10",
+                "--summary",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&logs_summary);
+
     let actual_schema = json!({
         "add": schema_of(&add),
         "list": schema_of(&list),
@@ -239,11 +261,9 @@ fn json_channels_module_schema_matches_snapshot() {
         "test": schema_of(&test_probe),
         "send": schema_of(&send),
         "logs": schema_of(&logs),
+        "logs_summary": schema_of(&logs_summary),
     });
-    let expected_schema: Value =
-        serde_json::from_str(include_str!("snapshots/json_module_channels_schema.json"))
-            .expect("expected module channels schema");
-    assert_eq!(actual_schema, expected_schema);
+    assert_json_snapshot("snapshots/json_module_channels_schema.json", &actual_schema);
 }
 
 #[test]
@@ -594,6 +614,26 @@ fn json_gateway_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&call_status);
 
+    let diagnose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+            .args([
+                "--project-state",
+                "--json",
+                "gateway",
+                "diagnose",
+                "--method",
+                "status",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&diagnose);
+
     let stop = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -613,12 +653,10 @@ fn json_gateway_module_schema_matches_snapshot() {
         "probe": schema_of(&probe),
         "discover": schema_of(&discover),
         "call_status": schema_of(&call_status),
+        "diagnose": schema_of(&diagnose),
         "stop": schema_of(&stop),
     });
-    let expected_schema: Value =
-        serde_json::from_str(include_str!("snapshots/json_module_gateway_schema.json"))
-            .expect("expected module gateway schema");
-    assert_eq!(actual_schema, expected_schema);
+    assert_json_snapshot("snapshots/json_module_gateway_schema.json", &actual_schema);
 }
 
 #[test]
@@ -815,10 +853,7 @@ fn json_security_module_schema_matches_snapshot() {
         "baseline_show": schema_of(&baseline_show),
         "audit": schema_of(&audit),
     });
-    let expected_schema: Value =
-        serde_json::from_str(include_str!("snapshots/json_module_security_schema.json"))
-            .expect("expected module security schema");
-    assert_eq!(actual_schema, expected_schema);
+    assert_json_snapshot("snapshots/json_module_security_schema.json", &actual_schema);
 }
 
 #[test]
@@ -2573,6 +2608,80 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&memory_status);
 
+    let memory_status_all = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "memory",
+                "status",
+                "--all-namespaces",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_status_all);
+
+    let memory_policy_get = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "memory", "policy", "get"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_policy_get);
+
+    let memory_policy_set = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "memory",
+                "policy",
+                "set",
+                "--enabled",
+                "true",
+                "--max-namespaces",
+                "1",
+                "--min-interval-minutes",
+                "5",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_policy_set);
+
+    let memory_policy_apply = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "memory",
+                "policy",
+                "apply",
+                "--dry-run",
+                "--force",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_policy_apply);
+
     let memory_clear = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -2584,6 +2693,26 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&memory_clear);
+
+    let memory_prune = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "memory",
+                "prune",
+                "--max-namespaces",
+                "1",
+                "--dry-run",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&memory_prune);
 
     let plugin_source = temp.path().join("sample-plugin");
     let plugin_hooks = plugin_source.join("hooks");
@@ -2826,7 +2955,12 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         "memory_index": schema_of(&memory_index),
         "memory_search": schema_of(&memory_search),
         "memory_status": schema_of(&memory_status),
+        "memory_status_all": schema_of(&memory_status_all),
+        "memory_policy_get": schema_of(&memory_policy_get),
+        "memory_policy_set": schema_of(&memory_policy_set),
+        "memory_policy_apply": schema_of(&memory_policy_apply),
         "memory_clear": schema_of(&memory_clear),
+        "memory_prune": schema_of(&memory_prune),
         "plugins_install": schema_of(&plugins_install),
         "plugins_list": schema_of(&plugins_list),
         "plugins_list_project": schema_of(&plugins_list_project),
@@ -3185,6 +3319,30 @@ fn json_mcp_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&check);
 
+    let show = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "show", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&show);
+
+    let check_all = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "check", "--all"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&check_all);
+
     let disable = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -3225,6 +3383,8 @@ fn json_mcp_module_schema_matches_snapshot() {
         "add": schema_of(&add),
         "list": schema_of(&list),
         "check": schema_of(&check),
+        "show": schema_of(&show),
+        "check_all": schema_of(&check_all),
         "disable": schema_of(&disable),
         "enable": schema_of(&enable),
         "remove": schema_of(&remove),

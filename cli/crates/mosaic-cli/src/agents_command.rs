@@ -5,6 +5,7 @@ use mosaic_agents::{
 };
 use mosaic_core::config::ConfigManager;
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_plugins::{ExtensionRegistry, RegistryRoots};
 
 use super::{AgentsArgs, AgentsCommand, AgentsRouteCommand, Cli, print_json, resolve_state_paths};
 
@@ -36,11 +37,17 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
                     println!("default agent: {default_agent_id}");
                 }
                 for agent in agents {
+                    let skills = if agent.skills.is_empty() {
+                        "-".to_string()
+                    } else {
+                        agent.skills.join(",")
+                    };
                     println!(
-                        "- {} ({}) profile={} model={} temperature={} max_turns={}",
+                        "- {} ({}) profile={} skills={} model={} temperature={} max_turns={}",
                         agent.id,
                         agent.name,
                         agent.profile,
+                        skills,
                         agent.model.unwrap_or_else(|| "-".to_string()),
                         agent
                             .temperature
@@ -58,6 +65,7 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
             name,
             id,
             profile,
+            skills,
             model,
             temperature,
             max_turns,
@@ -74,11 +82,13 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
             let config = manager.load()?;
             let profile = profile.unwrap_or_else(|| cli.profile.clone());
             let _ = config.resolve_profile(Some(&profile))?;
+            let validated_skills = resolve_skill_ids(&paths.root_dir, skills)?;
 
             let created = store.add(AddAgentInput {
                 id,
                 name,
                 profile,
+                skills: validated_skills,
                 model,
                 temperature,
                 max_turns,
@@ -101,12 +111,19 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
             } else {
                 println!("Created agent {} ({})", created.id, created.name);
                 println!("profile: {}", created.profile);
+                if created.skills.is_empty() {
+                    println!("skills: <none>");
+                } else {
+                    println!("skills: {}", created.skills.join(", "));
+                }
             }
         }
         AgentsCommand::Update {
             agent_id,
             name,
             profile,
+            skills,
+            clear_skills,
             model,
             clear_model,
             temperature,
@@ -129,12 +146,19 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
             if let Some(profile_name) = profile.as_deref() {
                 let _ = config.resolve_profile(Some(profile_name))?;
             }
+            let resolved_skills = if skills.is_empty() {
+                None
+            } else {
+                Some(resolve_skill_ids(&paths.root_dir, skills)?)
+            };
 
             let updated = store.update(
                 &agent_id,
                 UpdateAgentInput {
                     name,
                     profile,
+                    skills: resolved_skills,
+                    clear_skills,
                     model,
                     clear_model,
                     temperature,
@@ -164,6 +188,11 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
             } else {
                 println!("Updated agent {} ({})", updated.id, updated.name);
                 println!("profile: {}", updated.profile);
+                if updated.skills.is_empty() {
+                    println!("skills: <none>");
+                } else {
+                    println!("skills: {}", updated.skills.join(", "));
+                }
             }
         }
         AgentsCommand::Show { agent_id } => {
@@ -193,6 +222,11 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
                 println!("id: {}", agent.id);
                 println!("name: {}", agent.name);
                 println!("profile: {}", agent.profile);
+                if agent.skills.is_empty() {
+                    println!("skills: <none>");
+                } else {
+                    println!("skills: {}", agent.skills.join(", "));
+                }
                 println!("model: {}", agent.model.unwrap_or_else(|| "-".to_string()));
                 println!(
                     "temperature: {}",
@@ -353,4 +387,34 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
         },
     }
     Ok(())
+}
+
+fn resolve_skill_ids(state_root: &std::path::Path, skills: Vec<String>) -> Result<Vec<String>> {
+    if skills.is_empty() {
+        return Ok(Vec::new());
+    }
+    let registry = ExtensionRegistry::new(RegistryRoots::from_state_root(state_root.to_path_buf()));
+    let available = registry
+        .list_skills()?
+        .into_iter()
+        .map(|skill| skill.id)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut resolved = Vec::new();
+    for raw in skills {
+        let id = raw.trim();
+        if id.is_empty() {
+            return Err(MosaicError::Validation(
+                "agent skill id cannot be empty".to_string(),
+            ));
+        }
+        if !available.contains(id) {
+            return Err(MosaicError::Validation(format!(
+                "skill '{id}' not found; run `mosaic skills list` first"
+            )));
+        }
+        if !resolved.iter().any(|existing| existing == id) {
+            resolved.push(id.to_string());
+        }
+    }
+    Ok(resolved)
 }

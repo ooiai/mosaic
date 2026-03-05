@@ -13,7 +13,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use mosaic_core::error::MosaicError;
-use mosaic_memory::{MemoryIndexOptions, MemoryStore, memory_index_path, memory_status_path};
+use mosaic_memory::{
+    MemoryCleanupPolicyStore, MemoryIndexOptions, MemoryPruneOptions, MemoryStore,
+    list_memory_namespace_statuses, memory_cleanup_policy_path, memory_index_path_for_namespace,
+    memory_status_path_for_namespace, prune_memory_namespaces,
+};
 use mosaic_ops::{
     ApprovalDecision, ApprovalStore, SandboxProfile, SandboxStore, evaluate_approval,
     evaluate_sandbox,
@@ -22,7 +26,8 @@ use mosaic_plugins::{ExtensionRegistry, ExtensionSource, PluginEntry, RegistryRo
 
 use super::{
     BrowserArgs, BrowserCommand, Cli, ExtensionSourceFilterArg, MemoryArgs, MemoryCommand,
-    PluginHookArg, PluginsArgs, PluginsCommand, Result, SkillsArgs, SkillsCommand,
+    MemoryPolicyCommand, PluginHookArg, PluginsArgs, PluginsCommand, Result, SkillsArgs,
+    SkillsCommand,
     browser_history_file_path, browser_open_visit, browser_state_file_path,
     load_browser_history_or_default, load_browser_state_or_default, print_json,
     resolve_state_paths, save_browser_history, save_browser_state,
@@ -480,18 +485,20 @@ fn resolve_snapshot_visit(
 pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
-    let store = MemoryStore::new(
-        memory_index_path(&paths.data_dir),
-        memory_status_path(&paths.data_dir),
-    );
 
     match args.command {
         MemoryCommand::Index {
             path,
+            namespace,
+            incremental,
+            stale_after_hours,
+            retain_missing,
             max_files,
             max_file_size,
             max_content_bytes,
         } => {
+            let namespace = normalize_memory_namespace(&namespace)?;
+            let store = memory_store_for_namespace(&paths.data_dir, &namespace);
             let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
             let root = {
                 let raw = PathBuf::from(path);
@@ -503,6 +510,9 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
             };
             let result = store.index(MemoryIndexOptions {
                 root,
+                incremental,
+                stale_after_hours,
+                retain_missing,
                 max_files,
                 max_file_size,
                 max_content_bytes,
@@ -510,24 +520,48 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
             if cli.json {
                 print_json(&json!({
                     "ok": true,
+                    "namespace": namespace,
                     "index": result,
                 }));
             } else {
+                println!("memory namespace: {namespace}");
                 println!("memory indexed documents: {}", result.indexed_documents);
+                if result.incremental {
+                    println!("memory incremental: true");
+                    println!("memory reused documents: {}", result.reused_documents);
+                    println!("memory reindexed documents: {}", result.reindexed_documents);
+                    println!(
+                        "memory stale reindexed documents: {}",
+                        result.stale_reindexed_documents
+                    );
+                    println!("memory removed documents: {}", result.removed_documents);
+                    println!(
+                        "memory retained missing documents: {}",
+                        result.retained_missing_documents
+                    );
+                }
                 println!("memory skipped files: {}", result.skipped_files);
                 println!("index path: {}", result.index_path);
             }
         }
-        MemoryCommand::Search { query, limit } => {
+        MemoryCommand::Search {
+            query,
+            namespace,
+            limit,
+        } => {
+            let namespace = normalize_memory_namespace(&namespace)?;
+            let store = memory_store_for_namespace(&paths.data_dir, &namespace);
             let result = store.search(&query, Some(limit))?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
+                    "namespace": namespace,
                     "result": result,
                 }));
             } else if result.hits.is_empty() {
                 println!("No memory hits.");
             } else {
+                println!("memory namespace: {namespace}");
                 println!(
                     "memory search hits: {} (showing {})",
                     result.total_hits,
@@ -538,14 +572,47 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
                 }
             }
         }
-        MemoryCommand::Status => {
+        MemoryCommand::Status {
+            namespace,
+            all_namespaces,
+        } => {
+            if all_namespaces {
+                let namespaces = list_memory_namespace_statuses(&paths.data_dir)?;
+                if cli.json {
+                    print_json(&json!({
+                        "ok": true,
+                        "namespaces": namespaces,
+                    }));
+                } else if namespaces.is_empty() {
+                    println!("No memory namespaces.");
+                } else {
+                    println!("memory namespaces: {}", namespaces.len());
+                    for entry in namespaces {
+                        println!(
+                            "- {} docs={} last_indexed_at={} exists={}",
+                            entry.namespace,
+                            entry.indexed_documents,
+                            entry
+                                .last_indexed_at
+                                .map(|value| value.to_rfc3339())
+                                .unwrap_or_else(|| "-".to_string()),
+                            entry.exists
+                        );
+                    }
+                }
+                return Ok(());
+            }
+            let namespace = normalize_memory_namespace(&namespace)?;
+            let store = memory_store_for_namespace(&paths.data_dir, &namespace);
             let status = store.status()?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
+                    "namespace": namespace,
                     "status": status,
                 }));
             } else {
+                println!("memory namespace: {namespace}");
                 println!("indexed documents: {}", status.indexed_documents);
                 println!(
                     "last indexed at: {}",
@@ -557,14 +624,18 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
                 println!("index path: {}", status.index_path);
             }
         }
-        MemoryCommand::Clear => {
+        MemoryCommand::Clear { namespace } => {
+            let namespace = normalize_memory_namespace(&namespace)?;
+            let store = memory_store_for_namespace(&paths.data_dir, &namespace);
             let cleared = store.clear()?;
             if cli.json {
                 print_json(&json!({
                     "ok": true,
+                    "namespace": namespace,
                     "cleared": cleared,
                 }));
             } else {
+                println!("memory namespace: {namespace}");
                 println!(
                     "memory clear: index_removed={} status_removed={}",
                     cleared.removed_index, cleared.removed_status
@@ -573,8 +644,336 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
                 println!("status path: {}", cleared.status_path);
             }
         }
+        MemoryCommand::Prune {
+            max_namespaces,
+            max_age_hours,
+            max_documents_per_namespace,
+            dry_run,
+        } => {
+            if max_namespaces == Some(0) {
+                return Err(MosaicError::Validation(
+                    "--max-namespaces must be greater than 0".to_string(),
+                ));
+            }
+            if max_age_hours == Some(0) {
+                return Err(MosaicError::Validation(
+                    "--max-age-hours must be greater than 0".to_string(),
+                ));
+            }
+            if max_documents_per_namespace == Some(0) {
+                return Err(MosaicError::Validation(
+                    "--max-documents-per-namespace must be greater than 0".to_string(),
+                ));
+            }
+            if max_namespaces.is_none()
+                && max_age_hours.is_none()
+                && max_documents_per_namespace.is_none()
+            {
+                return Err(MosaicError::Validation(
+                    "memory prune requires --max-namespaces, --max-age-hours, and/or --max-documents-per-namespace".to_string(),
+                ));
+            }
+            let result = prune_memory_namespaces(
+                &paths.data_dir,
+                MemoryPruneOptions {
+                    max_namespaces,
+                    max_age_hours,
+                    max_documents_per_namespace,
+                    dry_run,
+                },
+            )?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "prune": result,
+                }));
+            } else {
+                println!(
+                    "memory prune{}: evaluated={} removed={}",
+                    if result.dry_run { " (dry-run)" } else { "" },
+                    result.evaluated_namespaces,
+                    result.removed_count
+                );
+                if !result.removed_namespaces.is_empty() {
+                    println!("removed namespaces: {}", result.removed_namespaces.join(", "));
+                }
+                if !result.kept_namespaces.is_empty() {
+                    println!("kept namespaces: {}", result.kept_namespaces.join(", "));
+                }
+                if !result.removed_due_to_max_namespaces.is_empty() {
+                    println!(
+                        "removed due to --max-namespaces: {}",
+                        result.removed_due_to_max_namespaces.join(", ")
+                    );
+                }
+                if !result.removed_due_to_max_age_hours.is_empty() {
+                    println!(
+                        "removed due to --max-age-hours: {}",
+                        result.removed_due_to_max_age_hours.join(", ")
+                    );
+                }
+                if !result.removed_due_to_max_documents_per_namespace.is_empty() {
+                    println!(
+                        "removed due to --max-documents-per-namespace: {}",
+                        result.removed_due_to_max_documents_per_namespace.join(", ")
+                    );
+                }
+            }
+        }
+        MemoryCommand::Policy { command } => {
+            let store = memory_cleanup_policy_store(&paths.policy_dir);
+            match command {
+                MemoryPolicyCommand::Get => {
+                    let policy = store.load_or_default()?;
+                    if cli.json {
+                        print_json(&json!({
+                            "ok": true,
+                            "policy_path": store.path().display().to_string(),
+                            "policy": policy,
+                        }));
+                    } else {
+                        println!("memory cleanup policy path: {}", store.path().display());
+                        println!("enabled: {}", policy.enabled);
+                        println!(
+                            "max_namespaces: {}",
+                            policy
+                                .max_namespaces
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "max_age_hours: {}",
+                            policy
+                                .max_age_hours
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "max_documents_per_namespace: {}",
+                            policy
+                                .max_documents_per_namespace
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "min_interval_minutes: {}",
+                            policy
+                                .min_interval_minutes
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "last_run_at: {}",
+                            policy
+                                .last_run_at
+                                .map(|value| value.to_rfc3339())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "last_run_removed_count: {}",
+                            policy
+                                .last_run_removed_count
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                    }
+                }
+                MemoryPolicyCommand::Set {
+                    enabled,
+                    max_namespaces,
+                    max_age_hours,
+                    max_documents_per_namespace,
+                    min_interval_minutes,
+                    clear_limits,
+                } => {
+                    let mut policy = store.load_or_default()?;
+                    if clear_limits {
+                        policy.max_namespaces = None;
+                        policy.max_age_hours = None;
+                        policy.max_documents_per_namespace = None;
+                    }
+                    if let Some(value) = enabled {
+                        policy.enabled = value;
+                    }
+                    if let Some(value) = max_namespaces {
+                        policy.max_namespaces = Some(value);
+                    }
+                    if let Some(value) = max_age_hours {
+                        policy.max_age_hours = Some(value);
+                    }
+                    if let Some(value) = max_documents_per_namespace {
+                        policy.max_documents_per_namespace = Some(value);
+                    }
+                    if let Some(value) = min_interval_minutes {
+                        policy.min_interval_minutes = Some(value);
+                    }
+                    store.save(&policy)?;
+                    let saved = store.load_or_default()?;
+                    if cli.json {
+                        print_json(&json!({
+                            "ok": true,
+                            "policy_path": store.path().display().to_string(),
+                            "policy": saved,
+                        }));
+                    } else {
+                        println!("memory cleanup policy saved: {}", store.path().display());
+                        println!("enabled: {}", saved.enabled);
+                        println!(
+                            "limits: max_namespaces={} max_age_hours={} max_documents_per_namespace={}",
+                            saved
+                                .max_namespaces
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string()),
+                            saved
+                                .max_age_hours
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string()),
+                            saved
+                                .max_documents_per_namespace
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                        println!(
+                            "min_interval_minutes: {}",
+                            saved
+                                .min_interval_minutes
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        );
+                    }
+                }
+                MemoryPolicyCommand::Apply { dry_run, force } => {
+                    let policy = store.load_or_default()?;
+                    if !policy.enabled {
+                        if cli.json {
+                            print_json(&json!({
+                                "ok": true,
+                                "applied": false,
+                                "skipped": true,
+                                "reason": "policy_disabled",
+                                "policy": policy,
+                                "policy_path": store.path().display().to_string(),
+                            }));
+                        } else {
+                            println!("memory cleanup apply skipped: policy is disabled");
+                        }
+                        return Ok(());
+                    }
+                    let mut remaining_wait_minutes: Option<u64> = None;
+                    if !force
+                        && let Some(interval_minutes) = policy.min_interval_minutes
+                        && let Some(last_run_at) = policy.last_run_at
+                    {
+                        let now = Utc::now();
+                        let interval = i64::try_from(interval_minutes).unwrap_or(i64::MAX);
+                        let elapsed = now.signed_duration_since(last_run_at).num_minutes();
+                        if elapsed < interval {
+                            let remaining = if elapsed <= 0 {
+                                interval
+                            } else {
+                                interval - elapsed
+                            };
+                            remaining_wait_minutes = u64::try_from(remaining).ok();
+                        }
+                    }
+                    if let Some(wait_minutes) = remaining_wait_minutes {
+                        if cli.json {
+                            print_json(&json!({
+                                "ok": true,
+                                "applied": false,
+                                "skipped": true,
+                                "reason": "interval_not_elapsed",
+                                "remaining_wait_minutes": wait_minutes,
+                                "policy": policy,
+                                "policy_path": store.path().display().to_string(),
+                            }));
+                        } else {
+                            println!(
+                                "memory cleanup apply skipped: interval not elapsed (remaining {} minutes)",
+                                wait_minutes
+                            );
+                        }
+                        return Ok(());
+                    }
+
+                    let prune = prune_memory_namespaces(
+                        &paths.data_dir,
+                        MemoryPruneOptions {
+                            max_namespaces: policy.max_namespaces,
+                            max_age_hours: policy.max_age_hours,
+                            max_documents_per_namespace: policy.max_documents_per_namespace,
+                            dry_run,
+                        },
+                    )?;
+                    let updated_policy = if dry_run {
+                        policy
+                    } else {
+                        store.mark_run(prune.removed_count)?
+                    };
+                    if cli.json {
+                        print_json(&json!({
+                            "ok": true,
+                            "applied": true,
+                            "skipped": false,
+                            "policy_path": store.path().display().to_string(),
+                            "policy": updated_policy,
+                            "prune": prune,
+                            "dry_run": dry_run,
+                        }));
+                    } else {
+                        println!(
+                            "memory cleanup apply{}: evaluated={} removed={}",
+                            if dry_run { " (dry-run)" } else { "" },
+                            prune.evaluated_namespaces,
+                            prune.removed_count
+                        );
+                        if !prune.removed_namespaces.is_empty() {
+                            println!("removed namespaces: {}", prune.removed_namespaces.join(", "));
+                        }
+                    }
+                }
+            }
+        }
     }
     Ok(())
+}
+
+fn normalize_memory_namespace(raw: &str) -> Result<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(MosaicError::Validation(
+            "memory namespace cannot be empty".to_string(),
+        ));
+    }
+    if value.len() > 64 {
+        return Err(MosaicError::Validation(
+            "memory namespace cannot exceed 64 characters".to_string(),
+        ));
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
+    {
+        return Err(MosaicError::Validation(
+            "memory namespace only supports [a-zA-Z0-9._-]".to_string(),
+        ));
+    }
+    if value.eq_ignore_ascii_case("default") {
+        Ok("default".to_string())
+    } else {
+        Ok(value.to_ascii_lowercase())
+    }
+}
+
+fn memory_store_for_namespace(data_dir: &Path, namespace: &str) -> MemoryStore {
+    MemoryStore::new(
+        memory_index_path_for_namespace(data_dir, namespace),
+        memory_status_path_for_namespace(data_dir, namespace),
+    )
+}
+
+fn memory_cleanup_policy_store(policy_dir: &Path) -> MemoryCleanupPolicyStore {
+    MemoryCleanupPolicyStore::new(memory_cleanup_policy_path(policy_dir))
 }
 
 pub(super) fn handle_plugins(cli: &Cli, args: PluginsArgs) -> Result<()> {

@@ -34,11 +34,14 @@
         <a class="side-link" href="guide.html">路径导航</a>
         <a class="side-link" href="learning-path.html">分阶段学习</a>
         <a class="side-link active" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">生产运维</a>
+        <a class="side-link" href="regression.html">回归测试</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -59,6 +62,7 @@ mosaic --project-state agents default</code></pre>
           <pre><code>mosaic --project-state agents add \
   --name Writer \
   --id writer \
+  --skill writer \
   --temperature 0.2 \
   --max-turns 8 \
   --tools-enabled true \
@@ -88,10 +92,12 @@ mosaic --project-state chat</code></pre>
           <h2>步骤 5：安全更新 agent 配置</h2>
           <pre><code>mosaic --project-state agents update writer \
   --name "Writer V2" \
+  --skill reviewer \
   --temperature 0.15 \
   --max-turns 10 \
   --route ask
 
+mosaic --project-state agents update writer --clear-skills
 mosaic --project-state agents show writer</code></pre>
           <p>预期：show 输出中能看到更新后的字段。</p>
 
@@ -113,6 +119,7 @@ mosaic --project-state agents remove writer</code></pre>
           <h2>步骤 8：排障清单</h2>
           <ul>
             <li><code>ask --agent writer</code> 失败：先看 <code>agents show writer</code>。</li>
+            <li>绑定 skill 的 agent 失败：执行 <code>skills list</code>，确认每个 <code>--skill</code> id 存在。</li>
             <li>路由异常：执行 <code>agents route list</code> 与 <code>route resolve</code>。</li>
             <li>执行被拦截：检查 <code>approvals get</code> 与 <code>sandbox get</code>。</li>
             <li>上下文诊断：用 <code>doctor</code> 和 <code>logs --tail 120</code>。</li>
@@ -120,11 +127,14 @@ mosaic --project-state agents remove writer</code></pre>
 
           <div class="quick-links">
             <a href="learning-path.html">分阶段学习</a>
+            <a href="channels.html">Channels 教程</a>
             <a href="memory.html">Memory 教程</a>
             <a href="plugins.html">Plugins 教程</a>
             <a href="skills.html">Skills 教程</a>
             <a href="gateway.html">Gateway 教程</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">生产运维</a>
+            <a href="regression.html">回归测试教程</a>
             <a href="troubleshooting.html">排障手册</a>
           </div>
         </article>

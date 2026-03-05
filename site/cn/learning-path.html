@@ -35,12 +35,18 @@
         <a class="side-link" href="guide.html">路径导航</a>
         <a class="side-link" href="quickstart.html">10 分钟上手</a>
         <a class="side-link active" href="learning-path.html">分阶段学习</a>
+        <a class="side-link" href="models-profiles.html">Models 与 Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions 教程</a>
+        <a class="side-link" href="policy.html">策略教程</a>
         <a class="side-link" href="agents.html">Agents 专项</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">生产运维</a>
+        <a class="side-link" href="regression.html">回归测试</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -96,6 +102,7 @@ mosaic --project-state --profile az-openai setup \
 
 mosaic --project-state --profile az-openai models list</code></pre>
           <p>完成判定：多个 profile 可以独立工作。</p>
+          <p>模块详解：<a href="models-profiles.html">Models 与 Profiles</a>。</p>
 
           <h2>阶段 5：通道与通知</h2>
           <pre><code>mosaic --project-state channels add --name local-terminal --kind terminal
@@ -103,6 +110,7 @@ mosaic --project-state channels list
 mosaic --project-state channels test &lt;channel_id&gt;
 mosaic --project-state channels send &lt;channel_id&gt; --text "stage-5-ok"</code></pre>
           <p>完成判定：至少一个通道 test/send 都成功。</p>
+          <p>模块详解：<a href="channels.html">Channels 教程</a>。</p>
 
           <h2>阶段 6：网关生命周期</h2>
           <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
@@ -111,6 +119,7 @@ mosaic --project-state gateway status
 mosaic --project-state gateway probe
 mosaic --project-state gateway call status</code></pre>
           <p>完成判定：probe 与 call 返回成功状态。</p>
+          <p>模块详解：<a href="gateway.html">Gateway 教程</a> 与 <a href="gateway-call.html">Gateway Call API</a>。</p>
 
           <h2>阶段 7：安全策略与门禁</h2>
           <pre><code>mosaic --project-state approvals get
@@ -121,6 +130,7 @@ mosaic --project-state sandbox get
 mosaic --project-state sandbox set standard
 mosaic --project-state sandbox explain --profile standard</code></pre>
           <p>完成判定：审批与沙箱策略符合预期。</p>
+          <p>模块详解：<a href="policy.html">Approvals 与 Sandbox</a>。</p>
 
           <h2>阶段 8：日常可观测</h2>
           <pre><code>mosaic --project-state dashboard
@@ -128,6 +138,7 @@ mosaic --project-state doctor
 mosaic --project-state logs --tail 120
 mosaic --project-state system presence</code></pre>
           <p>完成判定：dashboard/doctor/logs 输出可用于日常运维。</p>
+          <p>会话管理参考：<a href="sessions.html">Sessions 教程</a>。</p>
 
           <h2>阶段 9：Agents 模块入门</h2>
           <pre><code>mosaic --project-state agents list
@@ -147,15 +158,22 @@ mosaic --project-state --json status</code></pre>
             <li>策略与诊断输出稳定。</li>
             <li><code>--json</code> 输出可被脚本解析。</li>
           </ul>
+          <p>回归说明：<a href="regression.html">回归测试教程</a>。</p>
 
           <div class="quick-links">
             <a href="quickstart.html">10 分钟上手</a>
+            <a href="models-profiles.html">Models 与 Profiles</a>
+            <a href="sessions.html">Sessions 教程</a>
+            <a href="policy.html">策略教程</a>
             <a href="agents.html">Agents 专项</a>
+            <a href="channels.html">Channels 教程</a>
             <a href="memory.html">Memory 教程</a>
             <a href="plugins.html">Plugins 教程</a>
             <a href="skills.html">Skills 教程</a>
             <a href="gateway.html">Gateway 教程</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">生产运维</a>
+            <a href="regression.html">回归测试教程</a>
           </div>
         </article>
       </main>

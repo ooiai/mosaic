@@ -120,3 +120,9 @@ cli-release-manifests:
 	fi
 	@echo "===> Rust CLI release manifests ($(v))."
 	cd cli && ./scripts/update_distribution_manifests.sh --version "$(v)" --assets-dir "$(assets)" $(if $(out),--output-dir "$(out)",)
+
+# Docs static acceptance gate (docs.js syntax + local links).
+# Usage: make docs-check
+docs-check:
+	@echo "===> Docs acceptance checks."
+	bash site/scripts/check_docs.sh

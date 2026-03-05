@@ -24,6 +24,114 @@ mosaic --project-state skills info <skill-id>
 mosaic --project-state skills check [skill-id]
 mosaic --project-state skills install --path ./writer [--force]
 mosaic --project-state skills remove <skill-id>
+
+# Bind installed skills to an agent
+mosaic --project-state agents update writer --skill writer
+mosaic --project-state agents update writer --clear-skills
+```
+
+## Skills End-to-End (Recommended Flow)
+
+### 1) Create a local skill package
+
+```bash
+mkdir -p ./writer
+cat > ./writer/SKILL.md <<'EOF'
+# Writer
+Produce concise, structured answers.
+
+## Rules
+- Start with the direct answer.
+- Keep examples short.
+EOF
+```
+
+Minimum requirement is `SKILL.md` (non-empty and with at least one markdown heading).
+
+### 2) Install and verify
+
+```bash
+mosaic --project-state skills install --path ./writer
+mosaic --project-state skills list --source project
+mosaic --project-state skills info writer
+mosaic --project-state skills check writer
+```
+
+### 3) Bind skill to an agent
+
+```bash
+# create agent with skill
+mosaic --project-state agents add --name Writer --id writer --skill writer --set-default --route ask
+
+# or update existing agent
+mosaic --project-state agents update writer --skill writer
+mosaic --project-state agents show writer
+```
+
+`agents show` should include `skills: writer`.
+
+### 4) Run and confirm behavior
+
+```bash
+mosaic --project-state ask --agent writer "summarize README"
+```
+
+For mock regression, you can capture the model request envelope:
+
+```bash
+MOSAIC_MOCK_CHAT_RESPONSE=ok \
+MOSAIC_MOCK_CHAT_CAPTURE_PATH=./mock-chat-request.json \
+mosaic --project-state ask --agent writer "hello"
+```
+
+Then inspect `mock-chat-request.json` and verify the system prompt contains:
+
+- `BEGIN AGENT SKILL: writer`
+- your `SKILL.md` content
+
+### 5) Update, replace, remove
+
+```bash
+# update local skill content, then replace install
+mosaic --project-state skills install --path ./writer --force
+
+# clear skill binding from agent
+mosaic --project-state agents update writer --clear-skills
+
+# remove skill package
+mosaic --project-state skills remove writer
+```
+
+## Skills Troubleshooting
+
+- `skill '<id>' not found` when adding/updating agent:
+  - run `mosaic --project-state skills list` first
+  - ensure `--project-state` usage is consistent
+- `skills check` fails:
+  - verify `SKILL.md` exists and is non-empty
+  - ensure first heading exists (`# ...`)
+- agent runs but skill seems ignored:
+  - run `mosaic --project-state agents show <id>` and check `skills`
+  - verify route/default/`--agent` actually selects that agent
+- skill removed after binding:
+  - runtime will fail until you reinstall skill or run `agents update <id> --clear-skills`
+
+## Skills Regression Checklist
+
+```bash
+# install/list/info/check
+mosaic --project-state skills install --path ./writer --force
+mosaic --project-state --json skills list
+mosaic --project-state --json skills info writer
+mosaic --project-state --json skills check writer
+
+# bind/unbind
+mosaic --project-state --json agents update writer --skill writer
+mosaic --project-state --json agents show writer
+mosaic --project-state --json agents update writer --clear-skills
+
+# remove
+mosaic --project-state --json skills remove writer
 ```
 
 ## Discovery Roots

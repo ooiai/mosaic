@@ -34,6 +34,7 @@ pub struct AgentRunner {
     session_store: SessionStore,
     audit_store: AuditStore,
     tools: ToolExecutor,
+    system_prompt: String,
 }
 
 impl AgentRunner {
@@ -50,6 +51,30 @@ impl AgentRunner {
             session_store,
             audit_store,
             tools,
+            system_prompt: SYSTEM_PROMPT.to_string(),
+        }
+    }
+
+    pub fn with_system_prompt(
+        provider: Arc<dyn Provider>,
+        profile: ProfileConfig,
+        session_store: SessionStore,
+        audit_store: AuditStore,
+        tools: ToolExecutor,
+        system_prompt: String,
+    ) -> Self {
+        let prompt = if system_prompt.trim().is_empty() {
+            SYSTEM_PROMPT.to_string()
+        } else {
+            system_prompt
+        };
+        Self {
+            provider,
+            profile,
+            session_store,
+            audit_store,
+            tools,
+            system_prompt: prompt,
         }
     }
 
@@ -123,7 +148,7 @@ impl AgentRunner {
     fn build_messages_for_session(&self, session_id: &str) -> Result<Vec<ChatMessage>> {
         let mut messages = vec![ChatMessage {
             role: ChatRole::System,
-            content: SYSTEM_PROMPT.to_string(),
+            content: self.system_prompt.clone(),
         }];
         let events = self.session_store.read_events(session_id)?;
         for event in events {
@@ -221,6 +246,10 @@ When you need a local tool, respond with EXACT JSON:
 {"tool_call":{"name":"read_file|write_file|search_text|run_cmd","args":{...}}}
 If no tool is needed, answer directly with plain text.
 "#;
+
+pub fn default_system_prompt() -> &'static str {
+    SYSTEM_PROMPT
+}
 
 #[derive(Debug, Clone)]
 struct ParsedToolCall {

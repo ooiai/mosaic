@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | Models and Profiles</title>
+    <meta name="description" content="Step-by-step tutorial for profile configuration, model routing, aliases, and fallbacks." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>
+          <a class="active" href="guide.html">Guide</a>
+          <a href="quickstart.html">Quickstart</a>
+          <a href="operations.html">Operations</a>
+          <a href="install.html">Install</a>
+          <a href="configure.html">Configure</a>
+          <a href="troubleshooting.html">Troubleshooting</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/models-profiles.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Profiles & Models</p>
+        <a class="side-link" href="quickstart.html">Quickstart</a>
+        <a class="side-link active" href="models-profiles.html">Models & Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions</a>
+        <a class="side-link" href="policy.html">Approvals & Sandbox</a>
+        <a class="side-link" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Models & Profiles</span></nav>
+          <p class="kicker">Models & Profiles</p>
+          <h1>Profiles and Model Routing: Step-by-Step</h1>
+          <p class="lead">This page teaches how to manage multiple provider profiles, set model aliases/fallbacks, and keep behavior predictable in scripts.</p>
+
+          <h2>Step 1: Build one base profile</h2>
+          <pre><code>mosaic --project-state --profile default setup \
+  --base-url https://api.openai.com \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile default configure --show</code></pre>
+
+          <h2>Step 2: Inspect provider and model visibility</h2>
+          <pre><code>mosaic --project-state --profile default models list
+mosaic --project-state --profile default models list --query gpt --limit 10
+mosaic --project-state --profile default models status</code></pre>
+
+          <h2>Step 3: Resolve and set active model</h2>
+          <pre><code>mosaic --project-state --profile default models resolve
+mosaic --project-state --profile default models resolve fast
+mosaic --project-state --profile default models set gpt-4o-mini</code></pre>
+
+          <h2>Step 4: Use aliases to normalize call sites</h2>
+          <pre><code>mosaic --project-state --profile default models aliases set fast gpt-4o-mini
+mosaic --project-state --profile default models aliases set deep gpt-4.1-mini
+mosaic --project-state --profile default models aliases list
+mosaic --project-state --profile default models aliases remove deep</code></pre>
+
+          <h2>Step 5: Configure fallback chain</h2>
+          <pre><code>mosaic --project-state --profile default models fallbacks add gpt-4.1-mini
+mosaic --project-state --profile default models fallbacks add gpt-4o-mini
+mosaic --project-state --profile default models fallbacks list
+mosaic --project-state --profile default models fallbacks remove gpt-4.1-mini</code></pre>
+
+          <h2>Step 6: Patch configuration safely</h2>
+          <pre><code>mosaic --project-state --profile default configure keys
+mosaic --project-state --profile default configure get provider.model
+mosaic --project-state --profile default configure set agent.max_turns 10
+mosaic --project-state --profile default configure unset agent.max_turns
+
+mosaic --project-state --profile default configure patch --set provider.model=gpt-4o-mini --dry-run
+mosaic --project-state --profile default configure preview --set provider.model=gpt-4o-mini
+mosaic --project-state --profile default configure template --format toml --defaults</code></pre>
+
+          <h2>Step 7: Add a second profile (Azure example)</h2>
+          <pre><code>export AZURE_OPENAI_BASE_URL="https://&lt;resource&gt;.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="&lt;your_key&gt;"
+
+mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile az-openai models list</code></pre>
+
+          <h2>Step 8: JSON contract checks for automation</h2>
+          <pre><code>mosaic --project-state --profile default --json models list --query gpt --limit 5
+mosaic --project-state --profile default --json models status
+mosaic --project-state --profile default --json configure --show</code></pre>
+
+          <h2>Acceptance checklist</h2>
+          <ul>
+            <li>At least two profiles can run <code>models list</code> independently.</li>
+            <li>Aliases and fallbacks are visible and resolve as expected.</li>
+            <li><code>configure patch/preview</code> can be used without accidental destructive edits.</li>
+            <li>JSON output is parseable by your CI pipeline.</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="quickstart.html">Quickstart</a>
+            <a href="sessions.html">Sessions Guide</a>
+            <a href="policy.html">Approvals & Sandbox</a>
+            <a href="operations.html">Operations</a>
+            <a href="regression.html">Regression Guide</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

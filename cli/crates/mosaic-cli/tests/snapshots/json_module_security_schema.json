@@ -6,6 +6,25 @@
       "path": "string",
       "updated": "bool"
     },
+    "dimensions": {
+      "categories": {
+        "transport_security": "number"
+      },
+      "severities": {
+        "high": "number",
+        "low": "number",
+        "medium": "number"
+      }
+    },
+    "filters": {
+      "categories": {
+        "items": [],
+        "type": "array"
+      },
+      "filtered_out": "number",
+      "min_severity": "null",
+      "top": "null"
+    },
     "ok": "bool",
     "report": {
       "findings": {

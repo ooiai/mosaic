@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 文档 | Azure 端到端运维剧本</title>
+    <meta name="description" content="一套完整 Azure 运维剧本：profile、models、channels、gateway、policy、regression。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">跳转到正文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>
+          <a class="active" href="guide.html">路径</a>
+          <a href="quickstart.html">10 分钟上手</a>
+          <a href="operations.html">生产运维</a>
+          <a href="install.html">安装</a>
+          <a href="configure.html">配置</a>
+          <a href="troubleshooting.html">排障</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="../playbook-azure-ops.html">EN</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">运维剧本</p>
+        <a class="side-link" href="models-profiles.html">Models 与 Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions 教程</a>
+        <a class="side-link" href="channels.html">Channels 教程</a>
+        <a class="side-link" href="gateway.html">Gateway 教程</a>
+        <a class="side-link" href="policy.html">策略教程</a>
+        <a class="side-link" href="regression.html">回归测试</a>
+        <a class="side-link active" href="playbook-azure-ops.html">Azure 运维剧本</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>Azure 运维剧本</span></nav>
+          <p class="kicker">Playbook</p>
+          <h1>Azure 端到端运维剧本</h1>
+          <p class="lead">一套跑通生产基线的完整路径：Azure profile、模型路由、通道、网关、安全策略、观测与回归门禁。</p>
+
+          <div class="callout warn">
+            <strong>关键注意：</strong>Azure base URL 应该是 <code>https://&lt;resource&gt;.openai.azure.com/openai/v1</code>，不要再拼第二个 <code>/v1</code>。
+          </div>
+
+          <h2>步骤 0：环境前置</h2>
+          <pre><code>mosaic --version
+mosaic --project-state directory --ensure --check-writable
+
+export AZURE_OPENAI_BASE_URL="https://&lt;resource&gt;.openai.azure.com/openai/v1"
+export AZURE_OPENAI_API_KEY="&lt;your_key&gt;"</code></pre>
+          <pre><code># 可选：一条命令直接执行完整剧本
+cd cli
+./scripts/azure_ops_playbook.sh --profile az-openai --run-regression</code></pre>
+          <pre><code># 机器可读 summary 输出
+./scripts/azure_ops_playbook.sh \
+  --profile az-openai \
+  --json-summary \
+  --summary-out reports/azure-playbook-summary.json</code></pre>
+
+          <h2>步骤 1：创建 Azure profile</h2>
+          <pre><code>mosaic --project-state --profile az-openai setup \
+  --base-url "$AZURE_OPENAI_BASE_URL" \
+  --api-key-env AZURE_OPENAI_API_KEY \
+  --model gpt-4o-mini
+
+mosaic --project-state --profile az-openai configure --show</code></pre>
+
+          <h2>步骤 2：验证模型可见性与路由</h2>
+          <pre><code>mosaic --project-state --profile az-openai models list
+mosaic --project-state --profile az-openai models status
+mosaic --project-state --profile az-openai models aliases set fast gpt-4o-mini
+mosaic --project-state --profile az-openai models fallbacks add gpt-4.1-mini
+mosaic --project-state --profile az-openai models aliases list
+mosaic --project-state --profile az-openai models fallbacks list</code></pre>
+
+          <h2>步骤 3：核心 ask/chat/session 链路</h2>
+          <pre><code>mosaic --project-state --profile az-openai ask "hello from azure profile"
+mosaic --project-state --profile az-openai chat
+mosaic --project-state --profile az-openai session list</code></pre>
+
+          <h2>步骤 4：配置 channels</h2>
+          <pre><code># terminal 通道（建议必须有）
+mosaic --project-state channels add --name local-terminal --kind terminal
+
+# 可选 Slack webhook 通道
+mosaic --project-state channels add \
+  --name team-slack \
+  --kind slack_webhook \
+  --endpoint https://hooks.slack.com/services/XXX/YYY/ZZZ
+
+# 可选 Telegram bot 通道
+export MOSAIC_TELEGRAM_BOT_TOKEN=&lt;bot_token&gt;
+mosaic --project-state channels add \
+  --name team-telegram \
+  --kind telegram_bot \
+  --chat-id &lt;chat_id&gt; \
+  --token-env MOSAIC_TELEGRAM_BOT_TOKEN
+
+mosaic --project-state channels list
+mosaic --project-state channels status</code></pre>
+
+          <h2>步骤 5：验证通道投递</h2>
+          <pre><code>mosaic --project-state channels test &lt;channel_id&gt;
+mosaic --project-state channels send &lt;channel_id&gt; --text "azure playbook send ok"
+mosaic --project-state channels logs --channel &lt;channel_id&gt; --tail 20</code></pre>
+
+          <h2>步骤 6：运行 gateway 生命周期</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway probe
+mosaic --project-state gateway call status --params '{"detail":true}'
+mosaic --project-state gateway health --verbose</code></pre>
+
+          <h2>步骤 7：应用安全策略基线</h2>
+          <pre><code>mosaic --project-state approvals set confirm
+mosaic --project-state approvals allowlist add "git status"
+mosaic --project-state sandbox set standard
+mosaic --project-state safety check --command "git status"
+mosaic --project-state safety check --command "curl https://example.com"</code></pre>
+
+          <h2>步骤 8：建立可观测基线</h2>
+          <pre><code>mosaic --project-state status
+mosaic --project-state health
+mosaic --project-state doctor
+mosaic --project-state logs --tail 120
+mosaic --project-state dashboard
+mosaic --project-state safety report --audit-tail 50 --compare-window 24h</code></pre>
+
+          <h2>步骤 9：发版前回归门禁</h2>
+          <pre><code>cd cli
+./scripts/run_regression_suite.sh
+
+# 可选：用 Azure profile 做真实冒烟
+LIVE=1 \
+BASE_URL="$AZURE_OPENAI_BASE_URL" \
+API_KEY_ENV=AZURE_OPENAI_API_KEY \
+MODEL=gpt-4o-mini \
+./scripts/tutorial_regression.sh --profile az-openai</code></pre>
+
+          <h2>验收清单</h2>
+          <ul>
+            <li>Azure profile 通过 <code>setup/models list/ask</code>。</li>
+            <li>至少一个 channel 通过 <code>test + send</code>。</li>
+            <li>Gateway <code>probe + call</code> 健康。</li>
+            <li>策略基线生效：<code>approvals=confirm</code> + <code>sandbox=standard</code>。</li>
+            <li>回归脚本无关键失败。</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="models-profiles.html">Models 与 Profiles</a>
+            <a href="channels.html">Channels 教程</a>
+            <a href="gateway-call.html">Gateway Call API</a>
+            <a href="policy.html">策略教程</a>
+            <a href="regression.html">回归测试教程</a>
+            <a href="operations.html">生产运维</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

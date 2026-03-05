@@ -15,6 +15,8 @@ pub struct AgentDefinition {
     pub id: String,
     pub name: String,
     pub profile: String,
+    #[serde(default)]
+    pub skills: Vec<String>,
     pub model: Option<String>,
     pub temperature: Option<f32>,
     pub max_turns: Option<u32>,
@@ -29,6 +31,7 @@ pub struct AddAgentInput {
     pub id: Option<String>,
     pub name: String,
     pub profile: String,
+    pub skills: Vec<String>,
     pub model: Option<String>,
     pub temperature: Option<f32>,
     pub max_turns: Option<u32>,
@@ -40,6 +43,8 @@ pub struct AddAgentInput {
 pub struct UpdateAgentInput {
     pub name: Option<String>,
     pub profile: Option<String>,
+    pub skills: Option<Vec<String>>,
+    pub clear_skills: bool,
     pub model: Option<String>,
     pub clear_model: bool,
     pub temperature: Option<f32>,
@@ -117,6 +122,7 @@ impl AgentStore {
             input.id.as_deref(),
             &input.name,
             &input.profile,
+            &input.skills,
             input.temperature,
             input.max_turns,
         )?;
@@ -137,6 +143,7 @@ impl AgentStore {
             id,
             name: input.name.trim().to_string(),
             profile: input.profile.trim().to_string(),
+            skills: normalize_skill_ids(input.skills)?,
             model: input.model.map(|value| value.trim().to_string()),
             temperature: input.temperature,
             max_turns: input.max_turns,
@@ -185,6 +192,11 @@ impl AgentStore {
         }
         if let Some(profile) = input.profile {
             agent.profile = profile.trim().to_string();
+        }
+        if input.clear_skills {
+            agent.skills.clear();
+        } else if let Some(skills) = input.skills {
+            agent.skills = normalize_skill_ids(skills)?;
         }
 
         if input.clear_model {
@@ -325,6 +337,7 @@ impl AgentStore {
                 agent_id: None,
                 profile_name: resolved.profile_name,
                 profile: resolved.profile,
+                agent_skills: Vec::new(),
             });
         };
 
@@ -340,6 +353,7 @@ impl AgentStore {
             agent_id: Some(agent.id),
             profile_name: base.profile_name,
             profile: merged,
+            agent_skills: agent.skills,
         })
     }
 
@@ -448,6 +462,7 @@ pub struct ResolvedAgentProfile {
     pub agent_id: Option<String>,
     pub profile_name: String,
     pub profile: ProfileConfig,
+    pub agent_skills: Vec<String>,
 }
 
 pub fn agents_file_path(data_dir: &Path) -> PathBuf {
@@ -544,6 +559,7 @@ fn validate_agent_fields(
     id: Option<&str>,
     name: &str,
     profile: &str,
+    skills: &[String],
     temperature: Option<f32>,
     max_turns: Option<u32>,
 ) -> Result<()> {
@@ -560,6 +576,7 @@ fn validate_agent_fields(
             "agent profile cannot be empty".to_string(),
         ));
     }
+    let _ = normalize_skill_ids(skills.to_vec())?;
     if let Some(value) = temperature
         && !(0.0..=2.0).contains(&value)
     {
@@ -580,6 +597,8 @@ fn validate_agent_fields(
 fn validate_agent_update_input(input: &UpdateAgentInput) -> Result<()> {
     if input.name.is_none()
         && input.profile.is_none()
+        && input.skills.is_none()
+        && !input.clear_skills
         && input.model.is_none()
         && !input.clear_model
         && input.temperature.is_none()
@@ -598,6 +617,11 @@ fn validate_agent_update_input(input: &UpdateAgentInput) -> Result<()> {
     if input.clear_model && input.model.is_some() {
         return Err(MosaicError::Validation(
             "cannot use --model and --clear-model together".to_string(),
+        ));
+    }
+    if input.clear_skills && input.skills.is_some() {
+        return Err(MosaicError::Validation(
+            "cannot use --skill and --clear-skills together".to_string(),
         ));
     }
     if input.clear_temperature && input.temperature.is_some() {
@@ -635,6 +659,9 @@ fn validate_agent_update_input(input: &UpdateAgentInput) -> Result<()> {
             "agent profile cannot be empty".to_string(),
         ));
     }
+    if let Some(skills) = &input.skills {
+        let _ = normalize_skill_ids(skills.clone())?;
+    }
     if let Some(model) = &input.model
         && model.trim().is_empty()
     {
@@ -657,6 +684,22 @@ fn validate_agent_update_input(input: &UpdateAgentInput) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn normalize_skill_ids(raw_skills: Vec<String>) -> Result<Vec<String>> {
+    let mut normalized = Vec::new();
+    for raw in raw_skills {
+        let value = raw.trim();
+        if value.is_empty() {
+            return Err(MosaicError::Validation(
+                "agent skill id cannot be empty".to_string(),
+            ));
+        }
+        if !normalized.iter().any(|existing| existing == value) {
+            normalized.push(value.to_string());
+        }
+    }
+    Ok(normalized)
 }
 
 #[cfg(test)]
@@ -683,6 +726,7 @@ mod tests {
                 id: Some("writer".to_string()),
                 name: "Writer".to_string(),
                 profile: "default".to_string(),
+                skills: vec![],
                 model: Some("mock-model".to_string()),
                 temperature: Some(0.3),
                 max_turns: Some(4),
@@ -709,6 +753,7 @@ mod tests {
                 id: Some("planner".to_string()),
                 name: "Planner".to_string(),
                 profile: "default".to_string(),
+                skills: vec![],
                 model: None,
                 temperature: None,
                 max_turns: None,
@@ -721,6 +766,7 @@ mod tests {
                 id: Some("writer".to_string()),
                 name: "Writer".to_string(),
                 profile: "default".to_string(),
+                skills: vec![],
                 model: None,
                 temperature: None,
                 max_turns: None,
@@ -745,6 +791,7 @@ mod tests {
                 id: Some("writer".to_string()),
                 name: "Writer".to_string(),
                 profile: "default".to_string(),
+                skills: vec!["writer".to_string()],
                 model: Some("gpt-4o-mini".to_string()),
                 temperature: Some(0.9),
                 max_turns: Some(12),
@@ -765,6 +812,7 @@ mod tests {
             .resolve_effective_profile(&config, "default", Some("writer"), Some("ask"))
             .expect("resolve profile");
         assert_eq!(resolved.agent_id.as_deref(), Some("writer"));
+        assert_eq!(resolved.agent_skills, vec!["writer"]);
         assert_eq!(resolved.profile.provider.model, "gpt-4o-mini");
         assert_eq!(resolved.profile.agent.temperature, 0.9);
         assert_eq!(resolved.profile.agent.max_turns, 12);
@@ -784,6 +832,7 @@ mod tests {
                 id: Some("writer".to_string()),
                 name: "Writer".to_string(),
                 profile: "default".to_string(),
+                skills: vec!["writer".to_string()],
                 model: Some("gpt-4o-mini".to_string()),
                 temperature: Some(0.5),
                 max_turns: Some(6),
@@ -797,6 +846,7 @@ mod tests {
                 "writer",
                 UpdateAgentInput {
                     name: Some("Writer V2".to_string()),
+                    skills: Some(vec!["reviewer".to_string()]),
                     model: Some("mock-model".to_string()),
                     clear_temperature: true,
                     tools_enabled: Some(false),
@@ -807,6 +857,7 @@ mod tests {
             .expect("update");
 
         assert_eq!(updated.name, "Writer V2");
+        assert_eq!(updated.skills, vec!["reviewer"]);
         assert_eq!(updated.model.as_deref(), Some("mock-model"));
         assert_eq!(updated.temperature, None);
         assert_eq!(updated.tools_enabled, Some(false));
@@ -822,6 +873,7 @@ mod tests {
                 id: Some("writer".to_string()),
                 name: "Writer".to_string(),
                 profile: "default".to_string(),
+                skills: vec![],
                 model: None,
                 temperature: None,
                 max_turns: None,
@@ -843,6 +895,21 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("cannot use --model and --clear-model together")
+        );
+
+        let err = store
+            .update(
+                "writer",
+                UpdateAgentInput {
+                    skills: Some(vec!["writer".to_string()]),
+                    clear_skills: true,
+                    ..UpdateAgentInput::default()
+                },
+            )
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot use --skill and --clear-skills together")
         );
     }
 }

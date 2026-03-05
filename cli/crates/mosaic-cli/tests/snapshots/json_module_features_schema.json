@@ -176,18 +176,131 @@
       "removed_status": "bool",
       "status_path": "string"
     },
+    "namespace": "string",
     "ok": "bool"
   },
   "memory_index": {
     "index": {
+      "incremental": "bool",
       "index_path": "string",
       "indexed_documents": "number",
+      "reindexed_documents": "number",
+      "removed_documents": "number",
+      "retained_missing_documents": "number",
+      "reused_documents": "number",
       "skipped_files": "number",
+      "stale_reindexed_documents": "number",
       "status_path": "string"
     },
+    "namespace": "string",
     "ok": "bool"
   },
+  "memory_policy_apply": {
+    "applied": "bool",
+    "dry_run": "bool",
+    "ok": "bool",
+    "policy": {
+      "enabled": "bool",
+      "last_run_at": "null",
+      "last_run_removed_count": "null",
+      "max_age_hours": "null",
+      "max_documents_per_namespace": "null",
+      "max_namespaces": "number",
+      "min_interval_minutes": "number",
+      "version": "number"
+    },
+    "policy_path": "string",
+    "prune": {
+      "dry_run": "bool",
+      "evaluated_namespaces": "number",
+      "kept_namespaces": {
+        "items": [],
+        "type": "array"
+      },
+      "max_age_hours": "null",
+      "max_documents_per_namespace": "null",
+      "max_namespaces": "number",
+      "removed_count": "number",
+      "removed_due_to_max_age_hours": {
+        "items": [],
+        "type": "array"
+      },
+      "removed_due_to_max_documents_per_namespace": {
+        "items": [],
+        "type": "array"
+      },
+      "removed_due_to_max_namespaces": {
+        "items": [],
+        "type": "array"
+      },
+      "removed_namespaces": {
+        "items": [],
+        "type": "array"
+      }
+    },
+    "skipped": "bool"
+  },
+  "memory_policy_get": {
+    "ok": "bool",
+    "policy": {
+      "enabled": "bool",
+      "last_run_at": "null",
+      "last_run_removed_count": "null",
+      "max_age_hours": "null",
+      "max_documents_per_namespace": "null",
+      "max_namespaces": "null",
+      "min_interval_minutes": "null",
+      "version": "number"
+    },
+    "policy_path": "string"
+  },
+  "memory_policy_set": {
+    "ok": "bool",
+    "policy": {
+      "enabled": "bool",
+      "last_run_at": "null",
+      "last_run_removed_count": "null",
+      "max_age_hours": "null",
+      "max_documents_per_namespace": "null",
+      "max_namespaces": "number",
+      "min_interval_minutes": "number",
+      "version": "number"
+    },
+    "policy_path": "string"
+  },
+  "memory_prune": {
+    "ok": "bool",
+    "prune": {
+      "dry_run": "bool",
+      "evaluated_namespaces": "number",
+      "kept_namespaces": {
+        "items": [],
+        "type": "array"
+      },
+      "max_age_hours": "null",
+      "max_documents_per_namespace": "null",
+      "max_namespaces": "number",
+      "removed_count": "number",
+      "removed_due_to_max_age_hours": {
+        "items": [],
+        "type": "array"
+      },
+      "removed_due_to_max_documents_per_namespace": {
+        "items": [],
+        "type": "array"
+      },
+      "removed_due_to_max_namespaces": {
+        "items": [],
+        "type": "array"
+      },
+      "removed_namespaces": {
+        "items": [],
+        "type": "array"
+      }
+    }
+  },
   "memory_search": {
+    "namespace": "string",
     "ok": "bool",
     "result": {
       "hits": {
@@ -206,6 +319,7 @@
     }
   },
   "memory_status": {
+    "namespace": "string",
     "ok": "bool",
     "status": {
       "index_path": "string",
@@ -213,6 +327,22 @@
       "last_indexed_at": "string",
       "status_path": "string"
     }
+  },
+  "memory_status_all": {
+    "namespaces": {
+      "items": [
+        {
+          "exists": "bool",
+          "index_path": "string",
+          "indexed_documents": "number",
+          "last_indexed_at": "string",
+          "namespace": "string",
+          "status_path": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool"
   },
   "plugins_check": {
     "ok": "bool",

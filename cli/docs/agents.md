@@ -10,8 +10,10 @@ mosaic --project-state agents list
 mosaic --project-state agents show <agent_id>
 
 # Create/remove agents
-mosaic --project-state agents add --name Writer --id writer --profile default --set-default --route ask
+mosaic --project-state agents add --name Writer --id writer --profile default --skill writer --set-default --route ask
 mosaic --project-state agents update writer --name "Writer V2" --model gpt-4o-mini --route chat
+mosaic --project-state agents update writer --skill reviewer
+mosaic --project-state agents update writer --clear-skills
 mosaic --project-state agents update writer --clear-model --clear-temperature
 mosaic --project-state agents remove writer
 
@@ -49,6 +51,7 @@ Each agent may override these profile fields:
 - `agent.max_turns`
 - `tools.enabled`
 - `tools.run.guard_mode`
+- `skills[]` (loaded from local `SKILL.md` and injected into agent system prompt)
 
 `agents update` supports clearing optional overrides:
 
@@ -57,6 +60,15 @@ Each agent may override these profile fields:
 - `--clear-max-turns`
 - `--clear-tools-enabled`
 - `--clear-guard-mode`
+- `--clear-skills`
+
+## Agent Skills
+
+Use `--skill <skill_id>` on `agents add|update` to bind one or more installed skills.
+
+- Skill IDs must exist in `mosaic skills list`.
+- At runtime (`ask/chat`), bound `SKILL.md` content is appended to the system prompt.
+- If a bound skill is removed later, runtime will fail with a validation error until fixed.
 
 All commands support `--json` and use the common envelope:
 

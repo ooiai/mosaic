@@ -33,11 +33,14 @@
         <p class="sidebar-title">Modules</p>
         <a class="side-link" href="learning-path.html">Learning Path</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link active" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -71,23 +74,32 @@ mosaic --project-state gateway call status --params '{"detail":true}'
 mosaic --project-state --json gateway call status</code></pre>
           <p><code>call</code> forwards <code>method</code> and optional JSON <code>params</code> to the active gateway service.</p>
 
-          <h2>Step 6: Restart and controlled shutdown</h2>
+          <h2>Step 6: Run end-to-end diagnostics</h2>
+          <pre><code>mosaic --project-state gateway diagnose --method status
+mosaic --project-state --json gateway diagnose --method status --params '{"detail":true}'</code></pre>
+          <p><code>diagnose</code> executes <code>probe -> discover -> call</code> and returns per-step health, latency, and error code.</p>
+
+          <h2>Step 7: Restart and controlled shutdown</h2>
           <pre><code>mosaic --project-state gateway restart
 mosaic --project-state gateway stop</code></pre>
 
-          <h2>Step 7: Uninstall when cleaning up</h2>
+          <h2>Step 8: Uninstall when cleaning up</h2>
           <pre><code>mosaic --project-state gateway uninstall</code></pre>
 
-          <h2>Step 8: Operational checklist</h2>
+          <h2>Step 9: Operational checklist</h2>
           <ul>
             <li><code>status</code>, <code>health</code>, and <code>probe</code> must all succeed.</li>
+            <li><code>diagnose</code> should report failed=0 in stable environments.</li>
             <li><code>call status</code> must return valid payload for automation.</li>
             <li>After restart, probe result should remain healthy.</li>
           </ul>
 
           <div class="quick-links">
+            <a href="channels.html">Channels Guide</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">Operations</a>
             <a href="learning-path.html">Learning Path</a>
+            <a href="regression.html">Regression Guide</a>
             <a href="troubleshooting.html">Troubleshooting</a>
           </div>
         </article>

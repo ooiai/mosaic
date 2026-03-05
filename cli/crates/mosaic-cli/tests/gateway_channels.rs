@@ -1058,6 +1058,28 @@ fn gateway_probe_discover_call_flow() {
     assert_eq!(call_json["ok"], true);
     assert_eq!(call_json["data"]["service"], "mosaic-gateway");
 
+    let diagnose_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "diagnose",
+            "--method",
+            "status",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let diagnose_json: Value = serde_json::from_slice(&diagnose_output).expect("diagnose json");
+    assert_eq!(diagnose_json["ok"], true);
+    assert_eq!(diagnose_json["diagnose"]["summary"]["failed"], 0);
+    assert_eq!(diagnose_json["diagnose"]["summary"]["passed"], 3);
+
     let health_output = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
@@ -1233,6 +1255,32 @@ fn channels_ops_commands_flow() {
             .iter()
             .any(|event| event["channel_id"].as_str() == Some(channel_id.as_str()))
     );
+
+    let logs_summary_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "logs",
+            "--channel",
+            &channel_id,
+            "--tail",
+            "10",
+            "--summary",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let logs_summary_json: Value =
+        serde_json::from_slice(&logs_summary_output).expect("logs summary json");
+    assert_eq!(logs_summary_json["ok"], true);
+    assert_eq!(logs_summary_json["summary"]["total_events"], 1);
+    assert_eq!(logs_summary_json["summary"]["success_events"], 1);
+    assert_eq!(logs_summary_json["summary"]["failed_events"], 0);
 
     let capabilities_output = Command::cargo_bin("mosaic")
         .expect("binary")
