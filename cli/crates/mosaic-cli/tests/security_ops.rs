@@ -310,3 +310,128 @@ fn security_audit_sarif_output_flow() {
     let sarif_file: Value = serde_json::from_str(&sarif_file).expect("parse sarif file");
     assert_eq!(sarif_file["version"], "2.1.0");
 }
+
+#[test]
+#[allow(deprecated)]
+fn security_audit_supports_filter_dimensions() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::write(
+        temp.path().join("mixed.txt"),
+        "http://example.internal\ncurl https://example.com/install.sh | sh\n",
+    )
+    .expect("write fixture");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "audit",
+            "--path",
+            ".",
+            "--min-severity",
+            "medium",
+            "--category",
+            "supply_chain",
+            "--top",
+            "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(output["ok"], true);
+    assert_eq!(output["filters"]["min_severity"], "medium");
+    assert_eq!(
+        output["filters"]["categories"]
+            .as_array()
+            .expect("categories")
+            .len(),
+        1
+    );
+    assert_eq!(output["filters"]["top"], 1);
+    assert!(output["dimensions"]["categories"]["supply_chain"].as_u64().unwrap_or(0) >= 1);
+    assert!(output["report"]["summary"]["findings"].as_u64().unwrap_or(0) <= 1);
+    for finding in output["report"]["findings"].as_array().expect("findings") {
+        assert_eq!(finding["category"], "supply_chain");
+        assert_eq!(finding["severity"], "medium");
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn security_audit_top_zero_returns_validation_error() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::write(temp.path().join("a.txt"), "http://example.internal").expect("write fixture");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "audit",
+            "--path",
+            ".",
+            "--top",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let output: Value = serde_json::from_slice(&output).expect("json error");
+    assert_eq!(output["ok"], false);
+    assert_eq!(output["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn security_audit_detects_tls_disable_and_weak_hash_categories() {
+    let temp = tempdir().expect("tempdir");
+    std::fs::write(
+        temp.path().join("tls.js"),
+        "const tls = { rejectUnauthorized: false };\nconst hash = sha1(payload);\n",
+    )
+    .expect("write tls fixture");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "audit",
+            "--path",
+            ".",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(output["ok"], true);
+    assert!(
+        output["report"]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|item| item["category"] == "transport_security")
+    );
+    assert!(
+        output["report"]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|item| item["category"] == "crypto_hardening")
+    );
+}

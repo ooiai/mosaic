@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI 文档 | Gateway Call API</title>
+    <meta name="description" content="mosaic gateway call 方法与 JSON 契约详解教程。" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../assets/style.css" />
+    <script src="../assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">跳转到正文</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI 文档</a>
+        <nav class="top-nav">
+          <a href="index.html">总览</a>
+          <a class="active" href="guide.html">路径</a>
+          <a href="quickstart.html">10 分钟上手</a>
+          <a href="operations.html">生产运维</a>
+          <a href="install.html">安装</a>
+          <a href="configure.html">配置</a>
+          <a href="troubleshooting.html">排障</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="搜索文档... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="搜索结果"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="../gateway-call.html">EN</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Gateway</p>
+        <a class="side-link" href="models-profiles.html">Models 与 Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions 教程</a>
+        <a class="side-link" href="policy.html">策略教程</a>
+        <a class="side-link" href="gateway.html">Gateway 生命周期</a>
+        <a class="side-link active" href="gateway-call.html">Gateway Call API</a>
+        <a class="side-link" href="channels.html">Channels</a>
+        <a class="side-link" href="operations.html">生产运维</a>
+        <a class="side-link" href="regression.html">回归测试</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>Gateway Call API</span></nav>
+          <p class="kicker">Gateway Call</p>
+          <h1>Gateway Call 接口：详细教程</h1>
+          <p class="lead">本页聚焦 <code>mosaic gateway call</code>：请求形态、JSON 输出契约、错误处理和自动化模式。</p>
+
+          <h2>1. 先把 gateway 拉起</h2>
+          <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
+mosaic --project-state gateway start
+mosaic --project-state gateway probe</code></pre>
+
+          <h2>2. 最小方法调用</h2>
+          <pre><code>mosaic --project-state gateway call status</code></pre>
+          <p>该命令会把方法 <code>status</code> 透传给 gateway，params 为空。</p>
+
+          <h2>3. 带 JSON 参数调用</h2>
+          <pre><code>mosaic --project-state gateway call status --params '{"detail":true}'</code></pre>
+          <p><code>--params</code> 必须是合法 JSON（对象/数组/字符串），由目标方法解释。</p>
+
+          <h2>4. 机器可读输出契约</h2>
+          <pre><code>mosaic --project-state --json gateway call status</code></pre>
+          <p>当前成功返回示例：</p>
+          <pre><code>{
+  "ok": true,
+  "method": "status",
+  "request_id": "...",
+  "gateway": { "host": "127.0.0.1", "port": 8787 },
+  "data": { "ok": true, "service": "mosaic-gateway", "uptime_seconds": 12 }
+}</code></pre>
+
+          <h2>5. probe + call 标准巡检序列</h2>
+          <pre><code>mosaic --project-state --json gateway probe
+mosaic --project-state --json gateway call status
+mosaic --project-state --json gateway health --verbose</code></pre>
+          <p>建议把该序列放进 CI 或定时巡检任务。</p>
+
+          <h2>6. 错误处理建议</h2>
+          <ul>
+            <li><code>probe</code> 失败时先 <code>gateway restart</code> 再 probe。</li>
+            <li><code>call</code> 报协议/网络错误时，先看 <code>logs --tail</code>。</li>
+            <li>持续失败时执行 <code>doctor</code> 并检查状态目录权限。</li>
+          </ul>
+
+          <h2>7. 重启与停机流程</h2>
+          <pre><code>mosaic --project-state gateway restart
+mosaic --project-state gateway status --deep
+mosaic --project-state gateway stop</code></pre>
+
+          <h2>8. 自动化脚本示例</h2>
+          <pre><code># shell 自动化（call 失败则退出非 0）
+set -e
+mosaic --project-state --json gateway probe >/tmp/gw-probe.json
+mosaic --project-state --json gateway call status >/tmp/gw-status.json</code></pre>
+
+          <div class="quick-links">
+            <a href="models-profiles.html">Models 与 Profiles</a>
+            <a href="sessions.html">Sessions 教程</a>
+            <a href="policy.html">策略教程</a>
+            <a href="gateway.html">Gateway 生命周期</a>
+            <a href="channels.html">Channels 教程</a>
+            <a href="operations.html">生产运维</a>
+            <a href="regression.html">回归测试教程</a>
+            <a href="troubleshooting.html">排障手册</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">本页目录</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

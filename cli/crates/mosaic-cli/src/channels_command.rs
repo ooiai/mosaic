@@ -1,5 +1,6 @@
 use chrono::Utc;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 use mosaic_channels::{
     AddChannelInput, ChannelRepository, ChannelSendOptions, ChannelTemplateDefaults,
@@ -257,17 +258,55 @@ pub(super) async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()>
                 }
             }
         }
-        ChannelsCommand::Logs { channel, tail } => {
+        ChannelsCommand::Logs {
+            channel,
+            tail,
+            summary,
+        } => {
             let events = repository.logs(channel.as_deref(), tail)?;
             if cli.json {
-                print_json(&json!({
-                    "ok": true,
-                    "events": events,
-                    "channel": channel,
-                }));
+                let payload = if summary {
+                    json!({
+                        "ok": true,
+                        "events": events,
+                        "channel": channel,
+                        "summary": summarize_channel_events(&events),
+                    })
+                } else {
+                    json!({
+                        "ok": true,
+                        "events": events,
+                        "channel": channel,
+                    })
+                };
+                print_json(&payload);
             } else if events.is_empty() {
                 println!("No channel events found.");
             } else {
+                if summary {
+                    let summary = summarize_channel_events(&events);
+                    println!(
+                        "events total={} success={} failed={} probes={} deduplicated={}",
+                        summary["total_events"].as_u64().unwrap_or(0),
+                        summary["success_events"].as_u64().unwrap_or(0),
+                        summary["failed_events"].as_u64().unwrap_or(0),
+                        summary["probe_events"].as_u64().unwrap_or(0),
+                        summary["deduplicated_events"].as_u64().unwrap_or(0)
+                    );
+                    if let Some(channels) = summary["channels"].as_array() {
+                        println!("channels:");
+                        for item in channels {
+                            println!(
+                                "- {} total={} success={} failed={} last_error={}",
+                                item["channel_id"].as_str().unwrap_or("-"),
+                                item["total_events"].as_u64().unwrap_or(0),
+                                item["success_events"].as_u64().unwrap_or(0),
+                                item["failed_events"].as_u64().unwrap_or(0),
+                                item["last_error"].as_str().unwrap_or("-"),
+                            );
+                        }
+                    }
+                }
                 for event in events {
                     println!(
                         "{} channel={} kind={} status={} attempt={} http={} parse_mode={} idempotency_key={} deduplicated={} rate_limited_ms={} error={} preview={}",
@@ -612,4 +651,73 @@ pub(super) async fn handle_channels(cli: &Cli, args: ChannelsArgs) -> Result<()>
         }
     }
     Ok(())
+}
+
+fn summarize_channel_events(events: &[mosaic_channels::ChannelLogEntry]) -> Value {
+    #[derive(Default)]
+    struct PerChannel {
+        total: u64,
+        success: u64,
+        failed: u64,
+        last_error: Option<String>,
+        last_ts: Option<chrono::DateTime<chrono::Utc>>,
+    }
+
+    let mut total = 0u64;
+    let mut success = 0u64;
+    let mut failed = 0u64;
+    let mut probes = 0u64;
+    let mut deduplicated = 0u64;
+    let mut by_channel: BTreeMap<String, PerChannel> = BTreeMap::new();
+
+    for event in events {
+        total += 1;
+        if event.kind == "test_probe" {
+            probes += 1;
+        }
+        if event.deduplicated {
+            deduplicated += 1;
+        }
+        let is_success = event.delivery_status == "success" || event.delivery_status == "deduplicated";
+        if is_success {
+            success += 1;
+        }
+        if event.delivery_status == "failed" {
+            failed += 1;
+        }
+
+        let channel = by_channel.entry(event.channel_id.clone()).or_default();
+        channel.total += 1;
+        if is_success {
+            channel.success += 1;
+        }
+        if event.delivery_status == "failed" {
+            channel.failed += 1;
+            channel.last_error = event.error.clone();
+        }
+        channel.last_ts = Some(event.ts);
+    }
+
+    let channels = by_channel
+        .into_iter()
+        .map(|(channel_id, item)| {
+            json!({
+                "channel_id": channel_id,
+                "total_events": item.total,
+                "success_events": item.success,
+                "failed_events": item.failed,
+                "last_event_at": item.last_ts.map(|value| value.to_rfc3339()),
+                "last_error": item.last_error,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "total_events": total,
+        "success_events": success,
+        "failed_events": failed,
+        "probe_events": probes,
+        "deduplicated_events": deduplicated,
+        "channels": channels,
+    })
 }

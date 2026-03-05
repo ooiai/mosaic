@@ -109,6 +109,12 @@ fn channels_help_includes_operational_commands() {
             "channels --help missing expected subcommand: {name}\n{help}"
         );
     }
+
+    let logs_help = run_help(&["channels", "logs", "--help"]);
+    assert!(
+        logs_help.contains("--summary"),
+        "channels logs --help missing expected option --summary:\n{logs_help}"
+    );
 }
 
 #[test]
@@ -124,6 +130,7 @@ fn gateway_help_includes_lifecycle_commands() {
         "call",
         "probe",
         "discover",
+        "diagnose",
         "stop",
         "uninstall",
     ];
@@ -140,7 +147,9 @@ fn gateway_help_includes_lifecycle_commands() {
 #[allow(deprecated)]
 fn mcp_help_includes_management_commands() {
     let help = run_help(&["mcp", "--help"]);
-    let expected = ["list", "add", "check", "enable", "disable", "remove"];
+    let expected = [
+        "list", "add", "show", "check", "enable", "disable", "remove",
+    ];
 
     for name in expected {
         assert!(
@@ -148,6 +157,12 @@ fn mcp_help_includes_management_commands() {
             "mcp --help missing expected subcommand: {name}\n{help}"
         );
     }
+
+    let check_help = run_help(&["mcp", "check", "--help"]);
+    assert!(
+        check_help.contains("--all"),
+        "mcp check --help missing expected option --all:\n{check_help}"
+    );
 }
 
 #[test]
@@ -330,6 +345,22 @@ fn agents_help_includes_management_commands() {
             "agents --help missing expected subcommand: {name}\n{help}"
         );
     }
+
+    let add_help = run_help(&["agents", "add", "--help"]);
+    assert!(
+        add_help.contains("--skill"),
+        "agents add --help missing expected option --skill:\n{add_help}"
+    );
+
+    let update_help = run_help(&["agents", "update", "--help"]);
+    assert!(
+        update_help.contains("--skill"),
+        "agents update --help missing expected option --skill:\n{update_help}"
+    );
+    assert!(
+        update_help.contains("--clear-skills"),
+        "agents update --help missing expected option --clear-skills:\n{update_help}"
+    );
 }
 
 #[test]
@@ -407,7 +438,7 @@ fn browser_help_includes_navigation_and_history_commands() {
 #[allow(deprecated)]
 fn memory_help_includes_index_and_search_commands() {
     let help = run_help(&["memory", "--help"]);
-    let expected = ["index", "search", "status", "clear"];
+    let expected = ["index", "search", "status", "clear", "prune", "policy"];
 
     for name in expected {
         assert!(
@@ -415,6 +446,68 @@ fn memory_help_includes_index_and_search_commands() {
             "memory --help missing expected subcommand: {name}\n{help}"
         );
     }
+}
+
+#[test]
+#[allow(deprecated)]
+fn memory_index_help_includes_incremental_option() {
+    let help = run_help(&["memory", "index", "--help"]);
+    let expected = ["--incremental", "--namespace", "--stale-after-hours", "--retain-missing"];
+    for option in expected {
+        assert!(
+            help.contains(option),
+            "memory index --help missing expected option {option}:\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn memory_search_help_includes_namespace_option() {
+    let help = run_help(&["memory", "search", "--help"]);
+    assert!(
+        help.contains("--namespace"),
+        "memory search --help missing expected option --namespace:\n{help}"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn memory_status_help_includes_all_namespaces_option() {
+    let help = run_help(&["memory", "status", "--help"]);
+    assert!(
+        help.contains("--all-namespaces"),
+        "memory status --help missing expected option --all-namespaces:\n{help}"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn memory_prune_help_includes_document_quota_option() {
+    let help = run_help(&["memory", "prune", "--help"]);
+    assert!(
+        help.contains("--max-documents-per-namespace"),
+        "memory prune --help missing expected option --max-documents-per-namespace:\n{help}"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn memory_policy_help_includes_get_set_apply_commands() {
+    let help = run_help(&["memory", "policy", "--help"]);
+    let expected = ["get", "set", "apply"];
+    for command in expected {
+        assert!(
+            help.contains(command),
+            "memory policy --help missing expected subcommand {command}:\n{help}"
+        );
+    }
+
+    let apply_help = run_help(&["memory", "policy", "apply", "--help"]);
+    assert!(
+        apply_help.contains("--force"),
+        "memory policy apply --help missing expected option --force:\n{apply_help}"
+    );
 }
 
 #[test]
@@ -427,6 +520,19 @@ fn security_help_includes_audit_and_baseline_commands() {
         assert!(
             help.contains(name),
             "security --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn security_audit_help_includes_filter_options() {
+    let help = run_help(&["security", "audit", "--help"]);
+    let expected = ["--min-severity", "--category", "--top"];
+    for option in expected {
+        assert!(
+            help.contains(option),
+            "security audit --help missing expected option: {option}\n{help}"
         );
     }
 }

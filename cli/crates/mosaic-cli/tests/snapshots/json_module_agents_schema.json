@@ -8,6 +8,10 @@
       "model": "string",
       "name": "string",
       "profile": "string",
+      "skills": {
+        "items": [],
+        "type": "array"
+      },
       "temperature": "null",
       "tools_enabled": "null",
       "updated_at": "string"
@@ -31,6 +35,10 @@
           "model": "string",
           "name": "string",
           "profile": "string",
+          "skills": {
+            "items": [],
+            "type": "array"
+          },
           "temperature": "null",
           "tools_enabled": "null",
           "updated_at": "string"
@@ -71,6 +79,10 @@
       "model": "string",
       "name": "string",
       "profile": "string",
+      "skills": {
+        "items": [],
+        "type": "array"
+      },
       "temperature": "null",
       "tools_enabled": "null",
       "updated_at": "string"

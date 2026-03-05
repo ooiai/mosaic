@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 use serde_json::json;
 
@@ -9,8 +10,9 @@ use mosaic_security::{
 };
 
 use super::{
-    Cli, SecurityArgs, SecurityBaselineCommand, SecurityCommand, normalize_non_empty_list,
-    print_json, remove_matching, resolve_baseline_path, resolve_output_path, resolve_state_paths,
+    Cli, SecurityArgs, SecurityBaselineCommand, SecurityCommand, SecuritySeverityArg,
+    normalize_non_empty_list, print_json, remove_matching, resolve_baseline_path,
+    resolve_output_path, resolve_state_paths,
 };
 
 pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
@@ -30,12 +32,21 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
             update_baseline,
             sarif,
             sarif_output,
+            min_severity,
+            categories,
+            top,
         } => {
             if no_baseline && update_baseline {
                 return Err(MosaicError::Validation(
                     "--no-baseline and --update-baseline cannot be used together".to_string(),
                 ));
             }
+            if top == Some(0) {
+                return Err(MosaicError::Validation(
+                    "--top must be greater than 0".to_string(),
+                ));
+            }
+            let categories = normalize_non_empty_list(categories, "category")?;
             let root = {
                 let raw = PathBuf::from(path);
                 if raw.is_absolute() {
@@ -81,6 +92,8 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                     report.summary.baseline_path = Some(baseline_path_display.clone());
                 }
             }
+            let (report, filtered_out) =
+                apply_audit_filters(report, min_severity, &categories, top);
 
             let sarif_value = if sarif || sarif_output.is_some() {
                 Some(report_to_sarif(&report))
@@ -114,9 +127,17 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
             }
 
             if cli.json {
+                let dimensions = audit_dimensions(&report);
                 print_json(&json!({
                     "ok": true,
                     "report": report,
+                    "filters": {
+                        "min_severity": min_severity.map(security_severity_name),
+                        "categories": categories,
+                        "top": top,
+                        "filtered_out": filtered_out,
+                    },
+                    "dimensions": dimensions,
                     "baseline": {
                         "enabled": baseline_enabled,
                         "updated": update_baseline,
@@ -139,6 +160,33 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                     report.summary.ignored,
                     report.summary.scanned_files,
                     report.summary.skipped_files
+                );
+                if min_severity.is_some() || !categories.is_empty() || top.is_some() {
+                    println!(
+                        "filters: min_severity={} categories={} top={} filtered_out={}",
+                        min_severity
+                            .map(security_severity_name)
+                            .unwrap_or("-"),
+                        if categories.is_empty() {
+                            "-".to_string()
+                        } else {
+                            categories.join(",")
+                        },
+                        top.map(|value| value.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        filtered_out
+                    );
+                }
+                let dimensions = audit_dimensions(&report);
+                println!(
+                    "dimensions: categories={} high={} medium={} low={}",
+                    dimensions["categories"]
+                        .as_object()
+                        .map(|map| map.len())
+                        .unwrap_or(0),
+                    dimensions["severities"]["high"].as_u64().unwrap_or(0),
+                    dimensions["severities"]["medium"].as_u64().unwrap_or(0),
+                    dimensions["severities"]["low"].as_u64().unwrap_or(0),
                 );
                 if baseline_enabled {
                     println!("baseline: {baseline_path_display}");
@@ -176,6 +224,106 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn apply_audit_filters(
+    mut report: mosaic_security::SecurityAuditReport,
+    min_severity: Option<SecuritySeverityArg>,
+    categories: &[String],
+    top: Option<usize>,
+) -> (mosaic_security::SecurityAuditReport, usize) {
+    let before = report.findings.len();
+    if !categories.is_empty() {
+        report.findings.retain(|finding| {
+            categories
+                .iter()
+                .any(|category| category.eq_ignore_ascii_case(&finding.category))
+        });
+    }
+    if let Some(min_severity) = min_severity {
+        report.findings.retain(|finding| {
+            security_severity_rank_finding(finding.severity)
+                >= security_severity_rank_arg(min_severity)
+        });
+    }
+    report.findings.sort_by(|lhs, rhs| {
+        security_severity_rank_finding(rhs.severity)
+            .cmp(&security_severity_rank_finding(lhs.severity))
+            .then_with(|| lhs.path.cmp(&rhs.path))
+            .then_with(|| match (lhs.line, rhs.line) {
+                (Some(a), Some(b)) => a.cmp(&b),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            })
+    });
+    if let Some(limit) = top
+        && report.findings.len() > limit
+    {
+        report.findings.truncate(limit);
+    }
+    update_audit_summary(&mut report);
+    let filtered_out = before.saturating_sub(report.findings.len());
+    (report, filtered_out)
+}
+
+fn update_audit_summary(report: &mut mosaic_security::SecurityAuditReport) {
+    report.summary.findings = report.findings.len();
+    report.summary.high = report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == mosaic_security::SecuritySeverity::High)
+        .count();
+    report.summary.medium = report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == mosaic_security::SecuritySeverity::Medium)
+        .count();
+    report.summary.low = report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == mosaic_security::SecuritySeverity::Low)
+        .count();
+    report.summary.ok = report.summary.high == 0;
+}
+
+fn audit_dimensions(report: &mosaic_security::SecurityAuditReport) -> serde_json::Value {
+    let mut categories = BTreeMap::new();
+    for finding in &report.findings {
+        *categories.entry(finding.category.clone()).or_insert(0usize) += 1;
+    }
+    json!({
+        "categories": categories,
+        "severities": {
+            "high": report.summary.high,
+            "medium": report.summary.medium,
+            "low": report.summary.low,
+        }
+    })
+}
+
+fn security_severity_rank_arg(value: SecuritySeverityArg) -> u8 {
+    match value {
+        SecuritySeverityArg::Low => 1,
+        SecuritySeverityArg::Medium => 2,
+        SecuritySeverityArg::High => 3,
+    }
+}
+
+fn security_severity_rank_finding(value: mosaic_security::SecuritySeverity) -> u8 {
+    match value {
+        mosaic_security::SecuritySeverity::Low => 1,
+        mosaic_security::SecuritySeverity::Medium => 2,
+        mosaic_security::SecuritySeverity::High => 3,
+    }
+}
+
+fn security_severity_name(value: SecuritySeverityArg) -> &'static str {
+    match value {
+        SecuritySeverityArg::Low => "low",
+        SecuritySeverityArg::Medium => "medium",
+        SecuritySeverityArg::High => "high",
+    }
 }
 
 fn handle_security_baseline(

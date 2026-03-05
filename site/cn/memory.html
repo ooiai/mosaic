@@ -33,11 +33,14 @@
         <p class="sidebar-title">模块专题</p>
         <a class="side-link" href="learning-path.html">分阶段学习</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link active" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">生产运维</a>
+        <a class="side-link" href="regression.html">回归测试</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -62,22 +65,54 @@
           <pre><code>mosaic --project-state memory search "gateway retry" --limit 20
 mosaic --project-state memory search "agents route" --limit 10</code></pre>
 
-          <h2>步骤 4：按目录重建索引</h2>
-          <pre><code>mosaic --project-state memory index --path cli --max-files 300
-mosaic --project-state memory status</code></pre>
-          <p>大仓库建议按目录分批索引以提升迭代速度。</p>
+          <h2>步骤 4：按目录+命名空间重建索引</h2>
+          <pre><code>mosaic --project-state memory index \
+  --path cli \
+  --namespace ops \
+  --max-files 300 \
+  --incremental \
+  --stale-after-hours 24 \
+  --retain-missing
+mosaic --project-state memory status --namespace ops</code></pre>
+          <p>大仓库建议结合命名空间和增量索引，提高迭代速度并优化索引生命周期管理。</p>
 
           <h2>步骤 5：需要时清理索引</h2>
           <pre><code>mosaic --project-state memory clear
 mosaic --project-state memory status</code></pre>
 
-          <h2>步骤 6：JSON 自动化检查</h2>
-          <pre><code>mosaic --project-state --json memory status
-mosaic --project-state --json memory search "security" --limit 5</code></pre>
+          <h2>步骤 6：查看并清理命名空间</h2>
+          <pre><code>mosaic --project-state memory status --all-namespaces
+mosaic --project-state memory prune --max-namespaces 5 --dry-run
+mosaic --project-state memory prune --max-documents-per-namespace 1000 --dry-run
+mosaic --project-state memory prune --max-namespaces 5 --max-age-hours 168</code></pre>
+          <p>`memory prune` 现已支持按命名空间文档数量配额清理，并在 JSON 输出中给出清理原因分类。</p>
+
+          <h2>步骤 7：JSON 自动化检查</h2>
+          <pre><code>mosaic --project-state --json memory status --namespace ops
+mosaic --project-state --json memory search "security" --namespace ops --limit 5</code></pre>
+
+          <h2>步骤 8：持久化清理策略并执行</h2>
+          <pre><code>mosaic --project-state memory policy get
+mosaic --project-state memory policy set --enabled true --max-documents-per-namespace 1000 --min-interval-minutes 60
+mosaic --project-state memory policy apply
+mosaic --project-state --json memory policy apply --dry-run --force</code></pre>
+
+          <h2>步骤 9：通过 cron 事件自动执行策略</h2>
+          <pre><code>mosaic --project-state --json cron add \
+  --name memory-cleanup \
+  --event mosaic.memory.cleanup \
+  --every 3600 \
+  --data '{"dry_run":false}'
+mosaic --project-state --yes --json cron tick
+mosaic --project-state --json cron run &lt;job-id&gt; --data '{"force":true}'</code></pre>
+          <p>`mosaic.memory.cleanup`（或 `memory.cleanup`）会读取持久化 policy 限制，并支持 `dry_run`/`force` 布尔参数。</p>
 
           <div class="quick-links">
             <a href="learning-path.html">分阶段学习</a>
+            <a href="channels.html">Channels 教程</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">生产运维</a>
+            <a href="regression.html">回归测试教程</a>
             <a href="troubleshooting.html">排障手册</a>
           </div>
         </article>

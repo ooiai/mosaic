@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use mosaic_core::config::ProfileConfig;
 use mosaic_core::error::{MosaicError, Result};
@@ -139,6 +139,7 @@ impl Provider for OpenAiCompatibleProvider {
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse> {
         if self.mock_mode {
+            maybe_capture_mock_chat_request(&request);
             let content = std::env::var("MOSAIC_MOCK_CHAT_RESPONSE")
                 .unwrap_or_else(|_| "mock-answer".to_string());
             return Ok(ChatResponse { content });
@@ -184,6 +185,34 @@ impl Provider for OpenAiCompatibleProvider {
             latency_ms,
             detail,
         })
+    }
+}
+
+fn maybe_capture_mock_chat_request(request: &ChatRequest) {
+    let Ok(path) = std::env::var("MOSAIC_MOCK_CHAT_CAPTURE_PATH") else {
+        return;
+    };
+    let messages = request
+        .messages
+        .iter()
+        .map(|message| {
+            json!({
+                "role": match message.role {
+                    ChatRole::System => "system",
+                    ChatRole::User => "user",
+                    ChatRole::Assistant => "assistant",
+                },
+                "content": message.content,
+            })
+        })
+        .collect::<Vec<_>>();
+    let payload = json!({
+        "model": request.model,
+        "temperature": request.temperature,
+        "messages": messages,
+    });
+    if let Ok(raw) = serde_json::to_vec_pretty(&payload) {
+        let _ = std::fs::write(path, raw);
     }
 }
 

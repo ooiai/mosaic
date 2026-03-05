@@ -1,6 +1,8 @@
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
-use mosaic_agent::AgentRunner;
+use mosaic_agent::{AgentRunner, default_system_prompt};
 use mosaic_agents::{AgentStore, agent_routes_path, agents_file_path};
 use mosaic_core::audit::AuditStore;
 use mosaic_core::config::ConfigManager;
@@ -10,6 +12,7 @@ use mosaic_core::provider::{ChatRequest, ChatResponse, ModelInfo, Provider, Prov
 use mosaic_core::session::SessionStore;
 use mosaic_core::state::{StateMode, StatePaths};
 use mosaic_ops::{ApprovalStore, RuntimePolicy, SandboxStore};
+use mosaic_plugins::{ExtensionRegistry, RegistryRoots, SkillEntry};
 use mosaic_provider_openai::OpenAiCompatibleProvider;
 use mosaic_tools::ToolExecutor;
 
@@ -154,12 +157,15 @@ pub(super) fn build_runtime(
             sandbox: sandbox_store.load_or_default()?,
         }),
     );
-    let agent = AgentRunner::new(
+    let agent_skills = load_agent_skills(&state_paths.root_dir, &resolved.agent_skills)?;
+    let system_prompt = build_system_prompt(&agent_skills);
+    let agent = AgentRunner::with_system_prompt(
         provider.clone(),
         resolved.profile.clone(),
         session_store,
         audit_store,
         tool_executor,
+        system_prompt,
     );
     Ok(RuntimeContext {
         provider,
@@ -167,4 +173,71 @@ pub(super) fn build_runtime(
         active_agent_id: resolved.agent_id,
         active_profile_name: resolved.profile_name,
     })
+}
+
+#[derive(Debug, Clone)]
+struct LoadedAgentSkill {
+    id: String,
+    title: String,
+    content: String,
+}
+
+fn load_agent_skills(state_root: &Path, requested_ids: &[String]) -> Result<Vec<LoadedAgentSkill>> {
+    if requested_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let registry = ExtensionRegistry::new(RegistryRoots::from_state_root(state_root.to_path_buf()));
+    let skill_map = registry
+        .list_skills()?
+        .into_iter()
+        .map(|skill| (skill.id.clone(), skill))
+        .collect::<BTreeMap<String, SkillEntry>>();
+
+    let mut loaded = Vec::new();
+    for requested in requested_ids {
+        let id = requested.trim();
+        if id.is_empty() {
+            return Err(MosaicError::Validation(
+                "agent skill id cannot be empty".to_string(),
+            ));
+        }
+        let skill = skill_map.get(id).ok_or_else(|| {
+            MosaicError::Validation(format!(
+                "agent skill '{id}' not found; run `mosaic skills list` first"
+            ))
+        })?;
+        let content = std::fs::read_to_string(&skill.skill_file).map_err(|err| {
+            MosaicError::Io(format!(
+                "failed to read skill '{id}' at {}: {err}",
+                skill.skill_file
+            ))
+        })?;
+        if content.trim().is_empty() {
+            return Err(MosaicError::Validation(format!(
+                "agent skill '{id}' has empty SKILL.md"
+            )));
+        }
+        loaded.push(LoadedAgentSkill {
+            id: id.to_string(),
+            title: skill.title.clone(),
+            content: content.trim().to_string(),
+        });
+    }
+    Ok(loaded)
+}
+
+fn build_system_prompt(skills: &[LoadedAgentSkill]) -> String {
+    let mut rendered = default_system_prompt().trim().to_string();
+    if skills.is_empty() {
+        return rendered;
+    }
+    rendered.push_str("\n\nAdditional agent skills are enabled. Apply them when relevant:");
+    for skill in skills {
+        rendered.push_str(&format!(
+            "\n\n### BEGIN AGENT SKILL: {} ({})\n{}\n### END AGENT SKILL: {}",
+            skill.id, skill.title, skill.content, skill.id
+        ));
+    }
+    rendered.push('\n');
+    rendered
 }

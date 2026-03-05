@@ -12,6 +12,7 @@ mosaic --project-state gateway status --deep
 mosaic --project-state gateway health --verbose
 mosaic --project-state gateway probe
 mosaic --project-state gateway discover
+mosaic --project-state gateway diagnose --method status
 mosaic --project-state gateway call <method> --params '<json>'
 mosaic --project-state gateway stop
 mosaic --project-state gateway uninstall
@@ -26,6 +27,7 @@ Notes:
   - `gateway_discover`
   - `gateway_protocol_methods` (required `health,status`)
   - `gateway_call_status`
+- `gateway diagnose` runs `probe -> discover -> call` and returns step-level pass/fail with error codes and latency.
 
 ## `gateway call`
 

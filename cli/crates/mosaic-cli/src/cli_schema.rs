@@ -306,8 +306,13 @@ enum McpCommand {
         #[arg(long)]
         disabled: bool,
     },
-    Check {
+    Show {
         server_id: String,
+    },
+    Check {
+        server_id: Option<String>,
+        #[arg(long)]
+        all: bool,
     },
     Enable {
         server_id: String,
@@ -356,6 +361,12 @@ enum GatewayCommand {
     },
     Probe,
     Discover,
+    Diagnose {
+        #[arg(long)]
+        method: Option<String>,
+        #[arg(long)]
+        params: Option<String>,
+    },
     Stop,
     Uninstall,
     #[command(hide = true)]
@@ -803,6 +814,8 @@ enum ChannelsCommand {
         channel: Option<String>,
         #[arg(long, default_value_t = 50)]
         tail: usize,
+        #[arg(long)]
+        summary: bool,
     },
     Capabilities {
         #[arg(long)]
@@ -1023,6 +1036,14 @@ enum MemoryCommand {
     Index {
         #[arg(long, default_value = ".")]
         path: String,
+        #[arg(long, default_value = "default")]
+        namespace: String,
+        #[arg(long, default_value_t = false)]
+        incremental: bool,
+        #[arg(long)]
+        stale_after_hours: Option<u64>,
+        #[arg(long, default_value_t = false)]
+        retain_missing: bool,
         #[arg(long, default_value_t = 500)]
         max_files: usize,
         #[arg(long, default_value_t = 262_144)]
@@ -1032,11 +1053,60 @@ enum MemoryCommand {
     },
     Search {
         query: String,
+        #[arg(long, default_value = "default")]
+        namespace: String,
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
-    Status,
-    Clear,
+    Status {
+        #[arg(long, default_value = "default")]
+        namespace: String,
+        #[arg(long, default_value_t = false)]
+        all_namespaces: bool,
+    },
+    Clear {
+        #[arg(long, default_value = "default")]
+        namespace: String,
+    },
+    Prune {
+        #[arg(long)]
+        max_namespaces: Option<usize>,
+        #[arg(long)]
+        max_age_hours: Option<u64>,
+        #[arg(long)]
+        max_documents_per_namespace: Option<usize>,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+    Policy {
+        #[command(subcommand)]
+        command: MemoryPolicyCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum MemoryPolicyCommand {
+    Get,
+    Set {
+        #[arg(long)]
+        enabled: Option<bool>,
+        #[arg(long)]
+        max_namespaces: Option<usize>,
+        #[arg(long)]
+        max_age_hours: Option<u64>,
+        #[arg(long)]
+        max_documents_per_namespace: Option<usize>,
+        #[arg(long)]
+        min_interval_minutes: Option<u64>,
+        #[arg(long, default_value_t = false)]
+        clear_limits: bool,
+    },
+    Apply {
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        #[arg(long, default_value_t = false)]
+        force: bool,
+    },
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1066,11 +1136,24 @@ enum SecurityCommand {
         sarif: bool,
         #[arg(long)]
         sarif_output: Option<String>,
+        #[arg(long, value_enum)]
+        min_severity: Option<SecuritySeverityArg>,
+        #[arg(long = "category", action = ArgAction::Append)]
+        categories: Vec<String>,
+        #[arg(long)]
+        top: Option<usize>,
     },
     Baseline {
         #[command(subcommand)]
         command: SecurityBaselineCommand,
     },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum SecuritySeverityArg {
+    Low,
+    Medium,
+    High,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1121,6 +1204,8 @@ enum AgentsCommand {
         id: Option<String>,
         #[arg(long)]
         profile: Option<String>,
+        #[arg(long = "skill", action = ArgAction::Append)]
+        skills: Vec<String>,
         #[arg(long)]
         model: Option<String>,
         #[arg(long)]
@@ -1142,6 +1227,10 @@ enum AgentsCommand {
         name: Option<String>,
         #[arg(long)]
         profile: Option<String>,
+        #[arg(long = "skill", action = ArgAction::Append)]
+        skills: Vec<String>,
+        #[arg(long)]
+        clear_skills: bool,
         #[arg(long)]
         model: Option<String>,
         #[arg(long)]

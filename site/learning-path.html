@@ -35,12 +35,18 @@
         <a class="side-link" href="guide.html">Guide Hub</a>
         <a class="side-link" href="quickstart.html">Quickstart</a>
         <a class="side-link active" href="learning-path.html">Learning Path</a>
+        <a class="side-link" href="models-profiles.html">Models & Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions</a>
+        <a class="side-link" href="policy.html">Policy</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
         <a class="side-link" href="troubleshooting.html">Troubleshooting</a>
       </aside>
 
@@ -97,6 +103,7 @@ mosaic --project-state --profile az-openai setup \
 
 mosaic --project-state --profile az-openai models list</code></pre>
           <p>Done when each profile can independently list models.</p>
+          <p>Deep dive: <a href="models-profiles.html">Models & Profiles</a>.</p>
 
           <h2>Stage 5: Channels and notifications</h2>
           <pre><code>mosaic --project-state channels add --name local-terminal --kind terminal
@@ -104,6 +111,7 @@ mosaic --project-state channels list
 mosaic --project-state channels test &lt;channel_id&gt;
 mosaic --project-state channels send &lt;channel_id&gt; --text "stage-5-ok"</code></pre>
           <p>Done when test and send both succeed for at least one channel.</p>
+          <p>Deep dive: <a href="channels.html">Channels Guide</a>.</p>
 
           <h2>Stage 6: Gateway lifecycle</h2>
           <pre><code>mosaic --project-state gateway install --host 127.0.0.1 --port 8787
@@ -112,6 +120,7 @@ mosaic --project-state gateway status
 mosaic --project-state gateway probe
 mosaic --project-state gateway call status</code></pre>
           <p>Done when probe and call return successful status.</p>
+          <p>Deep dives: <a href="gateway.html">Gateway Guide</a> and <a href="gateway-call.html">Gateway Call API</a>.</p>
 
           <h2>Stage 7: Safety policy and guardrails</h2>
           <pre><code>mosaic --project-state approvals get
@@ -122,6 +131,7 @@ mosaic --project-state sandbox get
 mosaic --project-state sandbox set standard
 mosaic --project-state sandbox explain --profile standard</code></pre>
           <p>Done when approvals/sandbox both match your intended policy.</p>
+          <p>Deep dive: <a href="policy.html">Approvals & Sandbox Policy</a>.</p>
 
           <h2>Stage 8: Daily observability</h2>
           <pre><code>mosaic --project-state dashboard
@@ -129,6 +139,7 @@ mosaic --project-state doctor
 mosaic --project-state logs --tail 120
 mosaic --project-state system presence</code></pre>
           <p>Done when dashboard and doctor outputs are clean enough for daily operations.</p>
+          <p>Keep session hygiene: <a href="sessions.html">Sessions Guide</a>.</p>
 
           <h2>Stage 9: Agents module (start here)</h2>
           <pre><code>mosaic --project-state agents list
@@ -148,15 +159,22 @@ mosaic --project-state --json status</code></pre>
             <li>Policy and diagnostics output are stable.</li>
             <li><code>--json</code> output is script-parseable.</li>
           </ul>
+          <p>Runbook: <a href="regression.html">Regression Guide</a>.</p>
 
           <div class="quick-links">
             <a href="quickstart.html">Quickstart</a>
+            <a href="models-profiles.html">Models & Profiles</a>
+            <a href="sessions.html">Sessions Guide</a>
+            <a href="policy.html">Policy Guide</a>
             <a href="agents.html">Agents Guide</a>
+            <a href="channels.html">Channels Guide</a>
             <a href="memory.html">Memory Guide</a>
             <a href="plugins.html">Plugins Guide</a>
             <a href="skills.html">Skills Guide</a>
             <a href="gateway.html">Gateway Guide</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">Operations</a>
+            <a href="regression.html">Regression Guide</a>
           </div>
         </article>
       </main>

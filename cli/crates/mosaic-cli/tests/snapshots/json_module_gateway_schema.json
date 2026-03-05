@@ -13,6 +13,34 @@
     "ok": "bool",
     "request_id": "string"
   },
+  "diagnose": {
+    "diagnose": {
+      "method": "string",
+      "params": "null",
+      "steps": {
+        "items": [
+          {
+            "detail": "string",
+            "error_code": "null",
+            "latency_ms": "number",
+            "name": "string",
+            "ok": "bool"
+          }
+        ],
+        "type": "array"
+      },
+      "summary": {
+        "failed": "number",
+        "passed": "number",
+        "total": "number"
+      },
+      "target": {
+        "host": "string",
+        "port": "number"
+      }
+    },
+    "ok": "bool"
+  },
   "discover": {
     "discovery": {
       "endpoint": "string",

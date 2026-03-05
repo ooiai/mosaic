@@ -16,8 +16,16 @@ mosaic --project-state mcp add \
   --env MCP_TOKEN=example \
   --cwd /absolute/path/to/project
 
-# run readiness check (does not start the server)
+# inspect one configured server
+mosaic --project-state mcp show <server_id>
+
+# run readiness check for one server (does not start it)
 mosaic --project-state mcp check <server_id>
+
+# run readiness checks for all servers
+mosaic --project-state mcp check --all
+# (same as omitting server id)
+mosaic --project-state mcp check
 
 # toggle availability in policy/runtime
 mosaic --project-state mcp disable <server_id>
@@ -42,7 +50,16 @@ mosaic --project-state mcp remove <server_id>
 2. `command` is resolvable/executable
 3. `cwd` exists and is a directory (when provided)
 
-`mcp check` always returns operation success on valid input, and includes `healthy` plus issue list in payload/text output.
+`mcp check <server_id>` returns one check result.
+
+`mcp check --all` (or `mcp check`) returns batch summary:
+
+- `checked`
+- `healthy`
+- `unhealthy`
+- `results[]` (`server` + `check`)
+
+Both forms return operation success on valid input and expose health details in payload/text output.
 
 ## Error Contract
 

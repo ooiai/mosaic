@@ -33,11 +33,14 @@
         <p class="sidebar-title">Modules</p>
         <a class="side-link" href="learning-path.html">Learning Path</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link active" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -45,35 +48,93 @@
           <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Skills</span></nav>
           <p class="kicker">Skills</p>
           <h1>Skills Module: Step-by-Step Tutorial</h1>
-          <p class="lead">Use skills as reusable execution knowledge units. This page focuses on lifecycle operations.</p>
+          <p class="lead">Use skills as reusable execution instructions, then bind them to agents for stable behavior.</p>
 
-          <h2>Step 1: Discover installed skills</h2>
+          <h2>Step 1: Inspect current skill inventory</h2>
           <pre><code>mosaic --project-state skills list
-mosaic --project-state skills list --source all</code></pre>
+mosaic --project-state skills list --source all
+mosaic --project-state skills list --source project</code></pre>
+          <p>Expected: You can see which skills come from project state vs user/global roots.</p>
 
-          <h2>Step 2: Inspect skill metadata</h2>
-          <pre><code>mosaic --project-state skills info &lt;skill_id&gt;
-mosaic --project-state skills check &lt;skill_id&gt;</code></pre>
+          <h2>Step 2: Create a minimal local skill package</h2>
+          <pre><code>mkdir -p ./writer
+cat &gt; ./writer/SKILL.md &lt;&lt;'EOF'
+# Writer
+Produce concise, structured answers.
 
-          <h2>Step 3: Install skill from local path</h2>
-          <pre><code>mosaic --project-state skills install --path ./skills/example-skill
-# overwrite existing installation
-mosaic --project-state skills install --path ./skills/example-skill --force</code></pre>
+## Rules
+- Start with the direct answer.
+- Keep examples short.
+EOF</code></pre>
+          <p>Expected: local path contains a non-empty <code>SKILL.md</code> with headings.</p>
 
-          <h2>Step 4: Validate all skills</h2>
-          <pre><code>mosaic --project-state skills check</code></pre>
+          <h2>Step 3: Install and inspect the skill</h2>
+          <pre><code>mosaic --project-state skills install --path ./writer
+mosaic --project-state skills info writer
+mosaic --project-state skills check writer</code></pre>
+          <p>Use <code>--force</code> when replacing an existing installation.</p>
 
-          <h2>Step 5: Remove stale skill</h2>
-          <pre><code>mosaic --project-state skills remove &lt;skill_id&gt;
-mosaic --project-state skills list</code></pre>
+          <h2>Step 4: Bind skill to an agent</h2>
+          <pre><code># create new agent with skill
+mosaic --project-state agents add \
+  --name Writer \
+  --id writer \
+  --skill writer \
+  --set-default \
+  --route ask
 
-          <h2>Step 6: JSON output for scripts</h2>
+# or update existing agent
+mosaic --project-state agents update writer --skill writer
+mosaic --project-state agents show writer</code></pre>
+          <p>Expected: <code>agents show writer</code> includes <code>skills: writer</code>.</p>
+
+          <h2>Step 5: Run ask/chat through the bound agent</h2>
+          <pre><code>mosaic --project-state ask --agent writer "summarize this repository"
+mosaic --project-state chat --agent writer</code></pre>
+          <p>Expected: model follows your skill guidance more consistently.</p>
+
+          <h2>Step 6: Verify prompt injection in mock regression</h2>
+          <pre><code>MOSAIC_MOCK_CHAT_RESPONSE=ok \
+MOSAIC_MOCK_CHAT_CAPTURE_PATH=./mock-chat-request.json \
+mosaic --project-state ask --agent writer "hello"</code></pre>
+          <p>Inspect <code>mock-chat-request.json</code> and confirm it contains:</p>
+          <ul>
+            <li><code>BEGIN AGENT SKILL: writer</code></li>
+            <li>Your <code>SKILL.md</code> content</li>
+          </ul>
+
+          <h2>Step 7: Update or replace skill safely</h2>
+          <pre><code># edit ./writer/SKILL.md, then reinstall
+mosaic --project-state skills install --path ./writer --force
+mosaic --project-state skills check writer</code></pre>
+
+          <h2>Step 8: Unbind and remove cleanly</h2>
+          <pre><code>mosaic --project-state agents update writer --clear-skills
+mosaic --project-state skills remove writer
+mosaic --project-state skills list --source project</code></pre>
+          <p>Always unbind first to avoid runtime failures on missing skills.</p>
+
+          <h2>Step 9: JSON contracts for CI/scripts</h2>
           <pre><code>mosaic --project-state --json skills list
-mosaic --project-state --json skills check</code></pre>
+mosaic --project-state --json skills info writer
+mosaic --project-state --json skills check writer
+mosaic --project-state --json agents update writer --skill writer</code></pre>
+
+          <h2>Step 10: Troubleshooting checklist</h2>
+          <ul>
+            <li><code>skill '&lt;id&gt;' not found</code>: run <code>skills list</code> and verify the same <code>--project-state</code> mode.</li>
+            <li><code>skills check</code> fails: ensure <code>SKILL.md</code> exists, is readable, non-empty, and has a heading.</li>
+            <li>Skill seems ignored: check <code>agents show &lt;id&gt;</code> and route/default resolution.</li>
+            <li>Runtime fails after removing a skill: reinstall it or run <code>agents update &lt;id&gt; --clear-skills</code>.</li>
+          </ul>
 
           <div class="quick-links">
+            <a href="agents.html">Agents Guide</a>
+            <a href="channels.html">Channels Guide</a>
             <a href="plugins.html">Plugins Guide</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">Operations</a>
+            <a href="regression.html">Regression Guide</a>
             <a href="troubleshooting.html">Troubleshooting</a>
           </div>
         </article>

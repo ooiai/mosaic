@@ -67,7 +67,37 @@ fn mcp_add_list_check_toggle_remove_flow() {
             .stdout,
     );
     assert_eq!(check["ok"], true);
+    assert_eq!(check["all"], false);
     assert_eq!(check["healthy"], true);
+
+    let show = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "show", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(show["ok"], true);
+    assert_eq!(show["server"]["id"], server_id.as_str());
+
+    let check_all = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "check", "--all"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(check_all["ok"], true);
+    assert_eq!(check_all["all"], true);
+    assert_eq!(check_all["checked"], 1);
+    assert_eq!(check_all["healthy"], 1);
+    assert_eq!(check_all["unhealthy"], 0);
 
     let disable = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -93,6 +123,7 @@ fn mcp_add_list_check_toggle_remove_flow() {
             .stdout,
     );
     assert_eq!(disabled_check["ok"], true);
+    assert_eq!(disabled_check["all"], false);
     assert_eq!(disabled_check["healthy"], false);
     assert!(
         disabled_check["check"]["issues"]
@@ -114,6 +145,20 @@ fn mcp_add_list_check_toggle_remove_flow() {
     );
     assert_eq!(enable["ok"], true);
     assert_eq!(enable["server"]["enabled"], true);
+
+    let check_all_without_id = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "check"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(check_all_without_id["ok"], true);
+    assert_eq!(check_all_without_id["all"], true);
+    assert_eq!(check_all_without_id["checked"], 1);
 
     let remove = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -145,6 +190,20 @@ fn mcp_add_list_check_toggle_remove_flow() {
             .expect("servers")
             .is_empty()
     );
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_show_missing_server_returns_validation_error() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "mcp", "show", "missing-server"])
+        .assert()
+        .failure()
+        .code(7);
 }
 
 #[test]

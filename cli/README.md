@@ -6,8 +6,8 @@ This workspace ships a pure CLI with no frontend dependency.
 ## Scope (V1 + V2)
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `dashboard`, `status`, `health`, `doctor`)
-- Gateway control plane (`gateway install|start|restart|status|health|probe|discover|call|stop|uninstall`)
-- MCP runtime (`mcp list|add|check|enable|disable|remove`)
+- Gateway control plane (`gateway install|start|restart|status|health|probe|discover|diagnose|call|stop|uninstall`)
+- MCP runtime (`mcp list|add|show|check|enable|disable|remove`, supports `check --all`)
 - Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
 - Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve|reject`)
 - Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
@@ -62,6 +62,29 @@ cli/
 ```bash
 cd cli
 cargo test --workspace
+```
+
+### Regression Scripts
+
+```bash
+# full regression catalog + workspace tests + from-scratch smoke
+./scripts/run_regression_suite.sh
+
+# beginner-friendly end-to-end tutorial regression (offline by default)
+./scripts/tutorial_regression.sh
+
+# optional live provider smoke
+LIVE=1 BASE_URL=https://api.openai.com MODEL=gpt-4o-mini ./scripts/tutorial_regression.sh
+
+# azure one-command operations playbook (profile + channels + gateway + policy + optional regression)
+AZURE_OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1 \
+AZURE_OPENAI_API_KEY=<key> \
+./scripts/azure_ops_playbook.sh --profile az-openai --run-regression
+
+# emit machine-readable summary json
+AZURE_OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1 \
+AZURE_OPENAI_API_KEY=<key> \
+./scripts/azure_ops_playbook.sh --profile az-openai --json-summary --summary-out reports/azure-playbook-summary.json
 ```
 
 ### Install Binary (`mosaic`)
@@ -264,6 +287,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state gateway status --deep
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway health --verbose
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway probe
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway discover
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway diagnose --method status
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway call status
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway stop
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway uninstall
@@ -286,7 +310,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall stop
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp list
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp add --name local-mcp --command /usr/bin/env --arg bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp show <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check <server-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check --all
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp disable <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp enable <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp remove <server-id>
@@ -439,6 +465,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels send <channel-i
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels list
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels status
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels logs --channel <channel-id> --tail 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels logs --channel <channel-id> --tail 20 --summary
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels capabilities --channel slack_webhook
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels resolve --channel slack_webhook alert
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels export --out .mosaic/channels-backup.json
@@ -537,9 +564,19 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state safety report --command 
 
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory index --path .
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory index --path . --incremental
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory index --path . --namespace ops --incremental --stale-after-hours 24 --retain-missing
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory search "rust cli"
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory search "gateway retry" --namespace ops
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory status
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory status --all-namespaces
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory clear
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory prune --max-namespaces 5 --dry-run
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory prune --max-documents-per-namespace 1000 --dry-run
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory prune --max-namespaces 5 --max-age-hours 168
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory policy get
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory policy set --enabled true --max-documents-per-namespace 1000 --min-interval-minutes 60
+cargo run -p mosaic-cli --bin mosaic -- --project-state memory policy apply
 ```
 
 ### Security Runtime
@@ -549,6 +586,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path .
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --deep
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --update-baseline
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --no-baseline
+cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --min-severity medium
+cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --category supply_chain --category cors --top 20
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --sarif
 cargo run -p mosaic-cli --bin mosaic -- --project-state security audit --path . --sarif-output scan.sarif
 cargo run -p mosaic-cli --bin mosaic -- --project-state security baseline show
@@ -560,8 +599,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state security baseline clear
 
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents list
-cargo run -p mosaic-cli --bin mosaic -- --project-state agents add --name Writer --id writer --set-default --route ask
-cargo run -p mosaic-cli --bin mosaic -- --project-state agents update writer --name "Writer V2" --route chat
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents add --name Writer --id writer --skill writer --set-default --route ask
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents update writer --name "Writer V2" --skill reviewer --route chat
+cargo run -p mosaic-cli --bin mosaic -- --project-state agents update writer --clear-skills
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents show writer
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents route list
 cargo run -p mosaic-cli --bin mosaic -- --project-state ask --agent writer "hello"

@@ -2,6 +2,80 @@
 
 Generated: 2026-02-26
 
+## Release Gate Snapshot (2026-03-05)
+
+### Done (Code/Docs/CI)
+
+1. CLI command surface and module parity baseline complete.
+2. Full docs system extended:
+   - module pages (`agents/channels/memory/plugins/skills/gateway/gateway-call/models-profiles/sessions/policy/regression`)
+   - Azure end-to-end playbook (EN/CN)
+3. Docs acceptance gate added in CI and Pages deploy:
+   - `site/scripts/check_docs.sh`
+   - `.github/workflows/ci.yml` (`docs-site-check`)
+   - `.github/workflows/deploy.yml` (pre-deploy docs gate)
+4. Azure operations automation added:
+   - `cli/scripts/azure_ops_playbook.sh`
+   - supports `--json-summary` and `--summary-out`
+
+### Remaining 0/1 Items (Release Operations)
+
+| Item | State (0/1) |
+| --- | --- |
+| Live Azure run with real credentials | 0 |
+| Tag and publish release workflow | 0 |
+
+Engineering scope is complete; remaining items are release execution steps.
+
+## Module Completion Plan Refresh (2026-03-05)
+
+The command surface is complete, but depth/operational capability is still uneven across modules.  
+This section tracks **functional depth completion** (not only command existence).
+
+### Current Remaining Gaps (Depth View)
+
+| Module | Depth | Main Missing Pieces |
+| --- | --- | --- |
+| `mcp` | 68% | runtime handshake/protocol checks beyond executable+cwd, richer diagnostics/export |
+| `gateway` | 88% | stricter protocol schema verification and richer failure telemetry |
+| `channels` | 86% | deeper capability negotiation and delivery diagnostics/replay tooling |
+| `memory` | 100% | no open blocking gap in current beta scope |
+| `nodes/devices/pairing` | 82% | stronger operational lifecycle diagnostics and recovery flows |
+| `hooks/cron/webhooks` | 80% | richer replay/inspection and safer rollout controls |
+| `tts/voicecall` | 72% | provider-depth hardening and broader runtime checks |
+| `browser` | 84% | richer navigation/runtime diagnostics and stability hardening |
+| `distribution` | 86% | clean-VM install verification matrix and release automation hardening |
+
+### Execution Plan (Complete In Batches)
+
+1. Batch A (done in this iteration)
+   - `mcp show <server_id>`
+   - `mcp check --all` + default batch check (`mcp check`)
+   - batch health summary envelope (`checked/healthy/unhealthy/results`)
+   - tests/contracts/docs updated
+2. Batch B (done)
+   - gateway/channels diagnostics hardening:
+     - gateway call/probe error taxonomy tightening
+     - channels delivery replay and richer logs summary
+3. Batch C (done)
+   - memory/security operational hardening:
+     - incremental memory indexing
+     - namespace lifecycle controls (`status --all-namespaces`, `prune --max-namespaces/--max-age-hours`)
+     - namespace document quota pruning (`prune --max-documents-per-namespace`) + prune reason breakdown
+     - persistent cleanup policy (`memory policy get/set/apply` with interval guard)
+     - security audit report dimensions and tuning (`--min-severity/--category/--top`)
+4. Batch D
+   - realtime + distribution stabilization:
+     - tts/voicecall provider-depth checks
+     - clean-VM install matrix and release verification automation
+
+### Acceptance Rule For Each Batch
+
+1. module tests pass (`*_ops`, json contracts, command surface)
+2. docs and runbook updated
+3. `--json` envelope contracts stable
+4. progress recorded in `WORKLOG.md` and `cli/docs/progress.md`
+
 ## Baseline Sources Checked
 
 - Mosaic command schema and handlers:
@@ -39,7 +113,7 @@ Generated: 2026-02-26
 | `sessions` | `session list/show/resume/clear` + alias `sessions` | partial | 80% |
 | `status`, `health`, `doctor` | same commands | done | 90% |
 | `gateway`, `daemon` | `gateway ...` + alias `daemon` + protocol health checks (`gateway_discover`/`gateway_protocol_methods`/`gateway_call_status`) | partial | 88% |
-| `mcp` | `mcp list/add/check/enable/disable/remove` + local registry + readiness checks | partial | 52% |
+| `mcp` | `mcp list/add/show/check/enable/disable/remove` + local registry + readiness checks (`check --all` batch summary) | partial | 68% |
 | `channels` | add/list/login/send/test/status/logs/capabilities/resolve/remove/logout/export/import/rotate | partial | 85% |
 | `logs` | `logs` (`--tail`, `--follow`, `--source`) | partial | 80% |
 | `observability` | `observability report/export` (logs + system + doctor + policy + safety audit aggregate, supports `--audit-tail` + `--compare-window` + optional `--plugin-soak-report`, with plugin soak history persistence + retention + `current_vs_previous` deltas + gateway/channels telemetry slices + alert rollups + suppression controls + SLO view + persisted SLO history + unmet-streak/incident hints) | done | 100% |
@@ -52,8 +126,8 @@ Generated: 2026-02-26
 | `tts` | `tts voices/speak` | partial | 72% |
 | `voicecall` | `voicecall start/status/send/history/stop` | partial | 72% |
 | `browser` | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | partial | 84% |
-| `memory` | `memory index/search/status/clear` | partial | 82% |
-| `security` | `security audit/baseline` | partial | 90% |
+| `memory` | `memory index/search/status/clear/prune/policy` (`index` supports `--namespace`, `--incremental`, `--stale-after-hours`, `--retain-missing`, and reuse/reindex/remove counters; `status --all-namespaces`; `prune --max-namespaces/--max-age-hours/--max-documents-per-namespace` with reason breakdown fields; `policy get/set/apply` persists cleanup policy + interval guard; built-in `mosaic.memory.cleanup` / `memory.cleanup` event integration for cron/system/webhook runtime) | partial | 100% |
+| `security` | `security audit/baseline` (`audit` supports `--min-severity`, repeatable `--category`, and `--top` with dimensions summary; includes TLS/weak-hash/default-secret checks) | partial | 97% |
 | `plugins`, `skills` | `plugins`: list (`--source`)/info/check/install/enable/disable/doctor/run/remove (`run` includes timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog (`cpu_watchdog_ms`) including non-unix CPU-only fallback + supported-unix memory pre-enforcement (`RLIMIT_AS` on linux/android, `RLIMIT_DATA` on BSD) for safe thresholds + non-unix `max_rss_kb` guard + plugin soak long-horizon anomaly hints in observability); `skills`: list (`--source`)/info/check/install/remove | done | 100% |
 | `directory` | `directory` (state path introspection + `--ensure` + `--check-writable`) | partial | 80% |
 | `completion` | `completion shell/install` | partial | 80% |
@@ -81,7 +155,7 @@ Generated: 2026-02-26
 - Frozen scope: all command families listed in the parity matrix (including `mcp`, `tts`, `voicecall`).
 - Completion rule: command surface + JSON/error contracts + smoke coverage + beta gate pass.
 - Freeze result: `100%` for current CLI beta scope.
-- Remaining work is optimization/backlog only (not release blocking): deeper MCP runtime protocol execution, richer gateway/channels diagnostics, memory relevance tuning, security rulepack expansion.
+- Remaining work is optimization/backlog only (not release blocking): deeper MCP runtime protocol execution, richer gateway/channels diagnostics, security rulepack expansion.
 
 ## Module Gap Audit (Against Upstream `src`, 2026-03-01)
 
@@ -102,8 +176,8 @@ No unresolved missing major module gaps in current CLI matrix.
 | --- | --- | --- |
 | gateway | lifecycle/call/probe/discover + protocol checks in `gateway health --verbose` | deeper protocol validation (request/response schema strictness) + richer runtime telemetry |
 | channels | webhook/bot path complete for current kinds | capability negotiation and richer delivery diagnostics |
-| memory | index/search/status/clear | incremental indexing and relevance tuning |
-| security | audit/baseline | deeper rulepacks and report dimensions |
+| memory | index/search/status/clear/prune/policy + namespace lifecycle + incremental/refresh + tuned relevance scoring + document quota pruning (`--max-documents-per-namespace`) + persisted cleanup policy with interval guard + built-in auto-run event integration (`mosaic.memory.cleanup`) | optional daemon templates + richer cleanup telemetry summaries |
+| security | audit/baseline + audit filter dimensions + extra TLS/crypto/credential checks | deeper rulepacks and category-specific checks |
 | distribution | release artifacts + installer scripts + generated manifests | run periodic install verification on clean VMs and publish stable brew tap/scoop bucket |
 
 ## Implementation Queue (Execute In Order)

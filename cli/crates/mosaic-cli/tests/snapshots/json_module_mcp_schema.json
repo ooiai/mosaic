@@ -24,6 +24,7 @@
     }
   },
   "check": {
+    "all": "bool",
     "check": {
       "checked_at": "string",
       "cwd_exists": "bool",
@@ -58,6 +59,52 @@
       "name": "string",
       "updated_at": "string"
     }
+  },
+  "check_all": {
+    "all": "bool",
+    "checked": "number",
+    "healthy": "number",
+    "ok": "bool",
+    "results": {
+      "items": [
+        {
+          "check": {
+            "checked_at": "string",
+            "cwd_exists": "bool",
+            "enabled": "bool",
+            "executable_resolved": "string",
+            "healthy": "bool",
+            "issues": {
+              "items": [],
+              "type": "array"
+            },
+            "server_id": "string"
+          },
+          "server": {
+            "args": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "command": "string",
+            "created_at": "string",
+            "cwd": "null",
+            "enabled": "bool",
+            "env": {
+              "MCP_TOKEN": "string"
+            },
+            "id": "string",
+            "last_check_at": "string",
+            "last_check_error": "null",
+            "name": "string",
+            "updated_at": "string"
+          }
+        }
+      ],
+      "type": "array"
+    },
+    "unhealthy": "number"
   },
   "disable": {
     "ok": "bool",
@@ -138,5 +185,29 @@
     "ok": "bool",
     "removed": "bool",
     "server_id": "string"
+  },
+  "show": {
+    "ok": "bool",
+    "path": "string",
+    "server": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "command": "string",
+      "created_at": "string",
+      "cwd": "null",
+      "enabled": "bool",
+      "env": {
+        "MCP_TOKEN": "string"
+      },
+      "id": "string",
+      "last_check_at": "string",
+      "last_check_error": "null",
+      "name": "string",
+      "updated_at": "string"
+    }
   }
 }

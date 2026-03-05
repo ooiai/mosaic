@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | Approvals and Sandbox Policy</title>
+    <meta name="description" content="Step-by-step policy tutorial for approvals and sandbox enforcement." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>
+          <a class="active" href="guide.html">Guide</a>
+          <a href="quickstart.html">Quickstart</a>
+          <a href="operations.html">Operations</a>
+          <a href="install.html">Install</a>
+          <a href="configure.html">Configure</a>
+          <a href="troubleshooting.html">Troubleshooting</a>
+          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/policy.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Policy</p>
+        <a class="side-link" href="quickstart.html">Quickstart</a>
+        <a class="side-link" href="models-profiles.html">Models & Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions</a>
+        <a class="side-link active" href="policy.html">Approvals & Sandbox</a>
+        <a class="side-link" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>Approvals & Sandbox</span></nav>
+          <p class="kicker">Policy</p>
+          <h1>Approvals + Sandbox: Practical Policy Baseline</h1>
+          <p class="lead">Use policy controls to gate risky commands and keep local runtime safety predictable.</p>
+
+          <h2>Step 1: Inspect current policy state</h2>
+          <pre><code>mosaic --project-state approvals get
+mosaic --project-state sandbox get
+mosaic --project-state safety get</code></pre>
+
+          <h2>Step 2: Set approvals mode</h2>
+          <pre><code>mosaic --project-state approvals set confirm
+mosaic --project-state approvals get
+
+# stricter mode
+mosaic --project-state approvals set deny
+
+# controlled automation mode
+mosaic --project-state approvals set allowlist</code></pre>
+
+          <h2>Step 3: Manage allowlist prefixes</h2>
+          <pre><code>mosaic --project-state approvals allowlist add "git status"
+mosaic --project-state approvals allowlist add "git diff"
+mosaic --project-state approvals allowlist list
+mosaic --project-state approvals allowlist remove "git diff"</code></pre>
+
+          <h2>Step 4: Check command-level approval decision</h2>
+          <pre><code>mosaic --project-state approvals check --command "git status"
+mosaic --project-state approvals check --command "rm -rf /tmp/x"</code></pre>
+
+          <h2>Step 5: Set and explain sandbox profile</h2>
+          <pre><code>mosaic --project-state sandbox list
+mosaic --project-state sandbox set standard
+mosaic --project-state sandbox explain --profile restricted
+mosaic --project-state sandbox explain --profile elevated</code></pre>
+
+          <h2>Step 6: Check command-level sandbox decision</h2>
+          <pre><code>mosaic --project-state sandbox check --command "git status"
+mosaic --project-state sandbox check --command "curl https://example.com"</code></pre>
+
+          <h2>Step 7: Validate merged safety decision</h2>
+          <pre><code>mosaic --project-state safety check --command "git status"
+mosaic --project-state safety check --command "curl https://example.com"
+mosaic --project-state safety report --audit-tail 50 --compare-window 24h</code></pre>
+
+          <h2>Step 8: Team baseline recommendation</h2>
+          <ul>
+            <li>Default baseline: <code>approvals=confirm</code> + <code>sandbox=standard</code>.</li>
+            <li>Use <code>allowlist</code> only for explicit CI automation prefixes.</li>
+            <li>Run <code>doctor</code> and <code>safety report</code> in release checks.</li>
+          </ul>
+
+          <div class="quick-links">
+            <a href="models-profiles.html">Models & Profiles</a>
+            <a href="sessions.html">Sessions Guide</a>
+            <a href="operations.html">Operations</a>
+            <a href="regression.html">Regression Guide</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

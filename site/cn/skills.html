@@ -33,11 +33,14 @@
         <p class="sidebar-title">模块专题</p>
         <a class="side-link" href="learning-path.html">分阶段学习</a>
         <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link active" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="gateway-call.html">Gateway Call API</a>
         <a class="side-link" href="operations.html">生产运维</a>
+        <a class="side-link" href="regression.html">回归测试</a>
       </aside>
 
       <main id="doc-main" class="content">
@@ -45,35 +48,93 @@
           <nav class="breadcrumb" aria-label="面包屑"><a href="index.html">文档</a><span>/</span><span>Skills</span></nav>
           <p class="kicker">Skills</p>
           <h1>Skills 模块：一步一步教程</h1>
-          <p class="lead">把技能作为可复用的知识单元进行安装、检查、维护与清理。</p>
+          <p class="lead">把 skills 当作可复用执行规范，并绑定到 agent，形成稳定、可回归的行为。</p>
 
-          <h2>步骤 1：发现当前技能</h2>
+          <h2>步骤 1：查看当前 skill 清单</h2>
           <pre><code>mosaic --project-state skills list
-mosaic --project-state skills list --source all</code></pre>
+mosaic --project-state skills list --source all
+mosaic --project-state skills list --source project</code></pre>
+          <p>预期：你能区分 project 与 user/global 来源。</p>
 
-          <h2>步骤 2：检查技能详情</h2>
-          <pre><code>mosaic --project-state skills info &lt;skill_id&gt;
-mosaic --project-state skills check &lt;skill_id&gt;</code></pre>
+          <h2>步骤 2：创建最小可用 skill 包</h2>
+          <pre><code>mkdir -p ./writer
+cat &gt; ./writer/SKILL.md &lt;&lt;'EOF'
+# Writer
+Produce concise, structured answers.
 
-          <h2>步骤 3：从本地路径安装 skill</h2>
-          <pre><code>mosaic --project-state skills install --path ./skills/example-skill
-# 覆盖安装
-mosaic --project-state skills install --path ./skills/example-skill --force</code></pre>
+## Rules
+- Start with the direct answer.
+- Keep examples short.
+EOF</code></pre>
+          <p>预期：本地目录有非空 <code>SKILL.md</code> 且包含标题。</p>
 
-          <h2>步骤 4：全量校验</h2>
-          <pre><code>mosaic --project-state skills check</code></pre>
+          <h2>步骤 3：安装并检查 skill</h2>
+          <pre><code>mosaic --project-state skills install --path ./writer
+mosaic --project-state skills info writer
+mosaic --project-state skills check writer</code></pre>
+          <p>如需覆盖安装，追加 <code>--force</code>。</p>
 
-          <h2>步骤 5：移除无效 skill</h2>
-          <pre><code>mosaic --project-state skills remove &lt;skill_id&gt;
-mosaic --project-state skills list</code></pre>
+          <h2>步骤 4：把 skill 绑定到 agent</h2>
+          <pre><code># 创建新 agent 并绑定 skill
+mosaic --project-state agents add \
+  --name Writer \
+  --id writer \
+  --skill writer \
+  --set-default \
+  --route ask
 
-          <h2>步骤 6：JSON 自动化</h2>
+# 或更新已有 agent
+mosaic --project-state agents update writer --skill writer
+mosaic --project-state agents show writer</code></pre>
+          <p>预期：<code>agents show writer</code> 中可见 <code>skills: writer</code>。</p>
+
+          <h2>步骤 5：通过该 agent 执行 ask/chat</h2>
+          <pre><code>mosaic --project-state ask --agent writer "summarize this repository"
+mosaic --project-state chat --agent writer</code></pre>
+          <p>预期：模型回复更稳定地遵循你在 skill 中定义的规范。</p>
+
+          <h2>步骤 6：在 mock 回归中验证注入</h2>
+          <pre><code>MOSAIC_MOCK_CHAT_RESPONSE=ok \
+MOSAIC_MOCK_CHAT_CAPTURE_PATH=./mock-chat-request.json \
+mosaic --project-state ask --agent writer "hello"</code></pre>
+          <p>检查 <code>mock-chat-request.json</code>，确认包含：</p>
+          <ul>
+            <li><code>BEGIN AGENT SKILL: writer</code></li>
+            <li>你的 <code>SKILL.md</code> 内容</li>
+          </ul>
+
+          <h2>步骤 7：更新与替换 skill</h2>
+          <pre><code># 修改 ./writer/SKILL.md 后重装
+mosaic --project-state skills install --path ./writer --force
+mosaic --project-state skills check writer</code></pre>
+
+          <h2>步骤 8：解绑并清理</h2>
+          <pre><code>mosaic --project-state agents update writer --clear-skills
+mosaic --project-state skills remove writer
+mosaic --project-state skills list --source project</code></pre>
+          <p>建议先解绑再删除，避免运行时因为缺失 skill 报错。</p>
+
+          <h2>步骤 9：JSON 契约用于脚本/CI</h2>
           <pre><code>mosaic --project-state --json skills list
-mosaic --project-state --json skills check</code></pre>
+mosaic --project-state --json skills info writer
+mosaic --project-state --json skills check writer
+mosaic --project-state --json agents update writer --skill writer</code></pre>
+
+          <h2>步骤 10：排障清单</h2>
+          <ul>
+            <li><code>skill '&lt;id&gt;' not found</code>：先跑 <code>skills list</code>，并确认状态模式一致（是否都带 <code>--project-state</code>）。</li>
+            <li><code>skills check</code> 失败：确认 <code>SKILL.md</code> 存在、可读、非空、且有标题。</li>
+            <li>看起来未生效：检查 <code>agents show &lt;id&gt;</code> 与路由/默认 agent 解析。</li>
+            <li>删除 skill 后运行失败：重新安装该 skill，或执行 <code>agents update &lt;id&gt; --clear-skills</code>。</li>
+          </ul>
 
           <div class="quick-links">
+            <a href="agents.html">Agents 教程</a>
+            <a href="channels.html">Channels 教程</a>
             <a href="plugins.html">Plugins 教程</a>
+            <a href="gateway-call.html">Gateway Call API</a>
             <a href="operations.html">生产运维</a>
+            <a href="regression.html">回归测试教程</a>
             <a href="troubleshooting.html">排障手册</a>
           </div>
         </article>

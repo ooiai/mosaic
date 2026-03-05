@@ -89,6 +89,15 @@ impl McpStore {
         Ok(servers)
     }
 
+    pub fn get(&self, server_id: &str) -> Result<Option<McpServer>> {
+        let server_id = normalize_server_id(server_id)?;
+        Ok(self
+            .load_file()?
+            .servers
+            .into_iter()
+            .find(|server| server.id == server_id))
+    }
+
     pub fn add(&self, input: AddMcpServerInput) -> Result<McpServer> {
         self.ensure_dirs()?;
         let name = normalize_non_empty("mcp server name", &input.name)?;
@@ -183,48 +192,8 @@ impl McpStore {
                 MosaicError::Validation(format!("mcp server '{server_id}' not found"))
             })?;
 
-        let checked_at = Utc::now();
-        let mut issues = Vec::new();
-        let resolved = resolve_executable(&server.command);
-        if !server.enabled {
-            issues.push("server is disabled".to_string());
-        }
-        if resolved.is_none() {
-            issues.push(format!("command '{}' not found in PATH", server.command));
-        }
-
-        let cwd_exists = match server.cwd.as_deref() {
-            Some(cwd) => Path::new(cwd).is_dir(),
-            None => true,
-        };
-        if !cwd_exists {
-            issues.push(
-                server
-                    .cwd
-                    .as_deref()
-                    .map(|cwd| format!("cwd '{cwd}' does not exist or is not a directory"))
-                    .unwrap_or_else(|| "cwd does not exist or is not a directory".to_string()),
-            );
-        }
-
-        let healthy = issues.is_empty();
-        server.last_check_at = Some(checked_at);
-        server.last_check_error = if healthy {
-            None
-        } else {
-            Some(issues.join("; "))
-        };
-        server.updated_at = checked_at;
-
-        let check = McpServerCheck {
-            server_id: server.id.clone(),
-            checked_at,
-            healthy,
-            enabled: server.enabled,
-            executable_resolved: resolved.map(|path| path.display().to_string()),
-            cwd_exists,
-            issues,
-        };
+        let check = evaluate_server_check(server);
+        apply_server_check(server, &check);
         let record = server.clone();
         self.save_file(&file)?;
 
@@ -232,6 +201,22 @@ impl McpStore {
             server: record,
             check,
         })
+    }
+
+    pub fn check_all(&self) -> Result<Vec<McpServerCheckResult>> {
+        let mut file = self.load_file()?;
+        let mut results = Vec::with_capacity(file.servers.len());
+        for server in &mut file.servers {
+            let check = evaluate_server_check(server);
+            apply_server_check(server, &check);
+            results.push(McpServerCheckResult {
+                server: server.clone(),
+                check,
+            });
+        }
+        self.save_file(&file)?;
+        results.sort_by(|lhs, rhs| lhs.server.id.cmp(&rhs.server.id));
+        Ok(results)
     }
 
     fn load_file(&self) -> Result<McpServersFile> {
@@ -358,6 +343,52 @@ fn resolve_executable(command: &str) -> Option<PathBuf> {
     None
 }
 
+fn evaluate_server_check(server: &McpServer) -> McpServerCheck {
+    let checked_at = Utc::now();
+    let mut issues = Vec::new();
+    let resolved = resolve_executable(&server.command);
+    if !server.enabled {
+        issues.push("server is disabled".to_string());
+    }
+    if resolved.is_none() {
+        issues.push(format!("command '{}' not found in PATH", server.command));
+    }
+
+    let cwd_exists = match server.cwd.as_deref() {
+        Some(cwd) => Path::new(cwd).is_dir(),
+        None => true,
+    };
+    if !cwd_exists {
+        issues.push(
+            server
+                .cwd
+                .as_deref()
+                .map(|cwd| format!("cwd '{cwd}' does not exist or is not a directory"))
+                .unwrap_or_else(|| "cwd does not exist or is not a directory".to_string()),
+        );
+    }
+
+    McpServerCheck {
+        server_id: server.id.clone(),
+        checked_at,
+        healthy: issues.is_empty(),
+        enabled: server.enabled,
+        executable_resolved: resolved.map(|path| path.display().to_string()),
+        cwd_exists,
+        issues,
+    }
+}
+
+fn apply_server_check(server: &mut McpServer, check: &McpServerCheck) {
+    server.last_check_at = Some(check.checked_at);
+    server.last_check_error = if check.healthy {
+        None
+    } else {
+        Some(check.issues.join("; "))
+    };
+    server.updated_at = check.checked_at;
+}
+
 fn executable_if_valid(path: &Path) -> Option<PathBuf> {
     let metadata = std::fs::metadata(path).ok()?;
     if !metadata.is_file() {
@@ -457,5 +488,48 @@ mod tests {
                 .iter()
                 .any(|issue| issue.contains("not found"))
         );
+    }
+
+    #[test]
+    fn get_and_check_all_work() {
+        let temp = tempdir().expect("tempdir");
+        let path = mcp_servers_file_path(&temp.path().join("data"));
+        let store = McpStore::new(path);
+
+        store
+            .add(AddMcpServerInput {
+                id: Some("first".to_string()),
+                name: "First".to_string(),
+                command: std::env::current_exe()
+                    .expect("current exe")
+                    .display()
+                    .to_string(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                cwd: None,
+                enabled: true,
+            })
+            .expect("add first");
+        store
+            .add(AddMcpServerInput {
+                id: Some("second".to_string()),
+                name: "Second".to_string(),
+                command: "__missing_cmd__".to_string(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                cwd: None,
+                enabled: true,
+            })
+            .expect("add second");
+
+        let got = store.get("first").expect("get").expect("exists");
+        assert_eq!(got.id, "first");
+
+        let checks = store.check_all().expect("check all");
+        assert_eq!(checks.len(), 2);
+        assert!(checks.iter().any(|item| item.server.id == "first"));
+        assert!(checks.iter().any(|item| item.server.id == "second"));
+        assert!(checks.iter().any(|item| item.check.healthy));
+        assert!(checks.iter().any(|item| !item.check.healthy));
     }
 }
