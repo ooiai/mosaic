@@ -1,4 +1,12 @@
+use std::fs::{self, OpenOptions};
+use std::io::Write as _;
+use std::path::Path;
+use std::time::Instant;
+
+use chrono::Utc;
+use serde::Serialize;
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use mosaic_core::error::MosaicError;
 use mosaic_gateway::{GatewayClient, GatewayRequest};
@@ -16,6 +24,7 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
     paths.ensure_dirs()?;
     let gateway_path = paths.data_dir.join("gateway.json");
     let gateway_service_path = paths.data_dir.join("gateway-service.json");
+    let gateway_events_path = paths.data_dir.join("gateway-events.jsonl");
     match args.command {
         GatewayCommand::Install { host, port } => {
             let service =
@@ -159,9 +168,78 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                 }
             }
         }
-        GatewayCommand::Health { verbose } => {
-            let status =
+        GatewayCommand::Health { verbose, repair } => {
+            let mut status =
                 collect_gateway_runtime_status(&gateway_path, &gateway_service_path).await?;
+            let mut repair_check: Option<(bool, String)> = None;
+            if repair {
+                if status.endpoint_healthy {
+                    repair_check = Some((
+                        true,
+                        "auto-repair skipped: endpoint already healthy".to_string(),
+                    ));
+                } else {
+                    match resolve_gateway_start_target(
+                        &gateway_service_path,
+                        None,
+                        None,
+                        "127.0.0.1",
+                        8787,
+                    ) {
+                        Ok((target_host, target_port)) => {
+                            if let Err(err) = upsert_gateway_service(
+                                &gateway_service_path,
+                                Some(target_host.clone()),
+                                Some(target_port),
+                                true,
+                            ) {
+                                repair_check = Some((false, format!("auto-repair failed: {err}")));
+                            } else {
+                                match start_gateway_runtime(
+                                    cli,
+                                    &gateway_path,
+                                    target_host.clone(),
+                                    target_port,
+                                )
+                                .await
+                                {
+                                    Ok(started) => {
+                                        status = collect_gateway_runtime_status(
+                                            &gateway_path,
+                                            &gateway_service_path,
+                                        )
+                                        .await?;
+                                        let repaired = status.endpoint_healthy;
+                                        repair_check = Some((
+                                            repaired,
+                                            if repaired {
+                                                format!(
+                                                    "auto-repair attempted on {}:{} (already_running={}) and endpoint is healthy",
+                                                    target_host,
+                                                    target_port,
+                                                    started.already_running
+                                                )
+                                            } else {
+                                                format!(
+                                                    "auto-repair attempted on {}:{} but endpoint is still unreachable",
+                                                    target_host, target_port
+                                                )
+                                            },
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        repair_check =
+                                            Some((false, format!("auto-repair failed: {err}")));
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            repair_check = Some((false, format!("auto-repair failed: {err}")));
+                        }
+                    }
+                }
+            }
             let installed = status
                 .service
                 .as_ref()
@@ -235,6 +313,33 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                         "status method check skipped (runtime not running)"
                     },
                 ));
+                checks.push(run_check(
+                    "gateway_call_health",
+                    running,
+                    if running {
+                        "test mode health method callable"
+                    } else {
+                        "health method check skipped (runtime not running)"
+                    },
+                ));
+                checks.push(run_check(
+                    "gateway_status_schema_profile",
+                    running,
+                    if running {
+                        "status schema profile: basic"
+                    } else {
+                        "status schema check skipped (runtime not running)"
+                    },
+                ));
+                checks.push(run_check(
+                    "gateway_health_schema_profile",
+                    running,
+                    if running {
+                        "health schema profile: basic"
+                    } else {
+                        "health schema check skipped (runtime not running)"
+                    },
+                ));
             } else if status.endpoint_healthy {
                 match HttpGatewayClient::new(&status.target_host, status.target_port) {
                     Ok(client) => {
@@ -283,10 +388,10 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
 
                         match client.call(GatewayRequest::new("status", None)).await {
                             Ok(response) => {
-                                let has_data = response
-                                    .result
-                                    .as_ref()
-                                    .is_some_and(|value| !value.is_null());
+                                let result_payload = response.result.unwrap_or(Value::Null);
+                                let has_data = !result_payload.is_null();
+                                let (schema_ok, schema_detail) =
+                                    validate_gateway_method_schema("status", &result_payload);
                                 checks.push(run_check(
                                     "gateway_call_status",
                                     true,
@@ -296,12 +401,52 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                                         "status method callable (empty payload)"
                                     },
                                 ));
+                                checks.push(run_check(
+                                    "gateway_status_schema_profile",
+                                    schema_ok,
+                                    schema_detail,
+                                ));
                             }
                             Err(err) => {
                                 checks.push(run_check(
                                     "gateway_call_status",
                                     false,
                                     format!("status call failed: {err}"),
+                                ));
+                                checks.push(run_check(
+                                    "gateway_status_schema_profile",
+                                    false,
+                                    "status schema check skipped (status call failed)",
+                                ));
+                            }
+                        }
+
+                        match client.call(GatewayRequest::new("health", None)).await {
+                            Ok(response) => {
+                                let result_payload = response.result.unwrap_or(Value::Null);
+                                let (schema_ok, schema_detail) =
+                                    validate_gateway_method_schema("health", &result_payload);
+                                checks.push(run_check(
+                                    "gateway_call_health",
+                                    true,
+                                    "health method callable",
+                                ));
+                                checks.push(run_check(
+                                    "gateway_health_schema_profile",
+                                    schema_ok,
+                                    schema_detail,
+                                ));
+                            }
+                            Err(err) => {
+                                checks.push(run_check(
+                                    "gateway_call_health",
+                                    false,
+                                    format!("health call failed: {err}"),
+                                ));
+                                checks.push(run_check(
+                                    "gateway_health_schema_profile",
+                                    false,
+                                    "health schema check skipped (health call failed)",
                                 ));
                             }
                         }
@@ -322,6 +467,21 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                             false,
                             "status method check skipped (gateway client init failed)",
                         ));
+                        checks.push(run_check(
+                            "gateway_call_health",
+                            false,
+                            "health method check skipped (gateway client init failed)",
+                        ));
+                        checks.push(run_check(
+                            "gateway_status_schema_profile",
+                            false,
+                            "status schema check skipped (gateway client init failed)",
+                        ));
+                        checks.push(run_check(
+                            "gateway_health_schema_profile",
+                            false,
+                            "health schema check skipped (gateway client init failed)",
+                        ));
                     }
                 }
             } else {
@@ -340,6 +500,21 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     false,
                     "status method check skipped (endpoint unreachable)",
                 ));
+                checks.push(run_check(
+                    "gateway_call_health",
+                    false,
+                    "health method check skipped (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_status_schema_profile",
+                    false,
+                    "status schema check skipped (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_health_schema_profile",
+                    false,
+                    "health schema check skipped (endpoint unreachable)",
+                ));
             }
             if let Some(state) = status.state {
                 checks.push(run_check(
@@ -353,6 +528,9 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     installed,
                     format!("{}:{}", status.target_host, status.target_port),
                 ));
+            }
+            if let Some((ok, detail)) = repair_check {
+                checks.push(run_check("gateway_auto_repair", ok, detail));
             }
             if verbose {
                 checks.push(run_check(
@@ -370,12 +548,28 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             }
         }
         GatewayCommand::Call { method, params } => {
+            let started = Instant::now();
             if gateway_test_mode() {
                 let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
                 if !state.as_ref().is_some_and(|value| value.running) {
-                    return Err(MosaicError::GatewayUnavailable(
+                    let err = MosaicError::GatewayUnavailable(
                         "gateway is not running in test mode".to_string(),
-                    ));
+                    );
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "call",
+                            method: Some(method.as_str()),
+                            host: "127.0.0.1",
+                            port: 8787,
+                            mode: "test_mode",
+                            success: false,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: Some(err.code().to_string()),
+                            error_message: Some(err.to_string()),
+                        },
+                    );
+                    return Err(err);
                 }
                 let params = params
                     .as_deref()
@@ -414,12 +608,41 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                         "params": params.get("params").cloned().unwrap_or(Value::Null),
                     }),
                     _ => {
-                        return Err(MosaicError::GatewayProtocol(format!(
+                        let err = MosaicError::GatewayProtocol(format!(
                             "unknown gateway method '{}' in test mode",
                             method
-                        )));
+                        ));
+                        write_gateway_event(
+                            &gateway_events_path,
+                            GatewayEventInput {
+                                action: "call",
+                                method: Some(method.as_str()),
+                                host: "127.0.0.1",
+                                port: 8787,
+                                mode: "test_mode",
+                                success: false,
+                                latency_ms: started.elapsed().as_millis(),
+                                error_code: Some(err.code().to_string()),
+                                error_message: Some(err.to_string()),
+                            },
+                        );
+                        return Err(err);
                     }
                 };
+                write_gateway_event(
+                    &gateway_events_path,
+                    GatewayEventInput {
+                        action: "call",
+                        method: Some(method.as_str()),
+                        host: "127.0.0.1",
+                        port: 8787,
+                        mode: "test_mode",
+                        success: true,
+                        latency_ms: started.elapsed().as_millis(),
+                        error_code: None,
+                        error_message: None,
+                    },
+                );
                 if cli.json {
                     print_json(&json!({
                         "ok": true,
@@ -446,7 +669,42 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                 .transpose()?;
             let request = GatewayRequest::new(method.clone(), params);
             let request_id = request.id.clone();
-            let response = client.call(request).await?;
+            let response = match client.call(request).await {
+                Ok(value) => {
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "call",
+                            method: Some(method.as_str()),
+                            host: host.as_str(),
+                            port,
+                            mode: "http",
+                            success: true,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: None,
+                            error_message: None,
+                        },
+                    );
+                    value
+                }
+                Err(err) => {
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "call",
+                            method: Some(method.as_str()),
+                            host: host.as_str(),
+                            port,
+                            mode: "http",
+                            success: false,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: Some(err.code().to_string()),
+                            error_message: Some(err.to_string()),
+                        },
+                    );
+                    return Err(err);
+                }
+            };
             let result = response.result.unwrap_or(Value::Null);
             if cli.json {
                 print_json(&json!({
@@ -469,13 +727,43 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             }
         }
         GatewayCommand::Probe => {
+            let started = Instant::now();
             if gateway_test_mode() {
                 let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
                 if !state.as_ref().is_some_and(|value| value.running) {
-                    return Err(MosaicError::GatewayUnavailable(
+                    let err = MosaicError::GatewayUnavailable(
                         "gateway is not running in test mode".to_string(),
-                    ));
+                    );
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "probe",
+                            method: None,
+                            host: "127.0.0.1",
+                            port: 8787,
+                            mode: "test_mode",
+                            success: false,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: Some(err.code().to_string()),
+                            error_message: Some(err.to_string()),
+                        },
+                    );
+                    return Err(err);
                 }
+                write_gateway_event(
+                    &gateway_events_path,
+                    GatewayEventInput {
+                        action: "probe",
+                        method: None,
+                        host: "127.0.0.1",
+                        port: 8787,
+                        mode: "test_mode",
+                        success: true,
+                        latency_ms: started.elapsed().as_millis(),
+                        error_code: None,
+                        error_message: None,
+                    },
+                );
                 if cli.json {
                     print_json(&json!({
                         "ok": true,
@@ -495,7 +783,42 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
 
             let (host, port) = resolve_gateway_target(&gateway_path, &gateway_service_path)?;
             let client = HttpGatewayClient::new(&host, port)?;
-            let probe = client.probe().await?;
+            let probe = match client.probe().await {
+                Ok(value) => {
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "probe",
+                            method: None,
+                            host: host.as_str(),
+                            port,
+                            mode: "http",
+                            success: true,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: None,
+                            error_message: None,
+                        },
+                    );
+                    value
+                }
+                Err(err) => {
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "probe",
+                            method: None,
+                            host: host.as_str(),
+                            port,
+                            mode: "http",
+                            success: false,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: Some(err.code().to_string()),
+                            error_message: Some(err.to_string()),
+                        },
+                    );
+                    return Err(err);
+                }
+            };
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -513,8 +836,23 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             }
         }
         GatewayCommand::Discover => {
+            let started = Instant::now();
             if gateway_test_mode() {
                 let methods = vec!["health", "status", "echo", "nodes.run", "nodes.invoke"];
+                write_gateway_event(
+                    &gateway_events_path,
+                    GatewayEventInput {
+                        action: "discover",
+                        method: None,
+                        host: "127.0.0.1",
+                        port: 8787,
+                        mode: "test_mode",
+                        success: true,
+                        latency_ms: started.elapsed().as_millis(),
+                        error_code: None,
+                        error_message: None,
+                    },
+                );
                 if cli.json {
                     print_json(&json!({
                         "ok": true,
@@ -538,7 +876,42 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
 
             let (host, port) = resolve_gateway_target(&gateway_path, &gateway_service_path)?;
             let client = HttpGatewayClient::new(&host, port)?;
-            let discovery = client.discover().await?;
+            let discovery = match client.discover().await {
+                Ok(value) => {
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "discover",
+                            method: None,
+                            host: host.as_str(),
+                            port,
+                            mode: "http",
+                            success: true,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: None,
+                            error_message: None,
+                        },
+                    );
+                    value
+                }
+                Err(err) => {
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "discover",
+                            method: None,
+                            host: host.as_str(),
+                            port,
+                            mode: "http",
+                            success: false,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: Some(err.code().to_string()),
+                            error_message: Some(err.to_string()),
+                        },
+                    );
+                    return Err(err);
+                }
+            };
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -558,6 +931,7 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             }
         }
         GatewayCommand::Diagnose { method, params } => {
+            let started = Instant::now();
             let requested_method = method.unwrap_or_else(|| "status".to_string());
             let parsed_params = params
                 .as_deref()
@@ -567,9 +941,24 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             if gateway_test_mode() {
                 let state: Option<GatewayState> = load_json_file_opt(&gateway_path)?;
                 if !state.as_ref().is_some_and(|value| value.running) {
-                    return Err(MosaicError::GatewayUnavailable(
+                    let err = MosaicError::GatewayUnavailable(
                         "gateway is not running in test mode".to_string(),
-                    ));
+                    );
+                    write_gateway_event(
+                        &gateway_events_path,
+                        GatewayEventInput {
+                            action: "diagnose",
+                            method: Some(requested_method.as_str()),
+                            host: "127.0.0.1",
+                            port: 8787,
+                            mode: "test_mode",
+                            success: false,
+                            latency_ms: started.elapsed().as_millis(),
+                            error_code: Some(err.code().to_string()),
+                            error_message: Some(err.to_string()),
+                        },
+                    );
+                    return Err(err);
                 }
 
                 let steps = vec![
@@ -595,6 +984,20 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                         "error_code": Value::Null,
                     }),
                 ];
+                write_gateway_event(
+                    &gateway_events_path,
+                    GatewayEventInput {
+                        action: "diagnose",
+                        method: Some(requested_method.as_str()),
+                        host: "127.0.0.1",
+                        port: 8787,
+                        mode: "test_mode",
+                        success: true,
+                        latency_ms: started.elapsed().as_millis(),
+                        error_code: None,
+                        error_message: None,
+                    },
+                );
                 if cli.json {
                     print_json(&json!({
                         "ok": true,
@@ -705,6 +1108,31 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     }));
                 }
             }
+            let summary_error = if failed > 0 {
+                Some(format!(
+                    "diagnose failed steps={failed} (method={requested_method})"
+                ))
+            } else {
+                None
+            };
+            write_gateway_event(
+                &gateway_events_path,
+                GatewayEventInput {
+                    action: "diagnose",
+                    method: Some(requested_method.as_str()),
+                    host: host.as_str(),
+                    port,
+                    mode: "http",
+                    success: failed == 0,
+                    latency_ms: started.elapsed().as_millis(),
+                    error_code: if failed > 0 {
+                        Some("gateway_diagnose_failed".to_string())
+                    } else {
+                        None
+                    },
+                    error_message: summary_error,
+                },
+            );
 
             if cli.json {
                 print_json(&json!({
@@ -804,5 +1232,96 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
             run_gateway_http_server(&host, port)?;
         }
     }
+    Ok(())
+}
+
+fn validate_gateway_method_schema(method: &str, payload: &Value) -> (bool, String) {
+    let Some(obj) = payload.as_object() else {
+        return (
+            false,
+            format!("{method} schema profile failed: result is not an object"),
+        );
+    };
+    match obj.get("ok") {
+        Some(Value::Bool(_)) => {}
+        _ => {
+            return (
+                false,
+                format!("{method} schema profile failed: missing boolean field 'ok'"),
+            );
+        }
+    }
+    if method == "status" {
+        let has_status_signal = ["service", "status", "gateway", "runtime"]
+            .iter()
+            .any(|key| obj.contains_key(*key));
+        if !has_status_signal {
+            return (
+                false,
+                "status schema profile failed: missing status payload key (service/status/gateway/runtime)"
+                    .to_string(),
+            );
+        }
+    }
+    (true, format!("{method} schema profile: basic"))
+}
+
+#[derive(Debug)]
+struct GatewayEventInput<'a> {
+    action: &'a str,
+    method: Option<&'a str>,
+    host: &'a str,
+    port: u16,
+    mode: &'a str,
+    success: bool,
+    latency_ms: u128,
+    error_code: Option<String>,
+    error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct GatewayEventRecord {
+    id: String,
+    ts: String,
+    action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    method: Option<String>,
+    target_host: String,
+    target_port: u16,
+    mode: String,
+    success: bool,
+    latency_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_message: Option<String>,
+}
+
+fn write_gateway_event(path: &Path, input: GatewayEventInput<'_>) {
+    let record = GatewayEventRecord {
+        id: Uuid::new_v4().to_string(),
+        ts: Utc::now().to_rfc3339(),
+        action: input.action.to_string(),
+        method: input.method.map(ToString::to_string),
+        target_host: input.host.to_string(),
+        target_port: input.port,
+        mode: input.mode.to_string(),
+        success: input.success,
+        latency_ms: input.latency_ms,
+        error_code: input.error_code,
+        error_message: input.error_message,
+    };
+    let _ = append_jsonl(path, &record);
+}
+
+fn append_jsonl<T: Serialize>(path: &Path, record: &T) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    let line = serde_json::to_string(record)
+        .map_err(|err| MosaicError::Validation(format!("failed to encode gateway event: {err}")))?;
+    file.write_all(line.as_bytes())?;
+    file.write_all(b"\n")?;
     Ok(())
 }

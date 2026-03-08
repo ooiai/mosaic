@@ -8,6 +8,7 @@ use mosaic_core::config::ConfigManager;
 use mosaic_core::error::Result;
 use mosaic_core::provider::Provider;
 use mosaic_core::session::SessionStore;
+use mosaic_mcp::{McpStore, mcp_servers_file_path};
 use mosaic_memory::{MemoryStore, memory_index_path, memory_status_path};
 use mosaic_ops::{ApprovalStore, SandboxStore};
 use mosaic_plugins::{ExtensionRegistry, RegistryRoots};
@@ -228,6 +229,59 @@ pub(super) async fn collect_doctor_checks(cli: &Cli) -> Result<Vec<BTreeMap<Stri
                 "channels_file",
                 false,
                 format!("failed to inspect channels: {err}"),
+            ));
+        }
+    }
+
+    let mcp_store = McpStore::new(mcp_servers_file_path(&paths.data_dir));
+    match mcp_store.list() {
+        Ok(servers) => {
+            checks.push(run_check(
+                "mcp_registry",
+                true,
+                format!(
+                    "configured={} path={}",
+                    servers.len(),
+                    mcp_store.path().display()
+                ),
+            ));
+            if !servers.is_empty() {
+                match mcp_store.check_all() {
+                    Ok(results) => {
+                        let healthy = results.iter().filter(|item| item.check.healthy).count();
+                        let unhealthy = results.len().saturating_sub(healthy);
+                        checks.push(run_check(
+                            "mcp_health",
+                            unhealthy == 0,
+                            format!(
+                                "checked={} healthy={} unhealthy={}",
+                                results.len(),
+                                healthy,
+                                unhealthy
+                            ),
+                        ));
+                    }
+                    Err(err) => {
+                        checks.push(run_check(
+                            "mcp_health",
+                            false,
+                            format!("failed to run mcp health checks: {err}"),
+                        ));
+                    }
+                }
+            } else {
+                checks.push(run_check(
+                    "mcp_health",
+                    true,
+                    "no mcp servers configured".to_string(),
+                ));
+            }
+        }
+        Err(err) => {
+            checks.push(run_check(
+                "mcp_registry",
+                false,
+                format!("failed to inspect mcp registry: {err}"),
             ));
         }
     }

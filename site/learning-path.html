@@ -41,6 +41,7 @@
         <a class="side-link" href="agents.html">Agents</a>
         <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
+        <a class="side-link" href="knowledge.html">Knowledge</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
@@ -150,7 +151,8 @@ mosaic --project-state ask --agent writer "summarize this repo"</code></pre>
 
           <h2>Stage 10: Advanced checks and release gate</h2>
           <pre><code>mosaic --project-state memory index --path .
-mosaic --project-state memory search "retry"
+mosaic --project-state knowledge ingest --source local_md --path docs --namespace knowledge --incremental
+mosaic --project-state knowledge search "retry" --namespace knowledge
 mosaic --project-state security audit --path . --deep
 mosaic --project-state --json status</code></pre>
           <ul>
@@ -169,6 +171,7 @@ mosaic --project-state --json status</code></pre>
             <a href="agents.html">Agents Guide</a>
             <a href="channels.html">Channels Guide</a>
             <a href="memory.html">Memory Guide</a>
+            <a href="knowledge.html">Knowledge Guide</a>
             <a href="plugins.html">Plugins Guide</a>
             <a href="skills.html">Skills Guide</a>
             <a href="gateway.html">Gateway Guide</a>

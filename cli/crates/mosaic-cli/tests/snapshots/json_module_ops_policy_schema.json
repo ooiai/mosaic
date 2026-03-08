@@ -117,9 +117,19 @@
         "thresholds": {
           "channel_failure_critical": "number",
           "channel_failure_warn": "number",
+          "gateway_failure_critical": "number",
+          "gateway_failure_delta_critical": "number",
+          "gateway_failure_delta_warn": "number",
+          "gateway_failure_warn": "number",
+          "mcp_ratio_delta_critical": "number",
+          "mcp_ratio_delta_warn": "number",
+          "mcp_unhealthy_critical": "number",
+          "mcp_unhealthy_warn": "number",
           "plugin_completion_min": "number",
           "safety_failure_critical": "number",
-          "safety_failure_warn": "number"
+          "safety_failure_warn": "number",
+          "voicecall_failure_critical": "number",
+          "voicecall_failure_warn": "number"
         },
         "total": "number",
         "warning": "number"
@@ -177,18 +187,100 @@
       "gateway": {
         "endpoint_healthy": "bool",
         "error": "null",
+        "events_error": "null",
+        "history": {
+          "appended": "bool",
+          "current_run": {
+            "avg_latency_ms": "null",
+            "endpoint_healthy": "bool",
+            "event_count": "number",
+            "events_error": "bool",
+            "failed_events": "number",
+            "failure_rate": "number",
+            "running": "bool",
+            "status_error": "bool",
+            "ts": "string"
+          },
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "string",
+            "delta": {
+              "avg_latency_ms": "number",
+              "endpoint_healthy_changed": "bool",
+              "event_count": "number",
+              "events_error_changed": "bool",
+              "failed_events": "number",
+              "failure_rate": "number",
+              "running_changed": "bool",
+              "status_error_changed": "bool"
+            },
+            "previous_ts": "string"
+          },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
+          "latest": {
+            "avg_latency_ms": "null",
+            "endpoint_healthy": "bool",
+            "event_count": "number",
+            "events_error": "bool",
+            "failed_events": "number",
+            "failure_rate": "number",
+            "running": "bool",
+            "status_error": "bool",
+            "ts": "string"
+          },
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "streaks": {
+            "endpoint_unhealthy": "number",
+            "failure_warn": "number",
+            "not_running": "number"
+          },
+          "window": {
+            "failure_regression_warn": "number",
+            "failure_warn_threshold": "number",
+            "recent_error_samples": "number",
+            "recent_failure_samples": "number",
+            "repeat_threshold": "number",
+            "size": "number"
+          },
+          "write_error": "null"
+        },
         "ok": "bool",
         "paths": {
+          "events_file": "string",
           "service_file": "string",
           "state_file": "string"
         },
         "process_alive": "bool",
+        "recent_events": {
+          "items": [],
+          "type": "array"
+        },
         "running": "bool",
         "service": "null",
         "state": "null",
         "target": {
           "host": "string",
           "port": "number"
+        },
+        "telemetry": {
+          "actions": {},
+          "avg_latency_ms": "null",
+          "event_count": "number",
+          "failed_events": "number",
+          "failure_rate": "number",
+          "latest_event_ts": "null",
+          "success_events": "number"
         }
       },
       "generated_at": "string",
@@ -208,13 +300,106 @@
         ],
         "type": "array"
       },
+      "mcp": {
+        "errors": {
+          "check_all": "null",
+          "list": "null"
+        },
+        "history": {
+          "appended": "bool",
+          "current_run": {
+            "check_error": "bool",
+            "configured": "number",
+            "enabled": "number",
+            "healthy": "number",
+            "list_error": "bool",
+            "ts": "string",
+            "unhealthy": "number",
+            "unhealthy_ratio": "number",
+            "with_last_error": "number"
+          },
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "string",
+            "delta": {
+              "check_error_changed": "bool",
+              "configured": "number",
+              "enabled": "number",
+              "healthy": "number",
+              "list_error_changed": "bool",
+              "unhealthy": "number",
+              "unhealthy_ratio": "number",
+              "with_last_error": "number"
+            },
+            "previous_ts": "string"
+          },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
+          "latest": {
+            "check_error": "bool",
+            "configured": "number",
+            "enabled": "number",
+            "healthy": "number",
+            "list_error": "bool",
+            "ts": "string",
+            "unhealthy": "number",
+            "unhealthy_ratio": "number",
+            "with_last_error": "number"
+          },
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "streaks": {
+            "check_error": "number",
+            "list_error": "number",
+            "unhealthy": "number"
+          },
+          "window": {
+            "ratio_regression_warn": "number",
+            "recent_check_error_count": "number",
+            "recent_list_error_count": "number",
+            "recent_unhealthy_count": "number",
+            "repeat_threshold": "number",
+            "size": "number"
+          },
+          "write_error": "null"
+        },
+        "ok": "bool",
+        "paths": {
+          "registry_file": "string"
+        },
+        "recent_checks": {
+          "items": [],
+          "type": "array"
+        },
+        "summary": {
+          "checked": "number",
+          "configured": "number",
+          "disabled": "number",
+          "enabled": "number",
+          "healthy": "number",
+          "unhealthy": "number",
+          "with_last_error": "number"
+        }
+      },
       "paths": {
         "approvals_policy": "string",
         "channel_events_dir": "string",
         "channels_file": "string",
         "data_dir": "string",
+        "gateway_history_file": "string",
         "gateway_service": "string",
         "gateway_state": "string",
+        "mcp_history_file": "string",
+        "mcp_registry_file": "string",
         "sandbox_policy": "string",
         "system_events": "string"
       },
@@ -282,6 +467,46 @@
         "sandbox_profile": "string"
       },
       "profile": "string",
+      "realtime": {
+        "errors": {
+          "tts_events": "null",
+          "voicecall_events": "null",
+          "voicecall_state": "null"
+        },
+        "ok": "bool",
+        "paths": {
+          "tts_events_file": "string",
+          "voicecall_events_file": "string",
+          "voicecall_state_file": "string"
+        },
+        "recent_tts_events": {
+          "items": [],
+          "type": "array"
+        },
+        "recent_voicecall_events": {
+          "items": [],
+          "type": "array"
+        },
+        "state": {
+          "voicecall": "null"
+        },
+        "summary": {
+          "tts_events_count": "number",
+          "tts_last_event_ts": "null",
+          "tts_outputs_written": "number",
+          "tts_total_bytes_written": "number",
+          "voicecall_active": "bool",
+          "voicecall_channel_bound": "bool",
+          "voicecall_channel_outbound_events": "number",
+          "voicecall_delivery_events": "number",
+          "voicecall_events_count": "number",
+          "voicecall_failed_events": "number",
+          "voicecall_last_event_ts": "null",
+          "voicecall_local_outbound_events": "number",
+          "voicecall_messages_sent": "number"
+        },
+        "tail": "number"
+      },
       "safety_audit": {
         "compare_window": "number",
         "comparison": {
@@ -424,9 +649,28 @@
         "doctor_included": "bool",
         "doctor_ok": "number",
         "doctor_warn": "number",
+        "gateway_delta_available": "bool",
         "gateway_endpoint_healthy": "bool",
+        "gateway_events_count": "number",
+        "gateway_failed_events": "number",
+        "gateway_failure_rate": "number",
+        "gateway_failure_rate_delta": "number",
+        "gateway_history_count": "number",
+        "gateway_history_pruned": "number",
+        "gateway_incident_hints": "number",
+        "gateway_not_running_streak": "number",
         "gateway_running": "bool",
         "logs_count": "number",
+        "mcp_configured": "number",
+        "mcp_delta_available": "bool",
+        "mcp_enabled": "number",
+        "mcp_healthy": "number",
+        "mcp_history_count": "number",
+        "mcp_history_pruned": "number",
+        "mcp_incident_hints": "number",
+        "mcp_unhealthy": "number",
+        "mcp_unhealthy_ratio_delta": "number",
+        "mcp_unhealthy_streak": "number",
         "plugin_soak_available": "bool",
         "plugin_soak_completion_ratio_delta": "number",
         "plugin_soak_completion_unmet_streak": "number",
@@ -449,7 +693,14 @@
         "slo_gateway_unmet_streak": "number",
         "slo_history_count": "number",
         "slo_incident_hints": "number",
-        "system_events_count": "number"
+        "system_events_count": "number",
+        "tts_events_count": "number",
+        "tts_total_bytes_written": "number",
+        "voicecall_active": "bool",
+        "voicecall_delivery_events": "number",
+        "voicecall_events_count": "number",
+        "voicecall_failed_events": "number",
+        "voicecall_messages_sent": "number"
       },
       "system_events": {
         "items": [
@@ -503,9 +754,19 @@
         "thresholds": {
           "channel_failure_critical": "number",
           "channel_failure_warn": "number",
+          "gateway_failure_critical": "number",
+          "gateway_failure_delta_critical": "number",
+          "gateway_failure_delta_warn": "number",
+          "gateway_failure_warn": "number",
+          "mcp_ratio_delta_critical": "number",
+          "mcp_ratio_delta_warn": "number",
+          "mcp_unhealthy_critical": "number",
+          "mcp_unhealthy_warn": "number",
           "plugin_completion_min": "number",
           "safety_failure_critical": "number",
-          "safety_failure_warn": "number"
+          "safety_failure_warn": "number",
+          "voicecall_failure_critical": "number",
+          "voicecall_failure_warn": "number"
         },
         "total": "number",
         "warning": "number"
@@ -572,18 +833,100 @@
       "gateway": {
         "endpoint_healthy": "bool",
         "error": "null",
+        "events_error": "null",
+        "history": {
+          "appended": "bool",
+          "current_run": {
+            "avg_latency_ms": "null",
+            "endpoint_healthy": "bool",
+            "event_count": "number",
+            "events_error": "bool",
+            "failed_events": "number",
+            "failure_rate": "number",
+            "running": "bool",
+            "status_error": "bool",
+            "ts": "string"
+          },
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "string",
+            "delta": {
+              "avg_latency_ms": "number",
+              "endpoint_healthy_changed": "bool",
+              "event_count": "number",
+              "events_error_changed": "bool",
+              "failed_events": "number",
+              "failure_rate": "number",
+              "running_changed": "bool",
+              "status_error_changed": "bool"
+            },
+            "previous_ts": "null"
+          },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
+          "latest": {
+            "avg_latency_ms": "null",
+            "endpoint_healthy": "bool",
+            "event_count": "number",
+            "events_error": "bool",
+            "failed_events": "number",
+            "failure_rate": "number",
+            "running": "bool",
+            "status_error": "bool",
+            "ts": "string"
+          },
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "streaks": {
+            "endpoint_unhealthy": "number",
+            "failure_warn": "number",
+            "not_running": "number"
+          },
+          "window": {
+            "failure_regression_warn": "number",
+            "failure_warn_threshold": "number",
+            "recent_error_samples": "number",
+            "recent_failure_samples": "number",
+            "repeat_threshold": "number",
+            "size": "number"
+          },
+          "write_error": "null"
+        },
         "ok": "bool",
         "paths": {
+          "events_file": "string",
           "service_file": "string",
           "state_file": "string"
         },
         "process_alive": "bool",
+        "recent_events": {
+          "items": [],
+          "type": "array"
+        },
         "running": "bool",
         "service": "null",
         "state": "null",
         "target": {
           "host": "string",
           "port": "number"
+        },
+        "telemetry": {
+          "actions": {},
+          "avg_latency_ms": "null",
+          "event_count": "number",
+          "failed_events": "number",
+          "failure_rate": "number",
+          "latest_event_ts": "null",
+          "success_events": "number"
         }
       },
       "generated_at": "string",
@@ -603,13 +946,106 @@
         ],
         "type": "array"
       },
+      "mcp": {
+        "errors": {
+          "check_all": "null",
+          "list": "null"
+        },
+        "history": {
+          "appended": "bool",
+          "current_run": {
+            "check_error": "bool",
+            "configured": "number",
+            "enabled": "number",
+            "healthy": "number",
+            "list_error": "bool",
+            "ts": "string",
+            "unhealthy": "number",
+            "unhealthy_ratio": "number",
+            "with_last_error": "number"
+          },
+          "current_vs_previous": {
+            "available": "bool",
+            "current_ts": "string",
+            "delta": {
+              "check_error_changed": "bool",
+              "configured": "number",
+              "enabled": "number",
+              "healthy": "number",
+              "list_error_changed": "bool",
+              "unhealthy": "number",
+              "unhealthy_ratio": "number",
+              "with_last_error": "number"
+            },
+            "previous_ts": "null"
+          },
+          "incident_hints": {
+            "items": [],
+            "type": "array"
+          },
+          "incident_hints_count": "number",
+          "latest": {
+            "check_error": "bool",
+            "configured": "number",
+            "enabled": "number",
+            "healthy": "number",
+            "list_error": "bool",
+            "ts": "string",
+            "unhealthy": "number",
+            "unhealthy_ratio": "number",
+            "with_last_error": "number"
+          },
+          "parse_errors": "number",
+          "path": "string",
+          "read_error": "null",
+          "retention": {
+            "max_samples": "number",
+            "pruned": "number"
+          },
+          "sample_count": "number",
+          "streaks": {
+            "check_error": "number",
+            "list_error": "number",
+            "unhealthy": "number"
+          },
+          "window": {
+            "ratio_regression_warn": "number",
+            "recent_check_error_count": "number",
+            "recent_list_error_count": "number",
+            "recent_unhealthy_count": "number",
+            "repeat_threshold": "number",
+            "size": "number"
+          },
+          "write_error": "null"
+        },
+        "ok": "bool",
+        "paths": {
+          "registry_file": "string"
+        },
+        "recent_checks": {
+          "items": [],
+          "type": "array"
+        },
+        "summary": {
+          "checked": "number",
+          "configured": "number",
+          "disabled": "number",
+          "enabled": "number",
+          "healthy": "number",
+          "unhealthy": "number",
+          "with_last_error": "number"
+        }
+      },
       "paths": {
         "approvals_policy": "string",
         "channel_events_dir": "string",
         "channels_file": "string",
         "data_dir": "string",
+        "gateway_history_file": "string",
         "gateway_service": "string",
         "gateway_state": "string",
+        "mcp_history_file": "string",
+        "mcp_registry_file": "string",
         "sandbox_policy": "string",
         "system_events": "string"
       },
@@ -677,6 +1113,46 @@
         "sandbox_profile": "string"
       },
       "profile": "string",
+      "realtime": {
+        "errors": {
+          "tts_events": "null",
+          "voicecall_events": "null",
+          "voicecall_state": "null"
+        },
+        "ok": "bool",
+        "paths": {
+          "tts_events_file": "string",
+          "voicecall_events_file": "string",
+          "voicecall_state_file": "string"
+        },
+        "recent_tts_events": {
+          "items": [],
+          "type": "array"
+        },
+        "recent_voicecall_events": {
+          "items": [],
+          "type": "array"
+        },
+        "state": {
+          "voicecall": "null"
+        },
+        "summary": {
+          "tts_events_count": "number",
+          "tts_last_event_ts": "null",
+          "tts_outputs_written": "number",
+          "tts_total_bytes_written": "number",
+          "voicecall_active": "bool",
+          "voicecall_channel_bound": "bool",
+          "voicecall_channel_outbound_events": "number",
+          "voicecall_delivery_events": "number",
+          "voicecall_events_count": "number",
+          "voicecall_failed_events": "number",
+          "voicecall_last_event_ts": "null",
+          "voicecall_local_outbound_events": "number",
+          "voicecall_messages_sent": "number"
+        },
+        "tail": "number"
+      },
       "safety_audit": {
         "compare_window": "number",
         "comparison": {
@@ -819,9 +1295,28 @@
         "doctor_included": "bool",
         "doctor_ok": "number",
         "doctor_warn": "number",
+        "gateway_delta_available": "bool",
         "gateway_endpoint_healthy": "bool",
+        "gateway_events_count": "number",
+        "gateway_failed_events": "number",
+        "gateway_failure_rate": "number",
+        "gateway_failure_rate_delta": "number",
+        "gateway_history_count": "number",
+        "gateway_history_pruned": "number",
+        "gateway_incident_hints": "number",
+        "gateway_not_running_streak": "number",
         "gateway_running": "bool",
         "logs_count": "number",
+        "mcp_configured": "number",
+        "mcp_delta_available": "bool",
+        "mcp_enabled": "number",
+        "mcp_healthy": "number",
+        "mcp_history_count": "number",
+        "mcp_history_pruned": "number",
+        "mcp_incident_hints": "number",
+        "mcp_unhealthy": "number",
+        "mcp_unhealthy_ratio_delta": "number",
+        "mcp_unhealthy_streak": "number",
         "plugin_soak_available": "bool",
         "plugin_soak_completion_ratio_delta": "number",
         "plugin_soak_completion_unmet_streak": "number",
@@ -844,7 +1339,14 @@
         "slo_gateway_unmet_streak": "number",
         "slo_history_count": "number",
         "slo_incident_hints": "number",
-        "system_events_count": "number"
+        "system_events_count": "number",
+        "tts_events_count": "number",
+        "tts_total_bytes_written": "number",
+        "voicecall_active": "bool",
+        "voicecall_delivery_events": "number",
+        "voicecall_events_count": "number",
+        "voicecall_failed_events": "number",
+        "voicecall_messages_sent": "number"
       },
       "system_events": {
         "items": [

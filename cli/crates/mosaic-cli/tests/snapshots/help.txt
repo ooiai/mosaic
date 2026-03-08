@@ -28,6 +28,7 @@ Commands:
   sandbox        
   safety         
   memory         
+  knowledge      
   security       
   agents         
   plugins        

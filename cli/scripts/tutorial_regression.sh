@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     -h|--help)
-      cat <<USAGE
+      cat <<'USAGE'
 Usage: ./scripts/tutorial_regression.sh [options]
 
 Options:
@@ -54,6 +54,7 @@ Environment:
   LIVE=1                 Same as --live
   KEEP_TEMP=1            Same as --keep-temp
   MOSAIC_BIN=/path/mosaic  Use a specific mosaic binary instead of cargo run/mosaic in PATH
+  USE_SYSTEM_MOSAIC=1    Prefer `mosaic` from PATH (default uses workspace cargo run)
 USAGE
       exit 0
       ;;
@@ -66,10 +67,10 @@ done
 
 if [[ -n "${MOSAIC_BIN:-}" ]]; then
   MOSAIC_CMD=("$MOSAIC_BIN")
-elif command -v mosaic >/dev/null 2>&1; then
+elif [[ "${USE_SYSTEM_MOSAIC:-0}" == "1" ]] && command -v mosaic >/dev/null 2>&1; then
   MOSAIC_CMD=("mosaic")
 else
-  MOSAIC_CMD=("cargo" "run" "-q" "-p" "mosaic-cli" "--")
+  MOSAIC_CMD=("cargo" "run" "-q" "--manifest-path" "$ROOT_DIR/Cargo.toml" "-p" "mosaic-cli" "--")
 fi
 
 REPORT_DIR="$ROOT_DIR/reports"
@@ -124,6 +125,14 @@ run_mosaic() {
     cd "$TMP_PROJECT"
     "${MOSAIC_CMD[@]}" --project-state --profile "$PROFILE" "$@"
   )
+}
+
+prepare_knowledge_docs() {
+  mkdir -p "$TMP_PROJECT/docs"
+  cat >"$TMP_PROJECT/docs/ops.md" <<'DOC'
+# Ops Retry Policy
+Use exponential backoff with jitter and capped retries for transient upstream failures.
+DOC
 }
 
 extract_channel_id() {
@@ -181,6 +190,10 @@ run_step "Gateway restart" run_mosaic gateway restart
 run_step "Gateway stop" run_mosaic gateway stop
 run_step "Gateway uninstall" run_mosaic gateway uninstall
 
+run_step "MCP list" run_mosaic mcp list
+run_step "MCP check all" run_mosaic --json mcp check --all
+run_step "MCP deep check all" run_mosaic --json mcp check --all --deep --timeout-ms 300 --report-out .mosaic/reports/tutorial-mcp-check-deep.json
+
 run_step "Approvals policy flow" run_mosaic approvals get
 run_step "Set approvals confirm" run_mosaic approvals set confirm
 run_step "Approvals allowlist add" run_mosaic approvals allowlist add "git status"
@@ -194,6 +207,17 @@ run_step "Doctor" run_mosaic doctor
 run_step "Logs tail" run_mosaic logs --tail 50
 run_step "System presence" run_mosaic system presence
 run_step "System event" run_mosaic system event tutorial.regression --data '{"source":"tutorial_regression.sh"}'
+run_step "Prepare local knowledge corpus" prepare_knowledge_docs
+run_step "Knowledge ingest local markdown" run_mosaic knowledge ingest --source local_md --path docs --namespace tutorial-kb --incremental --report-out .mosaic/reports/tutorial-knowledge-ingest.json
+run_step "Knowledge search" run_mosaic knowledge search "retry jitter" --namespace tutorial-kb --limit 5 --min-score 4
+run_step "Knowledge ask references-only" run_mosaic --json knowledge ask "How should retry jitter be configured?" --namespace tutorial-kb --top-k 5 --min-score 3 --references-only
+run_step "Knowledge evaluate batch" run_mosaic --json knowledge evaluate --query "retry jitter" --query "missing topic" --namespace tutorial-kb --top-k 5 --min-score 3 --report-out .mosaic/reports/tutorial-knowledge-eval.json
+run_step "Knowledge evaluate baseline update" run_mosaic --json knowledge evaluate --query "retry jitter" --namespace tutorial-kb --top-k 5 --min-score 3 --history-window 20 --update-baseline
+run_step "Knowledge evaluate baseline gate" run_mosaic --json knowledge evaluate --query "retry jitter" --namespace tutorial-kb --top-k 5 --min-score 3 --history-window 20 --max-coverage-drop 0.05 --max-avg-top-score-drop 1.0 --fail-on-regression
+run_step "Knowledge datasets list" run_mosaic --json knowledge datasets list
+run_step "Knowledge datasets remove dry-run" run_mosaic --json knowledge datasets remove tutorial-kb --dry-run
+run_step "Knowledge datasets remove" run_mosaic --json knowledge datasets remove tutorial-kb
+run_step "Knowledge datasets list after remove" run_mosaic --json knowledge datasets list --namespace tutorial-kb
 
 if [[ "$LIVE" == "1" ]]; then
   LIVE_KEY="${!API_KEY_ENV:-}"

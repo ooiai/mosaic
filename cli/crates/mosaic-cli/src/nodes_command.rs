@@ -1,4 +1,6 @@
-use chrono::Utc;
+use std::collections::{HashMap, HashSet};
+
+use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 
 use mosaic_core::error::MosaicError;
@@ -10,7 +12,8 @@ use super::{
     Cli, DeviceStatus, NodeRuntimeStatus, NodesArgs, NodesCommand, PairingStatus, Result,
     devices_file_path, dispatch_gateway_call, load_devices_or_default, load_nodes_or_default,
     load_pairing_requests_or_default, next_pairing_seq, nodes_file_path,
-    pairing_requests_file_path, parse_json_input, print_json, resolve_state_paths, save_nodes,
+    pairing_requests_file_path, parse_json_input, print_json, resolve_state_paths, save_devices,
+    save_nodes, save_pairing_requests,
 };
 
 pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
@@ -150,6 +153,285 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                         .filter(|item| item.status == NodeRuntimeStatus::Online)
                         .count()
                 );
+            }
+        }
+        NodesCommand::Diagnose {
+            node_id,
+            stale_after_minutes,
+            repair,
+        } => {
+            if stale_after_minutes == 0 {
+                return Err(MosaicError::Validation(
+                    "nodes diagnose --stale-after-minutes must be greater than 0".to_string(),
+                ));
+            }
+            if let Some(node_id) = node_id.as_deref()
+                && !nodes.iter().any(|item| item.id == node_id)
+            {
+                return Err(MosaicError::Validation(format!(
+                    "node '{}' not found",
+                    node_id
+                )));
+            }
+            let mut devices = load_devices_or_default(&devices_path)?;
+            let mut pairings = load_pairing_requests_or_default(&pairings_path)?;
+
+            let stale_after_i64 = i64::try_from(stale_after_minutes).map_err(|_| {
+                MosaicError::Validation(
+                    "nodes diagnose --stale-after-minutes value is too large".to_string(),
+                )
+            })?;
+            let now = Utc::now();
+            let cutoff = now - Duration::minutes(stale_after_i64);
+            let node_scope = node_id.clone();
+
+            let mut issues = Vec::new();
+            let mut actions = Vec::new();
+            let mut stale_online_nodes = 0usize;
+            let mut orphan_pairings = 0usize;
+            let mut approved_pairing_device_mismatch = 0usize;
+            let mut pending_pairing_blocked_device = 0usize;
+            let mut nodes_checked = 0usize;
+            let mut pairings_checked = 0usize;
+            let mut nodes_changed = false;
+            let mut devices_changed = false;
+            let mut pairings_changed = false;
+
+            let node_ids = nodes
+                .iter()
+                .map(|item| item.id.clone())
+                .collect::<HashSet<_>>();
+            let device_index = devices
+                .iter()
+                .enumerate()
+                .map(|(idx, item)| (item.id.clone(), idx))
+                .collect::<HashMap<_, _>>();
+            let device_ids = device_index.keys().cloned().collect::<HashSet<_>>();
+
+            for node in &mut nodes {
+                if node_scope.as_deref().is_some_and(|scope| node.id != scope) {
+                    continue;
+                }
+                nodes_checked += 1;
+                let is_stale_online =
+                    node.status == NodeRuntimeStatus::Online && node.last_seen_at < cutoff;
+                if is_stale_online {
+                    stale_online_nodes += 1;
+                    issues.push(json!({
+                        "kind": "stale_online_node",
+                        "severity": "warn",
+                        "node_id": node.id,
+                        "status": node.status,
+                        "last_seen_at": node.last_seen_at.to_rfc3339(),
+                        "cutoff": cutoff.to_rfc3339(),
+                        "detail": "node is online but heartbeat is stale beyond stale-after-minutes",
+                        "repairable": true,
+                    }));
+                    if repair {
+                        node.status = NodeRuntimeStatus::Offline;
+                        node.updated_at = now;
+                        nodes_changed = true;
+                        actions.push(json!({
+                            "kind": "mark_node_offline",
+                            "ok": true,
+                            "target": node.id,
+                            "detail": "node status updated to offline due to stale heartbeat",
+                        }));
+                    }
+                }
+            }
+
+            for pairing in &mut pairings {
+                if node_scope
+                    .as_deref()
+                    .is_some_and(|scope| pairing.node_id != scope)
+                {
+                    continue;
+                }
+                pairings_checked += 1;
+                let missing_node = !node_ids.contains(&pairing.node_id);
+                let missing_device = !device_ids.contains(&pairing.device_id);
+                if missing_node || missing_device {
+                    orphan_pairings += 1;
+                    issues.push(json!({
+                        "kind": "orphan_pairing_reference",
+                        "severity": "warn",
+                        "request_id": pairing.id,
+                        "node_id": pairing.node_id,
+                        "device_id": pairing.device_id,
+                        "pairing_status": pairing.status,
+                        "missing_node": missing_node,
+                        "missing_device": missing_device,
+                        "detail": "pairing references missing node/device",
+                        "repairable": pairing.status == PairingStatus::Pending,
+                    }));
+                    if repair && pairing.status == PairingStatus::Pending {
+                        pairing.status = PairingStatus::Rejected;
+                        pairing.reason = Some(
+                            "auto-rejected: pairing references missing node/device".to_string(),
+                        );
+                        pairing.updated_at = now;
+                        pairings_changed = true;
+                        actions.push(json!({
+                            "kind": "reject_orphan_pairing",
+                            "ok": true,
+                            "target": pairing.id,
+                            "detail": "pending orphan pairing auto-rejected",
+                        }));
+                    }
+                    continue;
+                }
+
+                if pairing.status == PairingStatus::Approved {
+                    if let Some(idx) = device_index.get(&pairing.device_id).copied() {
+                        let device = &mut devices[idx];
+                        if device.status != DeviceStatus::Approved {
+                            approved_pairing_device_mismatch += 1;
+                            issues.push(json!({
+                                "kind": "approved_pairing_device_mismatch",
+                                "severity": "warn",
+                                "request_id": pairing.id,
+                                "node_id": pairing.node_id,
+                                "device_id": pairing.device_id,
+                                "device_status": device.status,
+                                "detail": "pairing is approved but device is not approved",
+                                "repairable": true,
+                            }));
+                            if repair {
+                                device.status = DeviceStatus::Approved;
+                                device.updated_at = now;
+                                device.last_seen_at = now;
+                                device.last_error = None;
+                                devices_changed = true;
+                                actions.push(json!({
+                                    "kind": "repair_device_status",
+                                    "ok": true,
+                                    "target": device.id,
+                                    "detail": "device status set to approved to match approved pairing",
+                                }));
+                            }
+                        }
+                    }
+                } else if pairing.status == PairingStatus::Pending
+                    && let Some(idx) = device_index.get(&pairing.device_id).copied()
+                {
+                    let device_status = devices[idx].status.clone();
+                    if matches!(
+                        device_status,
+                        DeviceStatus::Rejected | DeviceStatus::Revoked
+                    ) {
+                        pending_pairing_blocked_device += 1;
+                        issues.push(json!({
+                            "kind": "pending_pairing_blocked_device",
+                            "severity": "warn",
+                            "request_id": pairing.id,
+                            "node_id": pairing.node_id,
+                            "device_id": pairing.device_id,
+                            "device_status": device_status,
+                            "detail": "pairing is pending but device status blocks approval",
+                            "repairable": true,
+                        }));
+                        if repair {
+                            pairing.status = PairingStatus::Rejected;
+                            pairing.reason = Some(
+                                "auto-rejected: pairing blocked by rejected/revoked device"
+                                    .to_string(),
+                            );
+                            pairing.updated_at = now;
+                            pairings_changed = true;
+                            actions.push(json!({
+                                "kind": "reject_blocked_pairing",
+                                "ok": true,
+                                "target": pairing.id,
+                                "detail": "pending pairing auto-rejected due to blocked device status",
+                            }));
+                        }
+                    }
+                }
+            }
+
+            if nodes_changed {
+                save_nodes(&nodes_path, &nodes)?;
+            }
+            if devices_changed {
+                save_devices(&devices_path, &devices)?;
+            }
+            if pairings_changed {
+                save_pairing_requests(&pairings_path, &pairings)?;
+            }
+
+            let issues_total = issues.len();
+            let actions_applied = actions.len();
+            let summary = json!({
+                "nodes_checked": nodes_checked,
+                "devices_checked": devices.len(),
+                "pairings_checked": pairings_checked,
+                "issues_total": issues_total,
+                "stale_online_nodes": stale_online_nodes,
+                "orphan_pairings": orphan_pairings,
+                "approved_pairing_device_mismatch": approved_pairing_device_mismatch,
+                "pending_pairing_blocked_device": pending_pairing_blocked_device,
+                "actions_applied": actions_applied,
+                "saved_nodes": nodes_changed,
+                "saved_devices": devices_changed,
+                "saved_pairings": pairings_changed,
+            });
+
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "node_scope": node_scope,
+                    "stale_after_minutes": stale_after_minutes,
+                    "cutoff": cutoff.to_rfc3339(),
+                    "repair": repair,
+                    "summary": summary,
+                    "issues": issues,
+                    "actions": actions,
+                    "paths": {
+                        "nodes": nodes_path.display().to_string(),
+                        "devices": devices_path.display().to_string(),
+                        "pairings": pairings_path.display().to_string(),
+                    },
+                }));
+            } else {
+                println!(
+                    "nodes diagnose scope={} stale_after={}m repair={}",
+                    node_scope.as_deref().unwrap_or("all"),
+                    stale_after_minutes,
+                    repair
+                );
+                println!(
+                    "issues={} stale_online_nodes={} orphan_pairings={} approved_pairing_device_mismatch={} pending_pairing_blocked_device={} actions_applied={}",
+                    issues_total,
+                    stale_online_nodes,
+                    orphan_pairings,
+                    approved_pairing_device_mismatch,
+                    pending_pairing_blocked_device,
+                    actions_applied
+                );
+                for issue in issues {
+                    println!(
+                        "- issue kind={} target={} detail={}",
+                        issue["kind"].as_str().unwrap_or("-"),
+                        issue["request_id"]
+                            .as_str()
+                            .or_else(|| issue["node_id"].as_str())
+                            .or_else(|| issue["device_id"].as_str())
+                            .unwrap_or("-"),
+                        issue["detail"].as_str().unwrap_or("-")
+                    );
+                }
+                if repair {
+                    for action in actions {
+                        println!(
+                            "- action kind={} target={} ok={} detail={}",
+                            action["kind"].as_str().unwrap_or("-"),
+                            action["target"].as_str().unwrap_or("-"),
+                            action["ok"].as_bool().unwrap_or(false),
+                            action["detail"].as_str().unwrap_or("-")
+                        );
+                    }
+                }
             }
         }
         NodesCommand::Run { node_id, command } => {

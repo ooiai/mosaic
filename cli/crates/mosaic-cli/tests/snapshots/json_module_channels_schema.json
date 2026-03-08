@@ -25,6 +25,20 @@
             ],
             "type": "array"
           },
+          "diagnostics": {
+            "channel_id": "string",
+            "channel_name": "string",
+            "checked_at": "string",
+            "endpoint_configured": "bool",
+            "issues": {
+              "items": [],
+              "type": "array"
+            },
+            "ready_for_send": "bool",
+            "target_configured": "bool",
+            "token_env": "null",
+            "token_present": "null"
+          },
           "kind": "string",
           "supports_bearer_token": "bool",
           "supports_endpoint": "bool",
@@ -76,6 +90,11 @@
           "kind": "string",
           "parse_mode": "null",
           "rate_limited_ms": "null",
+          "replay_payload": {
+            "idempotency_key": "null",
+            "parse_mode": "null",
+            "text": "string"
+          },
           "text_preview": "string",
           "ts": "string"
         }
@@ -99,6 +118,11 @@
           "kind": "string",
           "parse_mode": "null",
           "rate_limited_ms": "null",
+          "replay_payload": {
+            "idempotency_key": "null",
+            "parse_mode": "null",
+            "text": "string"
+          },
           "text_preview": "string",
           "ts": "string"
         }
@@ -114,6 +138,7 @@
             "failed_events": "number",
             "last_error": "null",
             "last_event_at": "string",
+            "retryable_failed_events": "number",
             "success_events": "number",
             "total_events": "number"
           }
@@ -122,10 +147,94 @@
       },
       "deduplicated_events": "number",
       "failed_events": "number",
+      "failure_reasons": {},
+      "non_retryable_failed_events": "number",
       "probe_events": "number",
+      "replay_candidates": {
+        "items": [],
+        "type": "array"
+      },
+      "retryable_failed_events": "number",
       "success_events": "number",
       "total_events": "number"
     }
+  },
+  "replay": {
+    "apply": "bool",
+    "batch_plan": {
+      "items": [
+        {
+          "batch_index": "number",
+          "first_ts": "string",
+          "items": {
+            "items": [
+              {
+                "attempt": "number",
+                "http_status": "number",
+                "reason": "string",
+                "replay_source": "string",
+                "retryable": "bool",
+                "ts": "string"
+              }
+            ],
+            "type": "array"
+          },
+          "last_ts": "string",
+          "reasons": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "size": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "batch_size": "null",
+    "channel_id": "string",
+    "failed_events_in_window": "number",
+    "http_status_filters": {
+      "items": [],
+      "type": "array"
+    },
+    "include_non_retryable": "bool",
+    "limit": "number",
+    "max_apply": "null",
+    "min_attempt": "null",
+    "ok": "bool",
+    "reason_filters": {
+      "items": [],
+      "type": "array"
+    },
+    "replay_candidates": {
+      "items": [
+        {
+          "attempt": "number",
+          "channel_id": "string",
+          "error": "string",
+          "full_payload_available": "bool",
+          "http_status": "number",
+          "idempotency_key": "null",
+          "kind": "string",
+          "parse_mode": "null",
+          "reason": "string",
+          "replay_source": "string",
+          "retryable": "bool",
+          "suggested_action": "string",
+          "suggested_command": "string",
+          "text_preview": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "report_out": "null",
+    "selected_candidates": "number",
+    "since_minutes": "null",
+    "tail": "number",
+    "token_env": "null",
+    "total_failed_events": "number"
   },
   "resolve": {
     "channel": "string",

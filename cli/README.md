@@ -7,14 +7,14 @@ This workspace ships a pure CLI with no frontend dependency.
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `dashboard`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway install|start|restart|status|health|probe|discover|diagnose|call|stop|uninstall`)
-- MCP runtime (`mcp list|add|show|check|enable|disable|remove`, supports `check --all`)
-- Channels runtime (`channels add|update|list|status|test|send|logs|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
-- Nodes/device pairing runtime (`nodes list|status|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve|reject`)
-- Hooks runtime (`hooks list|add|remove|enable|disable|run|logs`, auto-trigger on `system event`)
-- Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs`)
-- Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs`)
-- Realtime compatibility runtime (`tts voices|speak`, `voicecall start|status|send|history|stop`)
-- Browser runtime (`browser start|stop|status|open|navigate|history|tabs|show|focus|snapshot|screenshot|close|clear`)
+- MCP runtime (`mcp list|add|show|check|diagnose|repair|enable|disable|remove`, supports `check --all`)
+- Channels runtime (`channels add|update|list|status|test|send|logs|replay|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
+- Nodes/device pairing runtime (`nodes list|status|diagnose|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve|reject`)
+- Hooks runtime (`hooks list|add|remove|enable|disable|run|logs|replay`, auto-trigger on `system event`)
+- Cron runtime (`cron list|add|remove|enable|disable|run|tick|logs|replay`)
+- Webhooks runtime (`webhooks list|add|remove|enable|disable|trigger|resolve|logs|replay`)
+- Realtime compatibility runtime (`tts voices|speak|diagnose`, `voicecall start|status|send|history|stop`)
+- Browser runtime (`browser start|stop|status|open|navigate|history|tabs|diagnose|show|focus|snapshot|screenshot|close|clear`)
 - Ops runtime (`logs`, `observability`, `system`, `approvals`, `sandbox`, `safety`)
 - CLI compatibility/runtime helpers (`completion shell|install`, `directory`)
 - Maintenance runtime (`update`, `reset`, `uninstall`)
@@ -22,6 +22,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - UX compatibility shim (`tui` -> chat runtime)
 - Compatibility helpers (`qr encode|pairing` with payload/ascii/png render, `clawbot ask|chat|send|status`)
 - Memory runtime (`memory index|search|status|clear`)
+- Knowledge runtime (`knowledge ingest|search|ask|evaluate|datasets list|datasets remove`)
 - Security runtime (`security audit`)
 - Agents runtime (`agents list|add|update|show|remove|default|route`)
 - Plugins and skills runtime (`plugins list|info|check|install|enable|disable|doctor|run|remove`, `skills list|info|check|install|remove`)
@@ -285,6 +286,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state gateway start
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway restart --port 8788
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway status --deep
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway health --verbose
+cargo run -p mosaic-cli --bin mosaic -- --project-state gateway health --verbose --repair
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway probe
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway discover
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway diagnose --method status
@@ -298,11 +300,20 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state gateway uninstall
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json tts voices
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json tts speak --text "hello" --voice alloy --format wav --out .mosaic/tts/hello.wav
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json tts diagnose --voice alloy --format txt --text "probe" --timeout-ms 2000 --report-out .mosaic/reports/tts-diagnose.json
 
+# local-only voicecall
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall start --target ops-room
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall send --text "deployment started"
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall history --tail 20
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall stop
+
+# channel-routed voicecall (reuses channels transport/retry/telemetry)
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json channels add --name voice-terminal --kind terminal
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall start --target ops-room --channel-id <channel-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall send --text "deployment started"
+# for channel kinds that require auth/format overrides:
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall send --text "markdown alert" --parse-mode markdown --token-env MOSAIC_TELEGRAM_BOT_TOKEN
 ```
 
 ### MCP Runtime
@@ -313,6 +324,12 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state mcp add --name local-mcp
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp show <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check --all
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check --all --deep --timeout-ms 2000
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check --all --deep --timeout-ms 2000 --report-out .mosaic/reports/mcp-check-deep.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp diagnose <server-id> --timeout-ms 2000
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp diagnose <server-id> --timeout-ms 2000 --report-out .mosaic/reports/mcp-diagnose.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp repair <server-id> --timeout-ms 2000
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp repair --all --timeout-ms 2000 --clear-missing-cwd --report-out .mosaic/reports/mcp-repair.json
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp disable <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp enable <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp remove <server-id>
@@ -323,6 +340,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state mcp remove <server-id>
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state nodes list
 cargo run -p mosaic-cli --bin mosaic -- --project-state nodes status local
+cargo run -p mosaic-cli --bin mosaic -- --project-state nodes diagnose local --stale-after-minutes 30
+cargo run -p mosaic-cli --bin mosaic -- --project-state nodes diagnose local --stale-after-minutes 30 --repair
 # run/invoke go through gateway; start gateway first
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway start
 # default approvals policy is confirm, so run needs --yes (or allowlist policy)
@@ -355,6 +374,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --yes hooks run <hook-id
 cargo run -p mosaic-cli --bin mosaic -- --project-state --yes system event deploy --data '{"version":"1.0.0"}'
 
 cargo run -p mosaic-cli --bin mosaic -- --project-state hooks logs --tail 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state hooks logs --tail 20 --summary --since-minutes 60
+cargo run -p mosaic-cli --bin mosaic -- --project-state hooks replay --tail 50 --limit 10 --batch-size 5 --reason tool --retryable-only --report-out hooks-replay-plan.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes hooks replay --tail 50 --limit 10 --batch-size 5 --apply --max-apply 3 --stop-on-error --report-out hooks-replay-apply.json
 ```
 
 ### Cron Runtime
@@ -373,6 +395,9 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --yes cron tick
 cargo run -p mosaic-cli --bin mosaic -- --project-state --yes cron run <job-id>
 
 cargo run -p mosaic-cli --bin mosaic -- --project-state cron logs --tail 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state cron logs --tail 20 --summary --since-minutes 60
+cargo run -p mosaic-cli --bin mosaic -- --project-state cron replay --tail 50 --limit 10 --batch-size 5 --reason hook_failures --retryable-only --report-out cron-replay-plan.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes cron replay --tail 50 --limit 10 --batch-size 5 --apply --max-apply 3 --stop-on-error --report-out cron-replay-apply.json
 ```
 
 ### Webhooks Runtime
@@ -402,6 +427,10 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --yes webhooks resolve \
   --path /inbound/secure \
   --method post \
   --secret "$MOSAIC_WEBHOOK_SECRET"
+
+cargo run -p mosaic-cli --bin mosaic -- --project-state webhooks logs --tail 20 --summary --since-minutes 60
+cargo run -p mosaic-cli --bin mosaic -- --project-state webhooks replay --tail 50 --limit 10 --batch-size 5 --reason auth --report-out webhooks-replay-plan.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state --yes webhooks replay --tail 50 --limit 10 --batch-size 5 --apply --max-apply 3 --report-out webhooks-replay-apply.json
 ```
 
 ### Browser Runtime
@@ -411,6 +440,11 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser start
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser navigate --url mock://ok?title=Docs
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser status
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser tabs --tail 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser diagnose --stale-after-minutes 30 --probe-url mock://ok --probe-url mock://404
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser diagnose --stale-after-minutes 30 --artifact-max-age-hours 168 --repair
+# diagnose includes network failure class breakdown + optional active probes
+# --artifact-max-age-hours adds screenshot retention checks
+# --repair also cleans orphan/corrupt/stale screenshot artifacts
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser focus <visit-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser snapshot
 cargo run -p mosaic-cli --bin mosaic -- --project-state --json browser screenshot
@@ -466,6 +500,17 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state channels list
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels status
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels logs --channel <channel-id> --tail 20
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels logs --channel <channel-id> --tail 20 --summary
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 50 --limit 5
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 200 --since-minutes 30 --limit 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 50 --limit 5 --include-non-retryable
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 50 --limit 5 --reason rate_limited --reason upstream_5xx
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 100 --limit 20 --batch-size 5 --http-status 500 --min-attempt 2
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 50 --limit 3 --apply
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 50 --limit 3 --apply --require-full-payload
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 50 --limit 3 --apply --stop-on-error
+cargo run -p mosaic-cli --bin mosaic -- --project-state channels replay <channel-id> --tail 100 --limit 10 --apply --max-apply 3 --report-out .mosaic/replay-report.json
+# replay --apply uses stored full payload when available, with legacy text_preview fallback warnings
+# replay --apply now runs channel readiness preflight and blocks early when token/target config is not ready
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels capabilities --channel slack_webhook
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels resolve --channel slack_webhook alert
 cargo run -p mosaic-cli --bin mosaic -- --project-state channels export --out .mosaic/channels-backup.json
@@ -493,6 +538,7 @@ Webhooks guide: `docs/webhooks.md`
 Browser guide: `docs/browser.md`
 Approvals and sandbox guide: `docs/sandbox-approvals.md`
 Memory guide: `docs/memory.md`
+Knowledge guide: `docs/knowledge.md`
 Security audit guide: `docs/security-audit.md`
 Agents guide: `docs/agents.md`
 Plugins and skills guide: `docs/plugins-skills.md`
@@ -577,6 +623,29 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state memory prune --max-names
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory policy get
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory policy set --enabled true --max-documents-per-namespace 1000 --min-interval-minutes 60
 cargo run -p mosaic-cli --bin mosaic -- --project-state memory policy apply
+```
+
+### Knowledge Runtime
+
+```bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ingest --source local_md --path docs --namespace knowledge
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ingest --source local_md --path docs --namespace knowledge --report-out .mosaic/reports/knowledge-local-ingest.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ingest --source local_md --path docs --namespace knowledge --incremental --stale-after-hours 24
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ingest --source http --url https://example.com/guide.md --namespace knowledge
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ingest --source http --url https://example.com/guide.md --header-env "Authorization=MOSAIC_DOC_TOKEN" --http-retries 3 --http-retry-backoff-ms 200 --namespace knowledge
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ingest --source http --url-file .mosaic/http-knowledge-urls.txt --continue-on-error --report-out .mosaic/reports/knowledge-http-ingest.json --namespace knowledge
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ingest --source mcp --mcp-server local-mcp --namespace knowledge
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge search "gateway retry policy" --namespace knowledge --limit 20 --min-score 4
+cargo run -p mosaic-cli --bin mosaic -- --project-state knowledge ask "How does retry policy work?" --namespace knowledge --top-k 8 --min-score 6
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge ask "How does retry policy work?" --namespace knowledge --top-k 8 --min-score 6 --references-only
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge evaluate --query "gateway retry policy" --query "sandbox default profile" --namespace knowledge --top-k 8 --min-score 6 --report-out .mosaic/reports/knowledge-eval.json
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge evaluate --query "gateway retry policy" --namespace knowledge --history-window 20
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge evaluate --query "gateway retry policy" --namespace knowledge --update-baseline
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge evaluate --query "gateway retry policy" --namespace knowledge --max-coverage-drop 0.05 --max-avg-top-score-drop 1.0 --fail-on-regression
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge datasets list
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge datasets list --namespace knowledge
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge datasets remove knowledge --dry-run
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json knowledge datasets remove knowledge
 ```
 
 ### Security Runtime

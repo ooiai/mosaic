@@ -146,7 +146,14 @@ fn memory_incremental_index_reuses_unchanged_documents() {
     let first = Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .args(["--project-state", "--json", "memory", "index", "--path", "."])
+        .args([
+            "--project-state",
+            "--json",
+            "memory",
+            "index",
+            "--path",
+            ".",
+        ])
         .assert()
         .success()
         .get_output()
@@ -217,7 +224,12 @@ fn memory_namespace_isolation_flow() {
     let default_index: Value = serde_json::from_slice(&default_index).expect("default index json");
     assert_eq!(default_index["ok"], true);
     assert_eq!(default_index["namespace"], "default");
-    assert!(default_index["index"]["indexed_documents"].as_u64().unwrap_or(0) >= 1);
+    assert!(
+        default_index["index"]["indexed_documents"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
 
     let ops_index = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -240,7 +252,12 @@ fn memory_namespace_isolation_flow() {
     let ops_index: Value = serde_json::from_slice(&ops_index).expect("ops index json");
     assert_eq!(ops_index["ok"], true);
     assert_eq!(ops_index["namespace"], "ops");
-    assert!(ops_index["index"]["indexed_documents"].as_u64().unwrap_or(0) >= 1);
+    assert!(
+        ops_index["index"]["indexed_documents"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
 
     let clear_ops = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -298,7 +315,14 @@ fn memory_incremental_stale_reindex_flow() {
     Command::cargo_bin("mosaic")
         .expect("binary")
         .current_dir(temp.path())
-        .args(["--project-state", "--json", "memory", "index", "--path", "."])
+        .args([
+            "--project-state",
+            "--json",
+            "memory",
+            "index",
+            "--path",
+            ".",
+        ])
         .assert()
         .success();
 
@@ -324,7 +348,12 @@ fn memory_incremental_stale_reindex_flow() {
     let second: Value = serde_json::from_slice(&second).expect("second json");
     assert_eq!(second["ok"], true);
     assert_eq!(second["index"]["incremental"], true);
-    assert!(second["index"]["stale_reindexed_documents"].as_u64().unwrap_or(0) >= 1);
+    assert!(
+        second["index"]["stale_reindexed_documents"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
 }
 
 #[test]
@@ -357,7 +386,8 @@ fn memory_invalid_namespace_returns_validation_error() {
 #[allow(deprecated)]
 fn memory_status_all_namespaces_and_prune_flow() {
     let temp = tempdir().expect("tempdir");
-    std::fs::write(temp.path().join("notes.md"), "memory prune namespace ops").expect("write notes");
+    std::fs::write(temp.path().join("notes.md"), "memory prune namespace ops")
+        .expect("write notes");
 
     Command::cargo_bin("mosaic")
         .expect("binary")
@@ -547,7 +577,10 @@ fn memory_prune_document_quota_removes_heavy_namespace() {
         .clone();
     let dry: Value = serde_json::from_slice(&dry).expect("dry prune json");
     assert_eq!(dry["ok"], true);
-    assert_eq!(dry["prune"]["removed_namespaces"], serde_json::json!(["heavy"]));
+    assert_eq!(
+        dry["prune"]["removed_namespaces"],
+        serde_json::json!(["heavy"])
+    );
     assert_eq!(
         dry["prune"]["removed_due_to_max_documents_per_namespace"],
         serde_json::json!(["heavy"])
@@ -571,7 +604,10 @@ fn memory_prune_document_quota_removes_heavy_namespace() {
         .clone();
     let apply: Value = serde_json::from_slice(&apply).expect("apply prune json");
     assert_eq!(apply["ok"], true);
-    assert_eq!(apply["prune"]["removed_namespaces"], serde_json::json!(["heavy"]));
+    assert_eq!(
+        apply["prune"]["removed_namespaces"],
+        serde_json::json!(["heavy"])
+    );
 
     let status_all = Command::cargo_bin("mosaic")
         .expect("binary")

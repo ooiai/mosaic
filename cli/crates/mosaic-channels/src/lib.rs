@@ -11,9 +11,9 @@ pub use schema::{
     format_channel_for_output,
 };
 pub use types::{
-    AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
-    ChannelImportSummary, ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions,
-    ChannelSendResult, ChannelStatus, ChannelTemplateDefaults, ChannelTokenRotationItem,
-    ChannelTokenRotationSummary, ChannelsFile, DoctorCheck, RotateTokenEnvInput,
-    UpdateChannelInput,
+    AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelCapabilityDiagnostics,
+    ChannelDirectoryEntry, ChannelEntry, ChannelImportSummary, ChannelListItem, ChannelLogEntry,
+    ChannelLoginResult, ChannelReplayPayload, ChannelSendOptions, ChannelSendResult, ChannelStatus,
+    ChannelTemplateDefaults, ChannelTokenRotationItem, ChannelTokenRotationSummary, ChannelsFile,
+    DoctorCheck, RotateTokenEnvInput, UpdateChannelInput,
 };

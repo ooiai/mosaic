@@ -10,6 +10,7 @@ mosaic --project-state gateway start
 mosaic --project-state gateway restart --port 8788
 mosaic --project-state gateway status --deep
 mosaic --project-state gateway health --verbose
+mosaic --project-state gateway health --verbose --repair
 mosaic --project-state gateway probe
 mosaic --project-state gateway discover
 mosaic --project-state gateway diagnose --method status
@@ -27,6 +28,10 @@ Notes:
   - `gateway_discover`
   - `gateway_protocol_methods` (required `health,status`)
   - `gateway_call_status`
+- `gateway health --repair` attempts auto-remediation before checks:
+  - auto-installs/updates service target if needed
+  - auto-starts gateway runtime when endpoint is unreachable
+  - emits `gateway_auto_repair` check with repair result
 - `gateway diagnose` runs `probe -> discover -> call` and returns step-level pass/fail with error codes and latency.
 
 ## `gateway call`

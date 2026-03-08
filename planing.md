@@ -36,14 +36,15 @@ This section tracks **functional depth completion** (not only command existence)
 
 | Module | Depth | Main Missing Pieces |
 | --- | --- | --- |
-| `mcp` | 68% | runtime handshake/protocol checks beyond executable+cwd, richer diagnostics/export |
-| `gateway` | 88% | stricter protocol schema verification and richer failure telemetry |
-| `channels` | 86% | deeper capability negotiation and delivery diagnostics/replay tooling |
+| `mcp` | 90% | deeper protocol-runtime conformance probes and broader auto-remediation action set |
+| `gateway` | 95% | expanded schema-profile coverage and broader auto-remediation workflows |
+| `channels` | 95% | richer multi-channel recovery ergonomics and operator guardrails |
 | `memory` | 100% | no open blocking gap in current beta scope |
-| `nodes/devices/pairing` | 82% | stronger operational lifecycle diagnostics and recovery flows |
-| `hooks/cron/webhooks` | 80% | richer replay/inspection and safer rollout controls |
-| `tts/voicecall` | 72% | provider-depth hardening and broader runtime checks |
-| `browser` | 84% | richer navigation/runtime diagnostics and stability hardening |
+| `knowledge` | 99% | source adapter depth (batch/http auth/mcp metadata) and long-horizon lifecycle automation polish |
+| `nodes/devices/pairing` | 88% | broaden lifecycle diagnostics/recovery automation and richer operational telemetry exports |
+| `hooks/cron/webhooks` | 94% | further enrich long-horizon replay analytics (trend scoring + backlog-age prioritization guidance) |
+| `tts/voicecall` | 90% | deeper provider/runtime drill coverage beyond mock synth probe and broader external integration depth |
+| `browser` | 92% | richer protocol-aware probe workflows (multi-target scheduling + report export) and retention policy automation tuning |
 | `distribution` | 86% | clean-VM install verification matrix and release automation hardening |
 
 ### Execution Plan (Complete In Batches)
@@ -56,7 +57,7 @@ This section tracks **functional depth completion** (not only command existence)
 2. Batch B (done)
    - gateway/channels diagnostics hardening:
      - gateway call/probe error taxonomy tightening
-     - channels delivery replay and richer logs summary
+     - channels delivery replay insights and richer logs summary (`channels logs --summary`, `channels replay`)
 3. Batch C (done)
    - memory/security operational hardening:
      - incremental memory indexing
@@ -66,7 +67,7 @@ This section tracks **functional depth completion** (not only command existence)
      - security audit report dimensions and tuning (`--min-severity/--category/--top`)
 4. Batch D
    - realtime + distribution stabilization:
-     - tts/voicecall provider-depth checks
+     - tts/voicecall provider-depth checks (`tts diagnose` delivered; next add non-mock/provider adapters)
      - clean-VM install matrix and release verification automation
 
 ### Acceptance Rule For Each Batch
@@ -112,21 +113,22 @@ This section tracks **functional depth completion** (not only command existence)
 | `agents` | `agents list/add/update/show/remove/default/route` | partial | 80% |
 | `sessions` | `session list/show/resume/clear` + alias `sessions` | partial | 80% |
 | `status`, `health`, `doctor` | same commands | done | 90% |
-| `gateway`, `daemon` | `gateway ...` + alias `daemon` + protocol health checks (`gateway_discover`/`gateway_protocol_methods`/`gateway_call_status`) | partial | 88% |
-| `mcp` | `mcp list/add/show/check/enable/disable/remove` + local registry + readiness checks (`check --all` batch summary) | partial | 68% |
-| `channels` | add/list/login/send/test/status/logs/capabilities/resolve/remove/logout/export/import/rotate | partial | 85% |
+| `gateway`, `daemon` | `gateway ...` + alias `daemon` + protocol health checks (`gateway_discover`/`gateway_protocol_methods`/`gateway_call_status`/`gateway_call_health`) + method-level schema checks in health (`gateway_status_schema_profile`/`gateway_health_schema_profile`) + optional health auto-remediation (`gateway health --repair` + `gateway_auto_repair`) + stricter discover/call response validation + persisted request telemetry (`.mosaic/data/gateway-events.jsonl`) + persisted gateway degradation history (`gateway.history`) surfaced in observability (`gateway.telemetry.*`, `gateway.recent_events`, `gateway.request_failures`/`gateway.failure_rate_regression` alerts) | partial | 95% |
+| `mcp` | `mcp list/add/show/check/diagnose/repair/enable/disable/remove` + local registry + readiness checks (`check --all` batch summary) + deep batch protocol probes (`check --all --deep --timeout-ms --report-out`) + single-target protocol initialize probe (`diagnose --timeout-ms --report-out`) with recommendations + auto-remediation workflow (`repair [<server_id>|--all]` with optional `--clear-missing-cwd` and before/after deltas) + doctor/observability MCP telemetry integration + persisted MCP observability history (`mcp.history`) with delta/regression alerts and incident hints | partial | 90% |
+| `channels` | add/list/login/send/test/status/logs/replay/capabilities/resolve/remove/logout/export/import/rotate (`capabilities --target` includes runtime diagnostics; `replay` supports retry-focused planning with time/reason/status/attempt filters `--since-minutes/--reason/--http-status/--min-attempt`, batch planning via `--batch-size` + `batch_plan`, optional `--apply` full-payload replay with readiness preflight guard, legacy preview fallback handling, strict mode `--require-full-payload`, batch apply controls `--max-apply/--stop-on-error`, and report export `--report-out`) | partial | 95% |
 | `logs` | `logs` (`--tail`, `--follow`, `--source`) | partial | 80% |
 | `observability` | `observability report/export` (logs + system + doctor + policy + safety audit aggregate, supports `--audit-tail` + `--compare-window` + optional `--plugin-soak-report`, with plugin soak history persistence + retention + `current_vs_previous` deltas + gateway/channels telemetry slices + alert rollups + suppression controls + SLO view + persisted SLO history + unmet-streak/incident hints) | done | 100% |
 | `system` | `system event/presence/list` (includes `--name` filter) | partial | 83% |
 | `approvals`, `acp` | `approvals ...` + alias `acp` + `approvals check --command` + `allowlist list` | partial | 83% |
 | `sandbox` | `sandbox get/set/check/list/explain` | partial | 83% |
 | `safety` | `safety get/check/report` + merged sandbox/approvals decision surface + audit summary/diff (`--audit-tail`, `--compare-window`) | partial | 91% |
-| `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject`) | partial | 82% |
-| `hooks`, `cron`, `webhooks` | same command families | partial | 80% |
-| `tts` | `tts voices/speak` | partial | 72% |
-| `voicecall` | `voicecall start/status/send/history/stop` | partial | 72% |
-| `browser` | `browser start/stop/status/open/navigate/history/tabs/show/focus/snapshot/screenshot/close/clear` | partial | 84% |
+| `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject` + `nodes diagnose [node-id] --stale-after-minutes --repair` for drift detection/remediation) | partial | 88% |
+| `hooks`, `cron`, `webhooks` | same command families (`logs` support `--summary` + `--since-minutes`; `replay` supports failed-event planning + optional `--apply` with `--stop-on-error`, reason filters `--reason`, retryable-only filters, batch planning `--batch-size` + `batch_plan`, partial apply capping `--max-apply`, recovery diagnostics (`recovery_diagnostics`), report export `--report-out`, and webhook secret-env reuse) | partial | 94% |
+| `tts` | `tts voices/speak/diagnose` (`diagnose` adds synth probe with timeout guard, optional output write check, and report export) | partial | 84% |
+| `voicecall` | `voicecall start/status/send/history/stop` (supports channel-bound delivery path with `send --parse-mode/--token-env` overrides, reusing channels retry/telemetry and observability realtime/alert telemetry) | partial | 86% |
+| `browser` | `browser start/stop/status/open/navigate/history/tabs/diagnose(showing probe + retention diagnostics)/show/focus/snapshot/screenshot/close/clear` | partial | 92% |
 | `memory` | `memory index/search/status/clear/prune/policy` (`index` supports `--namespace`, `--incremental`, `--stale-after-hours`, `--retain-missing`, and reuse/reindex/remove counters; `status --all-namespaces`; `prune --max-namespaces/--max-age-hours/--max-documents-per-namespace` with reason breakdown fields; `policy get/set/apply` persists cleanup policy + interval guard; built-in `mosaic.memory.cleanup` / `memory.cleanup` event integration for cron/system/webhook runtime) | partial | 100% |
+| `knowledge` | `knowledge ingest/search/ask/evaluate/datasets` (`ingest` supports `--source local_md|http|mcp` with markdown chunk staging/reuse/stale cleanup and unified `--report-out`; `search/ask` support `--min-score` filtering; `ask` supports `--references-only`; `evaluate` supports query batches + report export + baseline update/regression gating + history trend output; `datasets list/remove` supports lifecycle audit + dry-run/cleanup`) | partial | 99% |
 | `security` | `security audit/baseline` (`audit` supports `--min-severity`, repeatable `--category`, and `--top` with dimensions summary; includes TLS/weak-hash/default-secret checks) | partial | 97% |
 | `plugins`, `skills` | `plugins`: list (`--source`)/info/check/install/enable/disable/doctor/run/remove (`run` includes timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog (`cpu_watchdog_ms`) including non-unix CPU-only fallback + supported-unix memory pre-enforcement (`RLIMIT_AS` on linux/android, `RLIMIT_DATA` on BSD) for safe thresholds + non-unix `max_rss_kb` guard + plugin soak long-horizon anomaly hints in observability); `skills`: list (`--source`)/info/check/install/remove | done | 100% |
 | `directory` | `directory` (state path introspection + `--ensure` + `--check-writable`) | partial | 80% |
@@ -144,8 +146,8 @@ This section tracks **functional depth completion** (not only command existence)
 
 ## Totals (Current)
 
-- Planned command entries observed: `49`
-- Mosaic covered entries: `49`
+- Planned command entries observed: `50`
+- Mosaic covered entries: `50`
 - Command entry coverage: `100%`
 - Weighted functional parity (estimated): `~100%`
 - Beta freeze gate: `PASS` (`cli/scripts/beta_release_check.sh`, report: `cli/reports/beta-readiness-latest.log`)
@@ -174,9 +176,11 @@ No unresolved missing major module gaps in current CLI matrix.
 
 | Area | Current | Optimization Target |
 | --- | --- | --- |
-| gateway | lifecycle/call/probe/discover + protocol checks in `gateway health --verbose` | deeper protocol validation (request/response schema strictness) + richer runtime telemetry |
-| channels | webhook/bot path complete for current kinds | capability negotiation and richer delivery diagnostics |
+| gateway | lifecycle/call/probe/discover + protocol checks in `gateway health --verbose` + method-level schema checks (`status`/`health`) + optional auto-remediation (`gateway health --repair`) + request telemetry stream (`gateway-events.jsonl`) + persisted long-window gateway degradation analytics (`gateway.history`) integrated into observability alerts | expanded schema profiles and broader auto-remediation workflows |
+| channels | webhook/bot path complete for current kinds + target-level runtime capability diagnostics (`ready_for_send`, token/env + endpoint/target checks) + replay planning/execution (`channels replay`, `--since-minutes`, `--reason`, `--http-status`, `--min-attempt`, `--batch-size`, `--apply` full-payload + readiness preflight guard + legacy fallback + strict flag `--require-full-payload` + `--max-apply` + `--stop-on-error` + `--report-out`) | broader failure-recovery ergonomics and operator guardrails |
+| mcp | local registry + `check` preflight + deep batch probes (`check --all --deep --report-out`) + `diagnose` stdio initialize probe (`--timeout-ms --report-out`) + `repair` auto-remediation pass (`enable disabled` + optional missing-cwd cleanup) + doctor/observability MCP telemetry + persisted long-window MCP degradation analytics/alerts (`mcp.history`, ratio delta + incident hints) | deeper protocol-runtime conformance and expanded auto-remediation suggestions/actions |
 | memory | index/search/status/clear/prune/policy + namespace lifecycle + incremental/refresh + tuned relevance scoring + document quota pruning (`--max-documents-per-namespace`) + persisted cleanup policy with interval guard + built-in auto-run event integration (`mosaic.memory.cleanup`) | optional daemon templates + richer cleanup telemetry summaries |
+| knowledge | ingest/search/ask/evaluate/datasets over `local_md/http/mcp` with staged markdown chunks + unified ingest report export + retrieval references + score threshold filtering (`--min-score`) + references-only mode + query-batch evaluation export + baseline regression gating + persistent history trends + dataset lifecycle list/remove | source metadata depth and long-horizon lifecycle automation polish |
 | security | audit/baseline + audit filter dimensions + extra TLS/crypto/credential checks | deeper rulepacks and category-specific checks |
 | distribution | release artifacts + installer scripts + generated manifests | run periodic install verification on clean VMs and publish stable brew tap/scoop bucket |
 

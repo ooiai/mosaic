@@ -60,6 +60,7 @@ enum Commands {
     Sandbox(SandboxArgs),
     Safety(SafetyArgs),
     Memory(MemoryArgs),
+    Knowledge(KnowledgeArgs),
     Security(SecurityArgs),
     Agents(AgentsArgs),
     Plugins(PluginsArgs),
@@ -123,16 +124,9 @@ struct ConfigureArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum ConfigureCommand {
     Keys,
-    Get {
-        key: String,
-    },
-    Set {
-        key: String,
-        value: String,
-    },
-    Unset {
-        key: String,
-    },
+    Get { key: String },
+    Set { key: String, value: String },
+    Unset { key: String },
     Patch(ConfigurePatchArgs),
     Preview(ConfigurePreviewArgs),
     Template(ConfigureTemplateArgs),
@@ -313,6 +307,30 @@ enum McpCommand {
         server_id: Option<String>,
         #[arg(long)]
         all: bool,
+        #[arg(long, default_value_t = false)]
+        deep: bool,
+        #[arg(long, default_value_t = 2_000)]
+        timeout_ms: u64,
+        #[arg(long)]
+        report_out: Option<String>,
+    },
+    Diagnose {
+        server_id: String,
+        #[arg(long, default_value_t = 2_000)]
+        timeout_ms: u64,
+        #[arg(long)]
+        report_out: Option<String>,
+    },
+    Repair {
+        server_id: Option<String>,
+        #[arg(long)]
+        all: bool,
+        #[arg(long, default_value_t = 2_000)]
+        timeout_ms: u64,
+        #[arg(long)]
+        clear_missing_cwd: bool,
+        #[arg(long)]
+        report_out: Option<String>,
     },
     Enable {
         server_id: String,
@@ -353,6 +371,8 @@ enum GatewayCommand {
     Health {
         #[arg(long)]
         verbose: bool,
+        #[arg(long, alias = "auto-repair")]
+        repair: bool,
     },
     Call {
         method: String,
@@ -389,6 +409,13 @@ enum NodesCommand {
     List,
     Status {
         node_id: Option<String>,
+    },
+    Diagnose {
+        node_id: Option<String>,
+        #[arg(long, default_value_t = 30)]
+        stale_after_minutes: u64,
+        #[arg(long)]
+        repair: bool,
     },
     Run {
         node_id: String,
@@ -503,6 +530,34 @@ enum HooksCommand {
         hook: Option<String>,
         #[arg(long, default_value_t = 50)]
         tail: usize,
+        #[arg(long)]
+        since_minutes: Option<u64>,
+        #[arg(long)]
+        summary: bool,
+    },
+    Replay {
+        #[arg(long)]
+        hook: Option<String>,
+        #[arg(long, default_value_t = 200)]
+        tail: usize,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        batch_size: Option<usize>,
+        #[arg(long)]
+        since_minutes: Option<u64>,
+        #[arg(long = "reason", value_enum, action = ArgAction::Append)]
+        reasons: Vec<AutomationReplayReasonArg>,
+        #[arg(long)]
+        retryable_only: bool,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long, requires = "apply")]
+        max_apply: Option<usize>,
+        #[arg(long)]
+        stop_on_error: bool,
+        #[arg(long)]
+        report_out: Option<PathBuf>,
     },
 }
 
@@ -553,6 +608,34 @@ enum CronCommand {
         job: Option<String>,
         #[arg(long, default_value_t = 50)]
         tail: usize,
+        #[arg(long)]
+        since_minutes: Option<u64>,
+        #[arg(long)]
+        summary: bool,
+    },
+    Replay {
+        #[arg(long)]
+        job: Option<String>,
+        #[arg(long, default_value_t = 200)]
+        tail: usize,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        batch_size: Option<usize>,
+        #[arg(long)]
+        since_minutes: Option<u64>,
+        #[arg(long = "reason", value_enum, action = ArgAction::Append)]
+        reasons: Vec<AutomationReplayReasonArg>,
+        #[arg(long)]
+        retryable_only: bool,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long, requires = "apply")]
+        max_apply: Option<usize>,
+        #[arg(long)]
+        stop_on_error: bool,
+        #[arg(long)]
+        report_out: Option<PathBuf>,
     },
 }
 
@@ -581,6 +664,20 @@ enum TtsCommand {
         #[arg(long)]
         out: Option<String>,
     },
+    Diagnose {
+        #[arg(long, default_value = "alloy")]
+        voice: String,
+        #[arg(long, default_value = "wav")]
+        format: String,
+        #[arg(long, default_value = "mosaic tts diagnose probe")]
+        text: String,
+        #[arg(long)]
+        out: Option<String>,
+        #[arg(long, default_value_t = 3_000)]
+        timeout_ms: u64,
+        #[arg(long)]
+        report_out: Option<PathBuf>,
+    },
 }
 
 #[derive(Args, Debug, Clone)]
@@ -601,6 +698,10 @@ enum VoicecallCommand {
     Send {
         #[arg(long)]
         text: String,
+        #[arg(long)]
+        parse_mode: Option<String>,
+        #[arg(long)]
+        token_env: Option<String>,
     },
     History {
         #[arg(long, default_value_t = 20)]
@@ -660,6 +761,36 @@ enum WebhooksCommand {
         webhook: Option<String>,
         #[arg(long, default_value_t = 50)]
         tail: usize,
+        #[arg(long)]
+        since_minutes: Option<u64>,
+        #[arg(long)]
+        summary: bool,
+    },
+    Replay {
+        #[arg(long)]
+        webhook: Option<String>,
+        #[arg(long, default_value_t = 200)]
+        tail: usize,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long)]
+        batch_size: Option<usize>,
+        #[arg(long)]
+        since_minutes: Option<u64>,
+        #[arg(long = "reason", value_enum, action = ArgAction::Append)]
+        reasons: Vec<AutomationReplayReasonArg>,
+        #[arg(long)]
+        retryable_only: bool,
+        #[arg(long)]
+        secret: Option<String>,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long, requires = "apply")]
+        max_apply: Option<usize>,
+        #[arg(long)]
+        stop_on_error: bool,
+        #[arg(long)]
+        report_out: Option<PathBuf>,
     },
 }
 
@@ -674,6 +805,22 @@ enum BrowserCommand {
     Start,
     Stop,
     Status,
+    Diagnose {
+        #[arg(long, default_value_t = 120)]
+        stale_after_minutes: u64,
+        #[arg(long = "probe-url", action = ArgAction::Append)]
+        probe_urls: Vec<String>,
+        #[arg(long)]
+        probe_file: Option<String>,
+        #[arg(long, default_value_t = 5_000)]
+        probe_timeout_ms: u64,
+        #[arg(long)]
+        artifact_max_age_hours: Option<u64>,
+        #[arg(long)]
+        report_out: Option<String>,
+        #[arg(long)]
+        repair: bool,
+    },
     #[command(visible_alias = "visit")]
     Open {
         #[arg(long)]
@@ -816,6 +963,37 @@ enum ChannelsCommand {
         tail: usize,
         #[arg(long)]
         summary: bool,
+    },
+    Replay {
+        channel_id: String,
+        #[arg(long, default_value_t = 50)]
+        tail: usize,
+        #[arg(long)]
+        since_minutes: Option<u64>,
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        #[arg(long)]
+        batch_size: Option<usize>,
+        #[arg(long)]
+        min_attempt: Option<usize>,
+        #[arg(long = "http-status", action = ArgAction::Append)]
+        http_statuses: Vec<u16>,
+        #[arg(long)]
+        include_non_retryable: bool,
+        #[arg(long = "reason", value_enum, action = ArgAction::Append)]
+        reasons: Vec<ReplayReasonArg>,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long, requires = "apply")]
+        max_apply: Option<usize>,
+        #[arg(long, requires = "apply")]
+        require_full_payload: bool,
+        #[arg(long, requires = "apply")]
+        stop_on_error: bool,
+        #[arg(long)]
+        report_out: Option<PathBuf>,
+        #[arg(long)]
+        token_env: Option<String>,
     },
     Capabilities {
         #[arg(long)]
@@ -1107,6 +1285,139 @@ enum MemoryPolicyCommand {
         #[arg(long, default_value_t = false)]
         force: bool,
     },
+}
+
+#[derive(Args, Debug, Clone)]
+struct KnowledgeArgs {
+    #[command(subcommand)]
+    command: KnowledgeCommand,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum KnowledgeCommand {
+    Ingest {
+        #[arg(long, value_enum, default_value_t = KnowledgeSourceArg::LocalMd)]
+        source: KnowledgeSourceArg,
+        #[arg(long)]
+        path: Option<String>,
+        #[arg(long = "url", action = ArgAction::Append)]
+        urls: Vec<String>,
+        #[arg(long)]
+        url_file: Option<String>,
+        #[arg(long, default_value_t = false)]
+        continue_on_error: bool,
+        #[arg(long)]
+        report_out: Option<String>,
+        #[arg(long = "header", value_name = "KEY=VALUE", action = ArgAction::Append)]
+        headers: Vec<String>,
+        #[arg(long = "header-env", value_name = "KEY=ENV", action = ArgAction::Append)]
+        header_envs: Vec<String>,
+        #[arg(long)]
+        mcp_server: Option<String>,
+        #[arg(long)]
+        mcp_path: Option<String>,
+        #[arg(long, default_value = "knowledge")]
+        namespace: String,
+        #[arg(long, default_value_t = 20_000)]
+        max_chunk_bytes: usize,
+        #[arg(long, default_value_t = 2_000)]
+        chunk_overlap_bytes: usize,
+        #[arg(long, default_value_t = false)]
+        incremental: bool,
+        #[arg(long)]
+        stale_after_hours: Option<u64>,
+        #[arg(long, default_value_t = false)]
+        retain_missing: bool,
+        #[arg(long, default_value_t = 50_000)]
+        max_files: usize,
+        #[arg(long, default_value_t = 1_048_576)]
+        max_file_size: usize,
+        #[arg(long, default_value_t = 16_384)]
+        max_content_bytes: usize,
+        #[arg(long, default_value_t = 15)]
+        http_timeout_seconds: u64,
+        #[arg(long, default_value_t = 3)]
+        http_retries: u32,
+        #[arg(long, default_value_t = 200)]
+        http_retry_backoff_ms: u64,
+    },
+    Search {
+        query: String,
+        #[arg(long, default_value = "knowledge")]
+        namespace: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long, default_value_t = 1)]
+        min_score: usize,
+    },
+    Ask {
+        prompt: String,
+        #[arg(long, default_value = "knowledge")]
+        namespace: String,
+        #[arg(long, default_value_t = 8)]
+        top_k: usize,
+        #[arg(long, default_value_t = 1)]
+        min_score: usize,
+        #[arg(long, default_value_t = false)]
+        references_only: bool,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    Evaluate {
+        #[arg(long = "query", action = ArgAction::Append)]
+        queries: Vec<String>,
+        #[arg(long)]
+        query_file: Option<String>,
+        #[arg(long, default_value = "knowledge")]
+        namespace: String,
+        #[arg(long, default_value_t = 8)]
+        top_k: usize,
+        #[arg(long, default_value_t = 1)]
+        min_score: usize,
+        #[arg(long)]
+        baseline: Option<String>,
+        #[arg(long)]
+        no_baseline: bool,
+        #[arg(long)]
+        update_baseline: bool,
+        #[arg(long, default_value_t = false)]
+        fail_on_regression: bool,
+        #[arg(long, default_value_t = 0.0)]
+        max_coverage_drop: f64,
+        #[arg(long, default_value_t = 0.0)]
+        max_avg_top_score_drop: f64,
+        #[arg(long, default_value_t = 20)]
+        history_window: usize,
+        #[arg(long)]
+        report_out: Option<String>,
+    },
+    Datasets {
+        #[command(subcommand)]
+        command: KnowledgeDatasetsCommand,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum KnowledgeDatasetsCommand {
+    List {
+        #[arg(long)]
+        namespace: Option<String>,
+    },
+    Remove {
+        namespace: String,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+#[value(rename_all = "snake_case")]
+enum KnowledgeSourceArg {
+    LocalMd,
+    Http,
+    Mcp,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -1485,6 +1796,42 @@ enum ExtensionSourceFilterArg {
     Project,
     CodexHome,
     UserHome,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplayReasonArg {
+    #[value(name = "rate_limited")]
+    RateLimited,
+    #[value(name = "upstream_5xx")]
+    Upstream5xx,
+    #[value(name = "timeout")]
+    Timeout,
+    #[value(name = "auth")]
+    Auth,
+    #[value(name = "target_not_found")]
+    TargetNotFound,
+    #[value(name = "client_4xx")]
+    Client4xx,
+    #[value(name = "unknown")]
+    Unknown,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum AutomationReplayReasonArg {
+    #[value(name = "approval_required")]
+    ApprovalRequired,
+    #[value(name = "sandbox_denied")]
+    SandboxDenied,
+    #[value(name = "auth")]
+    Auth,
+    #[value(name = "validation")]
+    Validation,
+    #[value(name = "tool")]
+    Tool,
+    #[value(name = "hook_failures")]
+    HookFailures,
+    #[value(name = "unknown")]
+    Unknown,
 }
 
 #[derive(Args, Debug, Clone)]

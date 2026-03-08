@@ -43,6 +43,7 @@ fn root_help_includes_expected_commands() {
         "sandbox",
         "safety",
         "memory",
+        "knowledge",
         "security",
         "agents",
         "plugins",
@@ -83,6 +84,95 @@ fn root_help_includes_expected_commands() {
 
 #[test]
 #[allow(deprecated)]
+fn knowledge_help_includes_runtime_and_dataset_commands() {
+    let help = run_help(&["knowledge", "--help"]);
+    for name in ["ingest", "search", "ask", "evaluate", "datasets"] {
+        assert!(
+            help.contains(name),
+            "knowledge --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+
+    let ingest_help = run_help(&["knowledge", "ingest", "--help"]);
+    for option in [
+        "--source",
+        "--path",
+        "--url",
+        "--url-file",
+        "--continue-on-error",
+        "--report-out",
+        "--header",
+        "--header-env",
+        "--http-retries",
+        "--http-retry-backoff-ms",
+        "--mcp-server",
+        "--namespace",
+    ] {
+        assert!(
+            ingest_help.contains(option),
+            "knowledge ingest --help missing expected option: {option}\n{ingest_help}"
+        );
+    }
+
+    let ask_help = run_help(&["knowledge", "ask", "--help"]);
+    for option in ["--min-score", "--references-only"] {
+        assert!(
+            ask_help.contains(option),
+            "knowledge ask --help missing expected option: {option}\n{ask_help}"
+        );
+    }
+
+    let search_help = run_help(&["knowledge", "search", "--help"]);
+    assert!(
+        search_help.contains("--min-score"),
+        "knowledge search --help missing expected option: --min-score\n{search_help}"
+    );
+
+    let evaluate_help = run_help(&["knowledge", "evaluate", "--help"]);
+    for option in [
+        "--query",
+        "--query-file",
+        "--namespace",
+        "--top-k",
+        "--min-score",
+        "--baseline",
+        "--no-baseline",
+        "--update-baseline",
+        "--fail-on-regression",
+        "--max-coverage-drop",
+        "--max-avg-top-score-drop",
+        "--history-window",
+        "--report-out",
+    ] {
+        assert!(
+            evaluate_help.contains(option),
+            "knowledge evaluate --help missing expected option: {option}\n{evaluate_help}"
+        );
+    }
+
+    let datasets_help = run_help(&["knowledge", "datasets", "--help"]);
+    for name in ["list", "remove"] {
+        assert!(
+            datasets_help.contains(name),
+            "knowledge datasets --help missing expected subcommand: {name}\n{datasets_help}"
+        );
+    }
+
+    let datasets_list_help = run_help(&["knowledge", "datasets", "list", "--help"]);
+    assert!(
+        datasets_list_help.contains("--namespace"),
+        "knowledge datasets list --help missing expected option: --namespace\n{datasets_list_help}"
+    );
+
+    let datasets_remove_help = run_help(&["knowledge", "datasets", "remove", "--help"]);
+    assert!(
+        datasets_remove_help.contains("--dry-run"),
+        "knowledge datasets remove --help missing expected option: --dry-run\n{datasets_remove_help}"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
 fn channels_help_includes_operational_commands() {
     let help = run_help(&["channels", "--help"]);
     let expected = [
@@ -94,6 +184,7 @@ fn channels_help_includes_operational_commands() {
         "send",
         "test",
         "logs",
+        "replay",
         "capabilities",
         "resolve",
         "export",
@@ -115,6 +206,29 @@ fn channels_help_includes_operational_commands() {
         logs_help.contains("--summary"),
         "channels logs --help missing expected option --summary:\n{logs_help}"
     );
+
+    let replay_help = run_help(&["channels", "replay", "--help"]);
+    for option in [
+        "--tail",
+        "--since-minutes",
+        "--limit",
+        "--batch-size",
+        "--min-attempt",
+        "--http-status",
+        "--include-non-retryable",
+        "--reason",
+        "--apply",
+        "--max-apply",
+        "--require-full-payload",
+        "--stop-on-error",
+        "--report-out",
+        "--token-env",
+    ] {
+        assert!(
+            replay_help.contains(option),
+            "channels replay --help missing expected option: {option}\n{replay_help}"
+        );
+    }
 }
 
 #[test]
@@ -141,6 +255,14 @@ fn gateway_help_includes_lifecycle_commands() {
             "gateway --help missing expected subcommand: {name}\n{help}"
         );
     }
+
+    let health_help = run_help(&["gateway", "health", "--help"]);
+    for option in ["--verbose", "--repair"] {
+        assert!(
+            health_help.contains(option),
+            "gateway health --help missing expected option {option}:\n{health_help}"
+        );
+    }
 }
 
 #[test]
@@ -148,7 +270,7 @@ fn gateway_help_includes_lifecycle_commands() {
 fn mcp_help_includes_management_commands() {
     let help = run_help(&["mcp", "--help"]);
     let expected = [
-        "list", "add", "show", "check", "enable", "disable", "remove",
+        "list", "add", "show", "check", "diagnose", "repair", "enable", "disable", "remove",
     ];
 
     for name in expected {
@@ -159,10 +281,33 @@ fn mcp_help_includes_management_commands() {
     }
 
     let check_help = run_help(&["mcp", "check", "--help"]);
-    assert!(
-        check_help.contains("--all"),
-        "mcp check --help missing expected option --all:\n{check_help}"
-    );
+    for option in ["--all", "--deep", "--timeout-ms", "--report-out"] {
+        assert!(
+            check_help.contains(option),
+            "mcp check --help missing expected option {option}:\n{check_help}"
+        );
+    }
+
+    let diagnose_help = run_help(&["mcp", "diagnose", "--help"]);
+    for option in ["--timeout-ms", "--report-out"] {
+        assert!(
+            diagnose_help.contains(option),
+            "mcp diagnose --help missing expected option {option}:\n{diagnose_help}"
+        );
+    }
+
+    let repair_help = run_help(&["mcp", "repair", "--help"]);
+    for option in [
+        "--all",
+        "--timeout-ms",
+        "--clear-missing-cwd",
+        "--report-out",
+    ] {
+        assert!(
+            repair_help.contains(option),
+            "mcp repair --help missing expected option {option}:\n{repair_help}"
+        );
+    }
 }
 
 #[test]
@@ -261,7 +406,9 @@ fn chat_help_includes_prompt_file_and_script_options() {
 #[allow(deprecated)]
 fn hooks_help_includes_lifecycle_commands() {
     let help = run_help(&["hooks", "--help"]);
-    let expected = ["list", "add", "remove", "enable", "disable", "run", "logs"];
+    let expected = [
+        "list", "add", "remove", "enable", "disable", "run", "logs", "replay",
+    ];
 
     for name in expected {
         assert!(
@@ -273,10 +420,44 @@ fn hooks_help_includes_lifecycle_commands() {
 
 #[test]
 #[allow(deprecated)]
+fn hooks_logs_help_includes_summary_and_time_window_options() {
+    let help = run_help(&["hooks", "logs", "--help"]);
+    for option in ["--summary", "--since-minutes"] {
+        assert!(
+            help.contains(option),
+            "hooks logs --help missing expected option: {option}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn hooks_replay_help_includes_apply_options() {
+    let help = run_help(&["hooks", "replay", "--help"]);
+    for option in [
+        "--apply",
+        "--stop-on-error",
+        "--limit",
+        "--batch-size",
+        "--since-minutes",
+        "--reason",
+        "--retryable-only",
+        "--max-apply",
+        "--report-out",
+    ] {
+        assert!(
+            help.contains(option),
+            "hooks replay --help missing expected option: {option}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
 fn cron_help_includes_lifecycle_commands() {
     let help = run_help(&["cron", "--help"]);
     let expected = [
-        "list", "add", "remove", "enable", "disable", "run", "tick", "logs",
+        "list", "add", "remove", "enable", "disable", "run", "tick", "logs", "replay",
     ];
 
     for name in expected {
@@ -289,10 +470,44 @@ fn cron_help_includes_lifecycle_commands() {
 
 #[test]
 #[allow(deprecated)]
+fn cron_logs_help_includes_summary_and_time_window_options() {
+    let help = run_help(&["cron", "logs", "--help"]);
+    for option in ["--summary", "--since-minutes"] {
+        assert!(
+            help.contains(option),
+            "cron logs --help missing expected option: {option}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn cron_replay_help_includes_apply_options() {
+    let help = run_help(&["cron", "replay", "--help"]);
+    for option in [
+        "--apply",
+        "--stop-on-error",
+        "--limit",
+        "--batch-size",
+        "--since-minutes",
+        "--reason",
+        "--retryable-only",
+        "--max-apply",
+        "--report-out",
+    ] {
+        assert!(
+            help.contains(option),
+            "cron replay --help missing expected option: {option}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
 fn webhooks_help_includes_lifecycle_commands() {
     let help = run_help(&["webhooks", "--help"]);
     let expected = [
-        "list", "add", "remove", "enable", "disable", "trigger", "resolve", "logs",
+        "list", "add", "remove", "enable", "disable", "trigger", "resolve", "logs", "replay",
     ];
 
     for name in expected {
@@ -305,14 +520,64 @@ fn webhooks_help_includes_lifecycle_commands() {
 
 #[test]
 #[allow(deprecated)]
+fn webhooks_logs_help_includes_summary_and_time_window_options() {
+    let help = run_help(&["webhooks", "logs", "--help"]);
+    for option in ["--summary", "--since-minutes"] {
+        assert!(
+            help.contains(option),
+            "webhooks logs --help missing expected option: {option}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn webhooks_replay_help_includes_apply_options() {
+    let help = run_help(&["webhooks", "replay", "--help"]);
+    for option in [
+        "--apply",
+        "--stop-on-error",
+        "--limit",
+        "--batch-size",
+        "--since-minutes",
+        "--reason",
+        "--retryable-only",
+        "--secret",
+        "--max-apply",
+        "--report-out",
+    ] {
+        assert!(
+            help.contains(option),
+            "webhooks replay --help missing expected option: {option}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
 fn tts_help_includes_voices_and_speak_commands() {
     let help = run_help(&["tts", "--help"]);
-    let expected = ["voices", "speak"];
+    let expected = ["voices", "speak", "diagnose"];
 
     for name in expected {
         assert!(
             help.contains(name),
             "tts --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+
+    let diagnose_help = run_help(&["tts", "diagnose", "--help"]);
+    for option in [
+        "--voice",
+        "--format",
+        "--text",
+        "--out",
+        "--timeout-ms",
+        "--report-out",
+    ] {
+        assert!(
+            diagnose_help.contains(option),
+            "tts diagnose --help missing expected option: {option}\n{diagnose_help}"
         );
     }
 }
@@ -327,6 +592,14 @@ fn voicecall_help_includes_start_status_send_history_stop_commands() {
         assert!(
             help.contains(name),
             "voicecall --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+
+    let send_help = run_help(&["voicecall", "send", "--help"]);
+    for option in ["--parse-mode", "--token-env"] {
+        assert!(
+            send_help.contains(option),
+            "voicecall send --help missing expected option: {option}\n{send_help}"
         );
     }
 }
@@ -367,12 +640,25 @@ fn agents_help_includes_management_commands() {
 #[allow(deprecated)]
 fn nodes_help_includes_control_plane_commands() {
     let help = run_help(&["nodes", "--help"]);
-    let expected = ["list", "status", "run", "invoke"];
+    let expected = ["list", "status", "diagnose", "run", "invoke"];
 
     for name in expected {
         assert!(
             help.contains(name),
             "nodes --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn nodes_diagnose_help_includes_repair_and_stale_threshold() {
+    let help = run_help(&["nodes", "diagnose", "--help"]);
+    let expected = ["--stale-after-minutes", "--repair"];
+    for option in expected {
+        assert!(
+            help.contains(option),
+            "nodes diagnose --help missing expected option: {option}\n{help}"
         );
     }
 }
@@ -418,6 +704,7 @@ fn browser_help_includes_navigation_and_history_commands() {
         "navigate",
         "history",
         "tabs",
+        "diagnose",
         "show",
         "focus",
         "snapshot",
@@ -430,6 +717,25 @@ fn browser_help_includes_navigation_and_history_commands() {
         assert!(
             help.contains(name),
             "browser --help missing expected command or alias: {name}\n{help}"
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn browser_diagnose_help_includes_repair_and_stale_threshold() {
+    let help = run_help(&["browser", "diagnose", "--help"]);
+    let expected = [
+        "--stale-after-minutes",
+        "--probe-url",
+        "--probe-timeout-ms",
+        "--artifact-max-age-hours",
+        "--repair",
+    ];
+    for option in expected {
+        assert!(
+            help.contains(option),
+            "browser diagnose --help missing expected option: {option}\n{help}"
         );
     }
 }
@@ -452,7 +758,12 @@ fn memory_help_includes_index_and_search_commands() {
 #[allow(deprecated)]
 fn memory_index_help_includes_incremental_option() {
     let help = run_help(&["memory", "index", "--help"]);
-    let expected = ["--incremental", "--namespace", "--stale-after-hours", "--retain-missing"];
+    let expected = [
+        "--incremental",
+        "--namespace",
+        "--stale-after-hours",
+        "--retain-missing",
+    ];
     for option in expected {
         assert!(
             help.contains(option),

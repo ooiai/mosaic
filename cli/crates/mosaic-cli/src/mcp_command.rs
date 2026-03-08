@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use mosaic_core::error::{MosaicError, Result};
-use mosaic_mcp::{AddMcpServerInput, McpStore, mcp_servers_file_path};
+use mosaic_mcp::{
+    AddMcpServerInput, McpDiagnoseOptions, McpServerDiagnoseResult, McpStore, mcp_servers_file_path,
+};
 
-use super::{Cli, McpArgs, McpCommand, print_json, resolve_state_paths};
+use super::{Cli, McpArgs, McpCommand, print_json, resolve_state_paths, save_json_file};
 
 pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
@@ -66,7 +69,33 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
             }
         }
         McpCommand::Show { server_id } => handle_show(cli, &store, &server_id)?,
-        McpCommand::Check { server_id, all } => handle_check(cli, &store, server_id, all)?,
+        McpCommand::Check {
+            server_id,
+            all,
+            deep,
+            timeout_ms,
+            report_out,
+        } => handle_check(cli, &store, server_id, all, deep, timeout_ms, report_out)?,
+        McpCommand::Diagnose {
+            server_id,
+            timeout_ms,
+            report_out,
+        } => handle_diagnose(cli, &store, &server_id, timeout_ms, report_out)?,
+        McpCommand::Repair {
+            server_id,
+            all,
+            timeout_ms,
+            clear_missing_cwd,
+            report_out,
+        } => handle_repair(
+            cli,
+            &store,
+            server_id,
+            all,
+            timeout_ms,
+            clear_missing_cwd,
+            report_out,
+        )?,
         McpCommand::Enable { server_id } => {
             let server = store.set_enabled(&server_id, true)?;
             if cli.json {
@@ -108,6 +137,289 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn handle_repair(
+    cli: &Cli,
+    store: &McpStore,
+    server_id: Option<String>,
+    all: bool,
+    timeout_ms: u64,
+    clear_missing_cwd: bool,
+    report_out: Option<String>,
+) -> Result<()> {
+    validate_timeout_ms(timeout_ms)?;
+    if !all && server_id.is_none() {
+        return Err(MosaicError::Validation(
+            "mcp repair requires <server_id> or --all".to_string(),
+        ));
+    }
+    let report_out_path = report_out.map(PathBuf::from);
+
+    let targets = if all {
+        store.diagnose_all(McpDiagnoseOptions { timeout_ms })?
+    } else {
+        let server_id = server_id.expect("validated above");
+        vec![store.diagnose(&server_id, McpDiagnoseOptions { timeout_ms })?]
+    };
+
+    let mut changed = 0usize;
+    let mut results: Vec<Value> = Vec::with_capacity(targets.len());
+    for target in targets {
+        let server_id = target.server.id.clone();
+        let mut actions = Vec::new();
+
+        if has_disabled_issue(&target.check.issues) {
+            store.set_enabled(&server_id, true)?;
+            actions.push("enabled_server".to_string());
+        }
+        if clear_missing_cwd && has_missing_cwd_issue(&target.check.issues) {
+            store.set_cwd(&server_id, None)?;
+            actions.push("cleared_missing_cwd".to_string());
+        }
+
+        let after = store.diagnose(&server_id, McpDiagnoseOptions { timeout_ms })?;
+        let changed_entry = !actions.is_empty();
+        if changed_entry {
+            changed = changed.saturating_add(1);
+        }
+
+        results.push(json!({
+            "server_id": server_id,
+            "changed": changed_entry,
+            "actions": actions,
+            "before": {
+                "healthy": target.healthy,
+                "check_healthy": target.check.healthy,
+                "protocol_handshake_ok": target.protocol_probe.handshake_ok,
+                "issues": target.check.issues,
+            },
+            "after": {
+                "healthy": after.healthy,
+                "check_healthy": after.check.healthy,
+                "protocol_handshake_ok": after.protocol_probe.handshake_ok,
+                "issues": after.check.issues,
+            },
+            "remaining_recommendations": recommend_actions(&after),
+        }));
+    }
+
+    let payload = json!({
+        "ok": true,
+        "all": all,
+        "timeout_ms": timeout_ms,
+        "clear_missing_cwd": clear_missing_cwd,
+        "checked": results.len(),
+        "changed": changed,
+        "unchanged": results.len().saturating_sub(changed),
+        "results": results,
+        "report_out": report_out_path.as_ref().map(|path| path.display().to_string()),
+    });
+    if let Some(path) = report_out_path.as_ref() {
+        save_json_file(path, &payload)?;
+    }
+
+    if cli.json {
+        print_json(&payload);
+        return Ok(());
+    }
+
+    println!(
+        "checked={} changed={} unchanged={}",
+        payload["checked"].as_u64().unwrap_or(0),
+        payload["changed"].as_u64().unwrap_or(0),
+        payload["unchanged"].as_u64().unwrap_or(0),
+    );
+    if let Some(path) = report_out_path.as_ref() {
+        println!("report: {}", path.display());
+    }
+    Ok(())
+}
+
+fn handle_diagnose(
+    cli: &Cli,
+    store: &McpStore,
+    server_id: &str,
+    timeout_ms: u64,
+    report_out: Option<String>,
+) -> Result<()> {
+    validate_timeout_ms(timeout_ms)?;
+
+    let result = store.diagnose(server_id, McpDiagnoseOptions { timeout_ms })?;
+    let recommendations = recommend_actions(&result);
+    let report_out_path = report_out.map(PathBuf::from);
+    let payload = json!({
+        "ok": true,
+        "server": result.server,
+        "check": result.check,
+        "protocol_probe": result.protocol_probe,
+        "healthy": result.healthy,
+        "recommendations": recommendations,
+        "timeout_ms": timeout_ms,
+        "report_out": report_out_path.as_ref().map(|path| path.display().to_string()),
+    });
+    if let Some(path) = report_out_path.as_ref() {
+        save_json_file(path, &payload)?;
+    }
+    if cli.json {
+        print_json(&payload);
+        return Ok(());
+    }
+
+    println!(
+        "server: {}",
+        payload["server"]["id"].as_str().unwrap_or("-")
+    );
+    println!("healthy: {}", payload["healthy"].as_bool().unwrap_or(false));
+    println!(
+        "check_healthy: {}",
+        payload["check"]["healthy"].as_bool().unwrap_or(false)
+    );
+    if payload["check"]["issues"]
+        .as_array()
+        .is_none_or(|issues| issues.is_empty())
+    {
+        println!("check_issues: <none>");
+    } else {
+        println!("check_issues:");
+        for issue in payload["check"]["issues"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.as_str())
+        {
+            println!("- {issue}");
+        }
+    }
+
+    println!(
+        "protocol_probe_attempted: {}",
+        payload["protocol_probe"]["attempted"]
+            .as_bool()
+            .unwrap_or(false)
+    );
+    println!(
+        "protocol_probe_timeout_ms: {}",
+        payload["protocol_probe"]["timeout_ms"]
+            .as_u64()
+            .unwrap_or(0)
+    );
+    println!(
+        "protocol_probe_duration_ms: {}",
+        payload["protocol_probe"]["duration_ms"]
+            .as_u64()
+            .unwrap_or(0)
+    );
+    println!(
+        "protocol_probe_handshake_ok: {}",
+        payload["protocol_probe"]["handshake_ok"]
+            .as_bool()
+            .unwrap_or(false)
+    );
+    println!(
+        "protocol_probe_response_kind: {}",
+        payload["protocol_probe"]["response_kind"]
+            .as_str()
+            .unwrap_or("-")
+    );
+    println!(
+        "protocol_probe_error: {}",
+        payload["protocol_probe"]["error"].as_str().unwrap_or("-")
+    );
+    println!(
+        "protocol_probe_response_preview: {}",
+        payload["protocol_probe"]["response_preview"]
+            .as_str()
+            .unwrap_or("-")
+    );
+    println!(
+        "protocol_probe_stderr_preview: {}",
+        payload["protocol_probe"]["stderr_preview"]
+            .as_str()
+            .unwrap_or("-")
+    );
+
+    if payload["recommendations"]
+        .as_array()
+        .is_none_or(|items| items.is_empty())
+    {
+        println!("recommendations: <none>");
+    } else {
+        println!("recommendations:");
+        for recommendation in payload["recommendations"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.as_str())
+        {
+            println!("- {recommendation}");
+        }
+    }
+    if let Some(path) = report_out_path.as_ref() {
+        println!("report_out: {}", path.display());
+    }
+    Ok(())
+}
+
+fn recommend_actions(result: &McpServerDiagnoseResult) -> Vec<String> {
+    let mut actions = Vec::new();
+    if result
+        .check
+        .issues
+        .iter()
+        .any(|issue| issue.contains("disabled"))
+    {
+        actions.push(format!(
+            "enable server with `mosaic mcp enable {}`",
+            result.server.id
+        ));
+    }
+    if result
+        .check
+        .issues
+        .iter()
+        .any(|issue| issue.contains("not found in PATH"))
+    {
+        actions.push(
+            "set --command to an absolute executable path or ensure command is in PATH".to_string(),
+        );
+    }
+    if result
+        .check
+        .issues
+        .iter()
+        .any(|issue| issue.contains("cwd"))
+    {
+        actions.push("set a valid --cwd path for the MCP server".to_string());
+    }
+    if result.protocol_probe.attempted && !result.protocol_probe.handshake_ok {
+        actions.push(
+            "verify server supports MCP stdio initialize handshake and check server startup logs"
+                .to_string(),
+        );
+        if result
+            .protocol_probe
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("timed out")
+        {
+            actions.push(
+                "increase timeout via `mosaic mcp diagnose <id> --timeout-ms <ms>`".to_string(),
+            );
+        }
+    }
+    actions
+}
+
+fn has_disabled_issue(issues: &[String]) -> bool {
+    issues.iter().any(|issue| issue.contains("disabled"))
+}
+
+fn has_missing_cwd_issue(issues: &[String]) -> bool {
+    issues
+        .iter()
+        .any(|issue| issue.contains("cwd") && issue.contains("does not exist"))
 }
 
 fn handle_show(cli: &Cli, store: &McpStore, server_id: &str) -> Result<()> {
@@ -155,68 +467,209 @@ fn handle_show(cli: &Cli, store: &McpStore, server_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn handle_check(cli: &Cli, store: &McpStore, server_id: Option<String>, all: bool) -> Result<()> {
+fn handle_check(
+    cli: &Cli,
+    store: &McpStore,
+    server_id: Option<String>,
+    all: bool,
+    deep: bool,
+    timeout_ms: u64,
+    report_out: Option<String>,
+) -> Result<()> {
+    if deep {
+        validate_timeout_ms(timeout_ms)?;
+    }
+    let report_out_path = report_out.map(PathBuf::from);
+
     if all || server_id.is_none() {
-        let checks = store.check_all()?;
-        let healthy_count = checks.iter().filter(|item| item.check.healthy).count();
-        if cli.json {
-            print_json(&json!({
+        if deep {
+            let results = store.diagnose_all(McpDiagnoseOptions { timeout_ms })?;
+            let healthy_count = results.iter().filter(|item| item.healthy).count();
+            let protocol_ok = results
+                .iter()
+                .filter(|item| item.protocol_probe.handshake_ok)
+                .count();
+            let protocol_failed = results
+                .iter()
+                .filter(|item| item.protocol_probe.attempted && !item.protocol_probe.handshake_ok)
+                .count();
+            let probe_skipped = results
+                .iter()
+                .filter(|item| !item.protocol_probe.attempted)
+                .count();
+            let precheck_unhealthy = results.iter().filter(|item| !item.check.healthy).count();
+            let payload = json!({
                 "ok": true,
                 "all": true,
-                "checked": checks.len(),
+                "deep": true,
+                "timeout_ms": timeout_ms,
+                "checked": results.len(),
                 "healthy": healthy_count,
-                "unhealthy": checks.len().saturating_sub(healthy_count),
-                "results": checks,
-            }));
-        } else if checks.is_empty() {
+                "unhealthy": results.len().saturating_sub(healthy_count),
+                "precheck_unhealthy": precheck_unhealthy,
+                "protocol_ok": protocol_ok,
+                "protocol_failed": protocol_failed,
+                "probe_skipped": probe_skipped,
+                "results": results,
+                "report_out": report_out_path.as_ref().map(|path| path.display().to_string()),
+            });
+            if let Some(path) = report_out_path.as_ref() {
+                save_json_file(path, &payload)?;
+            }
+            if cli.json {
+                print_json(&payload);
+            } else if payload["checked"].as_u64().unwrap_or(0) == 0 {
+                println!("No MCP servers configured.");
+            } else {
+                println!(
+                    "checked={} healthy={} unhealthy={} protocol_ok={} protocol_failed={} probe_skipped={}",
+                    payload["checked"].as_u64().unwrap_or(0),
+                    payload["healthy"].as_u64().unwrap_or(0),
+                    payload["unhealthy"].as_u64().unwrap_or(0),
+                    payload["protocol_ok"].as_u64().unwrap_or(0),
+                    payload["protocol_failed"].as_u64().unwrap_or(0),
+                    payload["probe_skipped"].as_u64().unwrap_or(0),
+                );
+                if let Some(path) = report_out_path.as_ref() {
+                    println!("report: {}", path.display());
+                }
+            }
+            return Ok(());
+        }
+
+        let checks = store.check_all()?;
+        let healthy_count = checks.iter().filter(|item| item.check.healthy).count();
+        let payload = json!({
+            "ok": true,
+            "all": true,
+            "deep": false,
+            "checked": checks.len(),
+            "healthy": healthy_count,
+            "unhealthy": checks.len().saturating_sub(healthy_count),
+            "results": checks,
+            "report_out": report_out_path.as_ref().map(|path| path.display().to_string()),
+        });
+        if let Some(path) = report_out_path.as_ref() {
+            save_json_file(path, &payload)?;
+        }
+        if cli.json {
+            print_json(&payload);
+        } else if payload["checked"].as_u64().unwrap_or(0) == 0 {
             println!("No MCP servers configured.");
         } else {
             println!(
                 "checked={} healthy={} unhealthy={}",
-                checks.len(),
-                healthy_count,
-                checks.len().saturating_sub(healthy_count)
+                payload["checked"].as_u64().unwrap_or(0),
+                payload["healthy"].as_u64().unwrap_or(0),
+                payload["unhealthy"].as_u64().unwrap_or(0)
             );
-            for item in checks {
-                println!(
-                    "- {} healthy={} issues={}",
-                    item.server.id,
-                    item.check.healthy,
-                    if item.check.issues.is_empty() {
-                        "<none>".to_string()
-                    } else {
-                        item.check.issues.join("; ")
-                    }
-                );
+            if let Some(path) = report_out_path.as_ref() {
+                println!("report: {}", path.display());
             }
         }
         return Ok(());
     }
 
     let server_id = server_id.expect("checked above");
-    let result = store.check(&server_id)?;
-    if cli.json {
-        print_json(&json!({
+    if deep {
+        let result = store.diagnose(&server_id, McpDiagnoseOptions { timeout_ms })?;
+        let recommendations = recommend_actions(&result);
+        let payload = json!({
             "ok": true,
             "all": false,
-            "healthy": result.check.healthy,
+            "deep": true,
+            "timeout_ms": timeout_ms,
+            "healthy": result.healthy,
             "server": result.server,
             "check": result.check,
-        }));
+            "protocol_probe": result.protocol_probe,
+            "recommendations": recommendations,
+            "report_out": report_out_path.as_ref().map(|path| path.display().to_string()),
+        });
+        if let Some(path) = report_out_path.as_ref() {
+            save_json_file(path, &payload)?;
+        }
+        if cli.json {
+            print_json(&payload);
+        } else {
+            println!(
+                "server: {}",
+                payload["server"]["id"].as_str().unwrap_or("-")
+            );
+            println!("healthy: {}", payload["healthy"].as_bool().unwrap_or(false));
+            println!(
+                "protocol_probe: attempted={} handshake_ok={} kind={} error={}",
+                payload["protocol_probe"]["attempted"]
+                    .as_bool()
+                    .unwrap_or(false),
+                payload["protocol_probe"]["handshake_ok"]
+                    .as_bool()
+                    .unwrap_or(false),
+                payload["protocol_probe"]["response_kind"]
+                    .as_str()
+                    .unwrap_or("-"),
+                payload["protocol_probe"]["error"].as_str().unwrap_or("-"),
+            );
+            if let Some(path) = report_out_path.as_ref() {
+                println!("report: {}", path.display());
+            }
+        }
+        return Ok(());
+    }
+
+    let result = store.check(&server_id)?;
+    let payload = json!({
+        "ok": true,
+        "all": false,
+        "deep": false,
+        "healthy": result.check.healthy,
+        "server": result.server,
+        "check": result.check,
+        "report_out": report_out_path.as_ref().map(|path| path.display().to_string()),
+    });
+    if let Some(path) = report_out_path.as_ref() {
+        save_json_file(path, &payload)?;
+    }
+    if cli.json {
+        print_json(&payload);
     } else {
-        println!("server: {}", result.server.id);
-        println!("healthy: {}", result.check.healthy);
-        if let Some(path) = result.check.executable_resolved {
+        println!(
+            "server: {}",
+            payload["server"]["id"].as_str().unwrap_or(&server_id)
+        );
+        println!("healthy: {}", payload["healthy"].as_bool().unwrap_or(false));
+        if let Some(path) = payload["check"]["executable_resolved"].as_str() {
             println!("executable: {}", path);
         }
-        if result.check.issues.is_empty() {
+        let issues = payload["check"]["issues"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        if issues.is_empty() {
             println!("issues: <none>");
         } else {
             println!("issues:");
-            for issue in result.check.issues {
-                println!("- {}", issue);
+            for issue in issues {
+                println!("- {}", issue.as_str().unwrap_or("-"));
             }
         }
+        if let Some(path) = report_out_path.as_ref() {
+            println!("report: {}", path.display());
+        }
+    }
+    Ok(())
+}
+
+fn validate_timeout_ms(timeout_ms: u64) -> Result<()> {
+    if timeout_ms == 0 {
+        return Err(MosaicError::Validation(
+            "timeout_ms must be greater than 0".to_string(),
+        ));
+    }
+    if timeout_ms > 120_000 {
+        return Err(MosaicError::Validation(
+            "timeout_ms must be less than or equal to 120000".to_string(),
+        ));
     }
     Ok(())
 }

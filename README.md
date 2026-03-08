@@ -15,6 +15,7 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 - Agents module tutorial: https://ooiai.github.io/mosaic/agents.html
 - Channels module tutorial: https://ooiai.github.io/mosaic/channels.html
 - Memory module tutorial: https://ooiai.github.io/mosaic/memory.html
+- Knowledge module tutorial: https://ooiai.github.io/mosaic/knowledge.html
 - Plugins module tutorial: https://ooiai.github.io/mosaic/plugins.html
 - Skills module tutorial: https://ooiai.github.io/mosaic/skills.html
 - Gateway module tutorial: https://ooiai.github.io/mosaic/gateway.html
@@ -32,6 +33,7 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 - 中文 Agents 教程: https://ooiai.github.io/mosaic/cn/agents.html
 - 中文 Channels 教程: https://ooiai.github.io/mosaic/cn/channels.html
 - 中文 Memory 教程: https://ooiai.github.io/mosaic/cn/memory.html
+- 中文 Knowledge 教程: https://ooiai.github.io/mosaic/cn/knowledge.html
 - 中文 Plugins 教程: https://ooiai.github.io/mosaic/cn/plugins.html
 - 中文 Skills 教程: https://ooiai.github.io/mosaic/cn/skills.html
 - 中文 Gateway 教程: https://ooiai.github.io/mosaic/cn/gateway.html
@@ -48,7 +50,7 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 - Gateway: `gateway install|start|status|probe|discover|call|stop|uninstall`
 - Channels: `add|update|list|status|test|send|logs|capabilities|resolve|remove|logout`
 - Policy runtime: `approvals`, `sandbox`, `safety`
-- Extended modules: `mcp`, `memory`, `security`, `plugins`, `skills`, `agents`, `nodes`, `devices`, `pairing`, `hooks`, `cron`, `webhooks`, `browser`, `tts`, `voicecall`
+- Extended modules: `mcp`, `memory`, `knowledge`, `security`, `plugins`, `skills`, `agents`, `nodes`, `devices`, `pairing`, `hooks`, `cron`, `webhooks`, `browser`, `tts`, `voicecall`
 
 ## Install
 

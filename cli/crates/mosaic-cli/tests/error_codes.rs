@@ -1066,6 +1066,115 @@ fn channels_rotate_token_env_with_empty_from_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn channels_replay_max_apply_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            "dummy-channel",
+            "--apply",
+            "--max-apply",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_batch_size_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            "dummy-channel",
+            "--batch-size",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_min_attempt_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            "dummy-channel",
+            "--min-attempt",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_http_status_out_of_range_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            "dummy-channel",
+            "--http-status",
+            "99",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
 fn gateway_call_unknown_method_returns_gateway_protocol_exit_code() {
     let temp = tempdir().expect("tempdir");
     Command::cargo_bin("mosaic")
@@ -1178,6 +1287,111 @@ fn nodes_run_with_restricted_sandbox_returns_sandbox_denied_exit_code() {
     let json: Value = serde_json::from_slice(&output).expect("json output");
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "sandbox_denied");
+}
+
+#[test]
+#[allow(deprecated)]
+fn nodes_diagnose_zero_stale_threshold_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "nodes",
+            "diagnose",
+            "local",
+            "--stale-after-minutes",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn hooks_logs_zero_since_minutes_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "hooks",
+            "logs",
+            "--since-minutes",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn cron_logs_zero_since_minutes_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "cron",
+            "logs",
+            "--since-minutes",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn webhooks_logs_zero_since_minutes_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "webhooks",
+            "logs",
+            "--since-minutes",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
 }
 
 #[test]
@@ -1378,6 +1592,84 @@ fn browser_screenshot_without_visits_returns_validation_exit_code() {
         .expect("binary")
         .current_dir(temp.path())
         .args(["--project-state", "--json", "browser", "screenshot"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn browser_diagnose_zero_stale_window_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "browser",
+            "diagnose",
+            "--stale-after-minutes",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn browser_diagnose_zero_probe_timeout_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "browser",
+            "diagnose",
+            "--probe-timeout-ms",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn browser_diagnose_zero_artifact_max_age_hours_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "browser",
+            "diagnose",
+            "--artifact-max-age-hours",
+            "0",
+        ])
         .assert()
         .failure()
         .code(7)
@@ -1789,6 +2081,83 @@ fn mcp_check_missing_server_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn mcp_check_deep_invalid_timeout_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "check",
+            "--all",
+            "--deep",
+            "--timeout-ms",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_repair_without_target_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "mcp", "repair"])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_repair_invalid_timeout_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "repair",
+            "--all",
+            "--timeout-ms",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
 fn tts_speak_invalid_voice_returns_validation_exit_code() {
     let temp = tempdir().expect("tempdir");
 
@@ -1804,6 +2173,68 @@ fn tts_speak_invalid_voice_returns_validation_exit_code() {
             "hello",
             "--voice",
             "invalid",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn tts_diagnose_zero_timeout_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "tts",
+            "diagnose",
+            "--timeout-ms",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn voicecall_send_parse_mode_without_channel_binding_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "voicecall", "start"])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "voicecall",
+            "send",
+            "--text",
+            "hello",
+            "--parse-mode",
+            "markdown",
         ])
         .assert()
         .failure()
@@ -1895,4 +2326,301 @@ fn configure_patch_invalid_file_returns_validation_exit_code() {
     let json: Value = serde_json::from_slice(&output).expect("json output");
     assert_eq!(json["ok"], false);
     assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn hooks_replay_limit_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "hooks",
+            "replay",
+            "--limit",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn hooks_replay_batch_size_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "hooks",
+            "replay",
+            "--batch-size",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn hooks_replay_max_apply_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--yes",
+            "--json",
+            "hooks",
+            "replay",
+            "--apply",
+            "--max-apply",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn cron_replay_limit_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "cron",
+            "replay",
+            "--limit",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn cron_replay_batch_size_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "cron",
+            "replay",
+            "--batch-size",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn cron_replay_max_apply_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--yes",
+            "--json",
+            "cron",
+            "replay",
+            "--apply",
+            "--max-apply",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn webhooks_replay_limit_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "webhooks",
+            "replay",
+            "--limit",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn webhooks_replay_batch_size_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "webhooks",
+            "replay",
+            "--batch-size",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn webhooks_replay_max_apply_zero_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--yes",
+            "--json",
+            "webhooks",
+            "replay",
+            "--apply",
+            "--max-apply",
+            "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn hooks_replay_apply_without_yes_returns_approval_required_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "hooks", "replay", "--apply"])
+        .assert()
+        .failure()
+        .code(11)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "approval_required");
+}
+
+#[test]
+#[allow(deprecated)]
+fn cron_replay_apply_without_yes_returns_approval_required_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "cron", "replay", "--apply"])
+        .assert()
+        .failure()
+        .code(11)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "approval_required");
+}
+
+#[test]
+#[allow(deprecated)]
+fn webhooks_replay_apply_without_yes_returns_approval_required_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "webhooks", "replay", "--apply"])
+        .assert()
+        .failure()
+        .code(11)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "approval_required");
 }

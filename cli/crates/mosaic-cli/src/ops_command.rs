@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use mosaic_channels::{ChannelRepository, channels_events_dir, channels_file_path};
 use mosaic_core::audit::CommandAudit;
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_mcp::{McpStore, mcp_servers_file_path};
 use mosaic_ops::{
     ApprovalDecision, ApprovalStore, SandboxStore, SystemEventStore, UnifiedLogEntry, collect_logs,
     evaluate_approval, evaluate_sandbox, list_profiles, snapshot_presence, system_events_path,
@@ -193,6 +194,59 @@ pub(super) async fn handle_observability(cli: &Cli, args: ObservabilityArgs) -> 
                 .unwrap_or(false)
         );
         println!(
+            "gateway_events_count: {}",
+            report["summary"]["gateway_events_count"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "gateway_failed_events: {}",
+            report["summary"]["gateway_failed_events"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "gateway_history_count: {}",
+            report["summary"]["gateway_history_count"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "gateway_history_pruned: {}",
+            report["summary"]["gateway_history_pruned"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "gateway_delta_available: {}",
+            report["summary"]["gateway_delta_available"]
+                .as_bool()
+                .unwrap_or(false)
+        );
+        if report["summary"]["gateway_delta_available"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            println!(
+                "gateway_failure_rate_delta: {:.4}",
+                report["summary"]["gateway_failure_rate_delta"]
+                    .as_f64()
+                    .unwrap_or(0.0)
+            );
+        }
+        println!(
+            "gateway_not_running_streak: {}",
+            report["summary"]["gateway_not_running_streak"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "gateway_incident_hints: {}",
+            report["summary"]["gateway_incident_hints"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
             "channels_total: {}",
             report["summary"]["channels_total"].as_u64().unwrap_or(0)
         );
@@ -207,6 +261,79 @@ pub(super) async fn handle_observability(cli: &Cli, args: ObservabilityArgs) -> 
             report["summary"]["channel_failed_events"]
                 .as_u64()
                 .unwrap_or(0)
+        );
+        println!(
+            "mcp_configured: {}",
+            report["summary"]["mcp_configured"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "mcp_healthy: {}",
+            report["summary"]["mcp_healthy"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "mcp_unhealthy: {}",
+            report["summary"]["mcp_unhealthy"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "mcp_history_count: {}",
+            report["summary"]["mcp_history_count"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "mcp_history_pruned: {}",
+            report["summary"]["mcp_history_pruned"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "mcp_delta_available: {}",
+            report["summary"]["mcp_delta_available"]
+                .as_bool()
+                .unwrap_or(false)
+        );
+        if report["summary"]["mcp_delta_available"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            println!(
+                "mcp_unhealthy_ratio_delta: {:.4}",
+                report["summary"]["mcp_unhealthy_ratio_delta"]
+                    .as_f64()
+                    .unwrap_or(0.0)
+            );
+        }
+        println!(
+            "mcp_unhealthy_streak: {}",
+            report["summary"]["mcp_unhealthy_streak"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "mcp_incident_hints: {}",
+            report["summary"]["mcp_incident_hints"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "tts_events_count: {}",
+            report["summary"]["tts_events_count"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "voicecall_events_count: {}",
+            report["summary"]["voicecall_events_count"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "voicecall_failed_events: {}",
+            report["summary"]["voicecall_failed_events"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "voicecall_active: {}",
+            report["summary"]["voicecall_active"]
+                .as_bool()
+                .unwrap_or(false)
         );
         println!(
             "alerts_total: {}",
@@ -408,13 +535,34 @@ async fn build_observability_report(
     if let Value::Object(object) = &mut plugin_soak {
         object.insert("history".to_string(), plugin_soak_history.clone());
     }
-    let gateway = build_gateway_observability(
+    let mut gateway = build_gateway_observability(
         &paths.data_dir.join("gateway.json"),
         &paths.data_dir.join("gateway-service.json"),
+        &paths.data_dir.join("gateway-events.jsonl"),
+        options.tail,
     )
     .await;
+    let gateway_history = build_gateway_observability_history(&gateway, &paths.data_dir);
+    if let Value::Object(object) = &mut gateway {
+        object.insert("history".to_string(), gateway_history.clone());
+    }
     let channels = build_channels_observability(&paths.data_dir, options.tail);
-    let alerts = build_observability_alerts(&gateway, &channels, &safety_audit, &plugin_soak);
+    let mut mcp = build_mcp_observability(&paths.data_dir);
+    let mcp_history = build_mcp_observability_history(&mcp, &paths.data_dir);
+    if let Value::Object(object) = &mut mcp {
+        object.insert("history".to_string(), mcp_history.clone());
+    }
+    let realtime = build_realtime_observability(&paths.data_dir, options.tail);
+    let alerts = build_observability_alerts(
+        &gateway,
+        &gateway_history,
+        &channels,
+        &mcp,
+        &mcp_history,
+        &safety_audit,
+        &plugin_soak,
+        &realtime,
+    );
     let mut slo = build_observability_slo(&gateway, &channels);
     let slo_history = build_observability_slo_history(&slo, &alerts, &paths.data_dir);
     if let Value::Object(object) = &mut slo {
@@ -457,18 +605,47 @@ async fn build_observability_report(
             "sandbox_policy": sandbox_store.path().display().to_string(),
             "gateway_state": paths.data_dir.join("gateway.json").display().to_string(),
             "gateway_service": paths.data_dir.join("gateway-service.json").display().to_string(),
+            "gateway_history_file": gateway_history_path(&paths.data_dir).display().to_string(),
             "channels_file": channels_file_path(&paths.data_dir).display().to_string(),
             "channel_events_dir": channels_events_dir(&paths.data_dir).display().to_string(),
+            "mcp_registry_file": mcp_servers_file_path(&paths.data_dir).display().to_string(),
+            "mcp_history_file": mcp_history_path(&paths.data_dir).display().to_string(),
         },
         "summary": {
             "logs_count": logs.len(),
             "system_events_count": system_events.len(),
             "gateway_running": gateway["running"],
             "gateway_endpoint_healthy": gateway["endpoint_healthy"],
+            "gateway_events_count": gateway["telemetry"]["event_count"],
+            "gateway_failed_events": gateway["telemetry"]["failed_events"],
+            "gateway_failure_rate": gateway["telemetry"]["failure_rate"],
+            "gateway_history_count": gateway_history["sample_count"],
+            "gateway_history_pruned": gateway_history["retention"]["pruned"],
+            "gateway_delta_available": gateway_history["current_vs_previous"]["available"],
+            "gateway_failure_rate_delta": gateway_history["current_vs_previous"]["delta"]["failure_rate"],
+            "gateway_not_running_streak": gateway_history["streaks"]["not_running"],
+            "gateway_incident_hints": gateway_history["incident_hints_count"],
             "channels_total": channels["summary"]["total_channels"],
             "channels_with_errors": channels["summary"]["channels_with_errors"],
             "channel_events_count": channels["summary"]["event_count"],
             "channel_failed_events": channels["summary"]["failed_events"],
+            "mcp_configured": mcp["summary"]["configured"],
+            "mcp_enabled": mcp["summary"]["enabled"],
+            "mcp_healthy": mcp["summary"]["healthy"],
+            "mcp_unhealthy": mcp["summary"]["unhealthy"],
+            "mcp_history_count": mcp_history["sample_count"],
+            "mcp_history_pruned": mcp_history["retention"]["pruned"],
+            "mcp_delta_available": mcp_history["current_vs_previous"]["available"],
+            "mcp_unhealthy_ratio_delta": mcp_history["current_vs_previous"]["delta"]["unhealthy_ratio"],
+            "mcp_unhealthy_streak": mcp_history["streaks"]["unhealthy"],
+            "mcp_incident_hints": mcp_history["incident_hints_count"],
+            "tts_events_count": realtime["summary"]["tts_events_count"],
+            "tts_total_bytes_written": realtime["summary"]["tts_total_bytes_written"],
+            "voicecall_active": realtime["summary"]["voicecall_active"],
+            "voicecall_messages_sent": realtime["summary"]["voicecall_messages_sent"],
+            "voicecall_events_count": realtime["summary"]["voicecall_events_count"],
+            "voicecall_delivery_events": realtime["summary"]["voicecall_delivery_events"],
+            "voicecall_failed_events": realtime["summary"]["voicecall_failed_events"],
             "alerts_total": alerts["total"],
             "alerts_warning": alerts["warning"],
             "alerts_critical": alerts["critical"],
@@ -508,6 +685,8 @@ async fn build_observability_report(
         "system_events": system_events,
         "gateway": gateway,
         "channels": channels,
+        "mcp": mcp,
+        "realtime": realtime,
         "alerts": alerts,
         "slo": slo,
         "safety_audit": safety_audit,
@@ -526,7 +705,60 @@ fn error_to_json(err: &MosaicError) -> Value {
     })
 }
 
-async fn build_gateway_observability(gateway_path: &Path, gateway_service_path: &Path) -> Value {
+async fn build_gateway_observability(
+    gateway_path: &Path,
+    gateway_service_path: &Path,
+    gateway_events_path: &Path,
+    tail: usize,
+) -> Value {
+    let (gateway_events, gateway_events_error) = match load_jsonl_values(gateway_events_path) {
+        Ok(value) => (value, None),
+        Err(err) => (Vec::new(), Some(err)),
+    };
+    let mut action_counts = BTreeMap::<String, usize>::new();
+    let mut failed_events = 0usize;
+    let mut total_latency_ms = 0u128;
+    let mut latency_samples = 0usize;
+    let mut latest_event_ts = None::<String>;
+    for event in &gateway_events {
+        if let Some(action) = event.get("action").and_then(Value::as_str) {
+            *action_counts.entry(action.to_string()).or_default() += 1;
+        }
+        if event
+            .get("success")
+            .and_then(Value::as_bool)
+            .is_some_and(|success| !success)
+        {
+            failed_events += 1;
+        }
+        if let Some(latency_ms) = event.get("latency_ms").and_then(Value::as_u64) {
+            total_latency_ms += latency_ms as u128;
+            latency_samples += 1;
+        }
+        latest_event_ts = event
+            .get("ts")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or(latest_event_ts);
+    }
+    let gateway_events_count = gateway_events.len();
+    let failure_rate = if gateway_events_count > 0 {
+        (failed_events as f64) / (gateway_events_count as f64)
+    } else {
+        0.0
+    };
+    let average_latency_ms = if latency_samples > 0 {
+        Some((total_latency_ms as f64) / (latency_samples as f64))
+    } else {
+        None
+    };
+    let recent_events = gateway_events
+        .iter()
+        .rev()
+        .take(tail.max(1).min(50))
+        .cloned()
+        .collect::<Vec<_>>();
+
     match collect_gateway_runtime_status(gateway_path, gateway_service_path).await {
         Ok(status) => json!({
             "ok": true,
@@ -542,7 +774,19 @@ async fn build_gateway_observability(gateway_path: &Path, gateway_service_path: 
             "paths": {
                 "state_file": gateway_path.display().to_string(),
                 "service_file": gateway_service_path.display().to_string(),
+                "events_file": gateway_events_path.display().to_string(),
             },
+            "telemetry": {
+                "event_count": gateway_events_count,
+                "failed_events": failed_events,
+                "success_events": gateway_events_count.saturating_sub(failed_events),
+                "failure_rate": failure_rate,
+                "avg_latency_ms": average_latency_ms,
+                "latest_event_ts": latest_event_ts,
+                "actions": action_counts,
+            },
+            "recent_events": recent_events,
+            "events_error": gateway_events_error,
             "error": Value::Null,
         }),
         Err(err) => json!({
@@ -556,10 +800,474 @@ async fn build_gateway_observability(gateway_path: &Path, gateway_service_path: 
             "paths": {
                 "state_file": gateway_path.display().to_string(),
                 "service_file": gateway_service_path.display().to_string(),
+                "events_file": gateway_events_path.display().to_string(),
             },
+            "telemetry": {
+                "event_count": gateway_events_count,
+                "failed_events": failed_events,
+                "success_events": gateway_events_count.saturating_sub(failed_events),
+                "failure_rate": failure_rate,
+                "avg_latency_ms": average_latency_ms,
+                "latest_event_ts": latest_event_ts,
+                "actions": action_counts,
+            },
+            "recent_events": recent_events,
+            "events_error": gateway_events_error,
             "error": error_to_json(&err),
         }),
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ObservabilityGatewayHistoryEntry {
+    ts: String,
+    running: bool,
+    endpoint_healthy: bool,
+    event_count: u64,
+    failed_events: u64,
+    failure_rate: f64,
+    avg_latency_ms: Option<f64>,
+    status_error: bool,
+    events_error: bool,
+}
+
+fn gateway_history_path(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join("reports")
+        .join("observability-gateway-history.jsonl")
+}
+
+fn read_gateway_history(
+    history_path: &Path,
+) -> (Vec<ObservabilityGatewayHistoryEntry>, usize, Option<String>) {
+    if !history_path.exists() {
+        return (Vec::new(), 0, None);
+    }
+    let raw = match std::fs::read_to_string(history_path) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                Vec::new(),
+                0,
+                Some(format!(
+                    "failed to read gateway history '{}': {err}",
+                    history_path.display()
+                )),
+            );
+        }
+    };
+    let mut entries = Vec::new();
+    let mut parse_errors = 0usize;
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<ObservabilityGatewayHistoryEntry>(line) {
+            Ok(entry) => entries.push(entry),
+            Err(_) => parse_errors += 1,
+        }
+    }
+    (entries, parse_errors, None)
+}
+
+fn append_gateway_history_entry(
+    history_path: &Path,
+    entry: &ObservabilityGatewayHistoryEntry,
+) -> std::result::Result<(), String> {
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create gateway history directory '{}': {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut rendered = serde_json::to_string(entry)
+        .map_err(|err| format!("failed to serialize gateway history entry: {err}"))?;
+    rendered.push('\n');
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(history_path)
+        .map_err(|err| {
+            format!(
+                "failed to open gateway history file '{}': {err}",
+                history_path.display()
+            )
+        })?;
+    file.write_all(rendered.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write gateway history file '{}': {err}",
+            history_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn rewrite_gateway_history_entries(
+    history_path: &Path,
+    entries: &[ObservabilityGatewayHistoryEntry],
+) -> std::result::Result<(), String> {
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create gateway history directory '{}': {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut rendered = String::new();
+    for entry in entries {
+        let line = serde_json::to_string(entry)
+            .map_err(|err| format!("failed to serialize gateway history entry: {err}"))?;
+        rendered.push_str(&line);
+        rendered.push('\n');
+    }
+    std::fs::write(history_path, rendered).map_err(|err| {
+        format!(
+            "failed to rewrite gateway history file '{}': {err}",
+            history_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn gateway_history_entry_from_report(
+    gateway: &Value,
+) -> std::result::Result<ObservabilityGatewayHistoryEntry, String> {
+    let telemetry = gateway
+        .get("telemetry")
+        .ok_or_else(|| "missing gateway.telemetry".to_string())?;
+    let extract_u64 = |container: &Value, key: &str| -> std::result::Result<u64, String> {
+        container
+            .get(key)
+            .and_then(Value::as_u64)
+            .ok_or_else(|| format!("missing gateway telemetry field '{key}'"))
+    };
+    let extract_bool = |container: &Value, key: &str| -> std::result::Result<bool, String> {
+        container
+            .get(key)
+            .and_then(Value::as_bool)
+            .ok_or_else(|| format!("missing gateway field '{key}'"))
+    };
+    let failure_rate = telemetry
+        .get("failure_rate")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "missing gateway telemetry field 'failure_rate'".to_string())?;
+
+    Ok(ObservabilityGatewayHistoryEntry {
+        ts: chrono::Utc::now().to_rfc3339(),
+        running: extract_bool(gateway, "running")?,
+        endpoint_healthy: extract_bool(gateway, "endpoint_healthy")?,
+        event_count: extract_u64(telemetry, "event_count")?,
+        failed_events: extract_u64(telemetry, "failed_events")?,
+        failure_rate,
+        avg_latency_ms: telemetry.get("avg_latency_ms").and_then(Value::as_f64),
+        status_error: !gateway.get("error").map_or(true, Value::is_null),
+        events_error: !gateway.get("events_error").map_or(true, Value::is_null),
+    })
+}
+
+fn gateway_history_entry_json(entry: &ObservabilityGatewayHistoryEntry) -> Value {
+    json!({
+        "ts": entry.ts,
+        "running": entry.running,
+        "endpoint_healthy": entry.endpoint_healthy,
+        "event_count": entry.event_count,
+        "failed_events": entry.failed_events,
+        "failure_rate": entry.failure_rate,
+        "avg_latency_ms": entry.avg_latency_ms,
+        "status_error": entry.status_error,
+        "events_error": entry.events_error,
+    })
+}
+
+fn gateway_history_delta(
+    current: &ObservabilityGatewayHistoryEntry,
+    previous: &ObservabilityGatewayHistoryEntry,
+) -> Value {
+    let current_latency = current.avg_latency_ms.unwrap_or(0.0);
+    let previous_latency = previous.avg_latency_ms.unwrap_or(0.0);
+    json!({
+        "event_count": (current.event_count as i64) - (previous.event_count as i64),
+        "failed_events": (current.failed_events as i64) - (previous.failed_events as i64),
+        "failure_rate": current.failure_rate - previous.failure_rate,
+        "avg_latency_ms": current_latency - previous_latency,
+        "running_changed": current.running != previous.running,
+        "endpoint_healthy_changed": current.endpoint_healthy != previous.endpoint_healthy,
+        "status_error_changed": current.status_error != previous.status_error,
+        "events_error_changed": current.events_error != previous.events_error,
+    })
+}
+
+fn empty_gateway_history_delta() -> Value {
+    json!({
+        "event_count": 0,
+        "failed_events": 0,
+        "failure_rate": 0.0,
+        "avg_latency_ms": 0.0,
+        "running_changed": false,
+        "endpoint_healthy_changed": false,
+        "status_error_changed": false,
+        "events_error_changed": false,
+    })
+}
+
+fn count_gateway_not_running_streak(entries: &[ObservabilityGatewayHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| !entry.running)
+        .count()
+}
+
+fn count_gateway_endpoint_unhealthy_streak(entries: &[ObservabilityGatewayHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.running && !entry.endpoint_healthy)
+        .count()
+}
+
+fn count_gateway_failure_warn_streak(
+    entries: &[ObservabilityGatewayHistoryEntry],
+    failure_warn_threshold: f64,
+) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.event_count > 0 && entry.failure_rate >= failure_warn_threshold)
+        .count()
+}
+
+struct GatewayIncidentHintConfig {
+    incident_window: usize,
+    repeat_threshold: usize,
+    failure_warn_threshold: f64,
+    failure_regression_warn: f64,
+}
+
+fn build_gateway_incident_hints(
+    entries: &[ObservabilityGatewayHistoryEntry],
+    current: Option<&ObservabilityGatewayHistoryEntry>,
+    previous: Option<&ObservabilityGatewayHistoryEntry>,
+    config: &GatewayIncidentHintConfig,
+) -> Vec<Value> {
+    let mut hints = Vec::<Value>::new();
+
+    let not_running_streak = count_gateway_not_running_streak(entries);
+    if not_running_streak >= config.incident_window {
+        hints.push(json!({
+            "id": "gateway.not_running_streak",
+            "severity": "warning",
+            "message": format!("gateway runtime has not been running for {not_running_streak} consecutive samples"),
+            "streak": not_running_streak,
+            "threshold": config.incident_window,
+        }));
+    }
+
+    let endpoint_unhealthy_streak = count_gateway_endpoint_unhealthy_streak(entries);
+    if endpoint_unhealthy_streak >= config.incident_window {
+        hints.push(json!({
+            "id": "gateway.endpoint_unhealthy_streak",
+            "severity": "warning",
+            "message": format!("gateway endpoint stayed unhealthy for {endpoint_unhealthy_streak} consecutive samples"),
+            "streak": endpoint_unhealthy_streak,
+            "threshold": config.incident_window,
+        }));
+    }
+
+    let failure_warn_streak =
+        count_gateway_failure_warn_streak(entries, config.failure_warn_threshold);
+    if failure_warn_streak >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "gateway.failure_repeated",
+            "severity": "warning",
+            "message": format!(
+                "gateway failure rate stayed above warning threshold for {failure_warn_streak} consecutive samples"
+            ),
+            "streak": failure_warn_streak,
+            "threshold": config.repeat_threshold,
+            "failure_warn_threshold": config.failure_warn_threshold,
+        }));
+    }
+
+    let recent_error_samples = entries
+        .iter()
+        .rev()
+        .take(config.incident_window)
+        .filter(|entry| entry.status_error || entry.events_error)
+        .count();
+    if recent_error_samples >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "gateway.telemetry_errors_repeated",
+            "severity": "warning",
+            "message": format!(
+                "gateway telemetry read/status errors observed in {recent_error_samples}/{} recent samples",
+                config.incident_window
+            ),
+            "window": config.incident_window,
+            "repeat_threshold": config.repeat_threshold,
+            "repeated": recent_error_samples,
+        }));
+    }
+
+    if let (Some(current), Some(previous)) = (current, previous) {
+        let failure_rate_delta = current.failure_rate - previous.failure_rate;
+        if current.event_count > 0 && failure_rate_delta >= config.failure_regression_warn {
+            hints.push(json!({
+                "id": "gateway.failure_rate_regression",
+                "severity": "warning",
+                "message": format!(
+                    "gateway failure rate increased by {failure_rate_delta:.4} between consecutive samples"
+                ),
+                "delta": failure_rate_delta,
+                "threshold": config.failure_regression_warn,
+            }));
+        }
+    }
+
+    hints
+}
+
+fn build_gateway_observability_history(gateway: &Value, data_dir: &Path) -> Value {
+    let history_path = gateway_history_path(data_dir);
+    let max_samples = read_positive_usize("MOSAIC_OBS_GATEWAY_HISTORY_MAX_SAMPLES", 500);
+    let incident_window = read_positive_usize("MOSAIC_OBS_GATEWAY_INCIDENT_WINDOW", 5);
+    let repeat_threshold = read_positive_usize("MOSAIC_OBS_GATEWAY_REPEAT_HINT_THRESHOLD", 3);
+    let failure_warn_threshold = read_ratio_threshold("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_WARN", 0.2);
+    let failure_regression_warn =
+        read_ratio_threshold("MOSAIC_OBS_GATEWAY_FAILURE_REGRESSION_WARN", 0.1);
+    let incident_config = GatewayIncidentHintConfig {
+        incident_window,
+        repeat_threshold,
+        failure_warn_threshold,
+        failure_regression_warn,
+    };
+
+    let (mut entries, parse_errors, read_error) = read_gateway_history(&history_path);
+    let mut appended = false;
+    let mut write_error = None::<String>;
+    let mut pruned = 0usize;
+
+    let current_entry = match gateway_history_entry_from_report(gateway) {
+        Ok(entry) => {
+            if let Err(err) = append_gateway_history_entry(&history_path, &entry) {
+                write_error = Some(err);
+            } else {
+                appended = true;
+                entries.push(entry.clone());
+            }
+            Some(entry)
+        }
+        Err(err) => {
+            write_error = Some(err);
+            None
+        }
+    };
+
+    let previous_for_current = if current_entry.is_some() {
+        if appended {
+            if entries.len() >= 2 {
+                entries.get(entries.len() - 2).cloned()
+            } else {
+                None
+            }
+        } else {
+            entries.last().cloned()
+        }
+    } else {
+        None
+    };
+
+    let current_vs_previous = if let Some(current) = current_entry.as_ref() {
+        if let Some(previous) = previous_for_current.as_ref() {
+            json!({
+                "available": true,
+                "current_ts": current.ts,
+                "previous_ts": previous.ts,
+                "delta": gateway_history_delta(current, previous),
+            })
+        } else {
+            json!({
+                "available": false,
+                "current_ts": current.ts,
+                "previous_ts": null,
+                "delta": empty_gateway_history_delta(),
+            })
+        }
+    } else {
+        json!({
+            "available": false,
+            "current_ts": null,
+            "previous_ts": null,
+            "delta": empty_gateway_history_delta(),
+        })
+    };
+
+    if entries.len() > max_samples {
+        pruned = entries.len() - max_samples;
+        entries.drain(0..pruned);
+        if let Err(err) = rewrite_gateway_history_entries(&history_path, &entries)
+            && write_error.is_none()
+        {
+            write_error = Some(err);
+        }
+    }
+
+    let latest = entries.last().cloned();
+    let not_running_streak = count_gateway_not_running_streak(&entries);
+    let endpoint_unhealthy_streak = count_gateway_endpoint_unhealthy_streak(&entries);
+    let failure_warn_streak = count_gateway_failure_warn_streak(&entries, failure_warn_threshold);
+    let recent_failure_samples = entries
+        .iter()
+        .rev()
+        .take(incident_window)
+        .filter(|entry| entry.event_count > 0 && entry.failure_rate >= failure_warn_threshold)
+        .count();
+    let recent_error_samples = entries
+        .iter()
+        .rev()
+        .take(incident_window)
+        .filter(|entry| entry.status_error || entry.events_error)
+        .count();
+    let incident_hints = build_gateway_incident_hints(
+        &entries,
+        current_entry.as_ref(),
+        previous_for_current.as_ref(),
+        &incident_config,
+    );
+
+    json!({
+        "path": history_path.display().to_string(),
+        "sample_count": entries.len(),
+        "retention": {
+            "max_samples": max_samples,
+            "pruned": pruned,
+        },
+        "parse_errors": parse_errors,
+        "appended": appended,
+        "read_error": read_error,
+        "write_error": write_error,
+        "latest": latest.as_ref().map(gateway_history_entry_json),
+        "current_run": current_entry.as_ref().map(gateway_history_entry_json),
+        "current_vs_previous": current_vs_previous,
+        "window": {
+            "size": incident_window,
+            "repeat_threshold": repeat_threshold,
+            "failure_warn_threshold": failure_warn_threshold,
+            "failure_regression_warn": failure_regression_warn,
+            "recent_failure_samples": recent_failure_samples,
+            "recent_error_samples": recent_error_samples,
+        },
+        "streaks": {
+            "not_running": not_running_streak,
+            "endpoint_unhealthy": endpoint_unhealthy_streak,
+            "failure_warn": failure_warn_streak,
+        },
+        "incident_hints_count": incident_hints.len(),
+        "incident_hints": incident_hints,
+    })
 }
 
 fn build_channels_observability(data_dir: &Path, tail: usize) -> Value {
@@ -661,11 +1369,721 @@ fn build_channels_observability(data_dir: &Path, tail: usize) -> Value {
     })
 }
 
+fn build_mcp_observability(data_dir: &Path) -> Value {
+    let registry_path = mcp_servers_file_path(data_dir);
+    let store = McpStore::new(registry_path.clone());
+
+    let (servers, list_error) = match store.list() {
+        Ok(value) => (Some(value), None),
+        Err(err) => (None, Some(error_to_json(&err))),
+    };
+
+    let configured = servers.as_ref().map_or(0usize, |items| items.len());
+    let enabled = servers.as_ref().map_or(0usize, |items| {
+        items.iter().filter(|item| item.enabled).count()
+    });
+    let disabled = configured.saturating_sub(enabled);
+
+    let (checks, checks_error) = if configured == 0 {
+        (Some(Vec::new()), None)
+    } else {
+        match store.check_all() {
+            Ok(value) => (Some(value), None),
+            Err(err) => (None, Some(error_to_json(&err))),
+        }
+    };
+
+    let healthy = checks.as_ref().map_or(0usize, |items| {
+        items.iter().filter(|item| item.check.healthy).count()
+    });
+    let unhealthy = checks
+        .as_ref()
+        .map_or(0usize, |items| items.len().saturating_sub(healthy));
+    let with_last_error = checks.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.server.last_check_error.is_some())
+            .count()
+    });
+
+    let recent_checks = checks
+        .as_ref()
+        .map(|items| {
+            items
+                .iter()
+                .take(10)
+                .map(|item| {
+                    json!({
+                        "id": item.server.id,
+                        "name": item.server.name,
+                        "enabled": item.server.enabled,
+                        "healthy": item.check.healthy,
+                        "checked_at": item.check.checked_at,
+                        "executable_resolved": item.check.executable_resolved,
+                        "cwd_exists": item.check.cwd_exists,
+                        "issues": item.check.issues,
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    json!({
+        "ok": list_error.is_none() && checks_error.is_none(),
+        "paths": {
+            "registry_file": registry_path.display().to_string(),
+        },
+        "summary": {
+            "configured": configured,
+            "enabled": enabled,
+            "disabled": disabled,
+            "checked": checks.as_ref().map_or(0usize, |items| items.len()),
+            "healthy": healthy,
+            "unhealthy": unhealthy,
+            "with_last_error": with_last_error,
+        },
+        "recent_checks": recent_checks,
+        "errors": {
+            "list": list_error,
+            "check_all": checks_error,
+        },
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ObservabilityMcpHistoryEntry {
+    ts: String,
+    configured: u64,
+    enabled: u64,
+    healthy: u64,
+    unhealthy: u64,
+    with_last_error: u64,
+    list_error: bool,
+    check_error: bool,
+    unhealthy_ratio: f64,
+}
+
+fn mcp_history_path(data_dir: &Path) -> PathBuf {
+    data_dir
+        .join("reports")
+        .join("observability-mcp-history.jsonl")
+}
+
+fn read_mcp_history(
+    history_path: &Path,
+) -> (Vec<ObservabilityMcpHistoryEntry>, usize, Option<String>) {
+    if !history_path.exists() {
+        return (Vec::new(), 0, None);
+    }
+    let raw = match std::fs::read_to_string(history_path) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                Vec::new(),
+                0,
+                Some(format!(
+                    "failed to read mcp history '{}': {err}",
+                    history_path.display()
+                )),
+            );
+        }
+    };
+    let mut entries = Vec::new();
+    let mut parse_errors = 0usize;
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<ObservabilityMcpHistoryEntry>(line) {
+            Ok(entry) => entries.push(entry),
+            Err(_) => parse_errors += 1,
+        }
+    }
+    (entries, parse_errors, None)
+}
+
+fn append_mcp_history_entry(
+    history_path: &Path,
+    entry: &ObservabilityMcpHistoryEntry,
+) -> std::result::Result<(), String> {
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create mcp history directory '{}': {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut rendered = serde_json::to_string(entry)
+        .map_err(|err| format!("failed to serialize mcp history entry: {err}"))?;
+    rendered.push('\n');
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(history_path)
+        .map_err(|err| {
+            format!(
+                "failed to open mcp history file '{}': {err}",
+                history_path.display()
+            )
+        })?;
+    file.write_all(rendered.as_bytes()).map_err(|err| {
+        format!(
+            "failed to write mcp history file '{}': {err}",
+            history_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn rewrite_mcp_history_entries(
+    history_path: &Path,
+    entries: &[ObservabilityMcpHistoryEntry],
+) -> std::result::Result<(), String> {
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create mcp history directory '{}': {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut rendered = String::new();
+    for entry in entries {
+        let line = serde_json::to_string(entry)
+            .map_err(|err| format!("failed to serialize mcp history entry: {err}"))?;
+        rendered.push_str(&line);
+        rendered.push('\n');
+    }
+    std::fs::write(history_path, rendered).map_err(|err| {
+        format!(
+            "failed to rewrite mcp history file '{}': {err}",
+            history_path.display()
+        )
+    })?;
+    Ok(())
+}
+
+fn mcp_history_entry_from_report(
+    mcp: &Value,
+) -> std::result::Result<ObservabilityMcpHistoryEntry, String> {
+    let summary = mcp
+        .get("summary")
+        .ok_or_else(|| "missing mcp.summary".to_string())?;
+    let errors = mcp
+        .get("errors")
+        .ok_or_else(|| "missing mcp.errors".to_string())?;
+    let extract_u64 = |container: &Value, key: &str| -> std::result::Result<u64, String> {
+        container
+            .get(key)
+            .and_then(Value::as_u64)
+            .ok_or_else(|| format!("missing mcp summary field '{key}'"))
+    };
+
+    let configured = extract_u64(summary, "configured")?;
+    let unhealthy = extract_u64(summary, "unhealthy")?;
+    let unhealthy_ratio = if configured == 0 {
+        0.0
+    } else {
+        (unhealthy as f64) / (configured as f64)
+    };
+    Ok(ObservabilityMcpHistoryEntry {
+        ts: chrono::Utc::now().to_rfc3339(),
+        configured,
+        enabled: extract_u64(summary, "enabled")?,
+        healthy: extract_u64(summary, "healthy")?,
+        unhealthy,
+        with_last_error: extract_u64(summary, "with_last_error")?,
+        list_error: !errors.get("list").map_or(true, Value::is_null),
+        check_error: !errors.get("check_all").map_or(true, Value::is_null),
+        unhealthy_ratio,
+    })
+}
+
+fn mcp_history_entry_json(entry: &ObservabilityMcpHistoryEntry) -> Value {
+    json!({
+        "ts": entry.ts,
+        "configured": entry.configured,
+        "enabled": entry.enabled,
+        "healthy": entry.healthy,
+        "unhealthy": entry.unhealthy,
+        "with_last_error": entry.with_last_error,
+        "list_error": entry.list_error,
+        "check_error": entry.check_error,
+        "unhealthy_ratio": entry.unhealthy_ratio,
+    })
+}
+
+fn mcp_history_delta(
+    current: &ObservabilityMcpHistoryEntry,
+    previous: &ObservabilityMcpHistoryEntry,
+) -> Value {
+    json!({
+        "configured": (current.configured as i64) - (previous.configured as i64),
+        "enabled": (current.enabled as i64) - (previous.enabled as i64),
+        "healthy": (current.healthy as i64) - (previous.healthy as i64),
+        "unhealthy": (current.unhealthy as i64) - (previous.unhealthy as i64),
+        "with_last_error": (current.with_last_error as i64) - (previous.with_last_error as i64),
+        "unhealthy_ratio": current.unhealthy_ratio - previous.unhealthy_ratio,
+        "list_error_changed": current.list_error != previous.list_error,
+        "check_error_changed": current.check_error != previous.check_error,
+    })
+}
+
+fn empty_mcp_history_delta() -> Value {
+    json!({
+        "configured": 0,
+        "enabled": 0,
+        "healthy": 0,
+        "unhealthy": 0,
+        "with_last_error": 0,
+        "unhealthy_ratio": 0.0,
+        "list_error_changed": false,
+        "check_error_changed": false,
+    })
+}
+
+fn count_mcp_unhealthy_streak(entries: &[ObservabilityMcpHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.configured > 0 && entry.unhealthy > 0)
+        .count()
+}
+
+fn count_mcp_check_error_streak(entries: &[ObservabilityMcpHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.check_error)
+        .count()
+}
+
+fn count_mcp_list_error_streak(entries: &[ObservabilityMcpHistoryEntry]) -> usize {
+    entries
+        .iter()
+        .rev()
+        .take_while(|entry| entry.list_error)
+        .count()
+}
+
+struct McpIncidentHintConfig {
+    incident_window: usize,
+    repeat_threshold: usize,
+    ratio_regression_warn: f64,
+}
+
+fn build_mcp_incident_hints(
+    entries: &[ObservabilityMcpHistoryEntry],
+    current: Option<&ObservabilityMcpHistoryEntry>,
+    previous: Option<&ObservabilityMcpHistoryEntry>,
+    config: &McpIncidentHintConfig,
+) -> Vec<Value> {
+    let mut hints = Vec::<Value>::new();
+    let unhealthy_streak = count_mcp_unhealthy_streak(entries);
+    if unhealthy_streak >= config.incident_window {
+        hints.push(json!({
+            "id": "mcp.unhealthy_streak",
+            "severity": "warning",
+            "message": format!("mcp unhealthy servers persisted for {unhealthy_streak} consecutive samples"),
+            "streak": unhealthy_streak,
+            "threshold": config.incident_window,
+        }));
+    }
+
+    let check_error_streak = count_mcp_check_error_streak(entries);
+    if check_error_streak >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "mcp.check_errors_repeated",
+            "severity": "warning",
+            "message": format!("mcp check_all errors repeated for {check_error_streak} consecutive samples"),
+            "streak": check_error_streak,
+            "threshold": config.repeat_threshold,
+        }));
+    }
+
+    let list_error_streak = count_mcp_list_error_streak(entries);
+    if list_error_streak >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "mcp.list_errors_repeated",
+            "severity": "warning",
+            "message": format!("mcp list errors repeated for {list_error_streak} consecutive samples"),
+            "streak": list_error_streak,
+            "threshold": config.repeat_threshold,
+        }));
+    }
+
+    let recent_unhealthy_count = entries
+        .iter()
+        .rev()
+        .take(config.incident_window)
+        .filter(|entry| entry.configured > 0 && entry.unhealthy > 0)
+        .count();
+    if recent_unhealthy_count >= config.repeat_threshold {
+        hints.push(json!({
+            "id": "mcp.unhealthy_repeated",
+            "severity": "warning",
+            "message": format!(
+                "mcp unhealthy servers detected in {recent_unhealthy_count}/{} recent samples",
+                config.incident_window
+            ),
+            "window": config.incident_window,
+            "repeat_threshold": config.repeat_threshold,
+            "repeated": recent_unhealthy_count,
+        }));
+    }
+
+    if let (Some(current), Some(previous)) = (current, previous) {
+        let unhealthy_ratio_delta = current.unhealthy_ratio - previous.unhealthy_ratio;
+        if unhealthy_ratio_delta >= config.ratio_regression_warn && current.configured > 0 {
+            hints.push(json!({
+                "id": "mcp.unhealthy_ratio_regression",
+                "severity": "warning",
+                "message": format!(
+                    "mcp unhealthy ratio increased by {unhealthy_ratio_delta:.4} between consecutive samples"
+                ),
+                "delta": unhealthy_ratio_delta,
+                "threshold": config.ratio_regression_warn,
+            }));
+        }
+    }
+
+    hints
+}
+
+fn build_mcp_observability_history(mcp: &Value, data_dir: &Path) -> Value {
+    let history_path = mcp_history_path(data_dir);
+    let max_samples = read_positive_usize("MOSAIC_OBS_MCP_HISTORY_MAX_SAMPLES", 300);
+    let incident_window = read_positive_usize("MOSAIC_OBS_MCP_INCIDENT_WINDOW", 5);
+    let repeat_threshold = read_positive_usize("MOSAIC_OBS_MCP_REPEAT_HINT_THRESHOLD", 3);
+    let ratio_regression_warn = read_ratio_threshold("MOSAIC_OBS_MCP_RATIO_REGRESSION_WARN", 0.1);
+    let incident_config = McpIncidentHintConfig {
+        incident_window,
+        repeat_threshold,
+        ratio_regression_warn,
+    };
+    let (mut entries, parse_errors, read_error) = read_mcp_history(&history_path);
+    let mut appended = false;
+    let mut write_error = None::<String>;
+    let mut pruned = 0usize;
+
+    let current_entry = match mcp_history_entry_from_report(mcp) {
+        Ok(entry) => {
+            if let Err(err) = append_mcp_history_entry(&history_path, &entry) {
+                write_error = Some(err);
+            } else {
+                appended = true;
+                entries.push(entry.clone());
+            }
+            Some(entry)
+        }
+        Err(err) => {
+            write_error = Some(err);
+            None
+        }
+    };
+    let previous_for_current = if current_entry.is_some() {
+        if appended {
+            if entries.len() >= 2 {
+                entries.get(entries.len() - 2).cloned()
+            } else {
+                None
+            }
+        } else {
+            entries.last().cloned()
+        }
+    } else {
+        None
+    };
+    let current_vs_previous = if let Some(current) = current_entry.as_ref() {
+        if let Some(previous) = previous_for_current.as_ref() {
+            json!({
+                "available": true,
+                "current_ts": current.ts,
+                "previous_ts": previous.ts,
+                "delta": mcp_history_delta(current, previous),
+            })
+        } else {
+            json!({
+                "available": false,
+                "current_ts": current.ts,
+                "previous_ts": null,
+                "delta": empty_mcp_history_delta(),
+            })
+        }
+    } else {
+        json!({
+            "available": false,
+            "current_ts": null,
+            "previous_ts": null,
+            "delta": empty_mcp_history_delta(),
+        })
+    };
+
+    if entries.len() > max_samples {
+        pruned = entries.len() - max_samples;
+        entries.drain(0..pruned);
+        if let Err(err) = rewrite_mcp_history_entries(&history_path, &entries)
+            && write_error.is_none()
+        {
+            write_error = Some(err);
+        }
+    }
+
+    let latest = entries.last().cloned();
+    let unhealthy_streak = count_mcp_unhealthy_streak(&entries);
+    let check_error_streak = count_mcp_check_error_streak(&entries);
+    let list_error_streak = count_mcp_list_error_streak(&entries);
+    let recent_unhealthy_count = entries
+        .iter()
+        .rev()
+        .take(incident_window)
+        .filter(|entry| entry.configured > 0 && entry.unhealthy > 0)
+        .count();
+    let recent_check_error_count = entries
+        .iter()
+        .rev()
+        .take(incident_window)
+        .filter(|entry| entry.check_error)
+        .count();
+    let recent_list_error_count = entries
+        .iter()
+        .rev()
+        .take(incident_window)
+        .filter(|entry| entry.list_error)
+        .count();
+    let incident_hints = build_mcp_incident_hints(
+        &entries,
+        current_entry.as_ref(),
+        previous_for_current.as_ref(),
+        &incident_config,
+    );
+
+    json!({
+        "path": history_path.display().to_string(),
+        "sample_count": entries.len(),
+        "retention": {
+            "max_samples": max_samples,
+            "pruned": pruned,
+        },
+        "parse_errors": parse_errors,
+        "appended": appended,
+        "read_error": read_error,
+        "write_error": write_error,
+        "latest": latest.as_ref().map(mcp_history_entry_json),
+        "current_run": current_entry.as_ref().map(mcp_history_entry_json),
+        "current_vs_previous": current_vs_previous,
+        "window": {
+            "size": incident_window,
+            "repeat_threshold": repeat_threshold,
+            "ratio_regression_warn": ratio_regression_warn,
+            "recent_unhealthy_count": recent_unhealthy_count,
+            "recent_check_error_count": recent_check_error_count,
+            "recent_list_error_count": recent_list_error_count,
+        },
+        "streaks": {
+            "unhealthy": unhealthy_streak,
+            "check_error": check_error_streak,
+            "list_error": list_error_streak,
+        },
+        "incident_hints_count": incident_hints.len(),
+        "incident_hints": incident_hints,
+    })
+}
+
+fn build_realtime_observability(data_dir: &Path, tail: usize) -> Value {
+    let voicecall_state_path = data_dir.join("voicecall-state.json");
+    let voicecall_events_path = data_dir.join("voicecall-events.jsonl");
+    let tts_events_path = data_dir.join("tts-events.jsonl");
+
+    let (voicecall_state, voicecall_state_error) =
+        match load_optional_json_file(&voicecall_state_path) {
+            Ok(value) => (value, None),
+            Err(err) => (None, Some(err)),
+        };
+    let (voicecall_events, voicecall_events_error) = match load_jsonl_values(&voicecall_events_path)
+    {
+        Ok(value) => (value, None),
+        Err(err) => (Vec::new(), Some(err)),
+    };
+    let (tts_events, tts_events_error) = match load_jsonl_values(&tts_events_path) {
+        Ok(value) => (value, None),
+        Err(err) => (Vec::new(), Some(err)),
+    };
+
+    let voicecall_events_count = voicecall_events.len();
+    let voicecall_delivery_events = voicecall_events
+        .iter()
+        .filter(|event| {
+            event
+                .get("delivery_status")
+                .and_then(Value::as_str)
+                .is_some()
+        })
+        .count();
+    let voicecall_failed_events = voicecall_events
+        .iter()
+        .filter(|event| {
+            event
+                .get("delivery_status")
+                .and_then(Value::as_str)
+                .is_some_and(|status| status == "failed")
+                || event
+                    .get("direction")
+                    .and_then(Value::as_str)
+                    .is_some_and(|direction| direction == "error")
+        })
+        .count();
+    let voicecall_channel_outbound_events = voicecall_events
+        .iter()
+        .filter(|event| {
+            event
+                .get("direction")
+                .and_then(Value::as_str)
+                .is_some_and(|direction| direction == "channel_outbound")
+        })
+        .count();
+    let voicecall_local_outbound_events = voicecall_events
+        .iter()
+        .filter(|event| {
+            event
+                .get("direction")
+                .and_then(Value::as_str)
+                .is_some_and(|direction| direction == "outbound")
+        })
+        .count();
+    let voicecall_last_event_ts = voicecall_events
+        .iter()
+        .rev()
+        .find_map(|event| event.get("ts").and_then(Value::as_str).map(str::to_string));
+    let voicecall_recent_events = voicecall_events
+        .iter()
+        .rev()
+        .take(10)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let tts_events_count = tts_events.len();
+    let tts_total_bytes_written = tts_events
+        .iter()
+        .filter_map(|event| event.get("bytes_written").and_then(Value::as_u64))
+        .sum::<u64>();
+    let tts_outputs_written = tts_events
+        .iter()
+        .filter(|event| {
+            event
+                .get("bytes_written")
+                .and_then(Value::as_u64)
+                .is_some_and(|bytes| bytes > 0)
+                || event
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .is_some_and(|output| !output.trim().is_empty())
+        })
+        .count();
+    let tts_last_event_ts = tts_events
+        .iter()
+        .rev()
+        .find_map(|event| event.get("ts").and_then(Value::as_str).map(str::to_string));
+    let tts_recent_events = tts_events
+        .iter()
+        .rev()
+        .take(10)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let voicecall_active = voicecall_state
+        .as_ref()
+        .and_then(|state| state.get("active"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let voicecall_messages_sent = voicecall_state
+        .as_ref()
+        .and_then(|state| state.get("messages_sent"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let voicecall_channel_bound = voicecall_state
+        .as_ref()
+        .and_then(|state| state.get("channel_id"))
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+
+    json!({
+        "ok": voicecall_state_error.is_none()
+            && voicecall_events_error.is_none()
+            && tts_events_error.is_none(),
+        "tail": tail,
+        "paths": {
+            "voicecall_state_file": voicecall_state_path.display().to_string(),
+            "voicecall_events_file": voicecall_events_path.display().to_string(),
+            "tts_events_file": tts_events_path.display().to_string(),
+        },
+        "state": {
+            "voicecall": voicecall_state,
+        },
+        "summary": {
+            "voicecall_active": voicecall_active,
+            "voicecall_channel_bound": voicecall_channel_bound,
+            "voicecall_messages_sent": voicecall_messages_sent,
+            "voicecall_events_count": voicecall_events_count,
+            "voicecall_delivery_events": voicecall_delivery_events,
+            "voicecall_failed_events": voicecall_failed_events,
+            "voicecall_channel_outbound_events": voicecall_channel_outbound_events,
+            "voicecall_local_outbound_events": voicecall_local_outbound_events,
+            "voicecall_last_event_ts": voicecall_last_event_ts,
+            "tts_events_count": tts_events_count,
+            "tts_outputs_written": tts_outputs_written,
+            "tts_total_bytes_written": tts_total_bytes_written,
+            "tts_last_event_ts": tts_last_event_ts,
+        },
+        "recent_voicecall_events": voicecall_recent_events,
+        "recent_tts_events": tts_recent_events,
+        "errors": {
+            "voicecall_state": voicecall_state_error,
+            "voicecall_events": voicecall_events_error,
+            "tts_events": tts_events_error,
+        },
+    })
+}
+
+fn load_optional_json_file(path: &Path) -> std::result::Result<Option<Value>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|err| format!("read {} failed: {err}", path.display()))?;
+    let value = serde_json::from_str::<Value>(&raw)
+        .map_err(|err| format!("parse {} failed: {err}", path.display()))?;
+    Ok(Some(value))
+}
+
+fn load_jsonl_values(path: &Path) -> std::result::Result<Vec<Value>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|err| format!("read {} failed: {err}", path.display()))?;
+    let mut values = Vec::new();
+    for (idx, line) in raw.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let value = serde_json::from_str::<Value>(line)
+            .map_err(|err| format!("parse {} line {} failed: {err}", path.display(), idx + 1))?;
+        values.push(value);
+    }
+    Ok(values)
+}
+
 fn build_observability_alerts(
     gateway: &Value,
+    gateway_history: &Value,
     channels: &Value,
+    mcp: &Value,
+    mcp_history: &Value,
     safety_audit: &Value,
     plugin_soak: &Value,
+    realtime: &Value,
 ) -> Value {
     let channel_failure_warn_threshold =
         read_alert_threshold("MOSAIC_OBS_ALERT_CHANNEL_FAILURE_WARN", 0.1);
@@ -683,6 +2101,41 @@ fn build_observability_alerts(
     .max(safety_failure_warn_threshold);
     let plugin_completion_ratio_min =
         read_alert_threshold("MOSAIC_OBS_ALERT_PLUGIN_COMPLETION_MIN", 1.0).clamp(0.0, 1.0);
+    let mcp_unhealthy_warn_threshold =
+        read_alert_threshold("MOSAIC_OBS_ALERT_MCP_UNHEALTHY_WARN", 0.2);
+    let mcp_unhealthy_critical_threshold = read_alert_threshold(
+        "MOSAIC_OBS_ALERT_MCP_UNHEALTHY_CRITICAL",
+        mcp_unhealthy_warn_threshold.max(0.5),
+    )
+    .max(mcp_unhealthy_warn_threshold);
+    let mcp_ratio_delta_warn_threshold =
+        read_ratio_threshold("MOSAIC_OBS_ALERT_MCP_RATIO_DELTA_WARN", 0.15);
+    let mcp_ratio_delta_critical_threshold = read_ratio_threshold(
+        "MOSAIC_OBS_ALERT_MCP_RATIO_DELTA_CRITICAL",
+        mcp_ratio_delta_warn_threshold.max(0.3),
+    )
+    .max(mcp_ratio_delta_warn_threshold);
+    let voicecall_failure_warn_threshold =
+        read_alert_threshold("MOSAIC_OBS_ALERT_VOICECALL_FAILURE_WARN", 0.1);
+    let voicecall_failure_critical_threshold = read_alert_threshold(
+        "MOSAIC_OBS_ALERT_VOICECALL_FAILURE_CRITICAL",
+        voicecall_failure_warn_threshold.max(0.5),
+    )
+    .max(voicecall_failure_warn_threshold);
+    let gateway_failure_warn_threshold =
+        read_alert_threshold("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_WARN", 0.2);
+    let gateway_failure_critical_threshold = read_alert_threshold(
+        "MOSAIC_OBS_ALERT_GATEWAY_FAILURE_CRITICAL",
+        gateway_failure_warn_threshold.max(0.5),
+    )
+    .max(gateway_failure_warn_threshold);
+    let gateway_failure_delta_warn_threshold =
+        read_ratio_threshold("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_DELTA_WARN", 0.15);
+    let gateway_failure_delta_critical_threshold = read_ratio_threshold(
+        "MOSAIC_OBS_ALERT_GATEWAY_FAILURE_DELTA_CRITICAL",
+        gateway_failure_delta_warn_threshold.max(0.3),
+    )
+    .max(gateway_failure_delta_warn_threshold);
     let min_severity = read_alert_min_severity();
     let suppress_ids = read_suppressed_alert_ids();
 
@@ -715,6 +2168,57 @@ fn build_observability_alerts(
             "threshold": true,
         }));
     }
+    let gateway_event_count = gateway["telemetry"]["event_count"].as_u64().unwrap_or(0);
+    let gateway_failed_events = gateway["telemetry"]["failed_events"].as_u64().unwrap_or(0);
+    if gateway_event_count > 0 && gateway_failed_events > 0 {
+        let failure_rate = (gateway_failed_events as f64) / (gateway_event_count as f64);
+        if failure_rate >= gateway_failure_warn_threshold {
+            let severity = if failure_rate >= gateway_failure_critical_threshold {
+                "critical"
+            } else {
+                "warning"
+            };
+            items.push(json!({
+                "id": "gateway.request_failures",
+                "severity": severity,
+                "message": format!("gateway request failures detected in recent telemetry (failed={gateway_failed_events} / total={gateway_event_count})"),
+                "metric": "gateway_failure_rate",
+                "value": failure_rate,
+                "threshold": {
+                    "warning": gateway_failure_warn_threshold,
+                    "critical": gateway_failure_critical_threshold,
+                },
+            }));
+        }
+    }
+    let gateway_delta_available = gateway_history["current_vs_previous"]["available"]
+        .as_bool()
+        .unwrap_or(false);
+    let gateway_failure_rate_delta =
+        gateway_history["current_vs_previous"]["delta"]["failure_rate"]
+            .as_f64()
+            .unwrap_or(0.0);
+    if gateway_delta_available && gateway_failure_rate_delta >= gateway_failure_delta_warn_threshold
+    {
+        let severity = if gateway_failure_rate_delta >= gateway_failure_delta_critical_threshold {
+            "critical"
+        } else {
+            "warning"
+        };
+        items.push(json!({
+            "id": "gateway.failure_rate_regression",
+            "severity": severity,
+            "message": format!(
+                "gateway failure rate regressed in latest sample (delta={gateway_failure_rate_delta:.4})"
+            ),
+            "metric": "gateway_failure_rate_delta",
+            "value": gateway_failure_rate_delta,
+            "threshold": {
+                "warning": gateway_failure_delta_warn_threshold,
+                "critical": gateway_failure_delta_critical_threshold,
+            },
+        }));
+    }
 
     let channel_event_count = channels["summary"]["event_count"].as_u64().unwrap_or(0);
     let channel_failed_events = channels["summary"]["failed_events"].as_u64().unwrap_or(0);
@@ -735,6 +2239,84 @@ fn build_observability_alerts(
                 "threshold": {
                     "warning": channel_failure_warn_threshold,
                     "critical": channel_failure_critical_threshold,
+                },
+            }));
+        }
+    }
+
+    let mcp_configured = mcp["summary"]["configured"].as_u64().unwrap_or(0);
+    let mcp_unhealthy = mcp["summary"]["unhealthy"].as_u64().unwrap_or(0);
+    if mcp_configured > 0 && mcp_unhealthy > 0 {
+        let unhealthy_ratio = (mcp_unhealthy as f64) / (mcp_configured as f64);
+        if unhealthy_ratio >= mcp_unhealthy_warn_threshold {
+            let severity = if unhealthy_ratio >= mcp_unhealthy_critical_threshold {
+                "critical"
+            } else {
+                "warning"
+            };
+            items.push(json!({
+                "id": "mcp.unhealthy_servers",
+                "severity": severity,
+                "message": format!("mcp unhealthy servers detected (unhealthy={mcp_unhealthy} / configured={mcp_configured})"),
+                "metric": "mcp_unhealthy_ratio",
+                "value": unhealthy_ratio,
+                "threshold": {
+                    "warning": mcp_unhealthy_warn_threshold,
+                    "critical": mcp_unhealthy_critical_threshold,
+                },
+            }));
+        }
+    }
+    let mcp_ratio_delta_available = mcp_history["current_vs_previous"]["available"]
+        .as_bool()
+        .unwrap_or(false);
+    let mcp_unhealthy_ratio_delta = mcp_history["current_vs_previous"]["delta"]["unhealthy_ratio"]
+        .as_f64()
+        .unwrap_or(0.0);
+    if mcp_ratio_delta_available && mcp_unhealthy_ratio_delta >= mcp_ratio_delta_warn_threshold {
+        let severity = if mcp_unhealthy_ratio_delta >= mcp_ratio_delta_critical_threshold {
+            "critical"
+        } else {
+            "warning"
+        };
+        items.push(json!({
+            "id": "mcp.unhealthy_ratio_regression",
+            "severity": severity,
+            "message": format!(
+                "mcp unhealthy ratio regressed in latest sample (delta={mcp_unhealthy_ratio_delta:.4})"
+            ),
+            "metric": "mcp_unhealthy_ratio_delta",
+            "value": mcp_unhealthy_ratio_delta,
+            "threshold": {
+                "warning": mcp_ratio_delta_warn_threshold,
+                "critical": mcp_ratio_delta_critical_threshold,
+            },
+        }));
+    }
+
+    let voicecall_delivery_events = realtime["summary"]["voicecall_delivery_events"]
+        .as_u64()
+        .unwrap_or(0);
+    let voicecall_failed_events = realtime["summary"]["voicecall_failed_events"]
+        .as_u64()
+        .unwrap_or(0);
+    if voicecall_delivery_events > 0 && voicecall_failed_events > 0 {
+        let failure_rate = (voicecall_failed_events as f64) / (voicecall_delivery_events as f64);
+        if failure_rate >= voicecall_failure_warn_threshold {
+            let severity = if failure_rate >= voicecall_failure_critical_threshold {
+                "critical"
+            } else {
+                "warning"
+            };
+            items.push(json!({
+                "id": "voicecall.delivery_failures",
+                "severity": severity,
+                "message": format!("voicecall delivery failures detected (failed={voicecall_failed_events} / deliveries={voicecall_delivery_events})"),
+                "metric": "voicecall_failure_rate",
+                "value": failure_rate,
+                "threshold": {
+                    "warning": voicecall_failure_warn_threshold,
+                    "critical": voicecall_failure_critical_threshold,
                 },
             }));
         }
@@ -867,6 +2449,16 @@ fn build_observability_alerts(
             "safety_failure_warn": safety_failure_warn_threshold,
             "safety_failure_critical": safety_failure_critical_threshold,
             "plugin_completion_min": plugin_completion_ratio_min,
+            "mcp_unhealthy_warn": mcp_unhealthy_warn_threshold,
+            "mcp_unhealthy_critical": mcp_unhealthy_critical_threshold,
+            "mcp_ratio_delta_warn": mcp_ratio_delta_warn_threshold,
+            "mcp_ratio_delta_critical": mcp_ratio_delta_critical_threshold,
+            "voicecall_failure_warn": voicecall_failure_warn_threshold,
+            "voicecall_failure_critical": voicecall_failure_critical_threshold,
+            "gateway_failure_warn": gateway_failure_warn_threshold,
+            "gateway_failure_critical": gateway_failure_critical_threshold,
+            "gateway_failure_delta_warn": gateway_failure_delta_warn_threshold,
+            "gateway_failure_delta_critical": gateway_failure_delta_critical_threshold,
         },
         "items": visible_items,
     })

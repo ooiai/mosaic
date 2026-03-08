@@ -593,8 +593,9 @@ fn scan_content(
                     severity: SecuritySeverity::Low,
                     category: "crypto_hardening".to_string(),
                     title: "Weak hash function usage detected".to_string(),
-                    detail: "Detected md5/sha1 usage which is weak for security-sensitive contexts."
-                        .to_string(),
+                    detail:
+                        "Detected md5/sha1 usage which is weak for security-sensitive contexts."
+                            .to_string(),
                     path: path.to_string(),
                     line: Some(line_number + 1),
                     suggestion: Some(
