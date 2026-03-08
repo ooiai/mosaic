@@ -27,6 +27,7 @@ mod discovery_commands;
 mod feature_commands;
 mod gateway_command;
 mod gateway_runtime;
+mod knowledge_command;
 mod maintenance_commands;
 mod mcp_command;
 mod nodes_command;
@@ -63,6 +64,7 @@ use gateway_runtime::{
     resolve_gateway_start_target, resolve_gateway_target, run_gateway_http_server,
     start_gateway_runtime, stop_gateway_runtime, upsert_gateway_service,
 };
+use knowledge_command::handle_knowledge;
 use maintenance_commands::{handle_reset, handle_uninstall, handle_update};
 use mcp_command::handle_mcp;
 use nodes_command::handle_nodes;
@@ -147,7 +149,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Cron(args) => handle_cron(&cli, args),
         Commands::Webhooks(args) => handle_webhooks(&cli, args),
         Commands::Tts(args) => handle_tts(&cli, args),
-        Commands::Voicecall(args) => handle_voicecall(&cli, args),
+        Commands::Voicecall(args) => handle_voicecall(&cli, args).await,
         Commands::Browser(args) => handle_browser(&cli, args).await,
         Commands::Logs(args) => handle_logs(&cli, args).await,
         Commands::Observability(args) => handle_observability(&cli, args).await,
@@ -156,6 +158,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Sandbox(args) => handle_sandbox(&cli, args),
         Commands::Safety(args) => handle_safety(&cli, args),
         Commands::Memory(args) => handle_memory(&cli, args),
+        Commands::Knowledge(args) => handle_knowledge(&cli, args).await,
         Commands::Security(args) => handle_security(&cli, args),
         Commands::Agents(args) => handle_agents(&cli, args),
         Commands::Plugins(args) => handle_plugins(&cli, args),

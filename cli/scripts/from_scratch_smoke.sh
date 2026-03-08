@@ -225,8 +225,24 @@ require_contains "$TMP_ROOT/mcp_list.json" "$MCP_SERVER_ID"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp check "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_check.json")
 require_contains "$TMP_ROOT/mcp_check.json" '"healthy"[[:space:]]*:[[:space:]]*true'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp diagnose "$MCP_SERVER_ID" --timeout-ms 300 >"$TMP_ROOT/mcp_diagnose.json")
+require_contains "$TMP_ROOT/mcp_diagnose.json" '"ok"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/mcp_diagnose.json" '"protocol_probe"'
+require_contains "$TMP_ROOT/mcp_diagnose.json" '"attempted"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp check --all --deep --timeout-ms 300 --report-out "$TMP_ROOT/mcp_check_deep_report.json" >"$TMP_ROOT/mcp_check_deep.json")
+require_contains "$TMP_ROOT/mcp_check_deep.json" '"ok"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/mcp_check_deep.json" '"deep"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/mcp_check_deep.json" '"protocol_ok"'
+require_contains "$TMP_ROOT/mcp_check_deep_report.json" '"results"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp disable "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_disable.json")
 require_contains "$TMP_ROOT/mcp_disable.json" '"enabled"[[:space:]]*:[[:space:]]*false'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp repair "$MCP_SERVER_ID" --timeout-ms 300 >"$TMP_ROOT/mcp_repair.json")
+require_contains "$TMP_ROOT/mcp_repair.json" '"ok"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/mcp_repair.json" '"changed"[[:space:]]*:[[:space:]]*1'
+require_contains "$TMP_ROOT/mcp_repair.json" '"enabled_server"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp enable "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_enable.json")
 require_contains "$TMP_ROOT/mcp_enable.json" '"enabled"[[:space:]]*:[[:space:]]*true'
@@ -361,6 +377,10 @@ require_contains "$TMP_ROOT/nodes_status.json" '"pending"[[:space:]]*:[[:space:]
 require_contains "$TMP_ROOT/nodes_status.json" '"approved"[[:space:]]*:[[:space:]]*1'
 require_contains "$TMP_ROOT/nodes_status.json" '"rejected"[[:space:]]*:[[:space:]]*1'
 
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json nodes diagnose local --stale-after-minutes 30 >"$TMP_ROOT/nodes_diagnose.json")
+require_contains "$TMP_ROOT/nodes_diagnose.json" '"summary"'
+require_contains "$TMP_ROOT/nodes_diagnose.json" '"issues_total"'
+
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json devices revoke dev-smoke --reason "smoke cleanup" >"$TMP_ROOT/devices_revoke.json")
 require_contains "$TMP_ROOT/devices_revoke.json" '"status"[[:space:]]*:[[:space:]]*"revoked"'
 
@@ -391,12 +411,31 @@ require_contains "$TMP_ROOT/cron_tick.json" '"triggered"[[:space:]]*:[[:space:]]
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json cron logs --tail 20 >"$TMP_ROOT/cron_logs.json")
 require_contains "$TMP_ROOT/cron_logs.json" '"events"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json cron logs --tail 20 --summary --since-minutes 60 >"$TMP_ROOT/cron_logs_summary.json")
+require_contains "$TMP_ROOT/cron_logs_summary.json" '"summary"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json hooks logs --tail 20 >"$TMP_ROOT/hooks_logs.json")
 require_contains "$TMP_ROOT/hooks_logs.json" '"events"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json hooks logs --tail 20 --summary --since-minutes 60 >"$TMP_ROOT/hooks_logs_summary.json")
+require_contains "$TMP_ROOT/hooks_logs_summary.json" '"summary"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json hooks replay --tail 20 --limit 10 --batch-size 5 --reason tool --retryable-only --report-out "$TMP_ROOT/hooks_replay_plan_report.json" >"$TMP_ROOT/hooks_replay_plan.json")
+require_contains "$TMP_ROOT/hooks_replay_plan.json" '"selected_candidates"'
+require_contains "$TMP_ROOT/hooks_replay_plan.json" '"batch_plan"'
+require_contains "$TMP_ROOT/hooks_replay_plan_report.json" '"selected_candidates"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json webhooks logs --tail 20 >"$TMP_ROOT/webhooks_logs.json")
 require_contains "$TMP_ROOT/webhooks_logs.json" '"events"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json webhooks logs --tail 20 --summary --since-minutes 60 >"$TMP_ROOT/webhooks_logs_summary.json")
+require_contains "$TMP_ROOT/webhooks_logs_summary.json" '"summary"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json webhooks replay --tail 20 --limit 10 --batch-size 5 --reason auth --report-out "$TMP_ROOT/webhooks_replay_plan_report.json" >"$TMP_ROOT/webhooks_replay_plan.json")
+require_contains "$TMP_ROOT/webhooks_replay_plan.json" '"selected_candidates"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json webhooks replay --tail 20 --limit 10 --batch-size 5 --apply --max-apply 3 --report-out "$TMP_ROOT/webhooks_replay_apply_report.json" >"$TMP_ROOT/webhooks_replay_apply.json")
+require_contains "$TMP_ROOT/webhooks_replay_apply.json" '"attempted"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json hooks replay --tail 20 --limit 10 --batch-size 5 --apply --max-apply 3 --report-out "$TMP_ROOT/hooks_replay_apply_report.json" >"$TMP_ROOT/hooks_replay_apply.json")
+require_contains "$TMP_ROOT/hooks_replay_apply.json" '"attempted"'
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json cron replay --tail 20 --limit 10 --batch-size 5 --reason hook_failures --retryable-only --apply --max-apply 3 --report-out "$TMP_ROOT/cron_replay_apply_report.json" >"$TMP_ROOT/cron_replay_apply.json")
+require_contains "$TMP_ROOT/cron_replay_apply.json" '"attempted"'
+require_contains "$TMP_ROOT/cron_replay_apply_report.json" '"attempted"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json logs --tail 50 >"$TMP_ROOT/logs_tail.json")
 require_contains "$TMP_ROOT/logs_tail.json" '"source"[[:space:]]*:[[:space:]]*"system"'
@@ -439,6 +478,14 @@ require_contains "$TMP_ROOT/browser_tabs.json" '"active_visit_id"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser status >"$TMP_ROOT/browser_status.json")
 require_contains "$TMP_ROOT/browser_status.json" '"running"[[:space:]]*:[[:space:]]*true'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser diagnose --stale-after-minutes 30 --probe-url "mock://ok?title=Smoke+Probe" --probe-url "mock://404" --artifact-max-age-hours 24 >"$TMP_ROOT/browser_diagnose.json")
+require_contains "$TMP_ROOT/browser_diagnose.json" '"summary"'
+require_contains "$TMP_ROOT/browser_diagnose.json" '"issues"'
+require_contains "$TMP_ROOT/browser_diagnose.json" '"network_failure_classes"'
+require_contains "$TMP_ROOT/browser_diagnose.json" '"screenshot_artifacts_scanned"'
+require_contains "$TMP_ROOT/browser_diagnose.json" '"probe_results"'
+require_contains "$TMP_ROOT/browser_diagnose.json" '"probe_count"[[:space:]]*:[[:space:]]*2'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json browser focus "$BROWSER_VISIT_ID" >"$TMP_ROOT/browser_focus.json")
 require_contains "$TMP_ROOT/browser_focus.json" '"active_visit_id"'
@@ -659,11 +706,21 @@ if [[ ! -f "$TMP_ROOT/tts/smoke.txt" ]]; then
   exit 1
 fi
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall start --target "smoke-room" >"$TMP_ROOT/voicecall_start.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json tts diagnose --voice alloy --format txt --text "smoke diagnose" --timeout-ms 2000 --report-out "$TMP_ROOT/tts/diagnose-report.json" >"$TMP_ROOT/tts_diagnose.json")
+require_contains "$TMP_ROOT/tts_diagnose.json" '"ok"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/tts_diagnose.json" '"checks"'
+require_contains "$TMP_ROOT/tts/diagnose-report.json" '"command"[[:space:]]*:[[:space:]]*"tts diagnose"'
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json channels add --name voice-smoke-terminal --kind terminal >"$TMP_ROOT/voicecall_channel_add.json")
+VOICECALL_CHANNEL_ID="$(extract_first_match "$TMP_ROOT/voicecall_channel_add.json" 'ch_[a-f0-9-]+')"
+
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall start --target "smoke-room" --channel-id "$VOICECALL_CHANNEL_ID" >"$TMP_ROOT/voicecall_start.json")
 require_contains "$TMP_ROOT/voicecall_start.json" '"active"[[:space:]]*:[[:space:]]*true'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall send --text "smoke call message" >"$TMP_ROOT/voicecall_send.json")
 require_contains "$TMP_ROOT/voicecall_send.json" '"ok"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/voicecall_send.json" '"channel_delivery"'
+require_contains "$TMP_ROOT/voicecall_send.json" '"delivered_via"[[:space:]]*:[[:space:]]*"terminal"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json voicecall history --tail 20 >"$TMP_ROOT/voicecall_history.json")
 require_contains "$TMP_ROOT/voicecall_history.json" '"events"'

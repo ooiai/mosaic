@@ -66,13 +66,37 @@ Capability discovery:
 
 ```bash
 mosaic --project-state --json channels capabilities --channel telegram_bot
+mosaic --project-state --json channels capabilities --target <channel-id>
 ```
+
+## 6) Replay plan for failed deliveries
+
+```bash
+mosaic --project-state --json channels replay <channel-id> --tail 50 --limit 5
+```
+
+Notes:
+- Replay candidates are built from failed events in the channel log.
+- Use `--since-minutes <N>` to only inspect recent failed deliveries.
+- Default filter keeps retryable failures only.
+- Use `--include-non-retryable` when you also need to inspect config/auth/client failures.
+- Use repeatable `--reason <rate_limited|upstream_5xx|timeout|auth|target_not_found|client_4xx|unknown>` to filter replay reasons.
+- Use repeatable `--http-status <code>` and `--min-attempt <N>` to constrain replay candidates.
+- Use `--batch-size <N>` to inspect planned replay batches in `batch_plan`.
+- Use `--apply` to replay with stored full payload when available (`replay_source=full_payload`).
+- `--apply` runs a readiness preflight and blocks early when token/env or target config is not ready (`channels capabilities --target <channel-id>`).
+- Use `--apply --max-apply <N>` to cap replay executions in one batch.
+- Legacy events without stored payload fall back to `text_preview` (`replay_source=text_preview_fallback`) and emit a warning.
+- Use `--apply --require-full-payload` when you want replay to fail instead of using `text_preview` fallback.
+- Use `--apply --stop-on-error` to stop replay immediately once one candidate send fails.
+- Use `--report-out <path>` to save replay envelope JSON for CI/runbook evidence.
 
 Expect:
 - `supports_parse_mode = true`
 - `supports_message_template = true`
 - `supports_idempotency_key = true`
 - `supports_rate_limit_report = true`
+- `--target` additionally returns `diagnostics.ready_for_send`, `diagnostics.token_env`, `diagnostics.token_present`, and `diagnostics.issues` to explain runtime readiness.
 
 ## 4) Retry behavior
 

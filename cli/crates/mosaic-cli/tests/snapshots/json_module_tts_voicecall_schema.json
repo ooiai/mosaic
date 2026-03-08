@@ -1,4 +1,26 @@
 {
+  "tts_diagnose": {
+    "bytes_written": "null",
+    "checks": {
+      "items": [
+        {
+          "name": "string",
+          "ok": "bool",
+          "voice": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "duration_ms": "number",
+    "format": "string",
+    "ok": "bool",
+    "output": "null",
+    "payload_bytes": "number",
+    "report_path": "null",
+    "text_preview": "string",
+    "timeout_ms": "number",
+    "voice": "string"
+  },
   "tts_speak": {
     "bytes_written": "null",
     "format": "string",
@@ -32,6 +54,7 @@
   },
   "voicecall_send": {
     "call_id": "string",
+    "channel_delivery": "null",
     "messages_sent": "number",
     "ok": "bool",
     "text_preview": "string"

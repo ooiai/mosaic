@@ -94,6 +94,42 @@ fn observability_report_json_includes_logs_events_and_doctor_summary() {
     assert_eq!(json["report"]["summary"]["channels_total"], 0);
     assert_eq!(json["report"]["summary"]["channel_events_count"], 0);
     assert_eq!(json["report"]["summary"]["channel_failed_events"], 0);
+    assert_eq!(json["report"]["summary"]["mcp_configured"], 0);
+    assert_eq!(json["report"]["summary"]["mcp_healthy"], 0);
+    assert_eq!(json["report"]["summary"]["mcp_unhealthy"], 0);
+    assert_eq!(json["report"]["summary"]["tts_events_count"], 0);
+    assert_eq!(json["report"]["summary"]["tts_total_bytes_written"], 0);
+    assert_eq!(json["report"]["summary"]["voicecall_active"], false);
+    assert_eq!(json["report"]["summary"]["voicecall_messages_sent"], 0);
+    assert_eq!(json["report"]["summary"]["voicecall_events_count"], 0);
+    assert_eq!(json["report"]["summary"]["voicecall_delivery_events"], 0);
+    assert_eq!(json["report"]["summary"]["voicecall_failed_events"], 0);
+    assert_eq!(json["report"]["realtime"]["summary"]["tts_events_count"], 0);
+    assert_eq!(
+        json["report"]["realtime"]["summary"]["voicecall_events_count"],
+        0
+    );
+    assert_eq!(
+        json["report"]["realtime"]["summary"]["voicecall_delivery_events"],
+        0
+    );
+    assert_eq!(
+        json["report"]["realtime"]["summary"]["voicecall_failed_events"],
+        0
+    );
+    assert!(
+        json["report"]["realtime"]["paths"]["voicecall_state_file"]
+            .as_str()
+            .is_some()
+    );
+    assert!(
+        json["report"]["realtime"]["paths"]["tts_events_file"]
+            .as_str()
+            .is_some()
+    );
+    assert_eq!(json["report"]["mcp"]["summary"]["configured"], 0);
+    assert_eq!(json["report"]["mcp"]["summary"]["healthy"], 0);
+    assert_eq!(json["report"]["mcp"]["summary"]["unhealthy"], 0);
     assert!(
         json["report"]["summary"]["alerts_total"]
             .as_u64()
@@ -137,6 +173,678 @@ fn observability_report_json_includes_logs_events_and_doctor_summary() {
     );
     assert_eq!(
         json["report"]["summary"]["plugin_soak_completion_ratio_delta"],
+        0.0
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn observability_report_includes_mcp_unhealthy_alerts() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "add",
+            "--name",
+            "bad-mcp",
+            "--command",
+            "__missing_command__",
+        ])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--compare-window",
+            "1",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("observability report json");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["report"]["summary"]["mcp_configured"], 1);
+    assert_eq!(json["report"]["summary"]["mcp_unhealthy"], 1);
+    assert!(
+        json["report"]["alerts"]["items"]
+            .as_array()
+            .expect("alerts array")
+            .iter()
+            .any(|item| item["id"].as_str() == Some("mcp.unhealthy_servers")),
+        "expected mcp.unhealthy_servers alert"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn observability_report_tracks_mcp_history_and_regression_hints() {
+    let temp = tempdir().expect("tempdir");
+
+    let first_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_MCP_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_MCP_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_MCP_RATIO_REGRESSION_WARN", "0.1")
+        .env("MOSAIC_OBS_ALERT_MCP_RATIO_DELTA_WARN", "0.1")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first: Value = serde_json::from_slice(&first_output).expect("first report json");
+    assert_eq!(first["ok"], true);
+    assert_eq!(first["report"]["summary"]["mcp_history_count"], 1);
+    assert_eq!(first["report"]["summary"]["mcp_delta_available"], false);
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "add",
+            "--name",
+            "bad-history-mcp",
+            "--command",
+            "__missing_history_command__",
+        ])
+        .assert()
+        .success();
+
+    let second_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_MCP_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_MCP_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_MCP_RATIO_REGRESSION_WARN", "0.1")
+        .env("MOSAIC_OBS_ALERT_MCP_RATIO_DELTA_WARN", "0.1")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second: Value = serde_json::from_slice(&second_output).expect("second report json");
+    assert_eq!(second["ok"], true);
+    assert_eq!(second["report"]["summary"]["mcp_history_count"], 2);
+    assert_eq!(second["report"]["summary"]["mcp_delta_available"], true);
+    assert!(
+        second["report"]["summary"]["mcp_unhealthy_ratio_delta"]
+            .as_f64()
+            .unwrap_or(0.0)
+            >= 1.0
+    );
+    assert!(
+        second["report"]["mcp"]["history"]["incident_hints"]
+            .as_array()
+            .expect("mcp incident hints")
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("mcp.unhealthy_ratio_regression"))
+    );
+    assert!(
+        second["report"]["alerts"]["items"]
+            .as_array()
+            .expect("alerts")
+            .iter()
+            .any(|item| item["id"].as_str() == Some("mcp.unhealthy_ratio_regression"))
+    );
+
+    let third_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_MCP_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_MCP_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_MCP_RATIO_REGRESSION_WARN", "0.1")
+        .env("MOSAIC_OBS_ALERT_MCP_RATIO_DELTA_WARN", "0.1")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let third: Value = serde_json::from_slice(&third_output).expect("third report json");
+    assert_eq!(third["ok"], true);
+    assert_eq!(third["report"]["summary"]["mcp_history_count"], 3);
+    assert!(
+        third["report"]["summary"]["mcp_unhealthy_streak"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        third["report"]["summary"]["mcp_incident_hints"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        third["report"]["mcp"]["history"]["incident_hints"]
+            .as_array()
+            .expect("mcp incident hints")
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("mcp.unhealthy_streak"))
+    );
+
+    let history_path = temp
+        .path()
+        .join(".mosaic/data/reports/observability-mcp-history.jsonl");
+    let history_raw = fs::read_to_string(history_path).expect("read mcp history file");
+    assert_eq!(
+        history_raw
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count(),
+        3
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn observability_report_includes_gateway_failure_telemetry_alerts() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "run"])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "call", "status"])
+        .assert()
+        .success();
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "call",
+            "unknown.method",
+        ])
+        .assert()
+        .failure()
+        .code(9);
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_WARN", "0.0")
+        .env("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_CRITICAL", "0.0")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("observability report json");
+    assert_eq!(json["ok"], true);
+    assert!(
+        json["report"]["summary"]["gateway_events_count"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        json["report"]["summary"]["gateway_failed_events"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        json["report"]["gateway"]["telemetry"]["failure_rate"]
+            .as_f64()
+            .unwrap_or(0.0)
+            > 0.0
+    );
+    assert!(
+        json["report"]["gateway"]["recent_events"]
+            .as_array()
+            .expect("recent gateway events")
+            .iter()
+            .any(|item| item["success"].as_bool() == Some(false))
+    );
+    assert!(
+        json["report"]["alerts"]["items"]
+            .as_array()
+            .expect("alerts array")
+            .iter()
+            .any(|item| item["id"].as_str() == Some("gateway.request_failures")),
+        "expected gateway.request_failures alert"
+    );
+    assert_eq!(
+        json["report"]["alerts"]["thresholds"]["gateway_failure_warn"],
+        0.0
+    );
+    assert_eq!(
+        json["report"]["alerts"]["thresholds"]["gateway_failure_critical"],
+        0.0
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn observability_report_tracks_gateway_history_and_regression_hints() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "run"])
+        .assert()
+        .success();
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "call", "status"])
+        .assert()
+        .success();
+
+    let first_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_GATEWAY_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_GATEWAY_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_GATEWAY_FAILURE_REGRESSION_WARN", "0.1")
+        .env("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_DELTA_WARN", "0.1")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first: Value = serde_json::from_slice(&first_output).expect("first report json");
+    assert_eq!(first["ok"], true);
+    assert_eq!(first["report"]["summary"]["gateway_history_count"], 1);
+    assert_eq!(first["report"]["summary"]["gateway_delta_available"], false);
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "call",
+            "unknown.method",
+        ])
+        .assert()
+        .failure()
+        .code(9);
+
+    let second_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_GATEWAY_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_GATEWAY_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_GATEWAY_FAILURE_REGRESSION_WARN", "0.1")
+        .env("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_DELTA_WARN", "0.1")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second: Value = serde_json::from_slice(&second_output).expect("second report json");
+    assert_eq!(second["ok"], true);
+    assert_eq!(second["report"]["summary"]["gateway_history_count"], 2);
+    assert_eq!(second["report"]["summary"]["gateway_delta_available"], true);
+    assert!(
+        second["report"]["summary"]["gateway_failure_rate_delta"]
+            .as_f64()
+            .unwrap_or(0.0)
+            >= 0.5
+    );
+    assert!(
+        second["report"]["gateway"]["history"]["incident_hints"]
+            .as_array()
+            .expect("gateway incident hints")
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("gateway.failure_rate_regression"))
+    );
+    assert!(
+        second["report"]["alerts"]["items"]
+            .as_array()
+            .expect("alerts")
+            .iter()
+            .any(|item| item["id"].as_str() == Some("gateway.failure_rate_regression"))
+    );
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "call",
+            "unknown.method",
+        ])
+        .assert()
+        .failure()
+        .code(9);
+
+    let third_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_GATEWAY_INCIDENT_WINDOW", "2")
+        .env("MOSAIC_OBS_GATEWAY_REPEAT_HINT_THRESHOLD", "2")
+        .env("MOSAIC_OBS_GATEWAY_FAILURE_REGRESSION_WARN", "0.1")
+        .env("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_DELTA_WARN", "0.1")
+        .env("MOSAIC_OBS_ALERT_GATEWAY_FAILURE_WARN", "0.1")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let third: Value = serde_json::from_slice(&third_output).expect("third report json");
+    assert_eq!(third["ok"], true);
+    assert_eq!(third["report"]["summary"]["gateway_history_count"], 3);
+    assert!(
+        third["report"]["summary"]["gateway_incident_hints"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        third["report"]["gateway"]["history"]["incident_hints"]
+            .as_array()
+            .expect("gateway incident hints")
+            .iter()
+            .any(|hint| hint["id"].as_str() == Some("gateway.failure_repeated"))
+    );
+
+    let history_path = temp
+        .path()
+        .join(".mosaic/data/reports/observability-gateway-history.jsonl");
+    let history_raw = fs::read_to_string(history_path).expect("read gateway history file");
+    assert_eq!(
+        history_raw
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count(),
+        3
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn observability_report_includes_voicecall_telemetry_and_failure_alerts() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_channel = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "voice-obs-terminal",
+            "--kind",
+            "terminal",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_channel_json: Value = serde_json::from_slice(&add_channel).expect("channels add json");
+    let channel_id = add_channel_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "voicecall",
+            "start",
+            "--target",
+            "obs-room",
+            "--channel-id",
+            &channel_id,
+        ])
+        .assert()
+        .success();
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "voicecall",
+            "send",
+            "--text",
+            "voicecall observability success",
+        ])
+        .assert()
+        .success();
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "voicecall", "stop"])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "voicecall",
+            "start",
+            "--target",
+            "obs-room-fail",
+            "--channel-id",
+            "ch_missing_voicecall_target",
+        ])
+        .assert()
+        .success();
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "voicecall",
+            "send",
+            "--text",
+            "voicecall observability failure",
+        ])
+        .assert()
+        .failure()
+        .code(2);
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_OBS_ALERT_VOICECALL_FAILURE_WARN", "0.0")
+        .env("MOSAIC_OBS_ALERT_VOICECALL_FAILURE_CRITICAL", "0.0")
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("observability report json");
+    assert_eq!(json["ok"], true);
+    assert!(
+        json["report"]["summary"]["voicecall_events_count"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        json["report"]["summary"]["voicecall_delivery_events"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        json["report"]["summary"]["voicecall_failed_events"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert_eq!(json["report"]["summary"]["voicecall_active"], true);
+    assert!(
+        json["report"]["realtime"]["recent_voicecall_events"]
+            .as_array()
+            .expect("recent voicecall events")
+            .iter()
+            .any(|item| item["direction"].as_str() == Some("error"))
+    );
+    assert!(
+        json["report"]["alerts"]["items"]
+            .as_array()
+            .expect("alerts array")
+            .iter()
+            .any(|item| item["id"].as_str() == Some("voicecall.delivery_failures")),
+        "expected voicecall.delivery_failures alert"
+    );
+    assert_eq!(
+        json["report"]["alerts"]["thresholds"]["voicecall_failure_warn"],
+        0.0
+    );
+    assert_eq!(
+        json["report"]["alerts"]["thresholds"]["voicecall_failure_critical"],
         0.0
     );
 }
@@ -562,6 +1270,8 @@ fn observability_report_alert_thresholds_can_be_overridden_by_env() {
         .env("MOSAIC_OBS_ALERT_SAFETY_FAILURE_WARN", "0.3")
         .env("MOSAIC_OBS_ALERT_SAFETY_FAILURE_CRITICAL", "0.7")
         .env("MOSAIC_OBS_ALERT_PLUGIN_COMPLETION_MIN", "0.9")
+        .env("MOSAIC_OBS_ALERT_VOICECALL_FAILURE_WARN", "0.15")
+        .env("MOSAIC_OBS_ALERT_VOICECALL_FAILURE_CRITICAL", "0.55")
         .args([
             "--project-state",
             "--json",
@@ -601,6 +1311,14 @@ fn observability_report_alert_thresholds_can_be_overridden_by_env() {
     assert_eq!(
         json["report"]["alerts"]["thresholds"]["plugin_completion_min"],
         0.9
+    );
+    assert_eq!(
+        json["report"]["alerts"]["thresholds"]["voicecall_failure_warn"],
+        0.15
+    );
+    assert_eq!(
+        json["report"]["alerts"]["thresholds"]["voicecall_failure_critical"],
+        0.55
     );
 }
 

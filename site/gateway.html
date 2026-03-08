@@ -62,7 +62,8 @@ mosaic --project-state gateway start --host 127.0.0.1 --port 8787</code></pre>
           <pre><code>mosaic --project-state gateway status
 mosaic --project-state gateway status --deep
 mosaic --project-state gateway health
-mosaic --project-state gateway health --verbose</code></pre>
+mosaic --project-state gateway health --verbose
+mosaic --project-state gateway health --verbose --repair</code></pre>
 
           <h2>Step 4: Probe and discover</h2>
           <pre><code>mosaic --project-state gateway probe
@@ -90,6 +91,7 @@ mosaic --project-state gateway stop</code></pre>
           <ul>
             <li><code>status</code>, <code>health</code>, and <code>probe</code> must all succeed.</li>
             <li><code>diagnose</code> should report failed=0 in stable environments.</li>
+            <li>Use <code>gateway health --repair</code> when endpoint is down and you want one-shot auto recovery.</li>
             <li><code>call status</code> must return valid payload for automation.</li>
             <li>After restart, probe result should remain healthy.</li>
           </ul>

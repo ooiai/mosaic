@@ -164,9 +164,7 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                 if min_severity.is_some() || !categories.is_empty() || top.is_some() {
                     println!(
                         "filters: min_severity={} categories={} top={} filtered_out={}",
-                        min_severity
-                            .map(security_severity_name)
-                            .unwrap_or("-"),
+                        min_severity.map(security_severity_name).unwrap_or("-"),
                         if categories.is_empty() {
                             "-".to_string()
                         } else {

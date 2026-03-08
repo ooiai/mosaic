@@ -13,6 +13,69 @@
     "remaining": "number",
     "removed": "number"
   },
+  "browser_diagnose": {
+    "actions": {
+      "items": [],
+      "type": "array"
+    },
+    "artifacts_path": "string",
+    "cutoff": "string",
+    "history_path": "string",
+    "issues": {
+      "items": [],
+      "type": "array"
+    },
+    "latest_visit": {
+      "content_length": "number",
+      "content_type": "string",
+      "error": "null",
+      "http_status": "number",
+      "id": "string",
+      "ok": "bool",
+      "preview": "string",
+      "title": "string",
+      "ts": "string",
+      "url": "string"
+    },
+    "ok": "bool",
+    "probe_file_path": "null",
+    "probe_results": {
+      "items": [],
+      "type": "array"
+    },
+    "repair": "bool",
+    "report_path": "null",
+    "state": {
+      "active_visit_id": "string",
+      "running": "bool",
+      "started_at": "string",
+      "stopped_at": "null"
+    },
+    "state_path": "string",
+    "summary": {
+      "actions_applied": "number",
+      "active_visit_missing": "bool",
+      "artifact_retention_cutoff": "null",
+      "corrupt_screenshot_artifacts": "number",
+      "duplicate_ids": "number",
+      "history_entries": "number",
+      "invalid_urls": "number",
+      "issues": "number",
+      "network_failure_classes": {},
+      "network_failures": "number",
+      "orphan_screenshot_artifacts": "number",
+      "probe_count": "number",
+      "probe_failure_classes": {},
+      "probe_failures": "number",
+      "saved_artifacts": "bool",
+      "saved_history": "bool",
+      "saved_state": "bool",
+      "screenshot_artifacts_scanned": "number",
+      "stale_active_visit": "bool",
+      "stale_screenshot_artifacts": "number",
+      "stale_visits": "number"
+    }
+  },
   "browser_focus": {
     "active_visit_id": "string",
     "ok": "bool",

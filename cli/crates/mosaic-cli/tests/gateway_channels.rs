@@ -204,6 +204,79 @@ fn gateway_service_lifecycle_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn gateway_health_repair_recovers_test_mode_runtime() {
+    let temp = tempdir().expect("tempdir");
+
+    let status_before = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "status", "--deep"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_before: Value = serde_json::from_slice(&status_before).expect("status before");
+    assert_eq!(status_before["running"], false);
+    assert_eq!(status_before["deep"]["endpoint_healthy"], false);
+
+    let health_repair = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "health",
+            "--verbose",
+            "--repair",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let health_repair: Value = serde_json::from_slice(&health_repair).expect("health repair");
+    assert_eq!(health_repair["ok"], true);
+    let checks = health_repair["checks"].as_array().expect("checks");
+    let find = |name: &str| {
+        checks
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("missing check: {name}"))
+    };
+    assert_eq!(find("gateway_auto_repair")["status"], "ok");
+    assert_eq!(find("gateway_endpoint")["status"], "ok");
+    assert_eq!(find("gateway_runtime_running")["status"], "ok");
+
+    let status_after = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "status", "--deep"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_after: Value = serde_json::from_slice(&status_after).expect("status after");
+    assert_eq!(status_after["running"], true);
+    assert_eq!(status_after["deep"]["endpoint_healthy"], true);
+    assert_eq!(status_after["installed"], true);
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "stop"])
+        .assert()
+        .success();
+}
+
+#[test]
+#[allow(deprecated)]
 fn channels_real_send_flow() {
     let temp = tempdir().expect("tempdir");
 
@@ -490,6 +563,29 @@ fn channels_terminal_alias_flow() {
         terminal_capabilities["capabilities"][0]["supports_idempotency_key"],
         true
     );
+
+    let terminal_target_capabilities = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "capabilities",
+            "--target",
+            &channel_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let terminal_target_capabilities: Value = serde_json::from_slice(&terminal_target_capabilities)
+        .expect("terminal target capabilities");
+    assert_eq!(
+        terminal_target_capabilities["capabilities"][0]["diagnostics"]["ready_for_send"],
+        true
+    );
 }
 
 #[test]
@@ -594,6 +690,43 @@ fn channels_telegram_bot_flow() {
     assert_eq!(
         telegram_capabilities["capabilities"][0]["supports_rate_limit_report"],
         true
+    );
+
+    let telegram_target_capabilities = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "capabilities",
+            "--target",
+            &channel_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let telegram_target_capabilities: Value = serde_json::from_slice(&telegram_target_capabilities)
+        .expect("telegram target capabilities");
+    assert_eq!(
+        telegram_target_capabilities["capabilities"][0]["diagnostics"]["ready_for_send"],
+        false
+    );
+    assert_eq!(
+        telegram_target_capabilities["capabilities"][0]["diagnostics"]["token_present"],
+        false
+    );
+    assert!(
+        telegram_target_capabilities["capabilities"][0]["diagnostics"]["issues"]
+            .as_array()
+            .expect("issues")
+            .iter()
+            .any(|item| item
+                .as_str()
+                .is_some_and(|value| value.contains("required token env"))),
+        "telegram target diagnostics should report missing required token env"
     );
 
     let dedup_output = Command::cargo_bin("mosaic")
@@ -990,6 +1123,968 @@ fn channels_retry_policy_mock_http() {
     let send_timeout: Value = serde_json::from_slice(&send_timeout).expect("timeout send");
     assert_eq!(send_timeout["attempts"], 3);
     assert_eq!(send_timeout["http_status"], 200);
+
+    let logs_summary_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "channels", "logs", "--summary"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let logs_summary_json: Value =
+        serde_json::from_slice(&logs_summary_output).expect("logs summary json");
+    assert_eq!(logs_summary_json["ok"], true);
+    assert!(
+        logs_summary_json["summary"]["total_events"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 3
+    );
+    assert!(
+        logs_summary_json["summary"]["failed_events"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        logs_summary_json["summary"]["retryable_failed_events"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        logs_summary_json["summary"]["failure_reasons"]["rate_limited"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        logs_summary_json["summary"]["replay_candidates"]
+            .as_array()
+            .expect("replay candidates")
+            .iter()
+            .any(|item| {
+                item["channel_id"].as_str() == Some(fail_4xx_id.as_str())
+                    && item["suggested_command"]
+                        .as_str()
+                        .is_some_and(|cmd| cmd.contains("channels send"))
+            })
+    );
+
+    let replay_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &fail_4xx_id,
+            "--tail",
+            "20",
+            "--limit",
+            "3",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_json: Value = serde_json::from_slice(&replay_output).expect("replay json");
+    assert_eq!(replay_json["ok"], true);
+    assert_eq!(replay_json["channel_id"], fail_4xx_id);
+    assert_eq!(replay_json["selected_candidates"], 1);
+    assert_eq!(replay_json["replay_candidates"][0]["retryable"], true);
+    assert_eq!(
+        replay_json["replay_candidates"][0]["full_payload_available"],
+        true
+    );
+    assert_eq!(
+        replay_json["replay_candidates"][0]["replay_source"],
+        "full_payload"
+    );
+    assert_eq!(
+        replay_json["replay_candidates"][0]["reason"],
+        "rate_limited"
+    );
+    assert!(
+        replay_json["replay_candidates"][0]["suggested_command"]
+            .as_str()
+            .is_some_and(|value| value.contains("channels send"))
+    );
+
+    let replay_apply_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &fail_4xx_id,
+            "--tail",
+            "20",
+            "--limit",
+            "3",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_apply_json: Value =
+        serde_json::from_slice(&replay_apply_output).expect("replay apply json");
+    assert_eq!(replay_apply_json["ok"], true);
+    assert_eq!(replay_apply_json["apply"], true);
+    assert_eq!(replay_apply_json["applied"]["attempted"], 1);
+    assert_eq!(replay_apply_json["applied"]["failed"], 1);
+    assert_eq!(replay_apply_json["applied"]["fallback_count"], 0);
+    assert_eq!(
+        replay_apply_json["applied"]["results"][0]["replay_source"],
+        "full_payload"
+    );
+    assert_eq!(replay_apply_json["applied"]["results"][0]["ok"], false);
+    assert!(
+        replay_apply_json["warning"].is_null(),
+        "replay --apply should not warn when full payload is available"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_apply_falls_back_to_preview_when_payload_missing() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "legacy-replay",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://429",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add channel json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "legacy replay payload",
+        ])
+        .assert()
+        .failure()
+        .code(4);
+
+    let event_path = temp
+        .path()
+        .join(".mosaic/data/channel-events")
+        .join(format!("{channel_id}.jsonl"));
+    let raw = std::fs::read_to_string(&event_path).expect("read channel events");
+    let mut rewritten = String::new();
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut event: Value = serde_json::from_str(line).expect("event json");
+        event
+            .as_object_mut()
+            .expect("event object")
+            .remove("replay_payload");
+        rewritten.push_str(&serde_json::to_string(&event).expect("serialize rewritten event"));
+        rewritten.push('\n');
+    }
+    std::fs::write(&event_path, rewritten).expect("rewrite legacy channel events");
+
+    let replay_apply_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "1",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_apply_json: Value =
+        serde_json::from_slice(&replay_apply_output).expect("replay apply json");
+    assert_eq!(replay_apply_json["ok"], true);
+    assert_eq!(replay_apply_json["apply"], true);
+    assert_eq!(replay_apply_json["applied"]["attempted"], 1);
+    assert_eq!(replay_apply_json["applied"]["fallback_count"], 1);
+    assert_eq!(
+        replay_apply_json["replay_candidates"][0]["full_payload_available"],
+        false
+    );
+    assert_eq!(
+        replay_apply_json["replay_candidates"][0]["replay_source"],
+        "text_preview_fallback"
+    );
+    assert_eq!(
+        replay_apply_json["applied"]["results"][0]["replay_source"],
+        "text_preview_fallback"
+    );
+    assert!(
+        replay_apply_json["warning"]
+            .as_str()
+            .is_some_and(|value| value.contains("text_preview")),
+        "legacy events should report preview fallback warning"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_apply_require_full_payload_rejects_preview_fallback_candidates() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "strict-replay",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://429",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add channel json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "strict replay payload",
+        ])
+        .assert()
+        .failure()
+        .code(4);
+
+    let event_path = temp
+        .path()
+        .join(".mosaic/data/channel-events")
+        .join(format!("{channel_id}.jsonl"));
+    let raw = std::fs::read_to_string(&event_path).expect("read channel events");
+    let mut rewritten = String::new();
+    for line in raw.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut event: Value = serde_json::from_str(line).expect("event json");
+        event
+            .as_object_mut()
+            .expect("event object")
+            .remove("replay_payload");
+        rewritten.push_str(&serde_json::to_string(&event).expect("serialize rewritten event"));
+        rewritten.push('\n');
+    }
+    std::fs::write(&event_path, rewritten).expect("rewrite legacy channel events");
+
+    let replay_apply_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "1",
+            "--apply",
+            "--require-full-payload",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let replay_apply_json: Value =
+        serde_json::from_slice(&replay_apply_output).expect("replay apply json");
+    assert_eq!(replay_apply_json["ok"], false);
+    assert_eq!(replay_apply_json["error"]["code"], "validation");
+    assert!(
+        replay_apply_json["error"]["message"]
+            .as_str()
+            .is_some_and(|value| value.contains("require-full-payload")),
+        "strict replay validation should include require-full-payload in message"
+    );
+    assert!(
+        replay_apply_json["error"]["message"]
+            .as_str()
+            .is_some_and(|value| value.contains("text_preview")),
+        "strict replay validation should describe preview fallback risk"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_reason_filters_select_expected_candidates() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "reason-filter",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://429",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add channel json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "rate-limited candidate",
+        ])
+        .assert()
+        .failure()
+        .code(4);
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "update",
+            &channel_id,
+            "--endpoint",
+            "mock-http://500",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "upstream 5xx candidate",
+        ])
+        .assert()
+        .failure()
+        .code(4);
+
+    let replay_rate_limited_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "10",
+            "--reason",
+            "rate_limited",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_rate_limited_json: Value =
+        serde_json::from_slice(&replay_rate_limited_output).expect("rate limited replay json");
+    assert_eq!(replay_rate_limited_json["ok"], true);
+    assert_eq!(replay_rate_limited_json["selected_candidates"], 1);
+    assert_eq!(
+        replay_rate_limited_json["replay_candidates"][0]["reason"],
+        "rate_limited"
+    );
+
+    let replay_multi_reason_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "10",
+            "--batch-size",
+            "1",
+            "--reason",
+            "rate_limited",
+            "--reason",
+            "upstream_5xx",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_multi_reason_json: Value =
+        serde_json::from_slice(&replay_multi_reason_output).expect("multi reason replay json");
+    assert_eq!(replay_multi_reason_json["ok"], true);
+    assert_eq!(replay_multi_reason_json["selected_candidates"], 2);
+    assert_eq!(
+        replay_multi_reason_json["batch_plan"]
+            .as_array()
+            .expect("batch plan")
+            .len(),
+        2
+    );
+
+    let replay_http_attempt_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "10",
+            "--batch-size",
+            "1",
+            "--http-status",
+            "500",
+            "--min-attempt",
+            "1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_http_attempt_json: Value =
+        serde_json::from_slice(&replay_http_attempt_output).expect("http/attempt replay json");
+    assert_eq!(replay_http_attempt_json["ok"], true);
+    assert_eq!(replay_http_attempt_json["selected_candidates"], 1);
+    assert_eq!(
+        replay_http_attempt_json["replay_candidates"][0]["http_status"],
+        500
+    );
+    let observed_attempt = replay_http_attempt_json["replay_candidates"][0]["attempt"]
+        .as_u64()
+        .expect("candidate attempt as u64");
+    assert!(
+        observed_attempt >= 1,
+        "candidate attempt should be at least 1 for min-attempt filtering"
+    );
+
+    let replay_http_attempt_strict_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "10",
+            "--http-status",
+            "500",
+            "--min-attempt",
+            &(observed_attempt + 1).to_string(),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_http_attempt_strict_json: Value =
+        serde_json::from_slice(&replay_http_attempt_strict_output)
+            .expect("strict http/attempt replay json");
+    assert_eq!(replay_http_attempt_strict_json["ok"], true);
+    assert_eq!(replay_http_attempt_strict_json["selected_candidates"], 0);
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_apply_stop_on_error_stops_after_first_failure() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "stop-on-error",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://429",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add channel json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    for text in [
+        "first failed replay candidate",
+        "second failed replay candidate",
+    ] {
+        Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "send",
+                &channel_id,
+                "--text",
+                text,
+            ])
+            .assert()
+            .failure()
+            .code(4);
+    }
+
+    let replay_apply_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "2",
+            "--apply",
+            "--stop-on-error",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_apply_json: Value =
+        serde_json::from_slice(&replay_apply_output).expect("replay apply json");
+    assert_eq!(replay_apply_json["ok"], true);
+    assert_eq!(replay_apply_json["selected_candidates"], 2);
+    assert_eq!(replay_apply_json["applied"]["attempted"], 1);
+    assert_eq!(replay_apply_json["applied"]["succeeded"], 0);
+    assert_eq!(replay_apply_json["applied"]["failed"], 1);
+    assert_eq!(replay_apply_json["applied"]["stopped_on_error"], true);
+    assert_eq!(
+        replay_apply_json["applied"]["results"]
+            .as_array()
+            .expect("results array")
+            .len(),
+        1
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_since_minutes_filters_old_failed_events() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "since-window",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://429",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add channel json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    for text in ["old failed candidate", "recent failed candidate"] {
+        Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "send",
+                &channel_id,
+                "--text",
+                text,
+            ])
+            .assert()
+            .failure()
+            .code(4);
+    }
+
+    let event_path = temp
+        .path()
+        .join(".mosaic/data/channel-events")
+        .join(format!("{channel_id}.jsonl"));
+    let raw = std::fs::read_to_string(&event_path).expect("read channel events");
+    let mut events = raw
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).expect("event json"))
+        .collect::<Vec<_>>();
+    assert!(
+        events.len() >= 2,
+        "expected at least two failed events for since window test"
+    );
+    events[0]["ts"] = Value::String("2000-01-01T00:00:00Z".to_string());
+    let rewritten = format!(
+        "{}\n",
+        events
+            .iter()
+            .map(|event| serde_json::to_string(event).expect("serialize event"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    std::fs::write(&event_path, rewritten).expect("rewrite events with old timestamp");
+
+    let replay_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "10",
+            "--since-minutes",
+            "10",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_json: Value = serde_json::from_slice(&replay_output).expect("replay json");
+    assert_eq!(replay_json["ok"], true);
+    assert_eq!(replay_json["since_minutes"], 10);
+    assert_eq!(replay_json["selected_candidates"], 1);
+    assert_eq!(replay_json["failed_events_in_window"], 1);
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_apply_blocks_when_channel_is_not_ready() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "replay-preflight",
+            "--kind",
+            "telegram_bot",
+            "--chat-id=-1000000000042",
+            "--endpoint",
+            "mock-http://429",
+            "--token-env",
+            "MOSAIC_REPLAY_BLOCKED_TOKEN",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add channel json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_REPLAY_BLOCKED_TOKEN", "test-token")
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &channel_id,
+            "--text",
+            "preflight candidate",
+        ])
+        .assert()
+        .failure()
+        .code(4);
+
+    let event_path = temp
+        .path()
+        .join(".mosaic/data/channel-events")
+        .join(format!("{channel_id}.jsonl"));
+    let before = std::fs::read_to_string(&event_path)
+        .expect("event file before replay")
+        .lines()
+        .count();
+
+    let replay_apply_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "1",
+            "--apply",
+        ])
+        .assert()
+        .failure()
+        .code(3)
+        .get_output()
+        .stdout
+        .clone();
+    let replay_apply_json: Value =
+        serde_json::from_slice(&replay_apply_output).expect("replay apply json");
+    assert_eq!(replay_apply_json["ok"], false);
+    assert_eq!(replay_apply_json["error"]["code"], "auth");
+    assert!(
+        replay_apply_json["error"]["message"]
+            .as_str()
+            .is_some_and(|value| value.contains("channels replay --apply blocked")),
+        "replay apply should block early when channel readiness check fails"
+    );
+
+    let after = std::fs::read_to_string(&event_path)
+        .expect("event file after replay")
+        .lines()
+        .count();
+    assert_eq!(
+        before, after,
+        "preflight block should not append additional channel events"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn channels_replay_apply_max_apply_and_report_out_flow() {
+    let temp = tempdir().expect("tempdir");
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "add",
+            "--name",
+            "replay-report",
+            "--kind",
+            "slack_webhook",
+            "--endpoint",
+            "mock-http://429",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add channel json");
+    let channel_id = add_json["channel"]["id"]
+        .as_str()
+        .expect("channel id")
+        .to_string();
+
+    for text in [
+        "first replay report candidate",
+        "second replay report candidate",
+        "third replay report candidate",
+    ] {
+        Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "send",
+                &channel_id,
+                "--text",
+                text,
+            ])
+            .assert()
+            .failure()
+            .code(4);
+    }
+
+    let report_path = temp.path().join("replay-report.json");
+    let replay_apply_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "replay",
+            &channel_id,
+            "--tail",
+            "20",
+            "--limit",
+            "3",
+            "--apply",
+            "--max-apply",
+            "2",
+            "--report-out",
+            report_path.to_str().expect("report path"),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let replay_apply_json: Value =
+        serde_json::from_slice(&replay_apply_output).expect("replay apply json");
+    assert_eq!(replay_apply_json["ok"], true);
+    assert_eq!(replay_apply_json["selected_candidates"], 3);
+    assert_eq!(replay_apply_json["applied"]["planned"], 2);
+    assert_eq!(replay_apply_json["applied"]["attempted"], 2);
+    assert_eq!(replay_apply_json["applied"]["failed"], 2);
+    assert_eq!(replay_apply_json["applied"]["stopped_on_error"], false);
+    assert_eq!(
+        replay_apply_json["applied"]["skipped_due_to_apply_limit"],
+        1
+    );
+    assert_eq!(
+        replay_apply_json["applied"]["skipped_due_to_stop_on_error"],
+        0
+    );
+
+    let report_raw = std::fs::read_to_string(&report_path).expect("replay report file");
+    let report_json: Value = serde_json::from_str(&report_raw).expect("replay report json");
+    assert_eq!(report_json["ok"], true);
+    assert_eq!(report_json["selected_candidates"], 3);
+    assert_eq!(report_json["applied"]["planned"], 2);
+    assert_eq!(report_json["applied"]["attempted"], 2);
+    assert_eq!(report_json["applied"]["skipped_due_to_apply_limit"], 1);
 }
 
 #[test]
@@ -1108,6 +2203,29 @@ fn gateway_probe_discover_call_flow() {
     assert_eq!(find_check("gateway_discover")["status"], "ok");
     assert_eq!(find_check("gateway_protocol_methods")["status"], "ok");
     assert_eq!(find_check("gateway_call_status")["status"], "ok");
+    assert_eq!(find_check("gateway_call_health")["status"], "ok");
+    assert_eq!(find_check("gateway_status_schema_profile")["status"], "ok");
+    assert_eq!(find_check("gateway_health_schema_profile")["status"], "ok");
+
+    let events_path = temp.path().join(".mosaic/data/gateway-events.jsonl");
+    let events_raw = std::fs::read_to_string(&events_path).expect("gateway events");
+    let events = events_raw
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).expect("gateway event json"))
+        .collect::<Vec<_>>();
+    assert!(
+        events.len() >= 3,
+        "expected at least probe/discover/call events"
+    );
+    assert!(events.iter().any(|event| event["action"] == "probe"));
+    assert!(events.iter().any(|event| event["action"] == "discover"));
+    assert!(events.iter().any(|event| event["action"] == "call"));
+    assert!(
+        events
+            .iter()
+            .all(|event| event["success"].as_bool().unwrap_or(false)),
+        "test-mode gateway flow should not write failed telemetry events"
+    );
 
     Command::cargo_bin("mosaic")
         .expect("binary")
@@ -1281,6 +2399,27 @@ fn channels_ops_commands_flow() {
     assert_eq!(logs_summary_json["summary"]["total_events"], 1);
     assert_eq!(logs_summary_json["summary"]["success_events"], 1);
     assert_eq!(logs_summary_json["summary"]["failed_events"], 0);
+    assert_eq!(logs_summary_json["summary"]["retryable_failed_events"], 0);
+    assert_eq!(
+        logs_summary_json["summary"]["non_retryable_failed_events"],
+        0
+    );
+    assert!(
+        logs_summary_json["summary"]["failure_reasons"]
+            .as_object()
+            .expect("failure reasons object")
+            .is_empty()
+    );
+    assert!(
+        logs_summary_json["summary"]["replay_candidates"]
+            .as_array()
+            .expect("replay candidates")
+            .is_empty()
+    );
+    assert_eq!(
+        logs_summary_json["summary"]["channels"][0]["retryable_failed_events"],
+        0
+    );
 
     let capabilities_output = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -1303,6 +2442,14 @@ fn channels_ops_commands_flow() {
     assert_eq!(
         capabilities_json["capabilities"][0]["kind"],
         "slack_webhook"
+    );
+    assert_eq!(
+        capabilities_json["capabilities"][0]["diagnostics"]["ready_for_send"],
+        true
+    );
+    assert_eq!(
+        capabilities_json["capabilities"][0]["diagnostics"]["channel_id"],
+        channel_id
     );
 
     let resolve_output = Command::cargo_bin("mosaic")

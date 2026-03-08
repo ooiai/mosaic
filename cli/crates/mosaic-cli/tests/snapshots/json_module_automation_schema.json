@@ -40,7 +40,120 @@
       ],
       "type": "array"
     },
-    "ok": "bool"
+    "ok": "bool",
+    "summary": "null"
+  },
+  "cron_logs_summary": {
+    "events": {
+      "items": [
+        {
+          "data": {
+            "source": "string"
+          },
+          "error": "null",
+          "event": "string",
+          "hooks_failed": "number",
+          "hooks_ok": "number",
+          "hooks_triggered": "number",
+          "job_id": "string",
+          "job_name": "string",
+          "ok": "bool",
+          "trigger": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "summary": {
+      "by_trigger": {
+        "manual": "number",
+        "tick": "number"
+      },
+      "failed": "number",
+      "hooks_failed": "number",
+      "hooks_ok": "number",
+      "hooks_triggered": "number",
+      "ok": "number",
+      "total": "number"
+    }
+  },
+  "cron_replay": {
+    "apply": "bool",
+    "batch_plan": {
+      "items": [
+        {
+          "batch_index": "number",
+          "first_ts": "string",
+          "items": {
+            "items": [
+              {
+                "reason": "string",
+                "retryable": "bool",
+                "ts": "string"
+              }
+            ],
+            "type": "array"
+          },
+          "last_ts": "string",
+          "reasons": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "retryable_only": "bool",
+          "size": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "batch_size": "null",
+    "candidates": {
+      "items": [
+        {
+          "data": "null",
+          "error": "string",
+          "event": "string",
+          "hooks_failed": "number",
+          "job_id": "string",
+          "job_name": "string",
+          "reason": "string",
+          "retryable": "bool",
+          "suggested_command": "string",
+          "trigger": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "failed_events": "number",
+    "limit": "number",
+    "max_apply": "null",
+    "ok": "bool",
+    "reason_filters": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "recovery_diagnostics": {
+      "newest_candidate_ts": "string",
+      "non_retryable_candidates": "number",
+      "oldest_candidate_age_minutes": "number",
+      "oldest_candidate_ts": "string",
+      "reason_histogram": {
+        "hook_failures": "number"
+      },
+      "retryable_candidates": "number",
+      "selected_candidates": "number",
+      "suggested_strategy": "string"
+    },
+    "report_out": "string",
+    "retryable_only": "bool",
+    "selected_candidates": "number",
+    "since_minutes": "null",
+    "tail": "number"
   },
   "cron_run": {
     "job": {
@@ -155,7 +268,125 @@
       ],
       "type": "array"
     },
-    "ok": "bool"
+    "ok": "bool",
+    "summary": "null"
+  },
+  "hook_logs_summary": {
+    "events": {
+      "items": [
+        {
+          "approved_by": "string",
+          "command": "string",
+          "data": {
+            "source": "string"
+          },
+          "delivery_status": "string",
+          "duration_ms": "number",
+          "error": "null",
+          "error_code": "null",
+          "event": "string",
+          "exit_code": "number",
+          "hook_id": "string",
+          "hook_name": "string",
+          "ok": "bool",
+          "stderr_preview": "null",
+          "stdout_preview": "string",
+          "trigger": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "summary": {
+      "by_delivery_status": {
+        "success": "number"
+      },
+      "by_trigger": {
+        "manual": "number"
+      },
+      "failed": "number",
+      "ok": "number",
+      "total": "number"
+    }
+  },
+  "hook_replay": {
+    "apply": "bool",
+    "batch_plan": {
+      "items": [
+        {
+          "batch_index": "number",
+          "first_ts": "string",
+          "items": {
+            "items": [
+              {
+                "reason": "string",
+                "retryable": "bool",
+                "ts": "string"
+              }
+            ],
+            "type": "array"
+          },
+          "last_ts": "string",
+          "reasons": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "retryable_only": "bool",
+          "size": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "batch_size": "null",
+    "candidates": {
+      "items": [
+        {
+          "data": "null",
+          "delivery_status": "string",
+          "error": "string",
+          "error_code": "string",
+          "event": "string",
+          "hook_id": "string",
+          "hook_name": "string",
+          "reason": "string",
+          "retryable": "bool",
+          "suggested_command": "string",
+          "trigger": "string",
+          "ts": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "failed_events": "number",
+    "limit": "number",
+    "max_apply": "null",
+    "ok": "bool",
+    "reason_filters": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "recovery_diagnostics": {
+      "newest_candidate_ts": "string",
+      "non_retryable_candidates": "number",
+      "oldest_candidate_age_minutes": "number",
+      "oldest_candidate_ts": "string",
+      "reason_histogram": {
+        "approval_required": "number"
+      },
+      "retryable_candidates": "number",
+      "selected_candidates": "number",
+      "suggested_strategy": "string"
+    },
+    "report_out": "string",
+    "retryable_only": "bool",
+    "selected_candidates": "number",
+    "since_minutes": "null",
+    "tail": "number"
   },
   "hook_run": {
     "hook": {
@@ -227,7 +458,128 @@
       ],
       "type": "array"
     },
-    "ok": "bool"
+    "ok": "bool",
+    "summary": "null"
+  },
+  "webhook_logs_summary": {
+    "events": {
+      "items": [
+        {
+          "data": {
+            "kind": "string"
+          },
+          "error": "null",
+          "error_code": "null",
+          "event": "string",
+          "hooks_failed": "number",
+          "hooks_ok": "number",
+          "hooks_triggered": "number",
+          "method": "string",
+          "ok": "bool",
+          "path": "string",
+          "trigger": "string",
+          "ts": "string",
+          "webhook_id": "string",
+          "webhook_name": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "ok": "bool",
+    "summary": {
+      "by_method": {
+        "POST": "number"
+      },
+      "by_trigger": {
+        "resolve": "number"
+      },
+      "failed": "number",
+      "hooks_failed": "number",
+      "hooks_ok": "number",
+      "hooks_triggered": "number",
+      "ok": "number",
+      "total": "number"
+    }
+  },
+  "webhook_replay": {
+    "apply": "bool",
+    "batch_plan": {
+      "items": [
+        {
+          "batch_index": "number",
+          "first_ts": "string",
+          "items": {
+            "items": [
+              {
+                "reason": "string",
+                "retryable": "bool",
+                "ts": "string"
+              }
+            ],
+            "type": "array"
+          },
+          "last_ts": "string",
+          "reasons": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "retryable_only": "bool",
+          "size": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "batch_size": "null",
+    "candidates": {
+      "items": [
+        {
+          "data": "null",
+          "error": "string",
+          "error_code": "string",
+          "event": "string",
+          "method": "string",
+          "path": "string",
+          "reason": "string",
+          "requires_secret": "bool",
+          "retryable": "bool",
+          "suggested_command": "string",
+          "trigger": "string",
+          "ts": "string",
+          "webhook_id": "string",
+          "webhook_name": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "failed_events": "number",
+    "limit": "number",
+    "max_apply": "null",
+    "ok": "bool",
+    "reason_filters": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "recovery_diagnostics": {
+      "newest_candidate_ts": "string",
+      "non_retryable_candidates": "number",
+      "oldest_candidate_age_minutes": "number",
+      "oldest_candidate_ts": "string",
+      "reason_histogram": {
+        "auth": "number"
+      },
+      "retryable_candidates": "number",
+      "selected_candidates": "number",
+      "suggested_strategy": "string"
+    },
+    "report_out": "string",
+    "retryable_only": "bool",
+    "selected_candidates": "number",
+    "since_minutes": "null",
+    "tail": "number"
   },
   "webhook_resolve": {
     "ok": "bool",

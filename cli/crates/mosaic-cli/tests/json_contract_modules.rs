@@ -252,6 +252,71 @@ fn json_channels_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&logs_summary);
 
+    let add_fail = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "add",
+                "--name",
+                "contract-fail",
+                "--kind",
+                "slack_webhook",
+                "--endpoint",
+                "mock-http://429",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&add_fail);
+    let fail_channel_id = add_fail["channel"]["id"]
+        .as_str()
+        .expect("fail channel id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "channels",
+            "send",
+            &fail_channel_id,
+            "--text",
+            "module schema fail",
+        ])
+        .assert()
+        .failure()
+        .code(4);
+
+    let replay = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "channels",
+                "replay",
+                &fail_channel_id,
+                "--tail",
+                "20",
+                "--limit",
+                "3",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&replay);
+
     let actual_schema = json!({
         "add": schema_of(&add),
         "list": schema_of(&list),
@@ -262,6 +327,7 @@ fn json_channels_module_schema_matches_snapshot() {
         "send": schema_of(&send),
         "logs": schema_of(&logs),
         "logs_summary": schema_of(&logs_summary),
+        "replay": schema_of(&replay),
     });
     assert_json_snapshot("snapshots/json_module_channels_schema.json", &actual_schema);
 }
@@ -1237,6 +1303,66 @@ fn json_nodes_pairing_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&nodes_status_summary);
 
+    let device_reject_for_diagnose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "devices",
+                "reject",
+                "contract-dev-approve",
+                "--reason",
+                "schema-diagnose-mismatch",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&device_reject_for_diagnose);
+
+    let nodes_path = temp.path().join(".mosaic/data/nodes.json");
+    let mut nodes_json: Value = serde_json::from_slice(
+        &std::fs::read(&nodes_path).expect("read nodes for diagnose schema"),
+    )
+    .expect("parse nodes for diagnose schema");
+    let local_node = nodes_json
+        .as_array_mut()
+        .expect("nodes array for diagnose schema")
+        .iter_mut()
+        .find(|node| node["id"] == "local")
+        .expect("local node for diagnose schema");
+    local_node["last_seen_at"] = Value::String("2000-01-01T00:00:00Z".to_string());
+    local_node["updated_at"] = Value::String("2000-01-01T00:00:00Z".to_string());
+    std::fs::write(
+        &nodes_path,
+        serde_json::to_vec_pretty(&nodes_json).expect("serialize nodes for diagnose schema"),
+    )
+    .expect("write nodes for diagnose schema");
+
+    let nodes_diagnose_repair = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "nodes",
+                "diagnose",
+                "local",
+                "--stale-after-minutes",
+                "30",
+                "--repair",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&nodes_diagnose_repair);
+
     let actual_schema = json!({
         "nodes_list": schema_of(&nodes_list),
         "pairing_request_approve": schema_of(&pairing_request_approve),
@@ -1246,12 +1372,12 @@ fn json_nodes_pairing_module_schema_matches_snapshot() {
         "pairing_list_rejected": schema_of(&pairing_list_rejected),
         "nodes_status_local": schema_of(&nodes_status_local),
         "nodes_status_summary": schema_of(&nodes_status_summary),
+        "nodes_diagnose_repair": schema_of(&nodes_diagnose_repair),
     });
-    let expected_schema: Value = serde_json::from_str(include_str!(
-        "snapshots/json_module_nodes_pairing_schema.json"
-    ))
-    .expect("expected module nodes/pairing schema");
-    assert_eq!(actual_schema, expected_schema);
+    assert_json_snapshot(
+        "snapshots/json_module_nodes_pairing_schema.json",
+        &actual_schema,
+    );
 }
 
 #[test]
@@ -2174,6 +2300,65 @@ fn json_automation_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&hook_logs);
 
+    let hook_logs_summary = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "hooks",
+                "logs",
+                "--hook",
+                &hook_id,
+                "--tail",
+                "10",
+                "--summary",
+                "--since-minutes",
+                "60",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&hook_logs_summary);
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "hooks", "run", &hook_id])
+        .assert()
+        .failure()
+        .code(11);
+
+    let hook_replay = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "hooks",
+                "replay",
+                "--hook",
+                &hook_id,
+                "--tail",
+                "20",
+                "--limit",
+                "3",
+                "--reason",
+                "approval_required",
+                "--report-out",
+                "hook-replay-report.json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&hook_replay);
+
     let webhook_add = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -2247,6 +2432,102 @@ fn json_automation_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&webhook_logs);
+
+    let webhook_logs_summary = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "webhooks",
+                "logs",
+                "--webhook",
+                &webhook_id,
+                "--tail",
+                "10",
+                "--summary",
+                "--since-minutes",
+                "60",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&webhook_logs_summary);
+
+    let webhook_fail_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "webhooks",
+                "add",
+                "--name",
+                "contract-webhook-fail",
+                "--event",
+                "deploy",
+                "--path",
+                "/contract/fail",
+                "--method",
+                "post",
+                "--secret-env",
+                "MOSAIC_WEBHOOK_SECRET_CONTRACT",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&webhook_fail_add);
+    let webhook_fail_id = webhook_fail_add["webhook"]["id"]
+        .as_str()
+        .expect("webhook fail id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "webhooks",
+            "trigger",
+            &webhook_fail_id,
+        ])
+        .assert()
+        .failure()
+        .code(3);
+
+    let webhook_replay = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "webhooks",
+                "replay",
+                "--webhook",
+                &webhook_fail_id,
+                "--tail",
+                "20",
+                "--limit",
+                "3",
+                "--reason",
+                "auth",
+                "--report-out",
+                "webhook-replay-report.json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&webhook_replay);
 
     let cron_add = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -2331,17 +2612,143 @@ fn json_automation_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&cron_logs);
 
+    let cron_logs_summary = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "cron",
+                "logs",
+                "--job",
+                &cron_job_id,
+                "--tail",
+                "10",
+                "--summary",
+                "--since-minutes",
+                "60",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_logs_summary);
+
+    let fail_hook_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "hooks",
+                "add",
+                "--name",
+                "contract-cron-fail-hook",
+                "--event",
+                "deploy-fail",
+                "--command",
+                "false",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&fail_hook_add);
+
+    let cron_fail_add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "cron",
+                "add",
+                "--name",
+                "contract-cron-fail",
+                "--event",
+                "deploy-fail",
+                "--every",
+                "1",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_fail_add);
+    let cron_fail_job_id = cron_fail_add["job"]["id"]
+        .as_str()
+        .expect("cron fail job id")
+        .to_string();
+
+    let cron_fail_run = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--yes",
+                "--json",
+                "cron",
+                "run",
+                &cron_fail_job_id,
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_fail_run);
+
+    let cron_replay = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "cron",
+                "replay",
+                "--job",
+                &cron_fail_job_id,
+                "--tail",
+                "20",
+                "--limit",
+                "3",
+                "--reason",
+                "hook_failures",
+                "--report-out",
+                "cron-replay-report.json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&cron_replay);
+
     let actual_schema = json!({
         "hook_add": schema_of(&hook_add),
         "hook_run": schema_of(&hook_run),
         "hook_logs": schema_of(&hook_logs),
+        "hook_logs_summary": schema_of(&hook_logs_summary),
+        "hook_replay": schema_of(&hook_replay),
         "webhook_add": schema_of(&webhook_add),
         "webhook_resolve": schema_of(&webhook_resolve),
         "webhook_logs": schema_of(&webhook_logs),
+        "webhook_logs_summary": schema_of(&webhook_logs_summary),
+        "webhook_replay": schema_of(&webhook_replay),
         "cron_add": schema_of(&cron_add),
         "cron_tick": schema_of(&cron_tick),
         "cron_run": schema_of(&cron_run),
         "cron_logs": schema_of(&cron_logs),
+        "cron_logs_summary": schema_of(&cron_logs_summary),
+        "cron_replay": schema_of(&cron_replay),
     });
     assert_json_snapshot(
         "snapshots/json_module_automation_schema.json",
@@ -2424,6 +2831,25 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&browser_status);
+
+    let browser_diagnose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "browser",
+                "diagnose",
+                "--stale-after-minutes",
+                "1",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&browser_diagnose);
 
     let browser_history = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -2943,6 +3369,7 @@ fn json_feature_runtime_module_schema_matches_snapshot() {
         "browser_start": schema_of(&browser_start),
         "browser_open": schema_of(&browser_open),
         "browser_status": schema_of(&browser_status),
+        "browser_diagnose": schema_of(&browser_diagnose),
         "browser_history": schema_of(&browser_history),
         "browser_tabs": schema_of(&browser_tabs),
         "browser_show": schema_of(&browser_show),
@@ -3343,6 +3770,50 @@ fn json_mcp_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&check_all);
 
+    let deep_check_all = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "check",
+                "--all",
+                "--deep",
+                "--timeout-ms",
+                "300",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&deep_check_all);
+
+    let diagnose_report = temp.path().join("reports").join("mcp-diagnose-schema.json");
+    let diagnose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "diagnose",
+                &server_id,
+                "--timeout-ms",
+                "300",
+                "--report-out",
+                diagnose_report.to_string_lossy().as_ref(),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&diagnose);
+
     let disable = parse_stdout_json(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -3354,6 +3825,26 @@ fn json_mcp_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&disable);
+
+    let repair = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "repair",
+                &server_id,
+                "--timeout-ms",
+                "300",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&repair);
 
     let enable = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -3385,7 +3876,10 @@ fn json_mcp_module_schema_matches_snapshot() {
         "check": schema_of(&check),
         "show": schema_of(&show),
         "check_all": schema_of(&check_all),
+        "deep_check_all": schema_of(&deep_check_all),
+        "diagnose": schema_of(&diagnose),
         "disable": schema_of(&disable),
+        "repair": schema_of(&repair),
         "enable": schema_of(&enable),
         "remove": schema_of(&remove),
     });
@@ -3431,6 +3925,31 @@ fn json_tts_voicecall_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&speak);
+
+    let diagnose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "tts",
+                "diagnose",
+                "--voice",
+                "alloy",
+                "--format",
+                "txt",
+                "--text",
+                "contract diagnose",
+                "--timeout-ms",
+                "2000",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&diagnose);
 
     let start = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -3502,6 +4021,7 @@ fn json_tts_voicecall_module_schema_matches_snapshot() {
     let actual_schema = json!({
         "tts_voices": schema_of(&voices),
         "tts_speak": schema_of(&speak),
+        "tts_diagnose": schema_of(&diagnose),
         "voicecall_start": schema_of(&start),
         "voicecall_send": schema_of(&send),
         "voicecall_history": schema_of(&history),

@@ -23,12 +23,14 @@ This document defines JSON output contract coverage for Mosaic CLI.
     - `channels/admin` (`update`, `login`, `export`, `import`, `rotate-token-env`, `logout`, `remove`)
     - `gateway`
     - `gateway/admin` (`install`, `start`, `status --deep`, `health --verbose`, `restart`, `uninstall`)
+    - `mcp` (`list/add/show/check/diagnose/repair/enable/disable/remove`)
     - `ops/policy` (`approvals get/set/check/allowlist add|list|remove`, `sandbox get/set/check/list/explain`, `safety get/check/report`, `observability report/export`, `system event/presence/list`, `logs`)
     - `automation` (`hooks`, `cron`, `webhooks`)
-    - `features` (`browser start/status/navigate/history/tabs/show/focus/snapshot/screenshot/clear/close/stop`, `memory index/search/status/clear`, `plugins` doctor/toggle/run flow including run timeout/output-guard/sandbox/approval/resource-limit/resource-metrics/event-log fields, `plugins/skills` list source filters)
+    - `features` (`browser start/status/navigate/diagnose/history/tabs/show/focus/snapshot/screenshot/clear/close/stop`; `diagnose` schema includes network failure classes + probe results + screenshot artifact integrity/retention fields, `memory index/search/status/clear`, `plugins` doctor/toggle/run flow including run timeout/output-guard/sandbox/approval/resource-limit/resource-metrics/event-log fields, `plugins/skills` list source filters)
     - `compat/discovery/maintenance` (`docs`, `dns`, `tui`, `qr`, `clawbot`, `directory` + diagnostics flags, `dashboard`, `update` + same-version check, `reset`, `uninstall`)
     - `security`
     - `security/baseline` (`show`, `add`, `remove`, `clear`)
+    - `tts/voicecall` (`tts voices/speak/diagnose`, `voicecall start/status/send/history/stop`)
     - `agents`
     - `nodes/pairing`
   - Snapshot files:
@@ -38,12 +40,14 @@ This document defines JSON output contract coverage for Mosaic CLI.
     - `tests/snapshots/json_module_channels_admin_schema.json`
     - `tests/snapshots/json_module_gateway_schema.json`
     - `tests/snapshots/json_module_gateway_admin_schema.json`
+    - `tests/snapshots/json_module_mcp_schema.json`
     - `tests/snapshots/json_module_ops_policy_schema.json`
     - `tests/snapshots/json_module_automation_schema.json`
     - `tests/snapshots/json_module_features_schema.json`
     - `tests/snapshots/json_module_compat_discovery_maintenance_schema.json`
     - `tests/snapshots/json_module_security_schema.json`
     - `tests/snapshots/json_module_security_baseline_schema.json`
+    - `tests/snapshots/json_module_tts_voicecall_schema.json`
     - `tests/snapshots/json_module_agents_schema.json`
     - `tests/snapshots/json_module_nodes_pairing_schema.json`
 

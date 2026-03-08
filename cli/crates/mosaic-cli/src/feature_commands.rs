@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Read;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -8,9 +8,9 @@ use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use mosaic_core::error::MosaicError;
 use mosaic_memory::{
@@ -27,10 +27,9 @@ use mosaic_plugins::{ExtensionRegistry, ExtensionSource, PluginEntry, RegistryRo
 use super::{
     BrowserArgs, BrowserCommand, Cli, ExtensionSourceFilterArg, MemoryArgs, MemoryCommand,
     MemoryPolicyCommand, PluginHookArg, PluginsArgs, PluginsCommand, Result, SkillsArgs,
-    SkillsCommand,
-    browser_history_file_path, browser_open_visit, browser_state_file_path,
+    SkillsCommand, browser_history_file_path, browser_open_visit, browser_state_file_path,
     load_browser_history_or_default, load_browser_state_or_default, print_json,
-    resolve_state_paths, save_browser_history, save_browser_state,
+    resolve_output_path, resolve_state_paths, save_browser_history, save_browser_state,
 };
 
 const PLUGIN_STATE_VERSION: u32 = 1;
@@ -167,6 +166,630 @@ pub(super) async fn handle_browser(cli: &Cli, args: BrowserArgs) -> Result<()> {
                 );
                 if let Some(visit) = latest_visit {
                     println!("latest visit: {} {}", visit.id, visit.url);
+                }
+            }
+        }
+        BrowserCommand::Diagnose {
+            stale_after_minutes,
+            probe_urls: raw_probe_urls,
+            probe_file,
+            probe_timeout_ms,
+            artifact_max_age_hours,
+            report_out,
+            repair,
+        } => {
+            if stale_after_minutes == 0 {
+                return Err(MosaicError::Validation(
+                    "browser diagnose --stale-after-minutes must be greater than 0".to_string(),
+                ));
+            }
+            if probe_timeout_ms == 0 {
+                return Err(MosaicError::Validation(
+                    "browser diagnose --probe-timeout-ms must be greater than 0".to_string(),
+                ));
+            }
+            let stale_after_i64 = i64::try_from(stale_after_minutes).map_err(|_| {
+                MosaicError::Validation(
+                    "browser diagnose --stale-after-minutes value is too large".to_string(),
+                )
+            })?;
+            let now = Utc::now();
+            let artifact_retention_cutoff = if let Some(hours) = artifact_max_age_hours {
+                if hours == 0 {
+                    return Err(MosaicError::Validation(
+                        "browser diagnose --artifact-max-age-hours must be greater than 0"
+                            .to_string(),
+                    ));
+                }
+                let hours_i64 = i64::try_from(hours).map_err(|_| {
+                    MosaicError::Validation(
+                        "browser diagnose --artifact-max-age-hours value is too large".to_string(),
+                    )
+                })?;
+                Some(now - ChronoDuration::hours(hours_i64))
+            } else {
+                None
+            };
+            let cutoff = now - ChronoDuration::minutes(stale_after_i64);
+
+            let mut probe_urls = normalize_probe_urls(raw_probe_urls);
+            let mut probe_file_path: Option<String> = None;
+            if let Some(raw_probe_file) = probe_file.as_deref() {
+                let cwd =
+                    std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+                let path = resolve_output_path(&cwd, raw_probe_file);
+                let content = std::fs::read_to_string(&path).map_err(|err| {
+                    MosaicError::Io(format!(
+                        "failed to read browser probe file '{}': {err}",
+                        path.display()
+                    ))
+                })?;
+                probe_urls.extend(parse_probe_urls_from_file(&content));
+                probe_file_path = Some(path.display().to_string());
+            }
+            probe_urls = normalize_probe_urls(probe_urls);
+
+            let mut issues = Vec::new();
+            let mut actions = Vec::new();
+            let mut history_changed = false;
+            let mut state_changed = false;
+            let mut artifacts_changed = false;
+
+            let history_was_sorted = history
+                .windows(2)
+                .all(|window| window[0].ts <= window[1].ts);
+            if !history_was_sorted {
+                issues.push(json!({
+                    "kind": "history_not_sorted",
+                    "severity": "warn",
+                    "detail": "browser visit history timestamps are not sorted; results may be unstable",
+                    "repairable": true,
+                }));
+            }
+
+            let mut duplicate_counts = HashMap::new();
+            for visit in &history {
+                *duplicate_counts.entry(visit.id.clone()).or_insert(0usize) += 1;
+            }
+            let duplicate_ids = duplicate_counts
+                .into_iter()
+                .filter_map(|(id, count)| (count > 1).then_some(id))
+                .collect::<Vec<_>>();
+            if !duplicate_ids.is_empty() {
+                issues.push(json!({
+                    "kind": "duplicate_visit_id",
+                    "severity": "warn",
+                    "duplicate_count": duplicate_ids.len(),
+                    "duplicate_ids": duplicate_ids.clone(),
+                    "detail": "visit history contains duplicate visit ids",
+                    "repairable": true,
+                }));
+            }
+
+            let mut invalid_visit_ids = Vec::new();
+            let mut stale_visit_ids = Vec::new();
+            for visit in &history {
+                if reqwest::Url::parse(&visit.url).is_err() {
+                    invalid_visit_ids.push(visit.id.clone());
+                }
+                if visit.ts < cutoff {
+                    stale_visit_ids.push(visit.id.clone());
+                }
+            }
+            if !invalid_visit_ids.is_empty() {
+                issues.push(json!({
+                    "kind": "invalid_visit_url",
+                    "severity": "warn",
+                    "count": invalid_visit_ids.len(),
+                    "sample_visit_ids": sample_string_items(&invalid_visit_ids, 10),
+                    "detail": "one or more browser visit urls are invalid",
+                    "repairable": false,
+                }));
+            }
+            if !stale_visit_ids.is_empty() {
+                issues.push(json!({
+                    "kind": "stale_visits_present",
+                    "severity": "info",
+                    "count": stale_visit_ids.len(),
+                    "cutoff": cutoff.to_rfc3339(),
+                    "sample_visit_ids": sample_string_items(&stale_visit_ids, 10),
+                    "detail": "browser history contains visits older than stale-after-minutes",
+                    "repairable": false,
+                }));
+            }
+
+            let mut network_failure_classes = BTreeMap::new();
+            for visit in &history {
+                if !visit.ok {
+                    let class = classify_browser_failure(visit);
+                    *network_failure_classes.entry(class).or_insert(0usize) += 1;
+                }
+            }
+            let network_failures_total = network_failure_classes.values().copied().sum::<usize>();
+            if !network_failure_classes.is_empty() {
+                issues.push(json!({
+                    "kind": "network_failures_present",
+                    "severity": "info",
+                    "count": network_failures_total,
+                    "classes": network_failure_classes.clone(),
+                    "detail": "browser history includes failed visits; inspect classes for quick triage",
+                    "repairable": false,
+                }));
+            }
+
+            let mut probe_results = Vec::new();
+            let mut probe_failure_classes = BTreeMap::new();
+            for probe_url in &probe_urls {
+                let started = Instant::now();
+                match browser_open_visit(probe_url, probe_timeout_ms).await {
+                    Ok(visit) => {
+                        let failure_class = if visit.ok {
+                            None
+                        } else {
+                            let class = classify_browser_failure(&visit);
+                            *probe_failure_classes.entry(class.clone()).or_insert(0usize) += 1;
+                            Some(class)
+                        };
+                        probe_results.push(json!({
+                            "url": probe_url,
+                            "ok": visit.ok,
+                            "http_status": visit.http_status,
+                            "title": visit.title,
+                            "error": visit.error,
+                            "failure_class": failure_class,
+                            "latency_ms": started.elapsed().as_millis(),
+                        }));
+                    }
+                    Err(err) => {
+                        *probe_failure_classes
+                            .entry("input_validation".to_string())
+                            .or_insert(0usize) += 1;
+                        probe_results.push(json!({
+                            "url": probe_url,
+                            "ok": false,
+                            "http_status": Value::Null,
+                            "error": err.to_string(),
+                            "failure_class": "input_validation",
+                            "latency_ms": started.elapsed().as_millis(),
+                        }));
+                    }
+                }
+            }
+            let probe_failures_total = probe_failure_classes.values().copied().sum::<usize>();
+            if !probe_urls.is_empty() && probe_failures_total > 0 {
+                issues.push(json!({
+                    "kind": "probe_failures_present",
+                    "severity": "warn",
+                    "count": probe_failures_total,
+                    "classes": probe_failure_classes.clone(),
+                    "detail": "one or more probe urls failed; inspect probe_results",
+                    "repairable": false,
+                }));
+            }
+
+            let artifacts_dir = paths.data_dir.join("browser-screenshots");
+            let mut scanned_artifacts = 0usize;
+            let mut orphan_artifacts = Vec::new();
+            let mut corrupt_artifacts = Vec::new();
+            let mut stale_artifacts = Vec::new();
+            let history_visit_ids = history
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<HashSet<_>>();
+            let history_visit_ts = history
+                .iter()
+                .map(|item| (item.id.as_str(), item.ts))
+                .collect::<HashMap<_, _>>();
+            let mut artifact_scan_error: Option<String> = None;
+            if artifacts_dir.exists() {
+                match std::fs::read_dir(&artifacts_dir) {
+                    Ok(entries) => {
+                        for entry in entries {
+                            let entry = match entry {
+                                Ok(value) => value,
+                                Err(err) => {
+                                    if artifact_scan_error.is_none() {
+                                        artifact_scan_error =
+                                            Some(format!("failed to read artifact entry: {err}"));
+                                    }
+                                    continue;
+                                }
+                            };
+                            let path = entry.path();
+                            if !path.is_file() {
+                                continue;
+                            }
+                            if path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
+                                continue;
+                            }
+                            scanned_artifacts += 1;
+                            let Some(stem) = path.file_stem().and_then(|value| value.to_str())
+                            else {
+                                corrupt_artifacts.push(path.display().to_string());
+                                continue;
+                            };
+                            let artifact_path = path.display().to_string();
+                            if !history_visit_ids.contains(stem) {
+                                orphan_artifacts.push(artifact_path);
+                                continue;
+                            }
+                            match std::fs::read_to_string(&path) {
+                                Ok(content) => {
+                                    let valid_header =
+                                        content.contains("MOSAIC_BROWSER_SCREENSHOT_V1");
+                                    let valid_visit_id =
+                                        content.contains(&format!("visit_id={stem}"));
+                                    if !valid_header || !valid_visit_id {
+                                        corrupt_artifacts.push(artifact_path);
+                                        continue;
+                                    }
+                                    if let Some(retention_cutoff) = artifact_retention_cutoff
+                                        && let Some(visit_ts) = history_visit_ts.get(stem)
+                                        && *visit_ts < retention_cutoff
+                                    {
+                                        stale_artifacts.push(path.display().to_string());
+                                    }
+                                }
+                                Err(_) => {
+                                    corrupt_artifacts.push(artifact_path);
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        artifact_scan_error = Some(format!(
+                            "failed to read screenshot artifact directory '{}': {err}",
+                            artifacts_dir.display()
+                        ));
+                    }
+                }
+            }
+            if !orphan_artifacts.is_empty() {
+                issues.push(json!({
+                    "kind": "screenshot_orphan_artifact",
+                    "severity": "warn",
+                    "count": orphan_artifacts.len(),
+                    "sample_paths": sample_string_items(&orphan_artifacts, 10),
+                    "detail": "screenshot artifacts exist without matching visit history records",
+                    "repairable": true,
+                }));
+            }
+            if !corrupt_artifacts.is_empty() {
+                issues.push(json!({
+                    "kind": "screenshot_corrupt_artifact",
+                    "severity": "warn",
+                    "count": corrupt_artifacts.len(),
+                    "sample_paths": sample_string_items(&corrupt_artifacts, 10),
+                    "detail": "screenshot artifacts failed integrity checks",
+                    "repairable": true,
+                }));
+            }
+            if !stale_artifacts.is_empty() {
+                issues.push(json!({
+                    "kind": "screenshot_stale_artifact",
+                    "severity": "info",
+                    "count": stale_artifacts.len(),
+                    "sample_paths": sample_string_items(&stale_artifacts, 10),
+                    "retention_cutoff": artifact_retention_cutoff.as_ref().map(|value| value.to_rfc3339()),
+                    "detail": "screenshot artifacts exceed retention threshold and can be cleaned",
+                    "repairable": true,
+                }));
+            }
+            if let Some(scan_error) = artifact_scan_error {
+                issues.push(json!({
+                    "kind": "screenshot_artifact_scan_error",
+                    "severity": "warn",
+                    "detail": scan_error,
+                    "repairable": false,
+                }));
+            }
+
+            if state.running && state.started_at.is_none() {
+                issues.push(json!({
+                    "kind": "running_state_missing_started_at",
+                    "severity": "warn",
+                    "detail": "browser runtime is running but started_at is missing",
+                    "repairable": true,
+                }));
+            }
+            if let (Some(started_at), Some(stopped_at)) =
+                (state.started_at.as_ref(), state.stopped_at.as_ref())
+                && stopped_at < started_at
+            {
+                issues.push(json!({
+                    "kind": "runtime_timestamps_inverted",
+                    "severity": "warn",
+                    "started_at": started_at.to_rfc3339(),
+                    "stopped_at": stopped_at.to_rfc3339(),
+                    "detail": "runtime stopped_at is earlier than started_at",
+                    "repairable": true,
+                }));
+            }
+
+            let active_visit = state
+                .active_visit_id
+                .as_deref()
+                .and_then(|active_id| history.iter().find(|item| item.id == active_id));
+            let active_visit_missing = state.active_visit_id.is_some() && active_visit.is_none();
+            if active_visit_missing {
+                issues.push(json!({
+                    "kind": "active_visit_missing",
+                    "severity": "warn",
+                    "active_visit_id": state.active_visit_id.clone(),
+                    "detail": "active visit pointer does not match any visit in history",
+                    "repairable": true,
+                }));
+            }
+            let stale_active_visit = active_visit.map(|visit| visit.ts < cutoff).unwrap_or(false);
+            if stale_active_visit {
+                issues.push(json!({
+                    "kind": "stale_active_visit",
+                    "severity": "warn",
+                    "active_visit_id": state.active_visit_id.clone(),
+                    "cutoff": cutoff.to_rfc3339(),
+                    "detail": "active visit is stale",
+                    "repairable": true,
+                }));
+            }
+
+            if repair {
+                if !duplicate_ids.is_empty() {
+                    let mut deduped_by_id = HashMap::new();
+                    for visit in std::mem::take(&mut history) {
+                        match deduped_by_id.entry(visit.id.clone()) {
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert(visit);
+                            }
+                            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                if visit.ts > entry.get().ts {
+                                    entry.insert(visit);
+                                }
+                            }
+                        }
+                    }
+                    history = deduped_by_id.into_values().collect::<Vec<_>>();
+                    history.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+                    history_changed = true;
+                    actions.push(json!({
+                        "kind": "dedupe_visit_ids",
+                        "ok": true,
+                        "remaining_visits": history.len(),
+                        "detail": "duplicate visit ids removed (kept latest entry per id)",
+                    }));
+                } else if !history_was_sorted {
+                    history.sort_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+                    history_changed = true;
+                    actions.push(json!({
+                        "kind": "sort_visit_history",
+                        "ok": true,
+                        "detail": "visit history sorted by timestamp",
+                    }));
+                }
+
+                if state.running && state.started_at.is_none() {
+                    state.started_at = Some(now);
+                    state_changed = true;
+                    actions.push(json!({
+                        "kind": "repair_started_at",
+                        "ok": true,
+                        "started_at": now.to_rfc3339(),
+                        "detail": "runtime started_at populated for running state",
+                    }));
+                }
+
+                if let (Some(started_at), Some(stopped_at)) =
+                    (state.started_at.as_ref(), state.stopped_at.as_ref())
+                    && stopped_at < started_at
+                {
+                    state.stopped_at = Some(started_at.to_owned());
+                    state_changed = true;
+                    actions.push(json!({
+                        "kind": "repair_runtime_timestamps",
+                        "ok": true,
+                        "detail": "runtime stopped_at adjusted to not precede started_at",
+                    }));
+                }
+
+                let latest_visit_after = history.iter().max_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+                let active_exists_after = state
+                    .active_visit_id
+                    .as_deref()
+                    .is_some_and(|active_id| history.iter().any(|item| item.id == active_id));
+                if state.active_visit_id.is_some() && !active_exists_after {
+                    let previous = state.active_visit_id.clone();
+                    state.active_visit_id = latest_visit_after.map(|visit| visit.id.clone());
+                    state_changed = true;
+                    actions.push(json!({
+                        "kind": "repair_active_visit",
+                        "ok": true,
+                        "previous_active_visit_id": previous,
+                        "new_active_visit_id": state.active_visit_id.clone(),
+                        "detail": "active visit pointer reset to latest known visit",
+                    }));
+                }
+
+                let latest_visit_after = history.iter().max_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+                if let Some(active_id) = state.active_visit_id.as_deref()
+                    && let Some(active_visit_after) =
+                        history.iter().find(|item| item.id == active_id)
+                    && active_visit_after.ts < cutoff
+                    && let Some(latest) = latest_visit_after
+                    && latest.id != active_visit_after.id
+                    && latest.ts > active_visit_after.ts
+                {
+                    let previous = state.active_visit_id.clone();
+                    state.active_visit_id = Some(latest.id.clone());
+                    state_changed = true;
+                    actions.push(json!({
+                        "kind": "switch_stale_active_visit",
+                        "ok": true,
+                        "previous_active_visit_id": previous,
+                        "new_active_visit_id": state.active_visit_id.clone(),
+                        "detail": "active visit was stale and has been switched to the latest visit",
+                    }));
+                }
+
+                let mut artifact_cleanup_targets = BTreeMap::new();
+                for path in &orphan_artifacts {
+                    artifact_cleanup_targets.insert(path.clone(), "orphan");
+                }
+                for path in &corrupt_artifacts {
+                    artifact_cleanup_targets.insert(path.clone(), "corrupt");
+                }
+                for path in &stale_artifacts {
+                    artifact_cleanup_targets
+                        .entry(path.clone())
+                        .or_insert("stale");
+                }
+                for (path, reason) in artifact_cleanup_targets {
+                    match std::fs::remove_file(&path) {
+                        Ok(()) => {
+                            artifacts_changed = true;
+                            actions.push(json!({
+                                "kind": "remove_screenshot_artifact",
+                                "ok": true,
+                                "path": path,
+                                "reason": reason,
+                                "detail": "invalid/stale screenshot artifact removed",
+                            }));
+                        }
+                        Err(err) => {
+                            actions.push(json!({
+                                "kind": "remove_screenshot_artifact",
+                                "ok": false,
+                                "path": path,
+                                "reason": reason,
+                                "error": err.to_string(),
+                            }));
+                        }
+                    }
+                }
+            }
+
+            if repair && history_changed {
+                save_browser_history(&history_path, &history)?;
+            }
+            if repair && state_changed {
+                save_browser_state(&state_path, &state)?;
+            }
+
+            let latest_visit = history.iter().max_by(|lhs, rhs| lhs.ts.cmp(&rhs.ts));
+            let summary = json!({
+                "history_entries": history.len(),
+                "issues": issues.len(),
+                "stale_visits": stale_visit_ids.len(),
+                "invalid_urls": invalid_visit_ids.len(),
+                "network_failures": network_failures_total,
+                "network_failure_classes": network_failure_classes,
+                "probe_count": probe_urls.len(),
+                "probe_failures": probe_failures_total,
+                "probe_failure_classes": probe_failure_classes,
+                "duplicate_ids": duplicate_ids.len(),
+                "active_visit_missing": active_visit_missing,
+                "stale_active_visit": stale_active_visit,
+                "screenshot_artifacts_scanned": scanned_artifacts,
+                "orphan_screenshot_artifacts": orphan_artifacts.len(),
+                "corrupt_screenshot_artifacts": corrupt_artifacts.len(),
+                "stale_screenshot_artifacts": stale_artifacts.len(),
+                "artifact_retention_cutoff": artifact_retention_cutoff.as_ref().map(|value| value.to_rfc3339()),
+                "actions_applied": actions.len(),
+                "saved_history": repair && history_changed,
+                "saved_state": repair && state_changed,
+                "saved_artifacts": repair && artifacts_changed,
+            });
+
+            let mut diagnose_payload = json!({
+                "ok": true,
+                "repair": repair,
+                "summary": summary,
+                "issues": issues,
+                "actions": actions,
+                "cutoff": cutoff.to_rfc3339(),
+                "state": state,
+                "latest_visit": latest_visit,
+                "probe_results": probe_results,
+                "history_path": history_path.display().to_string(),
+                "state_path": state_path.display().to_string(),
+                "artifacts_path": artifacts_dir.display().to_string(),
+                "probe_file_path": probe_file_path,
+                "report_path": Value::Null,
+            });
+
+            if let Some(raw_report_out) = report_out.as_deref() {
+                let cwd =
+                    std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+                let report_path = resolve_output_path(&cwd, raw_report_out);
+                if let Some(parent) = report_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|err| {
+                        MosaicError::Io(format!(
+                            "failed to create browser diagnose report directory '{}': {err}",
+                            parent.display()
+                        ))
+                    })?;
+                }
+                let report_payload = json!({
+                    "generated_at": Utc::now().to_rfc3339(),
+                    "module": "browser",
+                    "command": "diagnose",
+                    "args": {
+                        "stale_after_minutes": stale_after_minutes,
+                        "probe_urls": probe_urls,
+                        "probe_file_path": diagnose_payload["probe_file_path"],
+                        "probe_timeout_ms": probe_timeout_ms,
+                        "artifact_max_age_hours": artifact_max_age_hours,
+                        "repair": repair,
+                    },
+                    "result": diagnose_payload,
+                });
+                let rendered = serde_json::to_string_pretty(&report_payload).map_err(|err| {
+                    MosaicError::Io(format!("failed to render browser diagnose report: {err}"))
+                })?;
+                std::fs::write(&report_path, rendered.as_bytes()).map_err(|err| {
+                    MosaicError::Io(format!(
+                        "failed to write browser diagnose report '{}': {err}",
+                        report_path.display()
+                    ))
+                })?;
+                if let Value::Object(map) = &mut diagnose_payload {
+                    map.insert(
+                        "report_path".to_string(),
+                        Value::String(report_path.display().to_string()),
+                    );
+                }
+            }
+
+            if cli.json {
+                print_json(&diagnose_payload);
+            } else {
+                println!("browser diagnose repair={repair}");
+                println!("history entries: {}", history.len());
+                println!("issues: {}", issues.len());
+                println!("actions applied: {}", actions.len());
+                println!("stale visits: {}", stale_visit_ids.len());
+                println!("invalid urls: {}", invalid_visit_ids.len());
+                println!("network failures: {network_failures_total}");
+                println!(
+                    "probes: total={} failures={}",
+                    probe_urls.len(),
+                    probe_failures_total
+                );
+                println!(
+                    "screenshot artifacts: scanned={} orphan={} corrupt={} stale={}",
+                    scanned_artifacts,
+                    orphan_artifacts.len(),
+                    corrupt_artifacts.len(),
+                    stale_artifacts.len()
+                );
+                if let Some(active_visit_id) = state.active_visit_id.as_deref() {
+                    println!("active visit: {active_visit_id}");
+                } else {
+                    println!("active visit: -");
+                }
+                if let Some(path) = diagnose_payload["probe_file_path"].as_str() {
+                    println!("probe file: {path}");
+                }
+                if let Some(path) = diagnose_payload["report_path"].as_str() {
+                    println!("report path: {path}");
                 }
             }
         }
@@ -482,6 +1105,67 @@ fn resolve_snapshot_visit(
         .ok_or_else(|| MosaicError::Validation("no browser visits available".to_string()))
 }
 
+fn classify_browser_failure(visit: &super::BrowserVisitRecord) -> String {
+    if let Some(status) = visit.http_status {
+        return match status {
+            400..=499 => "http_4xx".to_string(),
+            500..=599 => "http_5xx".to_string(),
+            _ => "http_other".to_string(),
+        };
+    }
+
+    let error = visit
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if error.contains("timed out") || error.contains("timeout") {
+        return "timeout".to_string();
+    }
+    if error.contains("dns") || error.contains("resolve") {
+        return "dns".to_string();
+    }
+    if error.contains("tls") || error.contains("certificate") {
+        return "tls".to_string();
+    }
+    if error.contains("connect") || error.contains("connection") {
+        return "connection".to_string();
+    }
+    if error.contains("request") || error.contains("network") {
+        return "network".to_string();
+    }
+    "unknown".to_string()
+}
+
+fn parse_probe_urls_from_file(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_string)
+        .collect()
+}
+
+fn normalize_probe_urls(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for raw in values {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let value = trimmed.to_string();
+        if seen.insert(value.clone()) {
+            normalized.push(value);
+        }
+    }
+    normalized
+}
+
+fn sample_string_items(values: &[String], limit: usize) -> Vec<String> {
+    values.iter().take(limit).cloned().collect()
+}
+
 pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
@@ -695,7 +1379,10 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
                     result.removed_count
                 );
                 if !result.removed_namespaces.is_empty() {
-                    println!("removed namespaces: {}", result.removed_namespaces.join(", "));
+                    println!(
+                        "removed namespaces: {}",
+                        result.removed_namespaces.join(", ")
+                    );
                 }
                 if !result.kept_namespaces.is_empty() {
                     println!("kept namespaces: {}", result.kept_namespaces.join(", "));
@@ -928,7 +1615,10 @@ pub(super) fn handle_memory(cli: &Cli, args: MemoryArgs) -> Result<()> {
                             prune.removed_count
                         );
                         if !prune.removed_namespaces.is_empty() {
-                            println!("removed namespaces: {}", prune.removed_namespaces.join(", "));
+                            println!(
+                                "removed namespaces: {}",
+                                prune.removed_namespaces.join(", ")
+                            );
                         }
                     }
                 }

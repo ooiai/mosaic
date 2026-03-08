@@ -1,6 +1,21 @@
 use assert_cmd::Command;
 use serde_json::Value;
-use tempfile::tempdir;
+use std::fs;
+use tempfile::{TempDir, tempdir};
+
+#[allow(deprecated)]
+fn run_json(temp: &TempDir, args: &[&str]) -> Value {
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(args)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    serde_json::from_slice(&output).expect("json output")
+}
 
 #[test]
 #[allow(deprecated)]
@@ -260,4 +275,207 @@ fn nodes_devices_pairing_flow() {
         .clone();
     let revoke_json: Value = serde_json::from_slice(&revoke_output).expect("revoke json");
     assert_eq!(revoke_json["device"]["status"], "revoked");
+}
+
+#[test]
+#[allow(deprecated)]
+fn nodes_diagnose_reports_and_repairs_operational_issues() {
+    let temp = tempdir().expect("tempdir");
+
+    let approve_request = run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "pairing",
+            "request",
+            "--device",
+            "diag-dev-approve",
+            "--node",
+            "local",
+            "--reason",
+            "approve baseline",
+        ],
+    );
+    let approve_request_id = approve_request["request"]["id"]
+        .as_str()
+        .expect("approve request id")
+        .to_string();
+    run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "pairing",
+            "approve",
+            &approve_request_id,
+        ],
+    );
+    run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "devices",
+            "reject",
+            "diag-dev-approve",
+            "--reason",
+            "force mismatch",
+        ],
+    );
+
+    run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "devices",
+            "approve",
+            "diag-dev-blocked",
+        ],
+    );
+    let blocked_request = run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "pairing",
+            "request",
+            "--device",
+            "diag-dev-blocked",
+            "--node",
+            "local",
+            "--reason",
+            "blocked pending",
+        ],
+    );
+    let blocked_request_id = blocked_request["request"]["id"]
+        .as_str()
+        .expect("blocked request id")
+        .to_string();
+    run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "devices",
+            "reject",
+            "diag-dev-blocked",
+            "--reason",
+            "force blocked",
+        ],
+    );
+
+    let nodes_path = temp.path().join(".mosaic/data/nodes.json");
+    let mut nodes_json: Value =
+        serde_json::from_slice(&fs::read(&nodes_path).expect("read nodes json for diagnose test"))
+            .expect("parse nodes json");
+    let local_node = nodes_json
+        .as_array_mut()
+        .expect("nodes should be array")
+        .iter_mut()
+        .find(|node| node["id"] == "local")
+        .expect("local node");
+    local_node["last_seen_at"] = Value::String("2000-01-01T00:00:00Z".to_string());
+    local_node["updated_at"] = Value::String("2000-01-01T00:00:00Z".to_string());
+    fs::write(
+        &nodes_path,
+        serde_json::to_vec_pretty(&nodes_json).expect("serialize nodes json"),
+    )
+    .expect("write stale nodes json");
+
+    let diagnose = run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "nodes",
+            "diagnose",
+            "local",
+            "--stale-after-minutes",
+            "30",
+        ],
+    );
+    assert_eq!(diagnose["ok"], true);
+    assert_eq!(diagnose["repair"], false);
+    assert_eq!(diagnose["summary"]["stale_online_nodes"], 1);
+    assert_eq!(diagnose["summary"]["approved_pairing_device_mismatch"], 1);
+    assert_eq!(diagnose["summary"]["pending_pairing_blocked_device"], 1);
+    assert_eq!(diagnose["summary"]["actions_applied"], 0);
+
+    let issue_kinds = diagnose["issues"]
+        .as_array()
+        .expect("diagnose issues array")
+        .iter()
+        .filter_map(|issue| issue["kind"].as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        issue_kinds.contains(&"stale_online_node"),
+        "expected stale_online_node issue in diagnose output: {diagnose}"
+    );
+    assert!(
+        issue_kinds.contains(&"approved_pairing_device_mismatch"),
+        "expected approved_pairing_device_mismatch issue in diagnose output: {diagnose}"
+    );
+    assert!(
+        issue_kinds.contains(&"pending_pairing_blocked_device"),
+        "expected pending_pairing_blocked_device issue in diagnose output: {diagnose}"
+    );
+
+    let repair = run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "nodes",
+            "diagnose",
+            "local",
+            "--stale-after-minutes",
+            "30",
+            "--repair",
+        ],
+    );
+    assert_eq!(repair["ok"], true);
+    assert_eq!(repair["repair"], true);
+    assert_eq!(repair["summary"]["actions_applied"], 3);
+    assert_eq!(repair["summary"]["saved_nodes"], true);
+    assert_eq!(repair["summary"]["saved_devices"], true);
+    assert_eq!(repair["summary"]["saved_pairings"], true);
+
+    let status = run_json(
+        &temp,
+        &["--project-state", "--json", "nodes", "status", "local"],
+    );
+    assert_eq!(status["node"]["status"], "offline");
+
+    let devices = run_json(&temp, &["--project-state", "--json", "devices", "list"]);
+    let repaired_device = devices["devices"]
+        .as_array()
+        .expect("devices list")
+        .iter()
+        .find(|device| device["id"] == "diag-dev-approve")
+        .expect("repaired device");
+    assert_eq!(repaired_device["status"], "approved");
+
+    let rejected = run_json(
+        &temp,
+        &[
+            "--project-state",
+            "--json",
+            "pairing",
+            "list",
+            "--status",
+            "rejected",
+        ],
+    );
+    let rejected_ids = rejected["requests"]
+        .as_array()
+        .expect("rejected requests")
+        .iter()
+        .filter_map(|request| request["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        rejected_ids.iter().any(|id| *id == blocked_request_id),
+        "expected blocked request to be auto-rejected after repair: {rejected}"
+    );
 }

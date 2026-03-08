@@ -7,6 +7,7 @@ This document covers the local control-plane commands for node execution, device
 ```bash
 mosaic --project-state nodes list
 mosaic --project-state nodes status [node-id]
+mosaic --project-state nodes diagnose [node-id] [--stale-after-minutes <minutes>] [--repair]
 # run/invoke go through gateway, start it first:
 mosaic --project-state gateway start
 mosaic --project-state --yes nodes run <node-id> --command "<shell-like command>"
@@ -33,6 +34,15 @@ mosaic --project-state pairing reject <request-id> [--reason <text>]
 ## Notes
 
 - `nodes run` and `nodes invoke` are dispatched via gateway (`nodes.run` / `nodes.invoke` methods).
+- `nodes diagnose` checks local control-plane consistency and reports:
+  - stale online node heartbeat (`stale_online_node`)
+  - approved pairing / device status drift (`approved_pairing_device_mismatch`)
+  - pending pairing blocked by rejected/revoked device (`pending_pairing_blocked_device`)
+  - orphan node/device references in pairing records (`orphan_pairing_reference`)
+- `nodes diagnose --repair` applies safe local remediation:
+  - stale online node -> mark node offline
+  - approved pairing drift -> set device to approved
+  - blocked/orphan pending pairing -> auto reject with reason
 - `nodes run` follows approvals/sandbox policy; under default confirm mode, use `--yes` for non-interactive runs.
 - Pairing approval automatically marks the associated device as approved.
 - Pairing rejection marks the request as `rejected` and sets the device status to `rejected` when the device exists.

@@ -41,6 +41,7 @@
         <a class="side-link" href="agents.html">Agents 专项</a>
         <a class="side-link" href="channels.html">Channels</a>
         <a class="side-link" href="memory.html">Memory</a>
+        <a class="side-link" href="knowledge.html">Knowledge</a>
         <a class="side-link" href="plugins.html">Plugins</a>
         <a class="side-link" href="skills.html">Skills</a>
         <a class="side-link" href="gateway.html">Gateway</a>
@@ -121,6 +122,8 @@ mosaic --project-state system event deploy.started --data '{"env":"prod"}'</code
           <h2>6. 可选加固检查</h2>
           <pre><code>mosaic --project-state memory index --path . --namespace ops --incremental --stale-after-hours 24 --retain-missing
 mosaic --project-state memory search "retry"
+mosaic --project-state knowledge ingest --source local_md --path docs --namespace ops-kb --incremental
+mosaic --project-state knowledge search "incident retry window" --namespace ops-kb
 
 mosaic --project-state security audit --path . --deep
 mosaic --project-state security audit --path . --min-severity medium --category supply_chain --category crypto_hardening --top 20
@@ -157,6 +160,7 @@ LIVE=1 BASE_URL=https://api.openai.com MODEL=gpt-4o-mini ./scripts/tutorial_regr
             <a href="agents.html">Agents 专项</a>
             <a href="channels.html">Channels 教程</a>
             <a href="memory.html">Memory 教程</a>
+            <a href="knowledge.html">Knowledge 教程</a>
             <a href="plugins.html">Plugins 教程</a>
             <a href="skills.html">Skills 教程</a>
             <a href="gateway.html">Gateway 教程</a>

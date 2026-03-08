@@ -72,6 +72,41 @@ Each entry includes:
 - `last_send_at`
 - `last_error`
 
+## 4.1) Target diagnostics (`capabilities --target`)
+
+```bash
+mosaic --project-state --json channels capabilities --target <channel-id>
+```
+
+For target-bound queries, each capability includes `diagnostics`:
+- `channel_id` / `channel_name`
+- `endpoint_configured` / `target_configured`
+- `token_env` / `token_present`
+- `ready_for_send`
+- `issues` (blocking reasons when not ready)
+
+## 4.2) Replay plan for failed deliveries
+
+```bash
+mosaic --project-state --json channels replay <channel-id> --tail 50 --limit 5
+```
+
+Notes:
+- This command builds replay candidates from failed channel events.
+- Add `--since-minutes <N>` to only include failures from the recent time window.
+- Default mode includes retryable failures only.
+- Add `--include-non-retryable` to include auth/config/client failures in the plan.
+- Add repeatable `--reason <rate_limited|upstream_5xx|timeout|auth|target_not_found|client_4xx|unknown>` to narrow replay candidates.
+- Add repeatable `--http-status <code>` and `--min-attempt <N>` to filter by status code and retry-attempt count.
+- Add `--batch-size <N>` to emit grouped replay batches in `batch_plan`.
+- Add `--apply` to replay using stored full payload when available (`replay_source=full_payload`).
+- `--apply` runs a readiness preflight and blocks early when channel runtime config is not ready (`channels capabilities --target <channel-id>`).
+- Add `--max-apply <N>` with `--apply` to cap how many candidates are executed in one run.
+- Legacy events without payload fall back to `text_preview` (`replay_source=text_preview_fallback`) and return a warning.
+- Add `--require-full-payload` together with `--apply` to hard-stop when any candidate only has `text_preview` fallback.
+- Add `--stop-on-error` with `--apply` to stop batch replay immediately after the first failed send.
+- Add `--report-out <path>` to persist the replay plan/result JSON for audits or scripts.
+
 ## 5) Retry and timeout defaults
 
 - Timeout: 15000ms (override with `MOSAIC_CHANNELS_HTTP_TIMEOUT_MS`)
@@ -92,7 +127,7 @@ Each entry includes:
 - Channel events path:
   - `.mosaic/data/channel-events/<channel_id>.jsonl` (project mode)
 - Event fields:
-  - `ts`, `channel_id`, `kind`, `delivery_status`, `attempt`, `http_status`, `error`, `text_preview`
+  - `ts`, `channel_id`, `kind`, `delivery_status`, `attempt`, `http_status`, `error`, `text_preview`, `replay_payload`
 - `doctor` includes channel endpoint validity and token env checks.
 
 ## 8) Troubleshooting

@@ -62,7 +62,8 @@ mosaic --project-state gateway start --host 127.0.0.1 --port 8787</code></pre>
           <pre><code>mosaic --project-state gateway status
 mosaic --project-state gateway status --deep
 mosaic --project-state gateway health
-mosaic --project-state gateway health --verbose</code></pre>
+mosaic --project-state gateway health --verbose
+mosaic --project-state gateway health --verbose --repair</code></pre>
 
           <h2>步骤 4：探测与发现</h2>
           <pre><code>mosaic --project-state gateway probe
@@ -90,6 +91,7 @@ mosaic --project-state gateway stop</code></pre>
           <ul>
             <li><code>status</code>、<code>health</code>、<code>probe</code> 全部成功。</li>
             <li><code>diagnose</code> 在稳定环境下应为 failed=0。</li>
+            <li>当端点不可达时，可用 <code>gateway health --repair</code> 做一次自动恢复。</li>
             <li><code>call status</code> 返回可用于自动化消费的有效结果。</li>
             <li>重启后网关仍保持健康。</li>
           </ul>

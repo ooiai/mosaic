@@ -17,11 +17,11 @@ use crate::schema::{
     validate_channel_for_kind,
 };
 use crate::types::{
-    AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelDirectoryEntry, ChannelEntry,
-    ChannelImportSummary, ChannelListItem, ChannelLogEntry, ChannelLoginResult, ChannelSendOptions,
-    ChannelSendResult, ChannelStatus, ChannelTemplateDefaults, ChannelTokenRotationItem,
-    ChannelTokenRotationSummary, ChannelsFile, DoctorCheck, RotateTokenEnvInput,
-    TEXT_PREVIEW_LIMIT, UpdateChannelInput, truncate_text,
+    AddChannelInput, ChannelAuthConfig, ChannelCapability, ChannelCapabilityDiagnostics,
+    ChannelDirectoryEntry, ChannelEntry, ChannelImportSummary, ChannelListItem, ChannelLogEntry,
+    ChannelLoginResult, ChannelReplayPayload, ChannelSendOptions, ChannelSendResult, ChannelStatus,
+    ChannelTemplateDefaults, ChannelTokenRotationItem, ChannelTokenRotationSummary, ChannelsFile,
+    DoctorCheck, RotateTokenEnvInput, TEXT_PREVIEW_LIMIT, UpdateChannelInput, truncate_text,
 };
 
 const CACHE_TTL_SECONDS: i64 = 300;
@@ -618,6 +618,11 @@ impl ChannelRepository {
             merged_metadata.as_ref(),
         );
         let text_preview = truncate_text(&rendered_text, TEXT_PREVIEW_LIMIT);
+        let replay_payload = Some(ChannelReplayPayload {
+            text: rendered_text.clone(),
+            parse_mode: parse_mode.clone(),
+            idempotency_key: idempotency_key.clone(),
+        });
         if !probe
             && let Some(key) = idempotency_key.as_deref()
             && let Some(previous_http_status) =
@@ -636,6 +641,7 @@ impl ChannelRepository {
                 idempotency_key: Some(key.to_string()),
                 rate_limited_ms: Some(0),
                 deduplicated: true,
+                replay_payload: replay_payload.clone(),
             };
             let event_path = self.append_event(&channel.id, &event)?;
             file.channels[idx].last_send_at = Some(Utc::now());
@@ -697,6 +703,7 @@ impl ChannelRepository {
             idempotency_key: idempotency_key.clone(),
             rate_limited_ms,
             deduplicated: false,
+            replay_payload,
         };
         let event_path = self.append_event(&channel.id, &event)?;
 
@@ -797,17 +804,21 @@ impl ChannelRepository {
             ));
         }
 
-        let resolved_kind = if let Some(target) = target {
+        if let Some(target) = target {
             let file = self.load_channels_file()?;
             let channel = file
                 .channels
                 .into_iter()
                 .find(|entry| entry.id == target)
                 .ok_or_else(|| MosaicError::Config(format!("channel '{target}' not found")))?;
-            Some(channel.kind)
-        } else {
-            kind.map(normalize_kind).transpose()?
-        };
+            let mut capabilities = providers::capabilities_for_kind(Some(channel.kind.as_str()))?;
+            for capability in &mut capabilities {
+                capability.diagnostics = Some(self.build_capability_diagnostics(&channel));
+            }
+            return Ok(capabilities);
+        }
+
+        let resolved_kind = kind.map(normalize_kind).transpose()?;
 
         let cache_key = format!(
             "capabilities:{}",
@@ -824,6 +835,56 @@ impl ChannelRepository {
         let capabilities = providers::capabilities_for_kind(resolved_kind.as_deref())?;
         self.write_cache(&cache_key, &capabilities)?;
         Ok(capabilities)
+    }
+
+    fn build_capability_diagnostics(&self, channel: &ChannelEntry) -> ChannelCapabilityDiagnostics {
+        let token_env =
+            channel.auth.token_env.clone().or_else(|| {
+                providers::default_token_env_for_kind(&channel.kind).map(str::to_string)
+            });
+        let token_present = token_env.as_ref().map(|env| std::env::var(env).is_ok());
+        let endpoint_configured = channel
+            .endpoint
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+        let target_configured = channel
+            .target
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty());
+
+        let mut issues = Vec::new();
+        if let Err(err) = validate_channel_for_kind(
+            &channel.kind,
+            channel.endpoint.as_deref(),
+            channel.target.as_deref(),
+        ) {
+            issues.push(err.to_string());
+        }
+        if providers::token_required_for_kind(&channel.kind) {
+            match (token_env.as_deref(), token_present) {
+                (None, _) => {
+                    issues.push("required token env is not configured".to_string());
+                }
+                (Some(env), Some(false)) => {
+                    issues.push(format!("required token env '{}' is not set", env));
+                }
+                _ => {}
+            }
+        }
+
+        ChannelCapabilityDiagnostics {
+            channel_id: channel.id.clone(),
+            channel_name: channel.name.clone(),
+            token_env,
+            token_present,
+            endpoint_configured,
+            target_configured,
+            ready_for_send: issues.is_empty(),
+            issues,
+            checked_at: Utc::now(),
+        }
     }
 
     pub fn resolve(&self, kind: &str, query: &str) -> Result<Vec<ChannelDirectoryEntry>> {
@@ -1355,7 +1416,7 @@ mod tests {
             channels_file_path(temp.path()),
             channels_events_dir(temp.path()),
         );
-        let _ = repo
+        let channel = repo
             .add(AddChannelInput {
                 name: "alerts".to_string(),
                 kind: "slack".to_string(),
@@ -1367,14 +1428,64 @@ mod tests {
             .expect("add");
 
         let capabilities = repo
-            .capabilities(Some("slack"), None)
+            .capabilities(None, Some(&channel.id))
             .expect("capabilities");
         assert_eq!(capabilities.len(), 1);
         assert_eq!(capabilities[0].kind, "slack_webhook");
+        let diagnostics = capabilities[0]
+            .diagnostics
+            .as_ref()
+            .expect("capability diagnostics");
+        assert_eq!(diagnostics.channel_id, channel.id);
+        assert_eq!(diagnostics.channel_name, "alerts");
+        assert_eq!(diagnostics.ready_for_send, true);
+        assert!(diagnostics.issues.is_empty());
 
         let resolved = repo.resolve("slack_webhook", "alert").expect("resolve");
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "alerts");
+    }
+
+    #[test]
+    fn capabilities_target_reports_missing_telegram_token() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let channel = repo
+            .add(AddChannelInput {
+                name: "telegram-alerts".to_string(),
+                kind: "telegram_bot".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: Some("-10000009".to_string()),
+                token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add");
+
+        let capabilities = repo
+            .capabilities(None, Some(&channel.id))
+            .expect("capabilities");
+        assert_eq!(capabilities.len(), 1);
+        let diagnostics = capabilities[0]
+            .diagnostics
+            .as_ref()
+            .expect("capability diagnostics");
+        assert_eq!(diagnostics.channel_id, channel.id);
+        assert_eq!(
+            diagnostics.token_env.as_deref(),
+            Some(crate::schema::DEFAULT_TELEGRAM_TOKEN_ENV)
+        );
+        assert_eq!(diagnostics.token_present, Some(false));
+        assert_eq!(diagnostics.ready_for_send, false);
+        assert!(
+            diagnostics
+                .issues
+                .iter()
+                .any(|item| item.contains("required token env")),
+            "missing required token env should be reported"
+        );
     }
 
     #[test]

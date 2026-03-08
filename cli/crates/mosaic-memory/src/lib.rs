@@ -318,10 +318,7 @@ impl MemoryStore {
                 continue;
             }
 
-            let source_modified_unix_ms = metadata
-                .modified()
-                .ok()
-                .and_then(system_time_to_unix_ms);
+            let source_modified_unix_ms = metadata.modified().ok().and_then(system_time_to_unix_ms);
 
             let relative = path
                 .strip_prefix(&root)
@@ -425,7 +422,11 @@ impl MemoryStore {
             } else {
                 status.indexed_documents
             },
-            stale_reindexed_documents: if options.incremental { stale_reindexed } else { 0 },
+            stale_reindexed_documents: if options.incremental {
+                stale_reindexed
+            } else {
+                0
+            },
             removed_documents,
             retained_missing_documents,
             skipped_files: skipped,
@@ -634,7 +635,10 @@ pub fn list_memory_namespace_statuses(data_dir: &Path) -> Result<Vec<MemoryNames
     Ok(results)
 }
 
-pub fn prune_memory_namespaces(data_dir: &Path, options: MemoryPruneOptions) -> Result<MemoryPruneResult> {
+pub fn prune_memory_namespaces(
+    data_dir: &Path,
+    options: MemoryPruneOptions,
+) -> Result<MemoryPruneResult> {
     if options.max_namespaces == Some(0) {
         return Err(MosaicError::Validation(
             "max_namespaces must be greater than 0".to_string(),
@@ -678,14 +682,14 @@ pub fn prune_memory_namespaces(data_dir: &Path, options: MemoryPruneOptions) -> 
     if let Some(max_namespaces) = options.max_namespaces
         && max_namespaces < statuses.len()
     {
-        statuses.sort_by(|lhs, rhs| {
-            match (lhs.last_indexed_at, rhs.last_indexed_at) {
+        statuses.sort_by(
+            |lhs, rhs| match (lhs.last_indexed_at, rhs.last_indexed_at) {
                 (Some(a), Some(b)) => b.cmp(&a),
                 (Some(_), None) => std::cmp::Ordering::Less,
                 (None, Some(_)) => std::cmp::Ordering::Greater,
                 (None, None) => lhs.namespace.cmp(&rhs.namespace),
-            }
-        });
+            },
+        );
         for status in statuses.iter().skip(max_namespaces) {
             remove_set.insert(status.namespace.clone());
             removed_due_to_max_namespaces.insert(status.namespace.clone());
@@ -720,9 +724,12 @@ pub fn prune_memory_namespaces(data_dir: &Path, options: MemoryPruneOptions) -> 
         .filter(|namespace| !removed_set.contains(namespace))
         .collect::<Vec<_>>();
     kept_namespaces.sort();
-    let mut removed_due_to_max_namespaces = removed_due_to_max_namespaces.into_iter().collect::<Vec<_>>();
+    let mut removed_due_to_max_namespaces = removed_due_to_max_namespaces
+        .into_iter()
+        .collect::<Vec<_>>();
     removed_due_to_max_namespaces.sort();
-    let mut removed_due_to_max_age_hours = removed_due_to_max_age_hours.into_iter().collect::<Vec<_>>();
+    let mut removed_due_to_max_age_hours =
+        removed_due_to_max_age_hours.into_iter().collect::<Vec<_>>();
     removed_due_to_max_age_hours.sort();
     let mut removed_due_to_max_documents_per_namespace = removed_due_to_max_documents_per_namespace
         .into_iter()

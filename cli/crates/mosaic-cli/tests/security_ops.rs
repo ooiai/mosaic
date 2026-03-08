@@ -354,8 +354,18 @@ fn security_audit_supports_filter_dimensions() {
         1
     );
     assert_eq!(output["filters"]["top"], 1);
-    assert!(output["dimensions"]["categories"]["supply_chain"].as_u64().unwrap_or(0) >= 1);
-    assert!(output["report"]["summary"]["findings"].as_u64().unwrap_or(0) <= 1);
+    assert!(
+        output["dimensions"]["categories"]["supply_chain"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        output["report"]["summary"]["findings"]
+            .as_u64()
+            .unwrap_or(0)
+            <= 1
+    );
     for finding in output["report"]["findings"].as_array().expect("findings") {
         assert_eq!(finding["category"], "supply_chain");
         assert_eq!(finding["severity"], "medium");

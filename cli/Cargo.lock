@@ -919,6 +919,7 @@ dependencies = [
  "tokio",
  "toml",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

@@ -43,6 +43,10 @@ trait ChannelProvider: Send + Sync {
         None
     }
 
+    fn requires_token(&self) -> bool {
+        false
+    }
+
     fn capability(&self) -> ChannelCapability;
 
     fn validate_channel(&self, endpoint: Option<&str>, target: Option<&str>) -> Result<()>;
@@ -121,6 +125,11 @@ impl ChannelProviderRegistry {
         Ok(provider.default_token_env())
     }
 
+    fn token_required_for_kind(&self, kind: &str) -> Result<bool> {
+        let provider = self.provider_for_kind(kind)?;
+        Ok(provider.requires_token())
+    }
+
     fn capabilities_for_kind(&self, kind: Option<&str>) -> Result<Vec<ChannelCapability>> {
         if let Some(kind) = kind {
             let provider = self.provider_for_kind(kind)?;
@@ -176,6 +185,7 @@ impl ChannelProvider for SlackWebhookProvider {
             supports_message_template: true,
             supports_idempotency_key: true,
             supports_rate_limit_report: false,
+            diagnostics: None,
         }
     }
 
@@ -243,6 +253,7 @@ impl ChannelProvider for GenericWebhookProvider {
             supports_message_template: true,
             supports_idempotency_key: true,
             supports_rate_limit_report: false,
+            diagnostics: None,
         }
     }
 
@@ -317,6 +328,7 @@ impl ChannelProvider for DiscordWebhookProvider {
             supports_message_template: true,
             supports_idempotency_key: true,
             supports_rate_limit_report: false,
+            diagnostics: None,
         }
     }
 
@@ -387,6 +399,10 @@ impl ChannelProvider for TelegramBotProvider {
         Some(DEFAULT_TELEGRAM_TOKEN_ENV)
     }
 
+    fn requires_token(&self) -> bool {
+        true
+    }
+
     fn capability(&self) -> ChannelCapability {
         ChannelCapability {
             kind: self.canonical_kind().to_string(),
@@ -399,6 +415,7 @@ impl ChannelProvider for TelegramBotProvider {
             supports_message_template: true,
             supports_idempotency_key: true,
             supports_rate_limit_report: true,
+            diagnostics: None,
         }
     }
 
@@ -479,6 +496,7 @@ impl ChannelProvider for TerminalProvider {
             supports_message_template: true,
             supports_idempotency_key: true,
             supports_rate_limit_report: false,
+            diagnostics: None,
         }
     }
 
@@ -523,6 +541,7 @@ impl ChannelProvider for LocalProvider {
             supports_message_template: true,
             supports_idempotency_key: true,
             supports_rate_limit_report: false,
+            diagnostics: None,
         }
     }
 
@@ -572,6 +591,12 @@ pub(crate) fn default_token_env_for_kind(kind: &str) -> Option<&'static str> {
     default_registry()
         .default_token_env_for_kind(kind)
         .unwrap_or_default()
+}
+
+pub(crate) fn token_required_for_kind(kind: &str) -> bool {
+    default_registry()
+        .token_required_for_kind(kind)
+        .unwrap_or(false)
 }
 
 pub(crate) async fn dispatch_send(

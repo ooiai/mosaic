@@ -9,6 +9,7 @@ Commands:
   send              
   test              
   logs              
+  replay            
   capabilities      
   resolve           
   export            

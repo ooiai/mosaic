@@ -37,8 +37,10 @@
       },
       "server_id": "string"
     },
+    "deep": "bool",
     "healthy": "bool",
     "ok": "bool",
+    "report_out": "null",
     "server": {
       "args": {
         "items": [
@@ -63,8 +65,10 @@
   "check_all": {
     "all": "bool",
     "checked": "number",
+    "deep": "bool",
     "healthy": "number",
     "ok": "bool",
+    "report_out": "null",
     "results": {
       "items": [
         {
@@ -105,6 +109,124 @@
       "type": "array"
     },
     "unhealthy": "number"
+  },
+  "deep_check_all": {
+    "all": "bool",
+    "checked": "number",
+    "deep": "bool",
+    "healthy": "number",
+    "ok": "bool",
+    "precheck_unhealthy": "number",
+    "probe_skipped": "number",
+    "protocol_failed": "number",
+    "protocol_ok": "number",
+    "report_out": "null",
+    "results": {
+      "items": [
+        {
+          "check": {
+            "checked_at": "string",
+            "cwd_exists": "bool",
+            "enabled": "bool",
+            "executable_resolved": "string",
+            "healthy": "bool",
+            "issues": {
+              "items": [],
+              "type": "array"
+            },
+            "server_id": "string"
+          },
+          "healthy": "bool",
+          "protocol_probe": {
+            "attempted": "bool",
+            "duration_ms": "number",
+            "error": "string",
+            "handshake_ok": "bool",
+            "response_kind": "null",
+            "response_preview": "null",
+            "stderr_preview": "string",
+            "timeout_ms": "number"
+          },
+          "server": {
+            "args": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "command": "string",
+            "created_at": "string",
+            "cwd": "null",
+            "enabled": "bool",
+            "env": {
+              "MCP_TOKEN": "string"
+            },
+            "id": "string",
+            "last_check_at": "string",
+            "last_check_error": "null",
+            "name": "string",
+            "updated_at": "string"
+          }
+        }
+      ],
+      "type": "array"
+    },
+    "timeout_ms": "number",
+    "unhealthy": "number"
+  },
+  "diagnose": {
+    "check": {
+      "checked_at": "string",
+      "cwd_exists": "bool",
+      "enabled": "bool",
+      "executable_resolved": "string",
+      "healthy": "bool",
+      "issues": {
+        "items": [],
+        "type": "array"
+      },
+      "server_id": "string"
+    },
+    "healthy": "bool",
+    "ok": "bool",
+    "protocol_probe": {
+      "attempted": "bool",
+      "duration_ms": "number",
+      "error": "string",
+      "handshake_ok": "bool",
+      "response_kind": "null",
+      "response_preview": "null",
+      "stderr_preview": "string",
+      "timeout_ms": "number"
+    },
+    "recommendations": {
+      "items": [
+        "string"
+      ],
+      "type": "array"
+    },
+    "report_out": "string",
+    "server": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "command": "string",
+      "created_at": "string",
+      "cwd": "null",
+      "enabled": "bool",
+      "env": {
+        "MCP_TOKEN": "string"
+      },
+      "id": "string",
+      "last_check_at": "string",
+      "last_check_error": "null",
+      "name": "string",
+      "updated_at": "string"
+    },
+    "timeout_ms": "number"
   },
   "disable": {
     "ok": "bool",
@@ -185,6 +307,57 @@
     "ok": "bool",
     "removed": "bool",
     "server_id": "string"
+  },
+  "repair": {
+    "all": "bool",
+    "changed": "number",
+    "checked": "number",
+    "clear_missing_cwd": "bool",
+    "ok": "bool",
+    "report_out": "null",
+    "results": {
+      "items": [
+        {
+          "actions": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "after": {
+            "check_healthy": "bool",
+            "healthy": "bool",
+            "issues": {
+              "items": [],
+              "type": "array"
+            },
+            "protocol_handshake_ok": "bool"
+          },
+          "before": {
+            "check_healthy": "bool",
+            "healthy": "bool",
+            "issues": {
+              "items": [
+                "string"
+              ],
+              "type": "array"
+            },
+            "protocol_handshake_ok": "bool"
+          },
+          "changed": "bool",
+          "remaining_recommendations": {
+            "items": [
+              "string"
+            ],
+            "type": "array"
+          },
+          "server_id": "string"
+        }
+      ],
+      "type": "array"
+    },
+    "timeout_ms": "number",
+    "unchanged": "number"
   },
   "show": {
     "ok": "bool",

@@ -85,6 +85,13 @@ pub struct ChannelSendOptions {
     pub metadata: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelReplayPayload {
+    pub text: String,
+    pub parse_mode: Option<String>,
+    pub idempotency_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ChannelSendResult {
     pub channel_id: String,
@@ -126,6 +133,8 @@ pub struct ChannelLogEntry {
     pub rate_limited_ms: Option<u64>,
     #[serde(default)]
     pub deduplicated: bool,
+    #[serde(default)]
+    pub replay_payload: Option<ChannelReplayPayload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +153,21 @@ pub struct ChannelCapability {
     pub supports_idempotency_key: bool,
     #[serde(default)]
     pub supports_rate_limit_report: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<ChannelCapabilityDiagnostics>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChannelCapabilityDiagnostics {
+    pub channel_id: String,
+    pub channel_name: String,
+    pub token_env: Option<String>,
+    pub token_present: Option<bool>,
+    pub endpoint_configured: bool,
+    pub target_configured: bool,
+    pub ready_for_send: bool,
+    pub issues: Vec<String>,
+    pub checked_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
