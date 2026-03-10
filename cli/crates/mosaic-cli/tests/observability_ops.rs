@@ -1025,6 +1025,125 @@ fn observability_report_includes_channel_runtime_telemetry() {
 
 #[test]
 #[allow(deprecated)]
+fn observability_report_includes_nodes_devices_pairing_telemetry() {
+    let temp = tempdir().expect("tempdir");
+
+    let request_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "pairing",
+            "request",
+            "--device",
+            "obs-node-dev",
+            "--node",
+            "local",
+            "--reason",
+            "observability node telemetry",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let request_json: Value = serde_json::from_slice(&request_output).expect("pairing request");
+    let request_id = request_json["request"]["id"]
+        .as_str()
+        .expect("request id")
+        .to_string();
+
+    let _ = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "pairing",
+            "approve",
+            &request_id,
+        ])
+        .assert()
+        .success();
+
+    let _ = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "nodes",
+            "diagnose",
+            "local",
+            "--stale-after-minutes",
+            "30",
+            "--report-out",
+            ".mosaic/reports/obs-nodes-diagnose.json",
+        ])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "observability",
+            "report",
+            "--tail",
+            "20",
+            "--event-tail",
+            "20",
+            "--audit-tail",
+            "20",
+            "--no-doctor",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("observability report json");
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["report"]["summary"]["nodes_total"], 1);
+    assert_eq!(json["report"]["summary"]["devices_total"], 1);
+    assert_eq!(json["report"]["summary"]["pairings_total"], 1);
+    assert!(
+        json["report"]["summary"]["nodes_events_count"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 3
+    );
+    assert_eq!(json["report"]["nodes"]["summary"]["approved_devices"], 1);
+    assert!(
+        json["report"]["nodes"]["summary"]["scopes"]["pairing"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 2
+    );
+    assert!(
+        json["report"]["nodes"]["summary"]["actions"]["diagnose"]
+            .as_u64()
+            .unwrap_or(0)
+            >= 1
+    );
+    assert!(
+        json["report"]["nodes"]["recent_events"]
+            .as_array()
+            .map_or(0, |items| items.len())
+            >= 1
+    );
+    assert!(
+        json["report"]["nodes"]["paths"]["events_file"]
+            .as_str()
+            .is_some_and(|value| value.ends_with("/.mosaic/data/nodes-events.jsonl"))
+    );
+}
+
+#[test]
+#[allow(deprecated)]
 fn observability_report_supports_alert_suppression_controls() {
     let temp = tempdir().expect("tempdir");
 

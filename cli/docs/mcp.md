@@ -117,7 +117,10 @@ Use `mcp update` for explicit operator-owned config changes:
 2. starts the configured server command with args/env/cwd
 3. writes an MCP `initialize` request over stdio
 4. waits for initialize response until `--timeout-ms`
-5. returns protocol probe details (`attempted`, `handshake_ok`, `response_kind`, `stderr_preview`, `error`) plus actionable recommendations
+5. returns protocol probe details (`attempted`, `handshake_ok`, `initialized_notification_sent`, `session_ready`, `response_kind`, `stderr_preview`, `error`) plus actionable recommendations
+
+The probe accepts standard MCP/LSP-style `Content-Length` framed responses and still tolerates newline-delimited JSON from lightweight local mocks.
+`session_ready=true` means Mosaic received `initialize`, then successfully sent `notifications/initialized` on the same stdio session.
 
 `mcp check <server_id>` returns one check result.
 
@@ -135,6 +138,8 @@ Use `mcp update` for explicit operator-owned config changes:
 - `probe_skipped`
 - `precheck_unhealthy`
 - `results[]` (`server` + `check` + `protocol_probe` + merged `healthy`)
+
+`protocol_ok` and merged `healthy` in deep mode now track `session_ready`, not only the initial `initialize` response.
 
 `--report-out <path>` is supported for both `check` and `diagnose` and writes the full JSON payload.
 
@@ -173,3 +178,16 @@ Both forms return operation success on valid input and expose health details in 
 - `cargo test -p mosaic-cli --test command_surface`
 - `cargo test -p mosaic-cli --test error_codes`
 - `cargo test -p mosaic-cli --test json_contract_modules`
+
+## Freeze Gate
+
+For current beta scope, MCP is considered complete when this passes:
+
+- `./scripts/mcp_freeze_check.sh`
+
+That gate covers:
+
+- MCP unit/integration/help/JSON contract tests
+- docs link validation
+- a real CLI smoke using a framed stdio mock server
+- `diagnose`, `check --deep`, and `repair` assertions on `session_ready`

@@ -204,13 +204,16 @@ require_contains "$TMP_ROOT/clawbot_send_text_file.json" '"response"[[:space:]]*
 require_contains "$TMP_ROOT/clawbot_send_text_file_stdin.json" '"response"[[:space:]]*:[[:space:]]*"mock-clawbot-send-stdin-file-answer"'
 
 log "Step 1b: mcp registry and readiness checks"
-MCP_COMMAND_PATH="$(command -v env || command -v sh || true)"
-if [[ -z "$MCP_COMMAND_PATH" ]]; then
-  echo "error: cannot locate executable for mcp smoke check" >&2
-  exit 1
-fi
+cat >"$TMP_ROOT/mock-mcp.sh" <<'EOF'
+#!/bin/sh
+body='{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}'
+len=$(printf %s "$body" | wc -c | tr -d ' ')
+printf 'Content-Length: %s\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n%s' "$len" "$body"
+sleep 1
+EOF
+chmod +x "$TMP_ROOT/mock-mcp.sh"
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp add --name smoke-mcp --command "$MCP_COMMAND_PATH" --arg --help --env MCP_TOKEN=smoke >"$TMP_ROOT/mcp_add.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp add --name smoke-mcp --command "$TMP_ROOT/mock-mcp.sh" --cwd "$SRC_DIR" --env MCP_MODE=smoke >"$TMP_ROOT/mcp_add.json")
 require_contains "$TMP_ROOT/mcp_add.json" '"ok"[[:space:]]*:[[:space:]]*true'
 MCP_SERVER_ID="$(sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$TMP_ROOT/mcp_add.json" | head -n1)"
 if [[ -z "$MCP_SERVER_ID" ]]; then
@@ -225,24 +228,29 @@ require_contains "$TMP_ROOT/mcp_list.json" "$MCP_SERVER_ID"
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp check "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_check.json")
 require_contains "$TMP_ROOT/mcp_check.json" '"healthy"[[:space:]]*:[[:space:]]*true'
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp diagnose "$MCP_SERVER_ID" --timeout-ms 300 >"$TMP_ROOT/mcp_diagnose.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp diagnose "$MCP_SERVER_ID" --timeout-ms 1000 >"$TMP_ROOT/mcp_diagnose.json")
 require_contains "$TMP_ROOT/mcp_diagnose.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/mcp_diagnose.json" '"protocol_probe"'
 require_contains "$TMP_ROOT/mcp_diagnose.json" '"attempted"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/mcp_diagnose.json" '"initialized_notification_sent"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/mcp_diagnose.json" '"session_ready"[[:space:]]*:[[:space:]]*true'
+require_contains "$TMP_ROOT/mcp_diagnose.json" '"healthy"[[:space:]]*:[[:space:]]*true'
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp check --all --deep --timeout-ms 300 --report-out "$TMP_ROOT/mcp_check_deep_report.json" >"$TMP_ROOT/mcp_check_deep.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp check --all --deep --timeout-ms 1000 --report-out "$TMP_ROOT/mcp_check_deep_report.json" >"$TMP_ROOT/mcp_check_deep.json")
 require_contains "$TMP_ROOT/mcp_check_deep.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/mcp_check_deep.json" '"deep"[[:space:]]*:[[:space:]]*true'
-require_contains "$TMP_ROOT/mcp_check_deep.json" '"protocol_ok"'
+require_contains "$TMP_ROOT/mcp_check_deep.json" '"protocol_ok"[[:space:]]*:[[:space:]]*1'
+require_contains "$TMP_ROOT/mcp_check_deep.json" '"healthy"[[:space:]]*:[[:space:]]*1'
 require_contains "$TMP_ROOT/mcp_check_deep_report.json" '"results"'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp disable "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_disable.json")
 require_contains "$TMP_ROOT/mcp_disable.json" '"enabled"[[:space:]]*:[[:space:]]*false'
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp repair "$MCP_SERVER_ID" --timeout-ms 300 >"$TMP_ROOT/mcp_repair.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp repair "$MCP_SERVER_ID" --timeout-ms 1000 >"$TMP_ROOT/mcp_repair.json")
 require_contains "$TMP_ROOT/mcp_repair.json" '"ok"[[:space:]]*:[[:space:]]*true'
 require_contains "$TMP_ROOT/mcp_repair.json" '"changed"[[:space:]]*:[[:space:]]*1'
 require_contains "$TMP_ROOT/mcp_repair.json" '"enabled_server"'
+require_contains "$TMP_ROOT/mcp_repair.json" '"protocol_session_ready"[[:space:]]*:[[:space:]]*true'
 
 (cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json mcp enable "$MCP_SERVER_ID" >"$TMP_ROOT/mcp_enable.json")
 require_contains "$TMP_ROOT/mcp_enable.json" '"enabled"[[:space:]]*:[[:space:]]*true'
@@ -359,7 +367,12 @@ require_contains "$TMP_ROOT/gateway_call_status.json" '"service"[[:space:]]*:[[:
 (cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json gateway health --verbose >"$TMP_ROOT/gateway_health.json")
 require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_discover"'
 require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_protocol_methods"'
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_discover_schema_profile"'
 require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_call_status"'
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_call_nodes_run"'
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_nodes_run_schema_profile"'
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_call_nodes_invoke"'
+require_contains "$TMP_ROOT/gateway_health.json" '"name"[[:space:]]*:[[:space:]]*"gateway_nodes_invoke_schema_profile"'
 
 (cd "$SRC_DIR" && MOSAIC_GATEWAY_TEST_MODE=1 cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --yes --json nodes run local --command "echo smoke-run" >"$TMP_ROOT/nodes_run.json")
 require_contains "$TMP_ROOT/nodes_run.json" '"accepted"[[:space:]]*:[[:space:]]*true'
@@ -377,7 +390,9 @@ require_contains "$TMP_ROOT/nodes_status.json" '"pending"[[:space:]]*:[[:space:]
 require_contains "$TMP_ROOT/nodes_status.json" '"approved"[[:space:]]*:[[:space:]]*1'
 require_contains "$TMP_ROOT/nodes_status.json" '"rejected"[[:space:]]*:[[:space:]]*1'
 
-(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json nodes diagnose local --stale-after-minutes 30 >"$TMP_ROOT/nodes_diagnose.json")
+(cd "$SRC_DIR" && cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p mosaic-cli --bin mosaic -- --project-state --json nodes diagnose local --stale-after-minutes 30 --report-out "$TMP_ROOT/nodes_diagnose_report.json" >"$TMP_ROOT/nodes_diagnose.json")
+require_contains "$TMP_ROOT/nodes_diagnose.json" '"report_out"[[:space:]]*:[[:space:]]*".*nodes_diagnose_report\.json"'
+require_contains "$TMP_ROOT/nodes_diagnose_report.json" '"summary"'
 require_contains "$TMP_ROOT/nodes_diagnose.json" '"summary"'
 require_contains "$TMP_ROOT/nodes_diagnose.json" '"issues_total"'
 

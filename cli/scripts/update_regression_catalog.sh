@@ -10,12 +10,13 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-TMP_TESTS="$(mktemp "${TMPDIR:-/tmp}/mosaic-tests-XXXXXX.txt")"
-TMP_DOCS="$(mktemp "${TMPDIR:-/tmp}/mosaic-docs-XXXXXX.txt")"
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/mosaic-regression-XXXXXX")"
+TMP_TESTS="$TMP_ROOT/tests.txt"
+TMP_DOCS="$TMP_ROOT/docs.txt"
 OUT_FILE="$ROOT_DIR/docs/regression-catalog.md"
 
 cleanup() {
-  rm -f "$TMP_TESTS" "$TMP_DOCS"
+  rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
 

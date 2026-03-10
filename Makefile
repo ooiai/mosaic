@@ -8,6 +8,37 @@ CD := cd
 MACOS_PATH := ./apps/macos
 WEB_PATH := ./apps/web
 
+.PHONY: \
+	git-run \
+	git-commit \
+	help \
+	desktop \
+	macos-dev \
+	macos-dev-wait \
+	macos-build \
+	macos-test \
+	macos-package \
+	web \
+	web-build \
+	web-lint \
+	web-typecheck \
+	cli-test \
+	cli-quality \
+	cli-json-contract \
+	cli-regression \
+	cli-beta-check \
+	cli-release-tooling-smoke \
+	cli-release-install-smoke \
+	cli-beta-package \
+	cli-release-assets \
+	cli-release-manifests \
+	cli-release-notes \
+	cli-release-prepare \
+	cli-release-verify \
+	cli-release-verify-archives \
+	cli-release-publish-check \
+	docs-check
+
 
 
 # Function to check if there are changes to commit
@@ -46,9 +77,29 @@ git-commit:
 # Desktop start dev server.
 # Usage: make desktop
 desktop:
-	@echo "===> macOS app start dev server."
+	@$(MAKE) macos-dev
+
+# macOS-native app start dev server.
+# Usage: make macos-dev
+macos-dev:
+	@echo "===> macOS app package and open (non-blocking)."
 	cd cli && cargo build --release -p mosaic-cli
-	$(CD) $(MACOS_PATH) && swift run MosaicMacApp
+	SWIFT_CONFIGURATION=debug APP_BUILD=dev SKIP_CLI_BUILD=1 ./apps/macos/scripts/package_app.sh
+	open -n "$(PWD)/apps/macos/dist/Mosaic.app"
+
+# macOS-native app start dev server and wait for app exit.
+# Usage: make macos-dev-wait
+macos-dev-wait:
+	@echo "===> macOS app package and open (wait for exit)."
+	cd cli && cargo build --release -p mosaic-cli
+	SWIFT_CONFIGURATION=debug APP_BUILD=dev SKIP_CLI_BUILD=1 ./apps/macos/scripts/package_app.sh
+	open -n -W "$(PWD)/apps/macos/dist/Mosaic.app"
+
+# macOS-native app release build.
+# Usage: make macos-build
+macos-build:
+	@echo "===> macOS app release build."
+	$(CD) $(MACOS_PATH) && swift build -c release
 
 # macOS-native app tests.
 # Usage: make macos-test
@@ -67,6 +118,24 @@ macos-package:
 web:
 	@echo "===> Web start dev server."
 	$(CD) $(WEB_PATH) && $(PNPM) dev
+
+# Web production build.
+# Usage: make web-build
+web-build:
+	@echo "===> Web production build."
+	$(CD) $(WEB_PATH) && $(PNPM) build
+
+# Web lint.
+# Usage: make web-lint
+web-lint:
+	@echo "===> Web lint."
+	$(CD) $(WEB_PATH) && $(PNPM) lint
+
+# Web typecheck.
+# Usage: make web-typecheck
+web-typecheck:
+	@echo "===> Web typecheck."
+	$(CD) $(WEB_PATH) && $(PNPM) typecheck
 
 # Rust CLI workspace tests.
 # Usage: make cli-test
@@ -213,3 +282,20 @@ cli-release-publish-check:
 docs-check:
 	@echo "===> Docs acceptance checks."
 	bash site/scripts/check_docs.sh
+
+# Show common developer commands.
+# Usage: make help
+help:
+	@echo "Common commands:"
+	@echo "  make macos-dev        # Package and open the macOS app without blocking the terminal"
+	@echo "  make macos-dev-wait   # Package and open the macOS app, then wait for it to exit"
+	@echo "  make macos-build      # Build the macOS app in release mode"
+	@echo "  make macos-test       # Run macOS app tests"
+	@echo "  make macos-package    # Build Mosaic.app and Mosaic-macOS.zip"
+	@echo "  make web              # Run the web dev server"
+	@echo "  make web-build        # Build the web app"
+	@echo "  make web-lint         # Lint the web app"
+	@echo "  make web-typecheck    # Typecheck the web app"
+	@echo "  make cli-test         # Run Rust CLI workspace tests"
+	@echo "  make cli-quality      # Run Rust CLI quality gates"
+	@echo "  make cli-json-contract # Run Rust CLI JSON contract tests"

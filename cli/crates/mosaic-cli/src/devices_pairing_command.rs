@@ -4,18 +4,19 @@ use serde_json::json;
 use mosaic_core::error::MosaicError;
 
 use super::{
-    Cli, DeviceRecord, DeviceStatus, DevicesArgs, DevicesCommand, NodeRuntimeStatus, PairingArgs,
-    PairingCommand, PairingRequestRecord, PairingStatus, Result, devices_file_path,
-    generate_pairing_request_id, load_devices_or_default, load_nodes_or_default,
-    load_pairing_requests_or_default, next_pairing_seq, nodes_file_path,
-    pairing_requests_file_path, print_json, resolve_state_paths, save_devices, save_nodes,
-    save_pairing_requests,
+    Cli, DeviceRecord, DeviceStatus, DevicesArgs, DevicesCommand, NodeRuntimeStatus,
+    NodeTelemetryEventInput, PairingArgs, PairingCommand, PairingRequestRecord, PairingStatus,
+    Result, devices_file_path, generate_pairing_request_id, load_devices_or_default,
+    load_nodes_or_default, load_pairing_requests_or_default, next_pairing_seq,
+    nodes_events_file_path, nodes_file_path, pairing_requests_file_path, print_json,
+    resolve_state_paths, save_devices, save_nodes, save_pairing_requests, write_nodes_event,
 };
 
 pub(super) fn handle_devices(cli: &Cli, args: DevicesArgs) -> Result<()> {
     let paths = resolve_state_paths(cli.project_state)?;
     paths.ensure_dirs()?;
     let devices_path = devices_file_path(&paths.data_dir);
+    let events_path = nodes_events_file_path(&paths.data_dir);
     let mut devices = load_devices_or_default(&devices_path)?;
 
     match args.command {
@@ -70,6 +71,23 @@ pub(super) fn handle_devices(cli: &Cli, args: DevicesArgs) -> Result<()> {
                     device
                 };
             save_devices(&devices_path, &devices)?;
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "devices",
+                    action: "approve",
+                    target_type: "device",
+                    target_id: device.id.clone(),
+                    success: true,
+                    detail: "device approved".to_string(),
+                    node_id: None,
+                    device_id: Some(device.id.clone()),
+                    pairing_id: None,
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -92,6 +110,30 @@ pub(super) fn handle_devices(cli: &Cli, args: DevicesArgs) -> Result<()> {
             device.updated_at = now;
             let device = device.clone();
             save_devices(&devices_path, &devices)?;
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "devices",
+                    action: "reject",
+                    target_type: "device",
+                    target_id: device.id.clone(),
+                    success: true,
+                    detail: format!(
+                        "device rejected{}",
+                        device
+                            .last_error
+                            .as_deref()
+                            .map(|reason| format!(": {reason}"))
+                            .unwrap_or_default()
+                    ),
+                    node_id: None,
+                    device_id: Some(device.id.clone()),
+                    pairing_id: None,
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -120,6 +162,23 @@ pub(super) fn handle_devices(cli: &Cli, args: DevicesArgs) -> Result<()> {
             device.last_seen_at = now;
             let device = device.clone();
             save_devices(&devices_path, &devices)?;
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "devices",
+                    action: "rotate",
+                    target_type: "device",
+                    target_id: device.id.clone(),
+                    success: true,
+                    detail: format!("device token rotated to version {}", device.token_version),
+                    node_id: None,
+                    device_id: Some(device.id.clone()),
+                    pairing_id: None,
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -145,6 +204,30 @@ pub(super) fn handle_devices(cli: &Cli, args: DevicesArgs) -> Result<()> {
             device.updated_at = now;
             let device = device.clone();
             save_devices(&devices_path, &devices)?;
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "devices",
+                    action: "revoke",
+                    target_type: "device",
+                    target_id: device.id.clone(),
+                    success: true,
+                    detail: format!(
+                        "device revoked{}",
+                        device
+                            .last_error
+                            .as_deref()
+                            .map(|reason| format!(": {reason}"))
+                            .unwrap_or_default()
+                    ),
+                    node_id: None,
+                    device_id: Some(device.id.clone()),
+                    pairing_id: None,
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -164,6 +247,7 @@ pub(super) fn handle_pairing(cli: &Cli, args: PairingArgs) -> Result<()> {
     let pairings_path = pairing_requests_file_path(&paths.data_dir);
     let devices_path = devices_file_path(&paths.data_dir);
     let nodes_path = nodes_file_path(&paths.data_dir);
+    let events_path = nodes_events_file_path(&paths.data_dir);
     let mut pairings = load_pairing_requests_or_default(&pairings_path)?;
     let mut devices = load_devices_or_default(&devices_path)?;
     let mut nodes = load_nodes_or_default(&nodes_path)?;
@@ -256,6 +340,23 @@ pub(super) fn handle_pairing(cli: &Cli, args: PairingArgs) -> Result<()> {
             save_pairing_requests(&pairings_path, &pairings)?;
             save_devices(&devices_path, &devices)?;
             save_nodes(&nodes_path, &nodes)?;
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "pairing",
+                    action: "approve",
+                    target_type: "pairing",
+                    target_id: request.id.clone(),
+                    success: true,
+                    detail: "pairing approved and device marked approved".to_string(),
+                    node_id: Some(request.node_id.clone()),
+                    device_id: Some(device.id.clone()),
+                    pairing_id: Some(request.id.clone()),
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -300,6 +401,30 @@ pub(super) fn handle_pairing(cli: &Cli, args: PairingArgs) -> Result<()> {
             }
             save_pairing_requests(&pairings_path, &pairings)?;
             save_devices(&devices_path, &devices)?;
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "pairing",
+                    action: "reject",
+                    target_type: "pairing",
+                    target_id: request.id.clone(),
+                    success: true,
+                    detail: format!(
+                        "pairing rejected{}",
+                        request
+                            .reason
+                            .as_deref()
+                            .map(|reason| format!(": {reason}"))
+                            .unwrap_or_default()
+                    ),
+                    node_id: Some(request.node_id.clone()),
+                    device_id: Some(request.device_id.clone()),
+                    pairing_id: Some(request.id.clone()),
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
             if cli.json {
                 print_json(&json!({
                     "ok": true,
@@ -345,6 +470,23 @@ pub(super) fn handle_pairing(cli: &Cli, args: PairingArgs) -> Result<()> {
             };
             pairings.push(request.clone());
             save_pairing_requests(&pairings_path, &pairings)?;
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "pairing",
+                    action: "request",
+                    target_type: "pairing",
+                    target_id: request.id.clone(),
+                    success: true,
+                    detail: "pairing request created".to_string(),
+                    node_id: Some(request.node_id.clone()),
+                    device_id: Some(request.device_id.clone()),
+                    pairing_id: Some(request.id.clone()),
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
             if cli.json {
                 print_json(&json!({
                     "ok": true,

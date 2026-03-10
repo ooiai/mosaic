@@ -108,4 +108,82 @@ final class WorkbenchViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.composerText, "retry this")
         XCTAssertFalse(viewModel.state.conversation.isSending)
     }
+
+    func testThreadFilteringAndSuggestedPromptEditing() async {
+        let client = MockRuntimeClient()
+        let viewModel = WorkbenchViewModel(
+            workspace: PreviewFixtures.workspace,
+            recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
+            runtimeClient: client
+        )
+
+        await viewModel.refresh()
+        viewModel.threadFilter = "thread-2"
+
+        XCTAssertEqual(viewModel.filteredThreads.count, 1)
+        XCTAssertEqual(viewModel.filteredThreads.first?.id, "thread-2")
+
+        viewModel.applySuggestedPrompt("Inspect the current workspace.")
+        XCTAssertEqual(viewModel.composerText, "Inspect the current workspace.")
+    }
+
+    func testClearSelectedThreadRemovesCurrentSession() async {
+        actor SessionStore {
+            private(set) var sessions: [SessionSummaryData] = [
+                SessionSummaryData(id: "thread-1", eventCount: 4, lastUpdated: "2026-03-10T09:20:00Z"),
+                SessionSummaryData(id: "thread-2", eventCount: 2, lastUpdated: "2026-03-09T18:12:00Z"),
+            ]
+
+            func remove(_ id: String) {
+                sessions.removeAll { $0.id == id }
+            }
+
+            func list() -> [SessionSummaryData] {
+                sessions
+            }
+        }
+
+        let store = SessionStore()
+        let client = MockRuntimeClient()
+        client.sessionsHandler = { _ in
+            await store.list()
+        }
+        client.clearSessionHandler = { _, sessionID in
+            await store.remove(sessionID)
+            return sessionID
+        }
+        client.transcriptHandler = { _, sessionID in
+            if sessionID == "thread-2" {
+                return SessionTranscript(
+                    sessionID: sessionID,
+                    events: [
+                        SessionEvent(
+                            id: "assistant-2",
+                            sessionID: sessionID,
+                            type: .assistant,
+                            timestamp: "2026-03-10T09:30:00Z",
+                            text: "Second thread"
+                        ),
+                    ]
+                )
+            }
+            return PreviewFixtures.transcript
+        }
+
+        let viewModel = WorkbenchViewModel(
+            workspace: PreviewFixtures.workspace,
+            recentWorkspaces: [PreviewFixtures.workspace],
+            runtimeClient: client
+        )
+
+        await viewModel.refresh()
+        XCTAssertEqual(viewModel.selectedThreadID, "thread-1")
+
+        await viewModel.clearSelectedThread()
+
+        XCTAssertEqual(viewModel.selectedThreadID, "thread-2")
+        XCTAssertEqual(viewModel.state.conversation.sessionID, "thread-2")
+        XCTAssertEqual(viewModel.state.sidebar.threads.count, 1)
+        XCTAssertNil(viewModel.state.conversation.inlineError)
+    }
 }

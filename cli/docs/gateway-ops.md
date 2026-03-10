@@ -26,10 +26,16 @@ Notes:
 - `gateway status --deep` includes process/endpoint diagnostics and resolved target.
 - `gateway health --verbose` includes protocol checks:
   - `gateway_discover`
+  - `gateway_discover_schema_profile`
   - `gateway_protocol_methods` (required `health,status`)
   - `gateway_call_status`
+  - `gateway_call_health`
+  - `gateway_call_nodes_run`
+  - `gateway_nodes_run_schema_profile`
+  - `gateway_call_nodes_invoke`
+  - `gateway_nodes_invoke_schema_profile`
 - `gateway health --repair` attempts auto-remediation before checks:
-  - auto-installs/updates service target if needed
+  - reconciles missing/drifted service metadata from the active runtime target when the endpoint is already healthy
   - auto-starts gateway runtime when endpoint is unreachable
   - emits `gateway_auto_repair` check with repair result
 - `gateway diagnose` runs `probe -> discover -> call` and returns step-level pass/fail with error codes and latency.

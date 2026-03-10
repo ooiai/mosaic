@@ -41,12 +41,31 @@ public final class MosaicCLIClient: MosaicRuntimeClient, @unchecked Sendable {
         try await execute(.configureShow, in: workspace, decode: CLIConfigurePayload.self).toDomain()
     }
 
+    public func configureSet(
+        workspace: WorkspaceReference,
+        key: RuntimeConfigKey,
+        value: String
+    ) async throws {
+        _ = try await execute(
+            .configureSet(key: key, value: value),
+            in: workspace,
+            decode: CLIConfigureSetPayload.self
+        )
+    }
+
     public func modelsStatus(workspace: WorkspaceReference) async throws -> ModelsStatusSummary {
         try await execute(.modelsStatus, in: workspace, decode: CLIModelsStatusPayload.self).toDomain()
     }
 
     public func modelsList(workspace: WorkspaceReference) async throws -> [ModelSummary] {
         try await execute(.modelsList, in: workspace, decode: CLIModelsListPayload.self).toDomain()
+    }
+
+    public func setModel(
+        workspace: WorkspaceReference,
+        model: String
+    ) async throws -> ModelSelectionSummary {
+        try await execute(.modelsSet(model: model), in: workspace, decode: CLIModelsSetPayload.self).toDomain()
     }
 
     public func ask(workspace: WorkspaceReference, prompt: String) async throws -> PromptResponse {
@@ -70,6 +89,13 @@ public final class MosaicCLIClient: MosaicRuntimeClient, @unchecked Sendable {
         sessionID: String
     ) async throws -> SessionTranscript {
         try await execute(.sessionShow(id: sessionID), in: workspace, decode: CLISessionTranscriptPayload.self).toDomain()
+    }
+
+    public func clearSession(
+        workspace: WorkspaceReference,
+        sessionID: String
+    ) async throws -> String {
+        try await execute(.sessionClear(id: sessionID), in: workspace, decode: CLISessionClearPayload.self).toDomain()
     }
 
     private func execute<Payload: Decodable>(

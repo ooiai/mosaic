@@ -3,8 +3,7 @@ import Foundation
 
 public enum AppScreen: Equatable {
     case loading
-    case workspacePicker
-    case onboarding(WorkspaceReference)
+    case setupHub
     case workbench
     case error(String)
 }

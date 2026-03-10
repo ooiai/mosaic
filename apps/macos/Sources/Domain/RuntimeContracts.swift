@@ -173,6 +173,23 @@ public struct ConfigurationSummary: Equatable, Sendable {
     }
 }
 
+public enum RuntimeConfigKey: String, Equatable, Sendable {
+    case providerBaseURL = "provider.base_url"
+    case providerAPIKeyEnv = "provider.api_key_env"
+}
+
+public struct ModelSelectionSummary: Equatable, Sendable {
+    public let requestedModel: String
+    public let effectiveModel: String
+    public let previousModel: String?
+
+    public init(requestedModel: String, effectiveModel: String, previousModel: String?) {
+        self.requestedModel = requestedModel
+        self.effectiveModel = effectiveModel
+        self.previousModel = previousModel
+    }
+}
+
 public struct PromptResponse: Equatable, Sendable {
     public let sessionID: String
     public let response: String
@@ -270,8 +287,17 @@ public protocol MosaicRuntimeClient: Sendable {
     func status(workspace: WorkspaceReference) async throws -> RuntimeStatusSummary
     func health(workspace: WorkspaceReference) async throws -> HealthSummary
     func configureShow(workspace: WorkspaceReference) async throws -> ConfigurationSummary
+    func configureSet(
+        workspace: WorkspaceReference,
+        key: RuntimeConfigKey,
+        value: String
+    ) async throws
     func modelsStatus(workspace: WorkspaceReference) async throws -> ModelsStatusSummary
     func modelsList(workspace: WorkspaceReference) async throws -> [ModelSummary]
+    func setModel(
+        workspace: WorkspaceReference,
+        model: String
+    ) async throws -> ModelSelectionSummary
     func ask(workspace: WorkspaceReference, prompt: String) async throws -> PromptResponse
     func chat(
         workspace: WorkspaceReference,
@@ -283,6 +309,10 @@ public protocol MosaicRuntimeClient: Sendable {
         workspace: WorkspaceReference,
         sessionID: String
     ) async throws -> SessionTranscript
+    func clearSession(
+        workspace: WorkspaceReference,
+        sessionID: String
+    ) async throws -> String
 }
 
 public protocol WorkspaceStoring: Sendable {
@@ -290,4 +320,10 @@ public protocol WorkspaceStoring: Sendable {
     func selectedWorkspace() async -> WorkspaceReference?
     func save(workspace: WorkspaceReference) async
     func select(workspaceID: UUID) async
+}
+
+public protocol CommandHistoryStoring: Sendable {
+    func recentCommandActionIDs() async -> [String]
+    func recordCommandActionID(_ actionID: String) async
+    func clearRecentCommandActionIDs() async
 }

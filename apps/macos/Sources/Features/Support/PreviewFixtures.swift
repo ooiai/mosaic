@@ -25,10 +25,10 @@ public enum PreviewFixtures {
         agentsCount: 1,
         stateMode: "project",
         provider: .init(
-            apiKeyEnv: "OPENAI_API_KEY",
-            baseURL: "https://api.openai.com",
+            apiKeyEnv: "AZURE_OPENAI_API_KEY",
+            baseURL: "https://demo-resource.openai.azure.com/openai/v1",
             kind: "openai_compatible",
-            model: "gpt-4o-mini"
+            model: "gpt-5.2"
         )
     )
 
@@ -44,10 +44,10 @@ public enum PreviewFixtures {
         profileName: "default",
         agent: .init(maxTurns: 8, temperature: 0.2),
         provider: .init(
-            apiKeyEnv: "OPENAI_API_KEY",
-            baseURL: "https://api.openai.com",
+            apiKeyEnv: "AZURE_OPENAI_API_KEY",
+            baseURL: "https://demo-resource.openai.azure.com/openai/v1",
             kind: "openai_compatible",
-            model: "gpt-4o-mini"
+            model: "gpt-5.2"
         ),
         stateMode: "project",
         projectDir: ".mosaic"
@@ -55,16 +55,16 @@ public enum PreviewFixtures {
 
     public static let modelsStatusSummary = ModelsStatusSummary(
         profile: "default",
-        currentModel: "gpt-4o-mini",
-        effectiveModel: "gpt-4o-mini",
-        baseURL: "https://api.openai.com",
-        apiKeyEnv: "OPENAI_API_KEY",
+        currentModel: "gpt-5.2",
+        effectiveModel: "gpt-5.2",
+        baseURL: "https://demo-resource.openai.azure.com/openai/v1",
+        apiKeyEnv: "AZURE_OPENAI_API_KEY",
         aliases: [:],
         fallbacks: []
     )
 
     public static let modelList = [
-        ModelSummary(id: "gpt-4o-mini", ownedBy: "openai"),
+        ModelSummary(id: "gpt-5.2", ownedBy: "azure"),
         ModelSummary(id: "gpt-4.1-mini", ownedBy: "openai"),
     ]
 
