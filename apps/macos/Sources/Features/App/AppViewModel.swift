@@ -42,15 +42,18 @@ public final class AppViewModel {
     private let runtimeClient: MosaicRuntimeClient
     private let workspaceStore: WorkspaceStoring
     private let commandHistoryStore: CommandHistoryStoring
+    private let pinnedSessionsStore: PinnedSessionsStoring
 
     public init(
         runtimeClient: MosaicRuntimeClient,
         workspaceStore: WorkspaceStoring,
-        commandHistoryStore: CommandHistoryStoring = CommandHistoryStore()
+        commandHistoryStore: CommandHistoryStoring = CommandHistoryStore(),
+        pinnedSessionsStore: PinnedSessionsStoring = PinnedSessionStore()
     ) {
         self.runtimeClient = runtimeClient
         self.workspaceStore = workspaceStore
         self.commandHistoryStore = commandHistoryStore
+        self.pinnedSessionsStore = pinnedSessionsStore
     }
 
     public func bootstrap() async {
@@ -101,6 +104,7 @@ public final class AppViewModel {
             )
             showAdvancedSetup = false
             await prepareWorkspace(workspace, openWorkbenchIfConfigured: true)
+            await recordCommandAction("initialize-workspace")
         } catch {
             globalError = error.localizedDescription
         }
@@ -109,10 +113,12 @@ public final class AppViewModel {
     public func openSelectedWorkspace() async {
         guard let workspace = selectedWorkspace else { return }
         await prepareWorkspace(workspace, openWorkbenchIfConfigured: true)
+        await recordCommandAction("open-workspace")
     }
 
     public func showSetupHub() {
         screen = .setupHub
+        Task { await recordCommandAction("choose-workspace") }
     }
 
     public func presentCommandPalette() {
@@ -126,6 +132,7 @@ public final class AppViewModel {
     public func revealSelectedWorkspaceInFinder() {
         guard let selectedWorkspace else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: selectedWorkspace.path)])
+        Task { await recordCommandAction("reveal-workspace") }
     }
 
     public func refreshSelectedWorkspace() async {
@@ -153,22 +160,61 @@ public final class AppViewModel {
 
     public func refreshActiveWorkspace() async {
         await refreshSelectedWorkspace()
+        await recordCommandAction("refresh-workspace")
     }
 
     public func createNewThread() {
         workbench?.newThread()
+        Task { await recordCommandAction("new-thread") }
     }
 
     public func sendCurrentPrompt() async {
+        let hasPrompt = !(workbench?.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         await workbench?.sendCurrentPrompt()
+        if hasPrompt {
+            await recordCommandAction("send-prompt")
+        }
     }
 
     public func clearCurrentThread() async {
+        let hadSelection = workbench?.selectedThreadID != nil
         await workbench?.clearSelectedThread()
+        if hadSelection {
+            await recordCommandAction("clear-thread")
+        }
     }
 
     public func toggleInspector() {
         workbench?.toggleInspector()
+        Task { await recordCommandAction("toggle-inspector") }
+    }
+
+    public func openSession(_ sessionID: String, recordHistory: Bool = false) async {
+        await workbench?.selectThread(sessionID)
+        if recordHistory {
+            await recordCommandAction("session-open-\(sessionID)")
+        }
+    }
+
+    public func clearSession(_ sessionID: String, recordHistory: Bool = false) async {
+        await workbench?.clearThread(sessionID)
+        if recordHistory {
+            await recordCommandAction("session-clear-\(sessionID)")
+        }
+    }
+
+    public func togglePinnedSession(_ sessionID: String, recordHistory: Bool = false) async {
+        await workbench?.togglePinnedThread(sessionID)
+        if recordHistory {
+            await recordCommandAction("session-pin-\(sessionID)")
+        }
+    }
+
+    public func activateWorkspace(_ workspace: WorkspaceReference, recordHistory: Bool = false) async {
+        await selectWorkspace(workspace)
+        if recordHistory {
+            await recordCommandAction("workspace-\(workspace.id.uuidString)")
+        }
     }
 
     public var selectedWorkspaceConfigured: Bool {
@@ -413,6 +459,7 @@ public final class AppViewModel {
             }
 
             await prepareWorkspace(workspace, openWorkbenchIfConfigured: screen == .workbench)
+            await recordCommandAction("save-runtime")
         } catch {
             globalError = error.localizedDescription
         }
@@ -447,7 +494,8 @@ public final class AppViewModel {
                     workbench = WorkbenchViewModel(
                         workspace: workspace,
                         recentWorkspaces: recentWorkspaces,
-                        runtimeClient: runtimeClient
+                        runtimeClient: runtimeClient,
+                        pinnedSessionsStore: pinnedSessionsStore
                     )
                 }
                 screen = .workbench

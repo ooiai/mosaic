@@ -2,12 +2,25 @@ import Domain
 import Foundation
 import Observation
 
+public struct SidebarThreadSection: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let threads: [ThreadSummary]
+
+    public init(id: String, title: String, threads: [ThreadSummary]) {
+        self.id = id
+        self.title = title
+        self.threads = threads
+    }
+}
+
 @MainActor
 @Observable
 public final class WorkbenchViewModel {
     public private(set) var state: WorkbenchState
     public private(set) var selectedThreadID: String?
     public private(set) var isLoading = false
+    public private(set) var pinnedThreadIDs: Set<String> = []
     public var isInspectorVisible = true
     public var lastError: String?
     public var threadFilter = ""
@@ -46,9 +59,33 @@ public final class WorkbenchViewModel {
         state.conversation.messages.count
     }
 
+    public var hasThreadSearchQuery: Bool {
+        !threadFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    public var pinnedThreads: [ThreadSummary] {
+        filteredThreads.filter { pinnedThreadIDs.contains($0.id) }
+    }
+
+    public var recentThreads: [ThreadSummary] {
+        filteredThreads.filter { !pinnedThreadIDs.contains($0.id) }
+    }
+
+    public var threadSections: [SidebarThreadSection] {
+        var sections: [SidebarThreadSection] = []
+        if !pinnedThreads.isEmpty {
+            sections.append(.init(id: "pinned", title: "Pinned", threads: pinnedThreads))
+        }
+        if !recentThreads.isEmpty {
+            sections.append(.init(id: "recent", title: hasThreadSearchQuery ? "Matches" : "Recent Sessions", threads: recentThreads))
+        }
+        return sections
+    }
+
     private let workspace: WorkspaceReference
     private let recentWorkspaces: [WorkspaceReference]
     private let runtimeClient: MosaicRuntimeClient
+    private let pinnedSessionsStore: PinnedSessionsStoring
 
     public var workspaceReference: WorkspaceReference {
         workspace
@@ -57,11 +94,13 @@ public final class WorkbenchViewModel {
     public init(
         workspace: WorkspaceReference,
         recentWorkspaces: [WorkspaceReference],
-        runtimeClient: MosaicRuntimeClient
+        runtimeClient: MosaicRuntimeClient,
+        pinnedSessionsStore: PinnedSessionsStoring
     ) {
         self.workspace = workspace
         self.recentWorkspaces = recentWorkspaces
         self.runtimeClient = runtimeClient
+        self.pinnedSessionsStore = pinnedSessionsStore
         self.state = WorkbenchState.empty(workspace: workspace, recentWorkspaces: recentWorkspaces)
     }
 
@@ -101,6 +140,16 @@ public final class WorkbenchViewModel {
 
     public func applySuggestedPrompt(_ prompt: String) {
         composerText = prompt
+    }
+
+    public func isPinnedThread(_ id: String) -> Bool {
+        pinnedThreadIDs.contains(id)
+    }
+
+    public func togglePinnedThread(_ id: String) async {
+        let shouldPin = !pinnedThreadIDs.contains(id)
+        await pinnedSessionsStore.setPinnedSessionID(id, pinned: shouldPin, workspaceID: workspace.id)
+        pinnedThreadIDs = Set(await pinnedSessionsStore.pinnedSessionIDs(for: workspace.id))
     }
 
     public var canClearSelectedThread: Bool {
@@ -159,11 +208,13 @@ public final class WorkbenchViewModel {
             async let status = runtimeClient.status(workspace: workspace)
             async let models = runtimeClient.modelsStatus(workspace: workspace)
             async let sessions = runtimeClient.listSessions(workspace: workspace)
+            async let pinnedSessionIDs = pinnedSessionsStore.pinnedSessionIDs(for: workspace.id)
 
             let loadedStatus = try await status
             let loadedModels = try? await models
             let loadedHealth = try? await runtimeClient.health(workspace: workspace)
             let loadedSessions = try await sessions
+            pinnedThreadIDs = Set(await pinnedSessionIDs)
 
             if selectedThreadID == nil {
                 selectedThreadID = loadedSessions.first?.id

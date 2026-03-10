@@ -775,7 +775,7 @@ private struct CommandPaletteOverlay: View {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(tokens.tertiaryText)
 
-                    TextField("Search commands, workspaces, and actions", text: $query)
+                    TextField("Search commands, sessions, and workspaces", text: $query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 16))
                         .focused($isSearchFocused)
@@ -998,10 +998,10 @@ private struct CommandPaletteOverlay: View {
             )
         }
 
-        if let workbench = viewModel.workbench {
-            items.append(
-                CommandPaletteItem(
-                    id: "new-thread",
+            if let workbench = viewModel.workbench {
+                items.append(
+                    CommandPaletteItem(
+                        id: "new-thread",
                     title: "New Thread",
                     subtitle: "Start a fresh conversation without leaving the current workspace.",
                     systemImage: "square.and.pencil",
@@ -1060,9 +1060,60 @@ private struct CommandPaletteOverlay: View {
                 ) {
                     viewModel.dismissCommandPalette()
                     viewModel.toggleInspector()
+                    }
+                )
+
+                for thread in workbench.state.sidebar.threads {
+                    let isPinned = workbench.isPinnedThread(thread.id)
+                    items.append(
+                        CommandPaletteItem(
+                            id: "session-open-\(thread.id)",
+                            title: thread.title,
+                            subtitle: "\(thread.eventCount) events · \(thread.updatedLabel)\(isPinned ? " · pinned" : "")",
+                            systemImage: isPinned ? "pin.fill" : "text.bubble",
+                            shortcutLabel: nil,
+                            enabled: true,
+                            group: .conversation,
+                            keywords: ["session", "thread", thread.id, thread.title, thread.subtitle, isPinned ? "pinned" : "recent"]
+                        ) {
+                            viewModel.dismissCommandPalette()
+                            Task { await viewModel.openSession(thread.id) }
+                        }
+                    )
+
+                    items.append(
+                        CommandPaletteItem(
+                            id: "session-pin-\(thread.id)",
+                            title: isPinned ? "Unpin \(thread.title)" : "Pin \(thread.title)",
+                            subtitle: isPinned ? "Remove this session from the pinned group." : "Keep this session at the top of the sidebar.",
+                            systemImage: isPinned ? "pin.slash" : "pin",
+                            shortcutLabel: nil,
+                            enabled: true,
+                            group: .conversation,
+                            keywords: ["pin", "session", "thread", thread.id, thread.title]
+                        ) {
+                            viewModel.dismissCommandPalette()
+                            Task { await viewModel.togglePinnedSession(thread.id) }
+                        }
+                    )
+
+                    items.append(
+                        CommandPaletteItem(
+                            id: "session-clear-\(thread.id)",
+                            title: "Clear \(thread.title)",
+                            subtitle: "Delete this session from the current workspace.",
+                            systemImage: "trash",
+                            shortcutLabel: nil,
+                            enabled: !workbench.state.conversation.isSending,
+                            group: .conversation,
+                            keywords: ["clear", "delete", "session", "thread", thread.id, thread.title]
+                        ) {
+                            viewModel.dismissCommandPalette()
+                            Task { await viewModel.clearSession(thread.id) }
+                        }
+                    )
                 }
-            )
-        }
+            }
 
         for workspace in viewModel.recentWorkspaces where workspace.id != viewModel.selectedWorkspace?.id {
             items.append(
@@ -1077,7 +1128,7 @@ private struct CommandPaletteOverlay: View {
                     keywords: ["switch", "workspace", workspace.name, workspace.path]
                 ) {
                     viewModel.dismissCommandPalette()
-                    Task { await viewModel.selectWorkspace(workspace) }
+                    Task { await viewModel.activateWorkspace(workspace) }
                 }
             )
         }
@@ -1365,6 +1416,8 @@ public struct WorkbenchView: View {
             }
 
             ToolbarItemGroup {
+                ToolbarModelMenu(appViewModel: appViewModel)
+
                 Button {
                     appViewModel.presentCommandPalette()
                 } label: {
@@ -1373,7 +1426,7 @@ public struct WorkbenchView: View {
                 .help("Command palette")
 
                 Button {
-                    viewModel.newThread()
+                    appViewModel.createNewThread()
                 } label: {
                     Image(systemName: "square.and.pencil")
                 }
@@ -1387,14 +1440,14 @@ public struct WorkbenchView: View {
                 .help("Switch workspace")
 
                 Button {
-                    Task { await viewModel.refresh() }
+                    Task { await appViewModel.refreshActiveWorkspace() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Refresh workspace")
 
                 Button {
-                    Task { await viewModel.clearSelectedThread() }
+                    Task { await appViewModel.clearCurrentThread() }
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -1402,7 +1455,7 @@ public struct WorkbenchView: View {
                 .help("Clear selected thread")
 
                 Button {
-                    viewModel.toggleInspector()
+                    appViewModel.toggleInspector()
                 } label: {
                     Image(systemName: viewModel.isInspectorVisible ? "sidebar.right" : "sidebar.left")
                 }
@@ -1488,10 +1541,112 @@ private struct ToolbarPill: View {
     }
 }
 
+private struct ToolbarModelMenu: View {
+    @Bindable var appViewModel: AppViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Menu {
+            if appViewModel.setupModelChoices.isEmpty {
+                Text("No models available")
+            } else {
+                ForEach(appViewModel.setupModelChoices, id: \.self) { modelID in
+                    Button {
+                        Task { await appViewModel.quickSwitchModel(modelID) }
+                    } label: {
+                        if modelID == appViewModel.currentModelLabel {
+                            Label(modelID, systemImage: "checkmark")
+                        } else {
+                            Text(modelID)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "cpu")
+                Text(appViewModel.isApplyingQuickModel ? "Switching…" : appViewModel.currentModelLabel)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(tokens.primaryText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(tokens.panelBackground.opacity(0.82), in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(tokens.border.opacity(0.6), lineWidth: 1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(appViewModel.setupModelChoices.isEmpty || !appViewModel.canQuickSwitchModels)
+    }
+}
+
 struct SidebarContent: View {
+    private struct RecentTaskDescriptor: Identifiable {
+        let id: String
+        let title: String
+        let subtitle: String
+        let systemImage: String
+        let perform: () -> Void
+    }
+
+    private struct RecentTaskCard: View {
+        let task: RecentTaskDescriptor
+        @Environment(\.colorScheme) private var colorScheme
+
+        var body: some View {
+            let tokens = ThemeTokens.current(for: colorScheme)
+
+            Button(action: task.perform) {
+                HStack(alignment: .top, spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(tokens.elevatedBackground.opacity(0.92))
+                        Image(systemName: task.systemImage)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(tokens.accent)
+                    }
+                    .frame(width: 34, height: 34)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(task.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(tokens.primaryText)
+                            .lineLimit(1)
+                        Text(task.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(tokens.secondaryText)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(tokens.tertiaryText)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(tokens.panelBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(tokens.border.opacity(0.62), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     @Bindable var appViewModel: AppViewModel
     @Bindable var viewModel: WorkbenchViewModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
@@ -1539,7 +1694,7 @@ struct SidebarContent: View {
                             .foregroundStyle(tokens.tertiaryText)
                         ForEach(viewModel.state.sidebar.recentWorkspaces) { workspace in
                             Button {
-                                Task { await appViewModel.selectWorkspace(workspace) }
+                                Task { await appViewModel.activateWorkspace(workspace, recordHistory: true) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(workspace.name)
@@ -1559,63 +1714,69 @@ struct SidebarContent: View {
                 }
 
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Threads")
-                        .font(.caption)
-                        .foregroundStyle(tokens.tertiaryText)
+                    HStack {
+                        Text("Sessions")
+                            .font(.caption)
+                            .foregroundStyle(tokens.tertiaryText)
+                        Spacer()
+                        Text("\(viewModel.state.sidebar.threads.count)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(tokens.tertiaryText)
+                    }
 
                     TextField("Filter threads", text: $viewModel.threadFilter)
                         .textFieldStyle(.roundedBorder)
 
-                    Button("New Thread") {
-                        viewModel.newThread()
+                    if let selected = viewModel.selectedThreadSummary {
+                        ActiveSessionCard(
+                            thread: selected,
+                            isPinned: viewModel.isPinnedThread(selected.id),
+                            onOpen: { Task { await viewModel.selectThread(selected.id) } },
+                            onTogglePinned: { Task { await viewModel.togglePinnedThread(selected.id) } },
+                            onClear: { Task { await viewModel.clearThread(selected.id) } }
+                        )
                     }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(tokens.accent)
 
-                    if viewModel.filteredThreads.isEmpty {
-                        Text(viewModel.threadFilter.isEmpty ? "No sessions yet." : "No matching threads.")
+                    HStack(spacing: 10) {
+                        Button("New Thread") {
+                            appViewModel.createNewThread()
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(tokens.accent)
+
+                        if viewModel.hasThreadSearchQuery {
+                            Text("Showing \(viewModel.filteredThreads.count) results")
+                                .font(.caption)
+                                .foregroundStyle(tokens.tertiaryText)
+                        }
+                    }
+
+                    if viewModel.threadSections.isEmpty {
+                        Text(viewModel.threadFilter.isEmpty ? "No sessions yet." : "No matching sessions.")
                             .font(.caption)
                             .foregroundStyle(tokens.tertiaryText)
                     } else {
-                        ForEach(viewModel.filteredThreads) { thread in
-                            Button {
-                                Task { await viewModel.selectThread(thread.id) }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(thread.title)
-                                            .foregroundStyle(tokens.primaryText)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text(thread.updatedLabel)
-                                            .font(.caption2)
-                                            .foregroundStyle(tokens.tertiaryText)
-                                    }
-                                    Text(thread.subtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(tokens.secondaryText)
-                                        .lineLimit(1)
+                        ForEach(viewModel.threadSections) { section in
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text(section.title)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(tokens.tertiaryText)
+                                    Spacer()
+                                    Text("\(section.threads.count)")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(tokens.tertiaryText)
                                 }
-                                .padding(12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(viewModel.state.conversation.sessionID == thread.id ? tokens.elevatedBackground : tokens.panelBackground.opacity(0.68))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .stroke(
-                                            viewModel.state.conversation.sessionID == thread.id ? tokens.accent.opacity(0.4) : tokens.border.opacity(0.5),
-                                            lineWidth: 1
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button("Open Thread") {
-                                    Task { await viewModel.selectThread(thread.id) }
-                                }
-                                Button("Clear Thread", role: .destructive) {
-                                    Task { await viewModel.clearThread(thread.id) }
+
+                                ForEach(section.threads) { thread in
+                                    SidebarThreadRow(
+                                        thread: thread,
+                                        isSelected: viewModel.state.conversation.sessionID == thread.id,
+                                        isPinned: viewModel.isPinnedThread(thread.id),
+                                        onOpen: { Task { await viewModel.selectThread(thread.id) } },
+                                        onTogglePinned: { Task { await viewModel.togglePinnedThread(thread.id) } },
+                                        onClear: { Task { await viewModel.clearThread(thread.id) } }
+                                    )
                                 }
                             }
                         }
@@ -1630,8 +1791,163 @@ struct SidebarContent: View {
                         quickActionRow(for: action, tokens: tokens)
                     }
                 }
+
+                if !appViewModel.recentCommandActionIDs.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Recent Tasks")
+                            .font(.caption)
+                            .foregroundStyle(tokens.tertiaryText)
+                        ForEach(resolvedRecentTasks) { task in
+                            RecentTaskCard(task: task)
+                        }
+                    }
+                }
             }
             .padding(16)
+        }
+    }
+
+    private struct ActiveSessionCard: View {
+        let thread: ThreadSummary
+        let isPinned: Bool
+        let onOpen: () -> Void
+        let onTogglePinned: () -> Void
+        let onClear: () -> Void
+        @Environment(\.colorScheme) private var colorScheme
+
+        var body: some View {
+            let tokens = ThemeTokens.current(for: colorScheme)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Active Session")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tokens.tertiaryText)
+                    Spacer()
+                    if isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption)
+                            .foregroundStyle(tokens.warning)
+                    }
+                }
+
+                Text(thread.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(tokens.primaryText)
+                    .lineLimit(2)
+
+                HStack(spacing: 8) {
+                    Text(thread.updatedLabel)
+                    Text("•")
+                    Text("\(thread.eventCount) events")
+                }
+                .font(.caption)
+                .foregroundStyle(tokens.secondaryText)
+
+                HStack(spacing: 8) {
+                    MiniActionButton(title: "Open", systemImage: "arrow.up.right") {
+                        onOpen()
+                    }
+                    MiniActionButton(title: isPinned ? "Unpin" : "Pin", systemImage: isPinned ? "pin.slash" : "pin") {
+                        onTogglePinned()
+                    }
+                    Button("Clear", role: .destructive) {
+                        onClear()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(14)
+            .background(tokens.panelBackground.opacity(0.84), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(tokens.accent.opacity(0.35), lineWidth: 1)
+            )
+        }
+    }
+
+    private struct SidebarThreadRow: View {
+        let thread: ThreadSummary
+        let isSelected: Bool
+        let isPinned: Bool
+        let onOpen: () -> Void
+        let onTogglePinned: () -> Void
+        let onClear: () -> Void
+        @Environment(\.colorScheme) private var colorScheme
+
+        var body: some View {
+            let tokens = ThemeTokens.current(for: colorScheme)
+
+            HStack(spacing: 10) {
+                Button {
+                    onOpen()
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(thread.title)
+                                .foregroundStyle(tokens.primaryText)
+                                .lineLimit(1)
+                            Spacer()
+                            Text(thread.updatedLabel)
+                                .font(.caption2)
+                                .foregroundStyle(tokens.tertiaryText)
+                        }
+                        HStack(spacing: 6) {
+                            Text("\(thread.eventCount) events")
+                            if isPinned {
+                                Text("• pinned")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(tokens.secondaryText)
+                        .lineLimit(1)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(isSelected ? tokens.elevatedBackground : tokens.panelBackground.opacity(0.68))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(
+                                isSelected ? tokens.accent.opacity(0.4) : tokens.border.opacity(0.5),
+                                lineWidth: 1
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .contextMenu {
+                    Button("Open Session") {
+                        onOpen()
+                    }
+                    Button(isPinned ? "Unpin Session" : "Pin Session") {
+                        onTogglePinned()
+                    }
+                    Button("Clear Session", role: .destructive) {
+                        onClear()
+                    }
+                }
+
+                VStack(spacing: 8) {
+                    Button {
+                        onTogglePinned()
+                    } label: {
+                        Image(systemName: isPinned ? "pin.fill" : "pin")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(isPinned ? tokens.warning : tokens.tertiaryText)
+
+                    Button(role: .destructive) {
+                        onClear()
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(tokens.tertiaryText)
+                }
+                .frame(width: 20)
+            }
         }
     }
 
@@ -1640,7 +1956,7 @@ struct SidebarContent: View {
         switch action.id {
         case "new-thread":
             Button {
-                viewModel.newThread()
+                appViewModel.createNewThread()
             } label: {
                 Label(action.title, systemImage: action.systemImage)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1649,7 +1965,7 @@ struct SidebarContent: View {
             .foregroundStyle(tokens.secondaryText)
         case "refresh":
             Button {
-                Task { await viewModel.refresh() }
+                Task { await appViewModel.refreshActiveWorkspace() }
             } label: {
                 Label(action.title, systemImage: action.systemImage)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1675,7 +1991,10 @@ struct SidebarContent: View {
             .buttonStyle(.plain)
             .foregroundStyle(tokens.secondaryText)
         case "settings":
-            SettingsLink {
+            Button {
+                Task { await appViewModel.recordCommandAction("settings") }
+                openSettings()
+            } label: {
                 Label(action.title, systemImage: action.systemImage)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1685,6 +2004,198 @@ struct SidebarContent: View {
             Label(action.title, systemImage: action.systemImage)
                 .foregroundStyle(tokens.secondaryText)
         }
+    }
+
+    private var resolvedRecentTasks: [RecentTaskDescriptor] {
+        Array(appViewModel.recentCommandActionIDs.prefix(5)).compactMap { actionID in
+            recentTaskDescriptor(for: actionID)
+        }
+    }
+
+    private func recentTaskDescriptor(for actionID: String) -> RecentTaskDescriptor? {
+        let workspaceTitle = viewModel.state.sidebar.currentWorkspace.name
+
+        switch actionID {
+        case "new-thread":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Start a new thread",
+                subtitle: "Open a fresh conversation in \(workspaceTitle).",
+                systemImage: "square.and.pencil"
+            ) {
+                appViewModel.createNewThread()
+            }
+        case "refresh-workspace":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Refresh workspace",
+                subtitle: "Reload health, sessions, and runtime state for \(workspaceTitle).",
+                systemImage: "arrow.clockwise"
+            ) {
+                Task { await appViewModel.refreshActiveWorkspace() }
+            }
+        case "reveal-workspace":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Reveal in Finder",
+                subtitle: viewModel.state.sidebar.currentWorkspace.path,
+                systemImage: "folder.badge.gearshape"
+            ) {
+                appViewModel.revealSelectedWorkspaceInFinder()
+            }
+        case "settings":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Open settings",
+                subtitle: "Adjust runtime, actions, and desktop defaults.",
+                systemImage: "gearshape"
+            ) {
+                Task { await appViewModel.recordCommandAction("settings") }
+                openSettings()
+            }
+        case "choose-workspace":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Choose workspace",
+                subtitle: "Return to the setup hub and switch projects.",
+                systemImage: "folder"
+            ) {
+                appViewModel.showSetupHub()
+            }
+        case "open-workspace":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Open workbench",
+                subtitle: "Resume the active project in the main workspace.",
+                systemImage: "play.rectangle"
+            ) {
+                Task { await appViewModel.openSelectedWorkspace() }
+            }
+        case "initialize-workspace":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Initialize workspace",
+                subtitle: "Create the local Mosaic runtime config with the current draft.",
+                systemImage: "wand.and.stars"
+            ) {
+                Task { await appViewModel.completeOnboarding() }
+            }
+        case "save-runtime":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Save runtime settings",
+                subtitle: "\(appViewModel.currentProviderLabel) · \(appViewModel.currentModelLabel)",
+                systemImage: "internaldrive"
+            ) {
+                Task { await appViewModel.saveRuntimeSettings() }
+            }
+        case "clear-thread":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Clear selected thread",
+                subtitle: viewModel.selectedThreadSummary?.title ?? "Remove the active session from this workspace.",
+                systemImage: "trash"
+            ) {
+                Task { await appViewModel.clearCurrentThread() }
+            }
+        case "send-prompt":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Send prompt",
+                subtitle: "Dispatch the current composer text to \(appViewModel.currentModelLabel).",
+                systemImage: "paperplane"
+            ) {
+                Task { await appViewModel.sendCurrentPrompt() }
+            }
+        case "toggle-inspector":
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: viewModel.isInspectorVisible ? "Hide inspector" : "Show inspector",
+                subtitle: "Toggle the runtime and session side panel.",
+                systemImage: viewModel.isInspectorVisible ? "sidebar.right" : "sidebar.left"
+            ) {
+                appViewModel.toggleInspector()
+            }
+        default:
+            if let task = workspaceTaskDescriptor(for: actionID) {
+                return task
+            }
+            if let task = sessionTaskDescriptor(for: actionID) {
+                return task
+            }
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: actionID,
+                subtitle: "Replay this workspace action.",
+                systemImage: "clock.arrow.circlepath"
+            ) {
+                Task { await appViewModel.recordCommandAction(actionID) }
+            }
+        }
+    }
+
+    private func workspaceTaskDescriptor(for actionID: String) -> RecentTaskDescriptor? {
+        guard actionID.hasPrefix("workspace-") else { return nil }
+        let rawID = String(actionID.dropFirst("workspace-".count))
+        guard let workspaceID = UUID(uuidString: rawID) else { return nil }
+
+        let candidates = [appViewModel.selectedWorkspace].compactMap { $0 }
+            + appViewModel.recentWorkspaces
+            + viewModel.state.sidebar.recentWorkspaces
+        guard let workspace = candidates.first(where: { $0.id == workspaceID }) else { return nil }
+
+        return RecentTaskDescriptor(
+            id: actionID,
+            title: "Switch to \(workspace.name)",
+            subtitle: workspace.path,
+            systemImage: "folder"
+        ) {
+            Task { await appViewModel.activateWorkspace(workspace, recordHistory: true) }
+        }
+    }
+
+    private func sessionTaskDescriptor(for actionID: String) -> RecentTaskDescriptor? {
+        if actionID.hasPrefix("session-open-") {
+            let sessionID = String(actionID.dropFirst("session-open-".count))
+            guard let thread = viewModel.state.sidebar.threads.first(where: { $0.id == sessionID }) else { return nil }
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Resume \(thread.title)",
+                subtitle: "\(thread.eventCount) events · \(thread.updatedLabel)",
+                systemImage: "text.bubble"
+            ) {
+                Task { await appViewModel.openSession(sessionID, recordHistory: true) }
+            }
+        }
+
+        if actionID.hasPrefix("session-pin-") {
+            let sessionID = String(actionID.dropFirst("session-pin-".count))
+            guard let thread = viewModel.state.sidebar.threads.first(where: { $0.id == sessionID }) else { return nil }
+            let isPinned = viewModel.isPinnedThread(sessionID)
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: isPinned ? "Unpin \(thread.title)" : "Pin \(thread.title)",
+                subtitle: isPinned ? "Move it back into the recent sessions group." : "Keep this session at the top of the sidebar.",
+                systemImage: isPinned ? "pin.slash" : "pin"
+            ) {
+                Task { await appViewModel.togglePinnedSession(sessionID, recordHistory: true) }
+            }
+        }
+
+        if actionID.hasPrefix("session-clear-") {
+            let sessionID = String(actionID.dropFirst("session-clear-".count))
+            guard let thread = viewModel.state.sidebar.threads.first(where: { $0.id == sessionID }) else { return nil }
+            return RecentTaskDescriptor(
+                id: actionID,
+                title: "Clear \(thread.title)",
+                subtitle: "Delete this session from \(viewModel.state.sidebar.currentWorkspace.name).",
+                systemImage: "trash"
+            ) {
+                Task { await appViewModel.clearSession(sessionID, recordHistory: true) }
+            }
+        }
+
+        return nil
     }
 }
 
@@ -1795,10 +2306,10 @@ private struct ConversationHeaderCard: View {
                         appViewModel.presentCommandPalette()
                     }
                     MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
-                        Task { await viewModel.refresh() }
+                        Task { await appViewModel.refreshActiveWorkspace() }
                     }
                     MiniActionButton(title: "New", systemImage: "square.and.pencil") {
-                        viewModel.newThread()
+                        appViewModel.createNewThread()
                     }
                 }
             }
@@ -1919,13 +2430,13 @@ private struct ComposerDock: View {
                     .foregroundStyle(tokens.tertiaryText)
 
                 Button("Clear Thread", role: .destructive) {
-                    Task { await viewModel.clearSelectedThread() }
+                    Task { await appViewModel.clearCurrentThread() }
                 }
                 .buttonStyle(.bordered)
                 .disabled(!viewModel.canClearSelectedThread)
 
                 Button(viewModel.state.conversation.isSending ? "Sending…" : "Send") {
-                    Task { await viewModel.sendCurrentPrompt() }
+                    Task { await appViewModel.sendCurrentPrompt() }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(viewModel.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.state.conversation.isSending)
@@ -2023,7 +2534,7 @@ private struct EmptyConversationView: View {
                     .buttonStyle(.bordered)
 
                     Button("Refresh Workspace") {
-                        Task { await viewModel.refresh() }
+                        Task { await appViewModel.refreshActiveWorkspace() }
                     }
                     .buttonStyle(.bordered)
                 }
@@ -2185,14 +2696,17 @@ struct InspectorContent: View {
                 switch selectedPane {
                 case .overview:
                     InspectorWorkspaceActions(appViewModel: appViewModel, viewModel: viewModel)
+                    InspectorModelSwitcherCard(appViewModel: appViewModel)
                     inspectorSections(for: ["context", "runtime"])
                     InspectorHealthChecksCard(appViewModel: appViewModel)
                 case .runtime:
+                    InspectorModelSwitcherCard(appViewModel: appViewModel)
                     RuntimeControlsCard(viewModel: appViewModel, title: "Runtime controls")
                     inspectorSections(for: ["runtime", "context"])
                     InspectorHealthChecksCard(appViewModel: appViewModel)
                 case .session:
-                    InspectorSessionActions(viewModel: viewModel)
+                    InspectorSessionActions(appViewModel: appViewModel, viewModel: viewModel)
+                    InspectorSessionListCard(viewModel: viewModel)
                     inspectorSections(for: ["session", "context"])
                 }
             }
@@ -2284,7 +2798,7 @@ private struct InspectorWorkspaceActions: View {
 
             HStack(spacing: 10) {
                 MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
-                    Task { await viewModel.refresh() }
+                    Task { await appViewModel.refreshActiveWorkspace() }
                 }
                 MiniActionButton(title: "Reveal", systemImage: "folder.badge.gearshape") {
                     appViewModel.revealSelectedWorkspaceInFinder()
@@ -2303,7 +2817,82 @@ private struct InspectorWorkspaceActions: View {
     }
 }
 
+private struct InspectorModelSwitcherCard: View {
+    @Bindable var appViewModel: AppViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Available Models")
+                        .font(.headline)
+                        .foregroundStyle(tokens.primaryText)
+                    Text("Quick-switch the active runtime model from the workbench.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(tokens.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if appViewModel.isApplyingQuickModel {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                ForEach(appViewModel.setupModelChoices, id: \.self) { modelID in
+                    Button {
+                        Task { await appViewModel.quickSwitchModel(modelID) }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(modelID == appViewModel.currentModelLabel ? tokens.success : tokens.accent.opacity(0.75))
+                                .frame(width: 7, height: 7)
+                            Text(modelID)
+                                .font(.system(size: 12, weight: .semibold))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(tokens.primaryText)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 9)
+                        .background(
+                            (modelID == appViewModel.currentModelLabel ? tokens.elevatedBackground : tokens.windowBackground.opacity(0.36)),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(
+                                    modelID == appViewModel.currentModelLabel ? tokens.success.opacity(0.45) : tokens.border.opacity(0.55),
+                                    lineWidth: 1
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!appViewModel.canQuickSwitchModels)
+                }
+            }
+
+            if appViewModel.setupModelChoices.isEmpty {
+                Text("No models available yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(tokens.secondaryText)
+            }
+        }
+        .padding(14)
+        .background(tokens.panelBackground.opacity(0.86), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
+        )
+    }
+}
+
 private struct InspectorSessionActions: View {
+    @Bindable var appViewModel: AppViewModel
     @Bindable var viewModel: WorkbenchViewModel
     @Environment(\.colorScheme) private var colorScheme
 
@@ -2317,16 +2906,90 @@ private struct InspectorSessionActions: View {
 
             HStack(spacing: 10) {
                 MiniActionButton(title: "New", systemImage: "square.and.pencil") {
-                    viewModel.newThread()
+                    appViewModel.createNewThread()
                 }
                 MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
-                    Task { await viewModel.refresh() }
+                    Task { await appViewModel.refreshActiveWorkspace() }
                 }
                 Button("Clear Thread", role: .destructive) {
-                    Task { await viewModel.clearSelectedThread() }
+                    Task { await appViewModel.clearCurrentThread() }
                 }
                 .buttonStyle(.bordered)
                 .disabled(!viewModel.canClearSelectedThread)
+            }
+        }
+        .padding(14)
+        .background(tokens.panelBackground.opacity(0.86), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
+        )
+    }
+}
+
+private struct InspectorSessionListCard: View {
+    @Bindable var viewModel: WorkbenchViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recent Sessions")
+                .font(.headline)
+                .foregroundStyle(tokens.primaryText)
+
+            if viewModel.state.sidebar.threads.isEmpty {
+                Text("No sessions in this workspace.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(tokens.secondaryText)
+            } else {
+                ForEach(viewModel.state.sidebar.threads) { thread in
+                    HStack(spacing: 10) {
+                        Button {
+                            Task { await viewModel.selectThread(thread.id) }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(thread.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(tokens.primaryText)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(thread.updatedLabel)
+                                        .font(.caption2)
+                                        .foregroundStyle(tokens.tertiaryText)
+                                }
+                                Text("\(thread.eventCount) events")
+                                    .font(.caption)
+                                    .foregroundStyle(tokens.secondaryText)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                (viewModel.state.conversation.sessionID == thread.id ? tokens.elevatedBackground : tokens.windowBackground.opacity(0.32)),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(
+                                        viewModel.state.conversation.sessionID == thread.id ? tokens.accent.opacity(0.42) : tokens.border.opacity(0.45),
+                                        lineWidth: 1
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(role: .destructive) {
+                            Task { await viewModel.clearThread(thread.id) }
+                        } label: {
+                            Image(systemName: "trash")
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(viewModel.state.conversation.isSending)
+                    }
+                }
             }
         }
         .padding(14)
@@ -2346,9 +3009,15 @@ private struct InspectorHealthChecksCard: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         VStack(alignment: .leading, spacing: 12) {
-            Text("Health Checks")
-                .font(.headline)
-                .foregroundStyle(tokens.primaryText)
+            HStack {
+                Text("Health Checks")
+                    .font(.headline)
+                    .foregroundStyle(tokens.primaryText)
+                Spacer()
+                MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
+                    Task { await appViewModel.refreshActiveWorkspace() }
+                }
+            }
 
             if let checks = appViewModel.selectedWorkspaceHealth?.checks, !checks.isEmpty {
                 ForEach(Array(checks.enumerated()), id: \.offset) { index, check in
