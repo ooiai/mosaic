@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use mosaic_core::error::MosaicError;
-use mosaic_core::privacy::append_sanitized_jsonl;
+use mosaic_core::privacy::{append_sanitized_jsonl, write_pretty_state_json_file};
 use mosaic_memory::{
     MemoryCleanupPolicyStore, MemoryIndexOptions, MemoryPruneOptions, MemoryStore,
     list_memory_namespace_statuses, memory_cleanup_policy_path, memory_index_path_for_namespace,
@@ -2390,23 +2390,12 @@ fn load_plugin_state(path: &Path) -> Result<PluginStateFile> {
 }
 
 fn save_plugin_state(path: &Path, state: &PluginStateFile) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            MosaicError::Io(format!(
-                "failed to create plugin state directory '{}': {err}",
-                parent.display()
-            ))
-        })?;
-    }
-    let rendered = serde_json::to_string_pretty(state)
-        .map_err(|err| MosaicError::Io(format!("failed to serialize plugin state: {err}")))?;
-    std::fs::write(path, rendered).map_err(|err| {
+    write_pretty_state_json_file(path, state, "plugin state").map_err(|err| {
         MosaicError::Io(format!(
             "failed to write plugin state file '{}': {err}",
             path.display()
         ))
-    })?;
-    Ok(())
+    })
 }
 
 #[derive(Clone, Copy)]

@@ -236,6 +236,20 @@ pub(super) async fn collect_doctor_checks(cli: &Cli) -> Result<Vec<BTreeMap<Stri
     let mcp_store = McpStore::new(mcp_servers_file_path(&paths.data_dir));
     match mcp_store.list() {
         Ok(servers) => {
+            let missing_env_refs = servers
+                .iter()
+                .flat_map(|server| {
+                    server.env_from.iter().filter_map(|(key, source)| {
+                        std::env::var_os(source)
+                            .is_none()
+                            .then_some(format!("{}:{}<-{}", server.id, key, source))
+                    })
+                })
+                .collect::<Vec<_>>();
+            let configured_env_refs = servers
+                .iter()
+                .map(|server| server.env_from.len())
+                .sum::<usize>();
             checks.push(run_check(
                 "mcp_registry",
                 true,
@@ -244,6 +258,22 @@ pub(super) async fn collect_doctor_checks(cli: &Cli) -> Result<Vec<BTreeMap<Stri
                     servers.len(),
                     mcp_store.path().display()
                 ),
+            ));
+            checks.push(run_check(
+                "mcp_env_refs",
+                missing_env_refs.is_empty(),
+                if configured_env_refs == 0 {
+                    "configured=0 missing=0".to_string()
+                } else if missing_env_refs.is_empty() {
+                    format!("configured={} missing=0", configured_env_refs)
+                } else {
+                    format!(
+                        "configured={} missing={} refs={}",
+                        configured_env_refs,
+                        missing_env_refs.len(),
+                        missing_env_refs.join(", ")
+                    )
+                },
             ));
             if !servers.is_empty() {
                 match mcp_store.check_all() {

@@ -445,3 +445,53 @@ fn security_audit_detects_tls_disable_and_weak_hash_categories() {
             .any(|item| item["category"] == "crypto_hardening")
     );
 }
+
+#[test]
+#[allow(deprecated)]
+fn security_audit_detects_state_persistence_category_inside_mosaic_dir() {
+    let temp = tempdir().expect("tempdir");
+    let state_root = temp.path().join(".mosaic");
+    std::fs::create_dir_all(&state_root).expect("create state root");
+    std::fs::write(
+        state_root.join("config.toml"),
+        r#"version = 1
+active_profile = "default"
+[provider]
+api_key = "sk-live-secret-12345678901234567890"
+"#,
+    )
+    .expect("write config");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "security",
+            "audit",
+            "--path",
+            ".",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(output["ok"], true);
+    assert!(
+        output["report"]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|item| item["category"] == "state_persistence")
+    );
+    assert!(
+        output["report"]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|item| item["path"] == ".mosaic/config.toml")
+    );
+}

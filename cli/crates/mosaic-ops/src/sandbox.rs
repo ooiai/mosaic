@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::write_pretty_state_toml_file;
 
 const CURRENT_SANDBOX_POLICY_VERSION: u32 = 1;
 
@@ -81,12 +82,7 @@ impl SandboxStore {
         let mut policy = policy.clone();
         policy.version = CURRENT_SANDBOX_POLICY_VERSION;
         policy.validate()?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let rendered = toml::to_string_pretty(&policy)?;
-        std::fs::write(&self.path, rendered)?;
-        Ok(())
+        write_pretty_state_toml_file(&self.path, &policy, "sandbox policy state")
     }
 
     pub fn set_profile(&self, profile: SandboxProfile) -> Result<SandboxPolicy> {

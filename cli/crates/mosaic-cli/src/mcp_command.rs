@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::validate_value_for_state_persistence;
 use mosaic_mcp::{
-    AddMcpServerInput, McpDiagnoseOptions, McpServerDiagnoseResult, McpStore, mcp_servers_file_path,
+    AddMcpServerInput, McpDiagnoseOptions, McpServerDiagnoseResult, McpStore, UpdateMcpServerInput,
+    mcp_servers_file_path,
 };
 
 use super::{Cli, McpArgs, McpCommand, print_json, resolve_state_paths, save_json_file};
@@ -31,12 +33,13 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
                 println!("mcp servers: {}", servers.len());
                 for server in servers {
                     println!(
-                        "- {} ({}) command={} enabled={} cwd={}",
+                        "- {} ({}) command={} enabled={} cwd={} env_refs={}",
                         server.id,
                         server.name,
                         server.command,
                         server.enabled,
-                        server.cwd.unwrap_or_else(|| "-".to_string())
+                        server.cwd.unwrap_or_else(|| "-".to_string()),
+                        server.env_from.len()
                     );
                 }
             }
@@ -46,6 +49,7 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
             command,
             args,
             env,
+            env_from,
             cwd,
             disabled,
         } => {
@@ -55,6 +59,7 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
                 command,
                 args,
                 env: parse_env_entries(env)?,
+                env_from: parse_env_from_entries(env_from)?,
                 cwd,
                 enabled: !disabled,
             })?;
@@ -66,6 +71,65 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
                 }));
             } else {
                 println!("Added MCP server {} ({})", created.id, created.name);
+            }
+        }
+        McpCommand::Update {
+            server_id,
+            name,
+            command,
+            args,
+            clear_args,
+            env,
+            clear_env,
+            env_from,
+            clear_env_from,
+            cwd,
+            clear_cwd,
+            enable,
+            disable,
+        } => {
+            let result = store.update(
+                &server_id,
+                UpdateMcpServerInput {
+                    name,
+                    command,
+                    args: (!args.is_empty()).then_some(args),
+                    clear_args,
+                    env: if env.is_empty() {
+                        None
+                    } else {
+                        Some(parse_env_entries(env)?)
+                    },
+                    clear_env,
+                    env_from: if env_from.is_empty() {
+                        None
+                    } else {
+                        Some(parse_env_from_entries(env_from)?)
+                    },
+                    clear_env_from,
+                    cwd,
+                    clear_cwd,
+                    enabled: if enable {
+                        Some(true)
+                    } else if disable {
+                        Some(false)
+                    } else {
+                        None
+                    },
+                },
+            )?;
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "changed": result.changed,
+                    "server": result.server,
+                    "path": store.path().display().to_string(),
+                }));
+            } else {
+                println!(
+                    "updated mcp server {} changed={}",
+                    result.server.id, result.changed
+                );
             }
         }
         McpCommand::Show { server_id } => handle_show(cli, &store, &server_id)?,
@@ -86,6 +150,7 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
             all,
             timeout_ms,
             clear_missing_cwd,
+            set_env_from,
             report_out,
         } => handle_repair(
             cli,
@@ -94,6 +159,7 @@ pub(super) fn handle_mcp(cli: &Cli, args: McpArgs) -> Result<()> {
             all,
             timeout_ms,
             clear_missing_cwd,
+            parse_env_from_entries(set_env_from)?,
             report_out,
         )?,
         McpCommand::Enable { server_id } => {
@@ -146,6 +212,7 @@ fn handle_repair(
     all: bool,
     timeout_ms: u64,
     clear_missing_cwd: bool,
+    set_env_from: BTreeMap<String, String>,
     report_out: Option<String>,
 ) -> Result<()> {
     validate_timeout_ms(timeout_ms)?;
@@ -168,6 +235,7 @@ fn handle_repair(
     for target in targets {
         let server_id = target.server.id.clone();
         let mut actions = Vec::new();
+        let before_env_from = target.server.env_from.clone();
 
         if has_disabled_issue(&target.check.issues) {
             store.set_enabled(&server_id, true)?;
@@ -176,6 +244,12 @@ fn handle_repair(
         if clear_missing_cwd && has_missing_cwd_issue(&target.check.issues) {
             store.set_cwd(&server_id, None)?;
             actions.push("cleared_missing_cwd".to_string());
+        }
+        if !set_env_from.is_empty() {
+            let updated = store.merge_env_from(&server_id, &set_env_from)?;
+            if updated.env_from != before_env_from {
+                actions.push("updated_env_from".to_string());
+            }
         }
 
         let after = store.diagnose(&server_id, McpDiagnoseOptions { timeout_ms })?;
@@ -193,12 +267,14 @@ fn handle_repair(
                 "check_healthy": target.check.healthy,
                 "protocol_handshake_ok": target.protocol_probe.handshake_ok,
                 "issues": target.check.issues,
+                "env_from": before_env_from,
             },
             "after": {
                 "healthy": after.healthy,
                 "check_healthy": after.check.healthy,
                 "protocol_handshake_ok": after.protocol_probe.handshake_ok,
                 "issues": after.check.issues,
+                "env_from": after.server.env_from.clone(),
             },
             "remaining_recommendations": recommend_actions(&after),
         }));
@@ -209,6 +285,7 @@ fn handle_repair(
         "all": all,
         "timeout_ms": timeout_ms,
         "clear_missing_cwd": clear_missing_cwd,
+        "set_env_from": set_env_from,
         "checked": results.len(),
         "changed": changed,
         "unchanged": results.len().saturating_sub(changed),
@@ -392,6 +469,17 @@ fn recommend_actions(result: &McpServerDiagnoseResult) -> Vec<String> {
     {
         actions.push("set a valid --cwd path for the MCP server".to_string());
     }
+    for env_ref in result
+        .check
+        .env_refs
+        .iter()
+        .filter(|env_ref| !env_ref.present)
+    {
+        actions.push(format!(
+            "export {} before launching Mosaic or run `mosaic mcp repair {} --set-env-from {}=<ENV_NAME>`",
+            env_ref.source, result.server.id, env_ref.key
+        ));
+    }
     if result.protocol_probe.attempted && !result.protocol_probe.handshake_ok {
         actions.push(
             "verify server supports MCP stdio initialize handshake and check server startup logs"
@@ -449,6 +537,14 @@ fn handle_show(cli: &Cli, store: &McpStore, server_id: &str) -> Result<()> {
         println!("env:");
         for (key, value) in server.env {
             println!("- {key}={value}");
+        }
+    }
+    if server.env_from.is_empty() {
+        println!("env_from: <none>");
+    } else {
+        println!("env_from:");
+        for (key, source) in server.env_from {
+            println!("- {key} <- {source}");
         }
     }
     println!("cwd: {}", server.cwd.unwrap_or_else(|| "-".to_string()));
@@ -677,26 +773,56 @@ fn validate_timeout_ms(timeout_ms: u64) -> Result<()> {
 fn parse_env_entries(entries: Vec<String>) -> Result<BTreeMap<String, String>> {
     let mut env = BTreeMap::new();
     for entry in entries {
-        let Some((key, value)) = entry.split_once('=') else {
-            return Err(MosaicError::Validation(format!(
-                "invalid --env value '{entry}', expected KEY=VALUE"
-            )));
-        };
-        let key = key.trim();
-        if key.is_empty() {
-            return Err(MosaicError::Validation(
-                "environment key cannot be empty".to_string(),
-            ));
-        }
-        if key
-            .chars()
-            .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
-        {
-            return Err(MosaicError::Validation(format!(
-                "invalid environment key '{key}'"
-            )));
-        }
+        let (key, value) = parse_env_mapping_entry(&entry, "--env", "KEY=VALUE")?;
         env.insert(key.to_string(), value.to_string());
     }
+    let encoded = serde_json::to_value(&env).map_err(|err| {
+        MosaicError::Validation(format!("failed to encode mcp env entries: {err}"))
+    })?;
+    if validate_value_for_state_persistence(&encoded, "mcp server env state").is_err() {
+        return Err(MosaicError::Validation(
+            "mcp add --env cannot persist secret-like literal values; inject secrets in the process environment that launches Mosaic and keep only non-sensitive env pairs in the registry".to_string(),
+        ));
+    }
     Ok(env)
+}
+
+fn parse_env_from_entries(entries: Vec<String>) -> Result<BTreeMap<String, String>> {
+    let mut env_from = BTreeMap::new();
+    for entry in entries {
+        let (key, source) = parse_env_mapping_entry(&entry, "--env-from", "KEY=ENV_NAME")?;
+        validate_env_token(source, "environment source")?;
+        env_from.insert(key.to_string(), source.to_string());
+    }
+    Ok(env_from)
+}
+
+fn parse_env_mapping_entry<'a>(
+    entry: &'a str,
+    flag: &str,
+    format_hint: &str,
+) -> Result<(&'a str, &'a str)> {
+    let Some((key, value)) = entry.split_once('=') else {
+        return Err(MosaicError::Validation(format!(
+            "invalid {flag} value '{entry}', expected {format_hint}"
+        )));
+    };
+    let key = key.trim();
+    validate_env_token(key, "environment key")?;
+    Ok((key, value.trim()))
+}
+
+fn validate_env_token(value: &str, label: &str) -> Result<()> {
+    if value.is_empty() {
+        return Err(MosaicError::Validation(format!("{label} cannot be empty")));
+    }
+    if value
+        .chars()
+        .any(|ch| !(ch.is_ascii_alphanumeric() || ch == '_'))
+    {
+        return Err(MosaicError::Validation(format!(
+            "invalid {label} '{value}'"
+        )));
+    }
+    Ok(())
 }

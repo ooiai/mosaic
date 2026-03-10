@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use mosaic_core::config::{ConfigFile, ProfileConfig, RunGuardMode};
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::write_pretty_state_json_file;
 
 const CURRENT_AGENTS_VERSION: u32 = 1;
 
@@ -420,31 +421,11 @@ impl AgentStore {
     }
 
     fn save_agents(&self, file: &AgentsFile) -> Result<()> {
-        if let Some(parent) = self.agents_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let raw = serde_json::to_string_pretty(file).map_err(|err| {
-            MosaicError::Validation(format!(
-                "failed to encode agents JSON {}: {err}",
-                self.agents_path.display()
-            ))
-        })?;
-        std::fs::write(&self.agents_path, raw)?;
-        Ok(())
+        write_pretty_state_json_file(&self.agents_path, file, "agents state")
     }
 
     fn save_routes(&self, routes: &AgentRoutes) -> Result<()> {
-        if let Some(parent) = self.routes_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let raw = serde_json::to_string_pretty(routes).map_err(|err| {
-            MosaicError::Validation(format!(
-                "failed to encode routes JSON {}: {err}",
-                self.routes_path.display()
-            ))
-        })?;
-        std::fs::write(&self.routes_path, raw)?;
-        Ok(())
+        write_pretty_state_json_file(&self.routes_path, routes, "agent routes state")
     }
 }
 
@@ -911,5 +892,26 @@ mod tests {
             err.to_string()
                 .contains("cannot use --skill and --clear-skills together")
         );
+    }
+
+    #[test]
+    fn add_rejects_secret_like_model_literal() {
+        let temp = tempdir().expect("tempdir");
+        let store = build_store(&temp);
+
+        let err = store
+            .add(AddAgentInput {
+                id: Some("writer".to_string()),
+                name: "Writer".to_string(),
+                profile: "default".to_string(),
+                skills: vec![],
+                model: Some("sk-live-secret-12345678901234567890".to_string()),
+                temperature: None,
+                max_turns: None,
+                tools_enabled: None,
+                guard_mode: None,
+            })
+            .expect_err("secret-like model should fail");
+        assert!(err.to_string().contains("blocked agents state"));
     }
 }

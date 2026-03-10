@@ -228,27 +228,15 @@ jobs:
         name: rust-cli-plugin-soak-report
         path: cli/reports/plugin-soak-latest.log
 
-  desktop-test:
-    name: Desktop App Tests
-    needs: web-test
-    strategy:
-      matrix:
-        platform: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.platform }}
+  macos-app-test:
+    name: macOS App Tests
+    runs-on: macos-latest
+    env:
+      APP_BUILD: ${{ github.run_number }}
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v4
-      with:
-        version: latest
 
     - name: Setup Rust
       uses: dtolnay/rust-toolchain@stable
@@ -261,56 +249,65 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          apps/desktop/src-tauri/target
+          cli/target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-cargo-
 
-    - name: Install system dependencies (Linux)
-      if: runner.os == 'Linux'
+    - name: Build embedded CLI binary
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+        cd cli
+        cargo build --release -p mosaic-cli
 
-    - name: Install dependencies
-      run: pnpm install
-
-    - name: Download web build artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: web-dist
-        path: apps/web/dist/
-
-    - name: Build desktop app
+    - name: Test macOS app package
       run: |
-        cd apps/desktop
-        pnpm build
+        cd apps/macos
+        swift test
 
-    - name: Upload desktop build artifacts (Ubuntu)
-      if: runner.os == 'Linux'
+    - name: Build macOS app package
+      run: |
+        cd apps/macos
+        swift build -c release
+
+    - name: Package macOS app bundle
+      run: |
+        if [[ -n "${MACOS_SIGN_IDENTITY}" && -n "${MACOS_NOTARY_PROFILE}" && "${GITHUB_REF}" == refs/tags/v* ]]; then
+          MACOS_NOTARIZE=1 ./apps/macos/scripts/package_app.sh
+        else
+          ./apps/macos/scripts/package_app.sh
+        fi
+      env:
+        SKIP_CLI_BUILD: "1"
+        SKIP_SWIFT_BUILD: "1"
+        MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        MACOS_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+
+    - name: Stage standalone CLI sidecar for binary artifact
+      run: |
+        mkdir -p apps/macos/.build/release/bin
+        cp cli/target/release/mosaic apps/macos/.build/release/bin/mosaic
+        chmod +x apps/macos/.build/release/bin/mosaic
+
+    - name: Upload macOS app build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: desktop-linux
-        path: apps/desktop/src-tauri/target/release/bundle/
+        name: macos-app-bundle
+        path: |
+          apps/macos/dist/Mosaic.app
+          apps/macos/dist/Mosaic-macOS.zip
 
-    - name: Upload desktop build artifacts (Windows)
-      if: runner.os == 'Windows'
+    - name: Upload macOS raw binary artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: desktop-windows
-        path: apps/desktop/src-tauri/target/release/bundle/
-
-    - name: Upload desktop build artifacts (macOS)
-      if: runner.os == 'macOS'
-      uses: actions/upload-artifact@v4
-      with:
-        name: desktop-macos
-        path: apps/desktop/src-tauri/target/release/bundle/
+        name: macos-app-binary
+        path: |
+          apps/macos/.build/release/MosaicMacApp
+          apps/macos/.build/release/bin/mosaic
 
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web-test, rust-cli-test, rust-cli-build, desktop-test]
+    needs: [web-test, rust-cli-test, rust-cli-build, macos-app-test]
     runs-on: ubuntu-latest
 
     steps:
@@ -324,9 +321,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          desktop-linux/**/*
-          desktop-windows/**/*
-          desktop-macos/**/*
+          macos-app-bundle/**/*
+          macos-app-binary/**/*
           rust-cli-Linux-binary/**/*
           rust-cli-Windows-binary/**/*
           rust-cli-macOS-binary/**/*

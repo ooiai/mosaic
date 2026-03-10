@@ -79,6 +79,17 @@ Default behavior:
    - before writing `sessions/*.jsonl`, `audit/commands.jsonl`, system events, channel events, gateway/realtime events, hook/webhook/cron events, plugin runtime events, observability history files, and knowledge evaluate history:
      - secret-like values are redacted
      - private key markers (`BEGIN ... PRIVATE KEY`) trigger hard block (write rejected)
+6. Persistence guard (state/config files)
+   - before writing canonical state/config files such as:
+     - `config.toml`, `models.toml`
+     - `.mosaic/policy/approvals.toml`, `.mosaic/policy/sandbox.toml`
+     - agent registry/routes, MCP server registry, channel registry/cache/rate state
+     - gateway/browser/voicecall runtime state
+     - memory cleanup policy/status
+     - security baseline
+   - secret-like literal values trigger hard validation failure
+   - private key markers trigger hard validation failure
+   - env reference fields like `*_env` remain allowed so configuration can continue to point at environment variables without persisting the secret itself
 
 Override env switches (for explicit audited admin workflows):
 

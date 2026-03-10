@@ -6,7 +6,10 @@ Runtime data-protection guardrails for agent tools are documented in:
 
 - `docs/sandbox-approvals.md` (`Private Data Guard` section)
 
-That section also documents pre-persistence protection for session/audit/event/history JSONL files.
+That section also documents pre-persistence protection for:
+
+- log/event/history JSONL files
+- canonical state/config files (`config.toml`, `models.toml`, approvals/sandbox policy, agent routes, MCP server registry, channels/gateway/browser/voicecall state, memory cleanup policy/status, security baseline)
 
 ## Commands
 
@@ -60,6 +63,7 @@ mosaic --project-state security baseline clear
 
 - Private key marker detection (`BEGIN PRIVATE KEY`)
 - Potential hardcoded secrets (`api_key`, `token`, `secret`, `password` literals)
+- Secret persistence in canonical state/config files (`state_persistence`)
 - AWS access key style pattern (`AKIA...`)
 - `curl ... | sh/bash` patterns
 - Plain `http://` endpoint detection
@@ -76,7 +80,8 @@ mosaic --project-state security baseline clear
 - `--min-severity <low|medium|high>` to keep only findings at/above a severity threshold
 - `--category <name>` (repeatable) to keep only selected categories
 - `--top <n>` to cap returned findings after sorting by severity/path/line
-- Skips common folders: `.git`, `target`, `node_modules`, `.pnpm-store`, `.mosaic`
+- Generic source scan skips common folders: `.git`, `target`, `node_modules`, `.pnpm-store`, `.mosaic`
+- Selected canonical state/config files inside `.mosaic` are still inspected for secret persistence risk
 - Text output also prints risk score/level and recommended remediation actions.
 
 ## Baseline
@@ -89,3 +94,12 @@ mosaic --project-state security baseline clear
 - Use `security baseline show|add|remove|clear` for manual baseline management.
 - Use `--sarif` to print SARIF v2.1.0 to stdout.
 - Use `--sarif-output <path>` to persist SARIF v2.1.0 while keeping normal CLI output.
+
+## Persistence Guardrails
+
+For state/config persistence, Mosaic now uses a stricter rule than log redaction:
+
+- event/log/history writes: redact secret-like values, block private keys
+- state/config writes: reject the write if secret-like literal values are about to be stored
+
+This avoids silently mutating canonical state while still preventing accidental token/password persistence.

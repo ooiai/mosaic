@@ -14,7 +14,10 @@
       "cwd": "null",
       "enabled": "bool",
       "env": {
-        "MCP_TOKEN": "string"
+        "MCP_MODE": "string"
+      },
+      "env_from": {
+        "MCP_PATH": "string"
       },
       "id": "string",
       "last_check_at": "null",
@@ -29,6 +32,16 @@
       "checked_at": "string",
       "cwd_exists": "bool",
       "enabled": "bool",
+      "env_refs": {
+        "items": [
+          {
+            "key": "string",
+            "present": "bool",
+            "source": "string"
+          }
+        ],
+        "type": "array"
+      },
       "executable_resolved": "string",
       "healthy": "bool",
       "issues": {
@@ -53,7 +66,10 @@
       "cwd": "null",
       "enabled": "bool",
       "env": {
-        "MCP_TOKEN": "string"
+        "MCP_MODE": "string"
+      },
+      "env_from": {
+        "MCP_PATH": "string"
       },
       "id": "string",
       "last_check_at": "string",
@@ -76,6 +92,16 @@
             "checked_at": "string",
             "cwd_exists": "bool",
             "enabled": "bool",
+            "env_refs": {
+              "items": [
+                {
+                  "key": "string",
+                  "present": "bool",
+                  "source": "string"
+                }
+              ],
+              "type": "array"
+            },
             "executable_resolved": "string",
             "healthy": "bool",
             "issues": {
@@ -96,7 +122,10 @@
             "cwd": "null",
             "enabled": "bool",
             "env": {
-              "MCP_TOKEN": "string"
+              "MCP_MODE": "string"
+            },
+            "env_from": {
+              "OPENAI_API_KEY": "string"
             },
             "id": "string",
             "last_check_at": "string",
@@ -128,6 +157,16 @@
             "checked_at": "string",
             "cwd_exists": "bool",
             "enabled": "bool",
+            "env_refs": {
+              "items": [
+                {
+                  "key": "string",
+                  "present": "bool",
+                  "source": "string"
+                }
+              ],
+              "type": "array"
+            },
             "executable_resolved": "string",
             "healthy": "bool",
             "issues": {
@@ -159,7 +198,10 @@
             "cwd": "null",
             "enabled": "bool",
             "env": {
-              "MCP_TOKEN": "string"
+              "MCP_MODE": "string"
+            },
+            "env_from": {
+              "OPENAI_API_KEY": "string"
             },
             "id": "string",
             "last_check_at": "string",
@@ -179,6 +221,16 @@
       "checked_at": "string",
       "cwd_exists": "bool",
       "enabled": "bool",
+      "env_refs": {
+        "items": [
+          {
+            "key": "string",
+            "present": "bool",
+            "source": "string"
+          }
+        ],
+        "type": "array"
+      },
       "executable_resolved": "string",
       "healthy": "bool",
       "issues": {
@@ -218,7 +270,10 @@
       "cwd": "null",
       "enabled": "bool",
       "env": {
-        "MCP_TOKEN": "string"
+        "MCP_MODE": "string"
+      },
+      "env_from": {
+        "OPENAI_API_KEY": "string"
       },
       "id": "string",
       "last_check_at": "string",
@@ -242,7 +297,10 @@
       "cwd": "null",
       "enabled": "bool",
       "env": {
-        "MCP_TOKEN": "string"
+        "MCP_MODE": "string"
+      },
+      "env_from": {
+        "OPENAI_API_KEY": "string"
       },
       "id": "string",
       "last_check_at": "string",
@@ -265,7 +323,10 @@
       "cwd": "null",
       "enabled": "bool",
       "env": {
-        "MCP_TOKEN": "string"
+        "MCP_MODE": "string"
+      },
+      "env_from": {
+        "OPENAI_API_KEY": "string"
       },
       "id": "string",
       "last_check_at": "string",
@@ -291,7 +352,10 @@
           "cwd": "null",
           "enabled": "bool",
           "env": {
-            "MCP_TOKEN": "string"
+            "MCP_MODE": "string"
+          },
+          "env_from": {
+            "MCP_PATH": "string"
           },
           "id": "string",
           "last_check_at": "null",
@@ -326,6 +390,9 @@
           },
           "after": {
             "check_healthy": "bool",
+            "env_from": {
+              "OPENAI_API_KEY": "string"
+            },
             "healthy": "bool",
             "issues": {
               "items": [],
@@ -335,6 +402,9 @@
           },
           "before": {
             "check_healthy": "bool",
+            "env_from": {
+              "OPENAI_API_KEY": "string"
+            },
             "healthy": "bool",
             "issues": {
               "items": [
@@ -356,6 +426,7 @@
       ],
       "type": "array"
     },
+    "set_env_from": {},
     "timeout_ms": "number",
     "unchanged": "number"
   },
@@ -374,7 +445,38 @@
       "cwd": "null",
       "enabled": "bool",
       "env": {
-        "MCP_TOKEN": "string"
+        "MCP_MODE": "string"
+      },
+      "env_from": {
+        "MCP_PATH": "string"
+      },
+      "id": "string",
+      "last_check_at": "string",
+      "last_check_error": "null",
+      "name": "string",
+      "updated_at": "string"
+    }
+  },
+  "update": {
+    "changed": "bool",
+    "ok": "bool",
+    "path": "string",
+    "server": {
+      "args": {
+        "items": [
+          "string"
+        ],
+        "type": "array"
+      },
+      "command": "string",
+      "created_at": "string",
+      "cwd": "null",
+      "enabled": "bool",
+      "env": {
+        "MCP_MODE": "string"
+      },
+      "env_from": {
+        "OPENAI_API_KEY": "string"
       },
       "id": "string",
       "last_check_at": "string",

@@ -10,7 +10,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use mosaic_core::error::{MosaicError, Result};
-use mosaic_core::privacy::append_sanitized_jsonl;
+use mosaic_core::privacy::{append_sanitized_jsonl, write_pretty_state_json_file};
 
 use super::{
     Cli, TtsArgs, TtsCommand, VoicecallArgs, VoicecallCommand, print_json, resolve_state_paths,
@@ -659,14 +659,7 @@ fn load_voicecall_state(path: &Path) -> Result<VoicecallState> {
 }
 
 fn save_voicecall_state(path: &Path, state: &VoicecallState) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let payload = serde_json::to_string_pretty(state).map_err(|err| {
-        MosaicError::Validation(format!("failed to encode voicecall state: {err}"))
-    })?;
-    fs::write(path, payload)?;
-    Ok(())
+    write_pretty_state_json_file(path, state, "voicecall state")
 }
 
 fn default_voicecall_state() -> VoicecallState {

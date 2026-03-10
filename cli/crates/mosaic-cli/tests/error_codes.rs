@@ -2110,6 +2110,107 @@ fn mcp_check_deep_invalid_timeout_returns_validation_exit_code() {
 
 #[test]
 #[allow(deprecated)]
+fn mcp_update_without_fields_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let command_path = std::env::current_exe().expect("current exe");
+    let command_path = command_path.to_string_lossy().to_string();
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "add",
+            "--name",
+            "update-target",
+            "--command",
+            &command_path,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add json");
+    let server_id = add_json["server"]["id"].as_str().expect("server id");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "mcp", "update", server_id])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_update_conflicting_env_flags_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+    let command_path = std::env::current_exe().expect("current exe");
+    let command_path = command_path.to_string_lossy().to_string();
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "add",
+            "--name",
+            "update-target",
+            "--command",
+            &command_path,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add json");
+    let server_id = add_json["server"]["id"].as_str().expect("server id");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "update",
+            server_id,
+            "--env",
+            "MCP_MODE=test",
+            "--clear-env",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+    assert!(
+        json["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("use either --env or --clear-env")
+    );
+}
+
+#[test]
+#[allow(deprecated)]
 fn mcp_repair_without_target_returns_validation_exit_code() {
     let temp = tempdir().expect("tempdir");
 
@@ -2144,6 +2245,34 @@ fn mcp_repair_invalid_timeout_returns_validation_exit_code() {
             "--all",
             "--timeout-ms",
             "0",
+        ])
+        .assert()
+        .failure()
+        .code(7)
+        .get_output()
+        .stdout
+        .clone();
+    let json: Value = serde_json::from_slice(&output).expect("json output");
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "validation");
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_repair_invalid_set_env_from_returns_validation_exit_code() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "mcp",
+            "repair",
+            "--all",
+            "--set-env-from",
+            "OPENAI_API_KEY=bad-value",
         ])
         .assert()
         .failure()

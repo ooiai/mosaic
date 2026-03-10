@@ -5,7 +5,7 @@ CARGO := cargo
 DOCKER := docker
 CD := cd
 
-DESKTOP_PATH := ./apps/desktop
+MACOS_PATH := ./apps/macos
 WEB_PATH := ./apps/web
 
 
@@ -46,8 +46,21 @@ git-commit:
 # Desktop start dev server.
 # Usage: make desktop
 desktop:
-	@echo "===> Desktop start dev server."
-	$(CD) $(DESKTOP_PATH) && $(PNPM) dev
+	@echo "===> macOS app start dev server."
+	cd cli && cargo build --release -p mosaic-cli
+	$(CD) $(MACOS_PATH) && swift run MosaicMacApp
+
+# macOS-native app tests.
+# Usage: make macos-test
+macos-test:
+	@echo "===> macOS app tests."
+	$(CD) $(MACOS_PATH) && swift test
+
+# Package macOS-native app bundle.
+# Usage: make macos-package
+macos-package:
+	@echo "===> Package macOS app bundle."
+	./apps/macos/scripts/package_app.sh
 
 # Web start dev server.
 # Usage: make web

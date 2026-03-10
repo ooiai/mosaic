@@ -9,9 +9,11 @@ use tiny_http::{Method, Response, Server};
 use mosaic_core::error::MosaicError;
 use mosaic_gateway::{GatewayClient, GatewayRequest, HttpGatewayClient};
 
+use crate::utils::{load_json_file_opt, save_state_json_file};
+
 use super::{
     Cli, DEFAULT_PROFILE, GatewayRuntimeStatus, GatewayServiceState, GatewayStartResult,
-    GatewayState, GatewayStopResult, Result, load_json_file_opt, save_json_file,
+    GatewayState, GatewayStopResult, Result,
 };
 
 pub(super) fn upsert_gateway_service(
@@ -36,7 +38,7 @@ pub(super) fn upsert_gateway_service(
             .unwrap_or(now),
         updated_at: now,
     };
-    save_json_file(service_path, &service)?;
+    save_state_json_file(service_path, &service, "gateway service state")?;
     Ok(service)
 }
 
@@ -107,7 +109,7 @@ pub(super) async fn start_gateway_runtime(
         started_at: now,
         updated_at: now,
     };
-    save_json_file(gateway_path, &state)?;
+    save_state_json_file(gateway_path, &state, "gateway runtime state")?;
     Ok(GatewayStartResult {
         state,
         already_running: false,
@@ -154,7 +156,7 @@ pub(super) fn stop_gateway_runtime(
         started_at: state.started_at,
         updated_at: Utc::now(),
     };
-    save_json_file(gateway_path, &next)?;
+    save_state_json_file(gateway_path, &next, "gateway runtime state")?;
     Ok(GatewayStopResult {
         was_running: was_alive,
         stopped: stopped || !was_alive,
