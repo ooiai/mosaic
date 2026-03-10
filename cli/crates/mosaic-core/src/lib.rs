@@ -2,6 +2,7 @@ pub mod audit;
 pub mod config;
 pub mod error;
 pub mod models;
+pub mod privacy;
 pub mod provider;
 pub mod session;
 pub mod state;

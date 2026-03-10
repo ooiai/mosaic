@@ -1358,6 +1358,7 @@ pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
                             .map_err(|err| MosaicError::Io(err.to_string()))?,
                         yes: cli.yes,
                         interactive: false,
+                        event_callback: None,
                     },
                 )
                 .await?;
@@ -1412,6 +1413,7 @@ pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
                 cwd: std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?,
                 yes: cli.yes,
                 interactive: false,
+                event_callback: None,
             },
         )
         .await?;
@@ -1454,6 +1456,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                             .map_err(|err| MosaicError::Io(err.to_string()))?,
                         yes: cli.yes,
                         interactive: true,
+                        event_callback: None,
                     },
                 )
                 .await?;
@@ -1509,6 +1512,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                     cwd: std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?,
                     yes: cli.yes,
                     interactive: true,
+                    event_callback: None,
                 },
             )
             .await?;
@@ -1608,6 +1612,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                                 .map_err(|err| MosaicError::Io(err.to_string()))?,
                             yes: cli.yes,
                             interactive: true,
+                            event_callback: None,
                         },
                     )
                     .await?;

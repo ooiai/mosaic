@@ -19,7 +19,7 @@ This workspace ships a pure CLI with no frontend dependency.
 - CLI compatibility/runtime helpers (`completion shell|install`, `directory`)
 - Maintenance runtime (`update`, `reset`, `uninstall`)
 - Discovery/runtime helpers (`docs`, `dns resolve`)
-- UX compatibility shim (`tui` -> chat runtime)
+- Chat-first terminal UI runtime (`tui`)
 - Compatibility helpers (`qr encode|pairing` with payload/ascii/png render, `clawbot ask|chat|send|status`)
 - Memory runtime (`memory index|search|status|clear`)
 - Knowledge runtime (`knowledge ingest|search|ask|evaluate|datasets list|datasets remove`)
@@ -54,6 +54,7 @@ cli/
     mosaic-memory
     mosaic-security
     mosaic-plugins
+    mosaic-tui
     mosaic-tools
     mosaic-provider-openai
 ```
@@ -159,11 +160,29 @@ cargo run -p mosaic-cli --bin mosaic -- docs gateway
 cargo run -p mosaic-cli --bin mosaic -- --json dns resolve localhost --port 443
 ```
 
-### TUI Shim
+### TUI
 
 ```bash
-cargo run -p mosaic-cli --bin mosaic -- --project-state tui --prompt "hello"
+# interactive fullscreen TUI
+cargo run -p mosaic-cli --bin mosaic -- --project-state tui
+
+# customize initial focus and inspector visibility
+cargo run -p mosaic-cli --bin mosaic -- --project-state tui --focus sessions --no-inspector
+
+# non-interactive one-shot (JSON contract compatible with previous tui path)
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json tui --prompt "hello"
 ```
+
+TUI shortcuts:
+
+- `Enter`: send
+- `Ctrl+J`: newline
+- `Tab`: cycle focus
+- `Ctrl+N`: new session
+- `Ctrl+R`: refresh sessions
+- `Ctrl+I`: toggle inspector
+- `?`: help overlay
+- `q` / `Ctrl+C`: quit
 
 ### QR / Clawbot
 
@@ -554,6 +573,9 @@ Telegram default token env: `MOSAIC_TELEGRAM_BOT_TOKEN`.
 Telegram min send interval env: `MOSAIC_CHANNELS_TELEGRAM_MIN_INTERVAL_MS` (default `800`).
 Idempotency dedupe window env: `MOSAIC_CHANNELS_IDEMPOTENCY_WINDOW_SECONDS` (default `86400`).
 Telegram 429 fallback retry env: `MOSAIC_CHANNELS_TELEGRAM_RETRY_AFTER_DEFAULT_SECONDS` (default `1`).
+Sensitive-file override env (admin only): `MOSAIC_ALLOW_SENSITIVE_FILES=1`.
+Sensitive-command override env (admin only): `MOSAIC_ALLOW_SENSITIVE_COMMANDS=1`.
+Secret-redaction disable env (admin only): `MOSAIC_DISABLE_SECRET_REDACTION=1`.
 
 ### Regression Scripts
 
@@ -570,10 +592,31 @@ ITERATIONS=200 ./scripts/plugin_resource_soak.sh
 ./scripts/worklog_append.sh --summary "Summary of change" --tests "cargo test --workspace"
 
 # package one platform release asset
-./scripts/package_release_asset.sh --version v0.2.0-beta.5 --target aarch64-apple-darwin
+./scripts/package_release_asset.sh --version <version> --target aarch64-apple-darwin
 
 # generate brew/scoop manifests from collected assets
-./scripts/update_distribution_manifests.sh --version v0.2.0-beta.5 --assets-dir ./dist/v0.2.0-beta.5 --output-dir ./dist/v0.2.0-beta.5
+./scripts/update_distribution_manifests.sh --version <version> --assets-dir ./dist/<version> --output-dir ./dist/<version>
+
+# generate release notes draft from worklog
+./scripts/release_notes_from_worklog.sh --version <version> --out docs/release-notes-<version>.md
+
+# one-command local release prepare
+./scripts/release_prepare.sh --version <version>
+
+# release tooling smoke (verifier pass/fail + dry-run summary)
+./scripts/release_tooling_smoke.sh --version <version>
+
+# release installer smoke (install.sh local assets + release-only guardrail)
+./scripts/release_install_smoke.sh --version <version>
+
+# verify archive internal contents
+./scripts/release_verify_archives.sh --version <version> --assets-dir <dir>
+
+# verify release assets directory
+./scripts/release_verify_assets.sh --version <version> --assets-dir <dir>
+
+# verify published GitHub release assets by tag
+./scripts/release_publish_check.sh --version <version> --repo ooiai/mosaic --json
 ```
 
 ### Ops Runtime

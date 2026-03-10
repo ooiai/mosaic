@@ -45,7 +45,7 @@ This section tracks **functional depth completion** (not only command existence)
 | `hooks/cron/webhooks` | 94% | further enrich long-horizon replay analytics (trend scoring + backlog-age prioritization guidance) |
 | `tts/voicecall` | 90% | deeper provider/runtime drill coverage beyond mock synth probe and broader external integration depth |
 | `browser` | 92% | richer protocol-aware probe workflows (multi-target scheduling + report export) and retention policy automation tuning |
-| `distribution` | 86% | clean-VM install verification matrix and release automation hardening |
+| `distribution` | 90% | clean-VM install verification matrix and stable external tap/bucket publish flow |
 
 ### Execution Plan (Complete In Batches)
 
@@ -68,7 +68,7 @@ This section tracks **functional depth completion** (not only command existence)
 4. Batch D
    - realtime + distribution stabilization:
      - tts/voicecall provider-depth checks (`tts diagnose` delivered; next add non-mock/provider adapters)
-     - clean-VM install matrix and release verification automation
+     - clean-VM install matrix (local installer smoke + release verification automation delivered)
 
 ### Acceptance Rule For Each Batch
 
@@ -129,7 +129,7 @@ This section tracks **functional depth completion** (not only command existence)
 | `browser` | `browser start/stop/status/open/navigate/history/tabs/diagnose(showing probe + retention diagnostics)/show/focus/snapshot/screenshot/close/clear` | partial | 92% |
 | `memory` | `memory index/search/status/clear/prune/policy` (`index` supports `--namespace`, `--incremental`, `--stale-after-hours`, `--retain-missing`, and reuse/reindex/remove counters; `status --all-namespaces`; `prune --max-namespaces/--max-age-hours/--max-documents-per-namespace` with reason breakdown fields; `policy get/set/apply` persists cleanup policy + interval guard; built-in `mosaic.memory.cleanup` / `memory.cleanup` event integration for cron/system/webhook runtime) | partial | 100% |
 | `knowledge` | `knowledge ingest/search/ask/evaluate/datasets` (`ingest` supports `--source local_md|http|mcp` with markdown chunk staging/reuse/stale cleanup and unified `--report-out`; `search/ask` support `--min-score` filtering; `ask` supports `--references-only`; `evaluate` supports query batches + report export + baseline update/regression gating + history trend output; `datasets list/remove` supports lifecycle audit + dry-run/cleanup`) | partial | 99% |
-| `security` | `security audit/baseline` (`audit` supports `--min-severity`, repeatable `--category`, and `--top` with dimensions summary; includes TLS/weak-hash/default-secret checks) | partial | 97% |
+| `security` | `security audit/baseline` (`audit` supports `--min-severity`, repeatable `--category`, and `--top` with dimensions summary; includes TLS/weak-hash/default-secret checks + risk score/level/recommendations) + runtime private-data guardrails in tools (`sensitive path blocking`, `sensitive command guard`, `secret output redaction`) + persistence guardrails across the log plane (`session/audit/system/channel/gateway/realtime/hooks/webhooks/cron/plugins/observability/knowledge-eval` pre-write redaction + private-key redline blocking) | partial | 100% |
 | `plugins`, `skills` | `plugins`: list (`--source`)/info/check/install/enable/disable/doctor/run/remove (`run` includes timeout/output-guard/resource-limits/sandbox/approval/event+metrics telemetry + unix CPU RLIMIT pre-enforcement + configurable cpu watchdog (`cpu_watchdog_ms`) including non-unix CPU-only fallback + supported-unix memory pre-enforcement (`RLIMIT_AS` on linux/android, `RLIMIT_DATA` on BSD) for safe thresholds + non-unix `max_rss_kb` guard + plugin soak long-horizon anomaly hints in observability); `skills`: list (`--source`)/info/check/install/remove | done | 100% |
 | `directory` | `directory` (state path introspection + `--ensure` + `--check-writable`) | partial | 80% |
 | `completion` | `completion shell/install` | partial | 80% |
@@ -139,10 +139,10 @@ This section tracks **functional depth completion** (not only command existence)
 | `uninstall` (top-level) | `uninstall` (`--yes` destructive guard + state removal) | partial | 80% |
 | `dns` | `dns resolve <host> [--port]` | partial | 75% |
 | `docs` | `docs [topic]` topic listing and URL routing | partial | 75% |
-| `tui` | `tui` shim (reuses `chat` runtime and options) | partial | 70% |
+| `tui` | `tui` chat-first terminal UI (`mosaic-tui` + `ratatui/crossterm`) with sessions/messages/inspector panes, focus control (`--focus`), inspector toggle (`--no-inspector`), interactive keymap, and non-interactive `--prompt` JSON mode compatibility | partial | 90% |
 | `qr` | `qr encode` + `qr pairing` with payload/ascii/png render | partial | 85% |
 | `clawbot` | `clawbot ask/chat/send/status` (routes to existing runtime; supports `--prompt-file`/`--script`/`--text-file`, including stdin source `-`) | partial | 96% |
-| `distribution` | cross-platform release packaging (`linux/mac/windows`) + installers (`install.sh`/`install.ps1`) + Homebrew/Scoop manifest generation | partial | 86% |
+| `distribution` | cross-platform release packaging (`linux/mac/windows`) + installers (`install.sh`/`install.ps1`) + Homebrew/Scoop manifest generation + archive/assets verifiers + local installer smoke (`release_install_smoke.sh`) | partial | 90% |
 
 ## Totals (Current)
 
@@ -181,8 +181,8 @@ No unresolved missing major module gaps in current CLI matrix.
 | mcp | local registry + `check` preflight + deep batch probes (`check --all --deep --report-out`) + `diagnose` stdio initialize probe (`--timeout-ms --report-out`) + `repair` auto-remediation pass (`enable disabled` + optional missing-cwd cleanup) + doctor/observability MCP telemetry + persisted long-window MCP degradation analytics/alerts (`mcp.history`, ratio delta + incident hints) | deeper protocol-runtime conformance and expanded auto-remediation suggestions/actions |
 | memory | index/search/status/clear/prune/policy + namespace lifecycle + incremental/refresh + tuned relevance scoring + document quota pruning (`--max-documents-per-namespace`) + persisted cleanup policy with interval guard + built-in auto-run event integration (`mosaic.memory.cleanup`) | optional daemon templates + richer cleanup telemetry summaries |
 | knowledge | ingest/search/ask/evaluate/datasets over `local_md/http/mcp` with staged markdown chunks + unified ingest report export + retrieval references + score threshold filtering (`--min-score`) + references-only mode + query-batch evaluation export + baseline regression gating + persistent history trends + dataset lifecycle list/remove | source metadata depth and long-horizon lifecycle automation polish |
-| security | audit/baseline + audit filter dimensions + extra TLS/crypto/credential checks | deeper rulepacks and category-specific checks |
-| distribution | release artifacts + installer scripts + generated manifests | run periodic install verification on clean VMs and publish stable brew tap/scoop bucket |
+| security | audit/baseline + audit filter dimensions + risk score/level/recommendations + extra TLS/crypto/credential checks + runtime private-data guardrails in tool execution + log-plane persistence pre-write redaction/redline blocking | deeper rulepacks and category-specific checks |
+| distribution | release artifacts + installer scripts + generated manifests + release/archive/install smoke verification | run periodic install verification on clean VMs and publish stable brew tap/scoop bucket |
 
 ## Implementation Queue (Execute In Order)
 

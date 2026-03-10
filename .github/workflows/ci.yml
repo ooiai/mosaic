@@ -113,7 +113,17 @@ jobs:
     - name: Install CLI test dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ripgrep
+        sudo apt-get install -y ripgrep zip unzip
+
+    - name: Run Rust CLI release tooling smoke
+      run: |
+        cd cli
+        ./scripts/release_tooling_smoke.sh
+
+    - name: Run Rust CLI release install smoke
+      run: |
+        cd cli
+        ./scripts/release_install_smoke.sh
 
     - name: Run Rust CLI clippy quality gate
       run: |

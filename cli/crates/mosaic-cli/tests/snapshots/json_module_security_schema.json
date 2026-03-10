@@ -43,6 +43,16 @@
         ],
         "type": "array"
       },
+      "risk": {
+        "level": "string",
+        "recommendations": {
+          "items": [
+            "string"
+          ],
+          "type": "array"
+        },
+        "score": "number"
+      },
       "summary": {
         "baseline_path": "string",
         "findings": "number",

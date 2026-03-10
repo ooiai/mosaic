@@ -38,6 +38,7 @@ mod state_records;
 #[cfg(test)]
 mod tests;
 mod tts_voicecall_command;
+mod tui_command;
 mod utils;
 
 use agents_command::handle_agents;
@@ -89,6 +90,7 @@ use state_records::{
     webhooks_file_path,
 };
 use tts_voicecall_command::{handle_tts, handle_voicecall};
+use tui_command::handle_tui;
 use utils::{
     binary_in_path, load_json_file_opt, normalize_non_empty_list, parse_json_input, preview_text,
     print_json, remove_matching, resolve_baseline_path, resolve_output_path, save_json_file,
@@ -171,19 +173,7 @@ async fn run(cli: Cli) -> Result<()> {
         Commands::Uninstall => handle_uninstall(&cli),
         Commands::Docs(args) => handle_docs(&cli, args),
         Commands::Dns(args) => handle_dns(&cli, args),
-        Commands::Tui(args) => {
-            handle_chat(
-                &cli,
-                ChatArgs {
-                    session: args.session,
-                    prompt: args.prompt,
-                    prompt_file: None,
-                    script: None,
-                    agent: args.agent,
-                },
-            )
-            .await
-        }
+        Commands::Tui(args) => handle_tui(&cli, args).await,
         Commands::Qr(args) => handle_qr(&cli, args),
         Commands::Clawbot(args) => match args.command {
             ClawbotCommand::Ask {

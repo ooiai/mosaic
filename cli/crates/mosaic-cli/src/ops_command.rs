@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -9,6 +8,7 @@ use serde_json::{Value, json};
 use mosaic_channels::{ChannelRepository, channels_events_dir, channels_file_path};
 use mosaic_core::audit::CommandAudit;
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::{append_sanitized_jsonl, render_sanitized_jsonl};
 use mosaic_mcp::{McpStore, mcp_servers_file_path};
 use mosaic_ops::{
     ApprovalDecision, ApprovalStore, SandboxStore, SystemEventStore, UnifiedLogEntry, collect_logs,
@@ -755,7 +755,7 @@ async fn build_gateway_observability(
     let recent_events = gateway_events
         .iter()
         .rev()
-        .take(tail.max(1).min(50))
+        .take(tail.clamp(1, 50))
         .cloned()
         .collect::<Vec<_>>();
 
@@ -837,6 +837,48 @@ fn gateway_history_path(data_dir: &Path) -> PathBuf {
         .join("observability-gateway-history.jsonl")
 }
 
+fn append_history_entry<T: Serialize>(
+    history_path: &Path,
+    entry: &T,
+    context: &str,
+) -> std::result::Result<(), String> {
+    append_sanitized_jsonl(history_path, entry, context).map_err(|err| {
+        format!(
+            "failed to append {} '{}': {err}",
+            context,
+            history_path.display()
+        )
+    })
+}
+
+fn rewrite_history_entries<T: Serialize>(
+    history_path: &Path,
+    entries: &[T],
+    context: &str,
+) -> std::result::Result<(), String> {
+    if let Some(parent) = history_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create history directory '{}': {err}",
+                parent.display()
+            )
+        })?;
+    }
+    let rendered = render_sanitized_jsonl(entries.iter(), context).map_err(|err| {
+        format!(
+            "failed to render {} '{}': {err}",
+            context,
+            history_path.display()
+        )
+    })?;
+    std::fs::write(history_path, rendered).map_err(|err| {
+        format!(
+            "failed to rewrite history file '{}': {err}",
+            history_path.display()
+        )
+    })
+}
+
 fn read_gateway_history(
     history_path: &Path,
 ) -> (Vec<ObservabilityGatewayHistoryEntry>, usize, Option<String>) {
@@ -874,62 +916,14 @@ fn append_gateway_history_entry(
     history_path: &Path,
     entry: &ObservabilityGatewayHistoryEntry,
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create gateway history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = serde_json::to_string(entry)
-        .map_err(|err| format!("failed to serialize gateway history entry: {err}"))?;
-    rendered.push('\n');
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path)
-        .map_err(|err| {
-            format!(
-                "failed to open gateway history file '{}': {err}",
-                history_path.display()
-            )
-        })?;
-    file.write_all(rendered.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write gateway history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    append_history_entry(history_path, entry, "gateway history entry")
 }
 
 fn rewrite_gateway_history_entries(
     history_path: &Path,
     entries: &[ObservabilityGatewayHistoryEntry],
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create gateway history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = String::new();
-    for entry in entries {
-        let line = serde_json::to_string(entry)
-            .map_err(|err| format!("failed to serialize gateway history entry: {err}"))?;
-        rendered.push_str(&line);
-        rendered.push('\n');
-    }
-    std::fs::write(history_path, rendered).map_err(|err| {
-        format!(
-            "failed to rewrite gateway history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    rewrite_history_entries(history_path, entries, "gateway history entry")
 }
 
 fn gateway_history_entry_from_report(
@@ -963,8 +957,8 @@ fn gateway_history_entry_from_report(
         failed_events: extract_u64(telemetry, "failed_events")?,
         failure_rate,
         avg_latency_ms: telemetry.get("avg_latency_ms").and_then(Value::as_f64),
-        status_error: !gateway.get("error").map_or(true, Value::is_null),
-        events_error: !gateway.get("events_error").map_or(true, Value::is_null),
+        status_error: !gateway.get("error").is_none_or(Value::is_null),
+        events_error: !gateway.get("events_error").is_none_or(Value::is_null),
     })
 }
 
@@ -1506,62 +1500,14 @@ fn append_mcp_history_entry(
     history_path: &Path,
     entry: &ObservabilityMcpHistoryEntry,
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create mcp history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = serde_json::to_string(entry)
-        .map_err(|err| format!("failed to serialize mcp history entry: {err}"))?;
-    rendered.push('\n');
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path)
-        .map_err(|err| {
-            format!(
-                "failed to open mcp history file '{}': {err}",
-                history_path.display()
-            )
-        })?;
-    file.write_all(rendered.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write mcp history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    append_history_entry(history_path, entry, "mcp history entry")
 }
 
 fn rewrite_mcp_history_entries(
     history_path: &Path,
     entries: &[ObservabilityMcpHistoryEntry],
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create mcp history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = String::new();
-    for entry in entries {
-        let line = serde_json::to_string(entry)
-            .map_err(|err| format!("failed to serialize mcp history entry: {err}"))?;
-        rendered.push_str(&line);
-        rendered.push('\n');
-    }
-    std::fs::write(history_path, rendered).map_err(|err| {
-        format!(
-            "failed to rewrite mcp history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    rewrite_history_entries(history_path, entries, "mcp history entry")
 }
 
 fn mcp_history_entry_from_report(
@@ -1594,8 +1540,8 @@ fn mcp_history_entry_from_report(
         healthy: extract_u64(summary, "healthy")?,
         unhealthy,
         with_last_error: extract_u64(summary, "with_last_error")?,
-        list_error: !errors.get("list").map_or(true, Value::is_null),
-        check_error: !errors.get("check_all").map_or(true, Value::is_null),
+        list_error: !errors.get("list").is_none_or(Value::is_null),
+        check_error: !errors.get("check_all").is_none_or(Value::is_null),
         unhealthy_ratio,
     })
 }
@@ -2075,6 +2021,7 @@ fn load_jsonl_values(path: &Path) -> std::result::Result<Vec<Value>, String> {
     Ok(values)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_observability_alerts(
     gateway: &Value,
     gateway_history: &Value,
@@ -2639,62 +2586,14 @@ fn append_slo_history_entry(
     history_path: &Path,
     entry: &ObservabilitySloHistoryEntry,
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create slo history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = serde_json::to_string(entry)
-        .map_err(|err| format!("failed to serialize slo history entry: {err}"))?;
-    rendered.push('\n');
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path)
-        .map_err(|err| {
-            format!(
-                "failed to open slo history file '{}': {err}",
-                history_path.display()
-            )
-        })?;
-    file.write_all(rendered.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write slo history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    append_history_entry(history_path, entry, "slo history entry")
 }
 
 fn rewrite_slo_history_entries(
     history_path: &Path,
     entries: &[ObservabilitySloHistoryEntry],
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create slo history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = String::new();
-    for entry in entries {
-        let line = serde_json::to_string(entry)
-            .map_err(|err| format!("failed to serialize slo history entry: {err}"))?;
-        rendered.push_str(&line);
-        rendered.push('\n');
-    }
-    std::fs::write(history_path, rendered).map_err(|err| {
-        format!(
-            "failed to rewrite slo history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    rewrite_history_entries(history_path, entries, "slo history entry")
 }
 
 fn slo_history_entry_from_report(
@@ -3298,62 +3197,14 @@ fn append_plugin_soak_history_entry(
     history_path: &Path,
     entry: &PluginSoakHistoryEntry,
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create plugin soak history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = serde_json::to_string(entry)
-        .map_err(|err| format!("failed to serialize plugin soak history entry: {err}"))?;
-    rendered.push('\n');
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(history_path)
-        .map_err(|err| {
-            format!(
-                "failed to open plugin soak history file '{}': {err}",
-                history_path.display()
-            )
-        })?;
-    file.write_all(rendered.as_bytes()).map_err(|err| {
-        format!(
-            "failed to write plugin soak history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    append_history_entry(history_path, entry, "plugin soak history entry")
 }
 
 fn rewrite_plugin_soak_history_entries(
     history_path: &Path,
     entries: &[PluginSoakHistoryEntry],
 ) -> std::result::Result<(), String> {
-    if let Some(parent) = history_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "failed to create plugin soak history directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-    let mut rendered = String::new();
-    for entry in entries {
-        let line = serde_json::to_string(entry)
-            .map_err(|err| format!("failed to serialize plugin soak history entry: {err}"))?;
-        rendered.push_str(&line);
-        rendered.push('\n');
-    }
-    std::fs::write(history_path, rendered).map_err(|err| {
-        format!(
-            "failed to rewrite plugin soak history file '{}': {err}",
-            history_path.display()
-        )
-    })?;
-    Ok(())
+    rewrite_history_entries(history_path, entries, "plugin soak history entry")
 }
 
 fn plugin_soak_history_entry_from_report(

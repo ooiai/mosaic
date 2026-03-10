@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::append_sanitized_jsonl;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemEvent {
@@ -48,19 +49,7 @@ impl SystemEventStore {
             name: name.to_string(),
             data,
         };
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let encoded = serde_json::to_string(&event).map_err(|err| {
-            MosaicError::Validation(format!("failed to encode system event JSON: {err}"))
-        })?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
-        use std::io::Write as _;
-        file.write_all(encoded.as_bytes())?;
-        file.write_all(b"\n")?;
+        append_sanitized_jsonl(&self.path, &event, "system event persistence")?;
         Ok(event)
     }
 
@@ -122,5 +111,32 @@ mod tests {
         let events = store.read_tail(10).expect("read tail");
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, "startup");
+    }
+
+    #[test]
+    fn append_event_redacts_secret_like_content() {
+        let temp = tempdir().expect("tempdir");
+        let store = SystemEventStore::new(temp.path().join("events.jsonl"));
+        store
+            .append_event(
+                "secret_probe",
+                json!({"token": "sk-live-secret-value-1234567890"}),
+            )
+            .expect("append");
+        let raw = std::fs::read_to_string(store.path()).expect("read events");
+        assert!(raw.contains("\"token\":\"[REDACTED]\""));
+    }
+
+    #[test]
+    fn append_event_blocks_private_key_content() {
+        let temp = tempdir().expect("tempdir");
+        let store = SystemEventStore::new(temp.path().join("events.jsonl"));
+        let err = store
+            .append_event(
+                "secret_probe",
+                json!({"text":"-----BEGIN OPENSSH PRIVATE KEY-----"}),
+            )
+            .expect_err("should block");
+        assert!(err.to_string().contains("private key material"));
     }
 }

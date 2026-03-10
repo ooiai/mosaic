@@ -55,6 +55,8 @@ run_step() {
 } | tee "$REPORT_FILE" >/dev/null
 
 run_step "Generate regression catalog" "$ROOT_DIR/scripts/update_regression_catalog.sh"
+run_step "Run release tooling smoke" "$ROOT_DIR/scripts/release_tooling_smoke.sh"
+run_step "Run release install smoke" "$ROOT_DIR/scripts/release_install_smoke.sh"
 run_step "Run cargo test --workspace" cargo test --workspace
 run_step "Run from scratch smoke (no duplicate workspace test)" \
   env SKIP_WORKSPACE_TESTS=1 "$ROOT_DIR/scripts/from_scratch_smoke.sh"

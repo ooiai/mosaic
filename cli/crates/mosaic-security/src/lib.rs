@@ -49,10 +49,27 @@ pub struct SecurityAuditSummary {
     pub baseline_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecurityRiskLevel {
+    Low,
+    Moderate,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityRiskProfile {
+    pub score: u8,
+    pub level: SecurityRiskLevel,
+    pub recommendations: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityAuditReport {
     pub summary: SecurityAuditSummary,
     pub findings: Vec<SecurityFinding>,
+    pub risk: SecurityRiskProfile,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,26 +210,9 @@ pub fn apply_baseline(
         }
     }
 
-    let high = kept
-        .iter()
-        .filter(|finding| finding.severity == SecuritySeverity::High)
-        .count();
-    let medium = kept
-        .iter()
-        .filter(|finding| finding.severity == SecuritySeverity::Medium)
-        .count();
-    let low = kept
-        .iter()
-        .filter(|finding| finding.severity == SecuritySeverity::Low)
-        .count();
-
-    report.summary.ok = high == 0;
-    report.summary.findings = kept.len();
-    report.summary.high = high;
-    report.summary.medium = medium;
-    report.summary.low = low;
-    report.summary.ignored += ignored;
     report.findings = kept;
+    refresh_report_metadata(&mut report);
+    report.summary.ignored += ignored;
 
     SecurityBaselineApplyResult { report, ignored }
 }
@@ -273,6 +273,113 @@ pub fn report_to_sarif(report: &SecurityAuditReport) -> Value {
             }
         ]
     })
+}
+
+pub fn refresh_report_metadata(report: &mut SecurityAuditReport) {
+    report.summary.findings = report.findings.len();
+    report.summary.high = report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::High)
+        .count();
+    report.summary.medium = report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::Medium)
+        .count();
+    report.summary.low = report
+        .findings
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::Low)
+        .count();
+    report.summary.ok = report.summary.high == 0;
+    report.risk = build_risk_profile(&report.findings);
+}
+
+fn build_risk_profile(findings: &[SecurityFinding]) -> SecurityRiskProfile {
+    let high = findings
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::High)
+        .count();
+    let medium = findings
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::Medium)
+        .count();
+    let low = findings
+        .iter()
+        .filter(|finding| finding.severity == SecuritySeverity::Low)
+        .count();
+
+    let mut categories = HashSet::new();
+    for finding in findings {
+        categories.insert(finding.category.as_str());
+    }
+
+    let mut score = high.saturating_mul(35) + medium.saturating_mul(15) + low.saturating_mul(5);
+    if categories.contains("credential_exposure") {
+        score = score.saturating_add(10);
+    }
+    if categories.contains("transport_security") && high > 0 {
+        score = score.saturating_add(8);
+    }
+    if categories.contains("code_injection") {
+        score = score.saturating_add(7);
+    }
+    if categories.contains("supply_chain") {
+        score = score.saturating_add(5);
+    }
+    let score = score.min(100) as u8;
+
+    let level = match score {
+        0..=9 => SecurityRiskLevel::Low,
+        10..=34 => SecurityRiskLevel::Moderate,
+        35..=69 => SecurityRiskLevel::High,
+        _ => SecurityRiskLevel::Critical,
+    };
+
+    let mut recommendations = Vec::new();
+    if high > 0 && categories.contains("credential_exposure") {
+        recommendations.push(
+            "Rotate exposed credentials immediately and move secrets to managed secret storage."
+                .to_string(),
+        );
+    }
+    if categories.contains("transport_security") {
+        recommendations.push(
+            "Enforce TLS verification and remove insecure transport/http-only endpoints."
+                .to_string(),
+        );
+    }
+    if categories.contains("supply_chain") {
+        recommendations.push(
+            "Avoid curl-pipe execution; pin checksums/signatures before running scripts."
+                .to_string(),
+        );
+    }
+    if categories.contains("code_injection") {
+        recommendations.push(
+            "Replace dynamic eval execution with explicit parsers or safe interpreters."
+                .to_string(),
+        );
+    }
+    if categories.contains("crypto_hardening") {
+        recommendations.push(
+            "Replace weak hashes (md5/sha1) with modern primitives (sha256/argon2/bcrypt)."
+                .to_string(),
+        );
+    }
+    if recommendations.is_empty() {
+        recommendations.push(
+            "No immediate high-risk findings. Keep baseline and secret-scanning checks in CI."
+                .to_string(),
+        );
+    }
+
+    SecurityRiskProfile {
+        score,
+        level,
+        recommendations,
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -361,8 +468,13 @@ impl SecurityAuditor {
             root: root.display().to_string(),
             baseline_path: None,
         };
+        let risk = build_risk_profile(&findings);
 
-        Ok(SecurityAuditReport { summary, findings })
+        Ok(SecurityAuditReport {
+            summary,
+            findings,
+            risk,
+        })
     }
 }
 
@@ -805,6 +917,7 @@ mod tests {
         assert!(report.summary.findings >= 2);
         assert!(report.summary.high >= 1);
         assert!(!report.summary.ok);
+        assert!(report.risk.score >= 35);
     }
 
     #[test]
@@ -838,6 +951,7 @@ mod tests {
                 .iter()
                 .any(|finding| finding.category == "transport_security")
         );
+        assert!(report.risk.score >= 20);
     }
 
     #[test]
@@ -869,6 +983,7 @@ mod tests {
                 .iter()
                 .any(|finding| finding.category == "crypto_hardening")
         );
+        assert!(report.risk.score >= 35);
     }
 
     #[test]
@@ -890,6 +1005,8 @@ mod tests {
 
         assert_eq!(report.summary.findings, 0);
         assert!(report.summary.ok);
+        assert_eq!(report.risk.score, 0);
+        assert_eq!(report.risk.level, SecurityRiskLevel::Low);
     }
 
     #[test]
@@ -918,6 +1035,7 @@ mod tests {
         assert_eq!(filtered.ignored, 1);
         assert_eq!(filtered.report.summary.findings, 0);
         assert!(filtered.report.summary.ok);
+        assert_eq!(filtered.report.risk.score, 0);
     }
 
     #[test]

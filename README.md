@@ -10,6 +10,7 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 - Learning path tutorial: https://ooiai.github.io/mosaic/learning-path.html
 - Models & profiles tutorial: https://ooiai.github.io/mosaic/models-profiles.html
 - Sessions tutorial: https://ooiai.github.io/mosaic/sessions.html
+- TUI tutorial: https://ooiai.github.io/mosaic/tui.html
 - Policy tutorial (approvals + sandbox): https://ooiai.github.io/mosaic/policy.html
 - Azure end-to-end ops playbook: https://ooiai.github.io/mosaic/playbook-azure-ops.html
 - Agents module tutorial: https://ooiai.github.io/mosaic/agents.html
@@ -28,6 +29,7 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 - 中文分阶段学习: https://ooiai.github.io/mosaic/cn/learning-path.html
 - 中文 Models 与 Profiles 教程: https://ooiai.github.io/mosaic/cn/models-profiles.html
 - 中文 Sessions 教程: https://ooiai.github.io/mosaic/cn/sessions.html
+- 中文 TUI 教程: https://ooiai.github.io/mosaic/cn/tui.html
 - 中文策略教程: https://ooiai.github.io/mosaic/cn/policy.html
 - 中文 Azure 运维剧本: https://ooiai.github.io/mosaic/cn/playbook-azure-ops.html
 - 中文 Agents 教程: https://ooiai.github.io/mosaic/cn/agents.html
@@ -45,7 +47,7 @@ Mosaic is a standalone rewrite focused on a production-usable CLI core: agent lo
 
 ## Current Scope
 
-- Core: `setup`, `configure`, `models`, `ask`, `chat`, `session`
+- Core: `setup`, `configure`, `models`, `ask`, `chat`, `tui`, `session`
 - Ops: `status`, `health`, `doctor`, `logs`, `system`, `dashboard`
 - Gateway: `gateway install|start|status|probe|discover|call|stop|uninstall`
 - Channels: `add|update|list|status|test|send|logs|capabilities|resolve|remove|logout`
@@ -98,6 +100,9 @@ mosaic --project-state ask "summarize this repository"
 
 # 4) interactive chat
 mosaic --project-state chat
+
+# 4b) chat-first terminal UI
+mosaic --project-state tui
 ```
 
 ## Workspace
@@ -119,6 +124,27 @@ make cli-test
 
 # full regression
 make cli-regression
+
+# release tooling smoke (verifier pass/fail + dry-run summary)
+make cli-release-tooling-smoke v=v0.2.0-beta.6
+
+# release installer smoke (install.sh local assets + release-only guardrail)
+make cli-release-install-smoke v=v0.2.0-beta.6
+
+# release notes draft from worklog
+make cli-release-notes v=v0.2.0-beta.6
+
+# one-command local release prepare
+make cli-release-prepare v=v0.2.0-beta.6
+
+# verify archive internal layout (binary/docs/installers)
+make cli-release-verify-archives v=v0.2.0-beta.6 assets=../release-assets
+
+# verify release assets directory
+make cli-release-verify v=v0.2.0-beta.6 assets=../release-assets
+
+# verify published GitHub release by tag
+make cli-release-publish-check v=v0.2.0-beta.6 repo=ooiai/mosaic
 ```
 
 ## License

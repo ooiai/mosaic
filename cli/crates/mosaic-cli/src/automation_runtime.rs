@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 
 use mosaic_core::config::RunGuardMode;
 use mosaic_core::error::MosaicError;
+use mosaic_core::privacy::append_sanitized_jsonl;
 use mosaic_core::state::StatePaths;
 use mosaic_memory::{
     MemoryCleanupPolicy, MemoryCleanupPolicyStore, MemoryPruneOptions, memory_cleanup_policy_path,
@@ -256,23 +257,8 @@ fn append_hook_event(
         data: payload,
     };
     let path = hook_events_file_path(data_dir, &hook.id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let encoded = serde_json::to_string(&event).map_err(|err| {
-        MosaicError::Validation(format!(
-            "failed to encode hook event {}: {err}",
-            path.display()
-        ))
-    })?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-    use std::io::Write as _;
-    file.write_all(encoded.as_bytes())?;
-    file.write_all(b"\n")?;
-    Ok(())
+    append_sanitized_jsonl(&path, &event, "hook event persistence")
+        .map_err(|err| err.with_context(format!("failed to append hook event {}", path.display())))
 }
 
 pub(super) fn apply_hook_last_result(
@@ -440,23 +426,8 @@ fn append_cron_event(
         error: report.error.clone(),
     };
     let path = cron_events_file_path(data_dir, &job.id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let encoded = serde_json::to_string(&event).map_err(|err| {
-        MosaicError::Validation(format!(
-            "failed to encode cron event {}: {err}",
-            path.display()
-        ))
-    })?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-    use std::io::Write as _;
-    file.write_all(encoded.as_bytes())?;
-    file.write_all(b"\n")?;
-    Ok(())
+    append_sanitized_jsonl(&path, &event, "cron event persistence")
+        .map_err(|err| err.with_context(format!("failed to append cron event {}", path.display())))
 }
 
 pub(super) fn apply_cron_result(
@@ -705,23 +676,9 @@ fn append_webhook_event(
         error: report.error.clone(),
     };
     let path = webhook_events_file_path(data_dir, &webhook.id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let encoded = serde_json::to_string(&event).map_err(|err| {
-        MosaicError::Validation(format!(
-            "failed to encode webhook event {}: {err}",
-            path.display()
-        ))
-    })?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-    use std::io::Write as _;
-    file.write_all(encoded.as_bytes())?;
-    file.write_all(b"\n")?;
-    Ok(())
+    append_sanitized_jsonl(&path, &event, "webhook event persistence").map_err(|err| {
+        err.with_context(format!("failed to append webhook event {}", path.display()))
+    })
 }
 
 pub(super) fn apply_webhook_last_result(

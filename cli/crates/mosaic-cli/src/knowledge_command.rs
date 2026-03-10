@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use mosaic_agent::AgentRunOptions;
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::append_sanitized_jsonl;
 use mosaic_mcp::{McpStore, mcp_servers_file_path};
 use mosaic_memory::{
     MemoryIndexOptions, MemoryIndexResult, MemorySearchHit, MemoryStore,
@@ -328,6 +329,7 @@ pub(super) async fn handle_knowledge(cli: &Cli, args: KnowledgeArgs) -> Result<(
                             .map_err(|err| MosaicError::Io(err.to_string()))?,
                         yes: cli.yes,
                         interactive: false,
+                        event_callback: None,
                     },
                 )
                 .await?;
@@ -961,6 +963,7 @@ fn stage_markdown_from_directory(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn stage_markdown_from_http(
     urls: &[String],
     stage_root: &Path,
@@ -985,7 +988,7 @@ async fn stage_markdown_from_http(
             Ok(fetched) => {
                 let bytes = fetched.text.len();
                 let mut skipped = false;
-                if fetched.text.as_bytes().len() > options.max_file_size {
+                if fetched.text.len() > options.max_file_size {
                     skipped = true;
                     stats.documents_skipped = stats.documents_skipped.saturating_add(1);
                 } else {
@@ -1100,6 +1103,7 @@ async fn fetch_http_markdown(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_knowledge_ingest_report(
     path: &Path,
     source: &str,
@@ -1234,23 +1238,12 @@ fn load_knowledge_eval_history(path: &Path) -> Result<Vec<KnowledgeEvalHistoryEn
 }
 
 fn append_knowledge_eval_history(path: &Path, entry: &KnowledgeEvalHistoryEntry) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let line = serde_json::to_string(entry).map_err(|err| {
+    append_sanitized_jsonl(path, entry, "knowledge evaluate history persistence").map_err(|err| {
         MosaicError::Unknown(format!(
-            "failed to serialize knowledge evaluate history '{}': {err}",
+            "failed to append knowledge evaluate history '{}': {err}",
             path.display()
         ))
-    })?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    use std::io::Write as _;
-    file.write_all(line.as_bytes())?;
-    file.write_all(b"\n")?;
-    Ok(())
+    })
 }
 
 fn history_tail(
@@ -1909,7 +1902,8 @@ fn percentile_score(scores: &[usize], percentile: usize) -> usize {
     }
     let mut sorted = scores.to_vec();
     sorted.sort_unstable();
-    let rank = ((percentile.max(1).min(100) * sorted.len()) + 99) / 100;
+    let bounded_percentile = percentile.clamp(1, 100);
+    let rank = (bounded_percentile * sorted.len()).div_ceil(100);
     let index = rank.saturating_sub(1).min(sorted.len().saturating_sub(1));
     sorted[index]
 }

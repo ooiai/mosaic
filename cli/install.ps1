@@ -1,7 +1,9 @@
 param(
     [string]$Version = "",
     [string]$InstallDir = "$env:LOCALAPPDATA\mosaic\bin",
-    [switch]$FromSource
+    [string]$AssetsDir = "",
+    [switch]$FromSource,
+    [switch]$ReleaseOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +53,10 @@ function Install-FromSource {
 
 function Install-FromRelease {
     if (-not $Version) {
+        if ($AssetsDir) {
+            Write-Error "Version is required when using -AssetsDir."
+            return $false
+        }
         $Version = Resolve-LatestVersion
     }
     if (-not $Version) {
@@ -59,15 +65,34 @@ function Install-FromRelease {
 
     $platform = "windows-x64"
     $asset = "mosaic-$Version-$platform.zip"
-    $url = "https://github.com/$Repo/releases/download/$Version/$asset"
     $zipPath = Join-Path $tempRoot $asset
 
-    Write-Host "Installing mosaic $Version ($platform)"
-    Write-Host "Download: $url"
-    try {
-        Invoke-WebRequest -Uri $url -OutFile $zipPath
-    } catch {
-        return $false
+    if ($AssetsDir) {
+        if (-not (Test-Path $AssetsDir -PathType Container)) {
+            throw "Assets directory does not exist: $AssetsDir"
+        }
+
+        $candidate = Join-Path $AssetsDir $asset
+        if (-not (Test-Path $candidate)) {
+            $found = Get-ChildItem -Path $AssetsDir -Recurse -File -Filter $asset | Select-Object -First 1
+            if (-not $found) {
+                return $false
+            }
+            $candidate = $found.FullName
+        }
+
+        Write-Host "Installing mosaic $Version ($platform) from local assets"
+        Write-Host "Asset: $candidate"
+        Copy-Item -Path $candidate -Destination $zipPath -Force
+    } else {
+        $url = "https://github.com/$Repo/releases/download/$Version/$asset"
+        Write-Host "Installing mosaic $Version ($platform)"
+        Write-Host "Download: $url"
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $zipPath
+        } catch {
+            return $false
+        }
     }
 
     Expand-Archive -Path $zipPath -DestinationPath $tempRoot -Force
@@ -85,6 +110,10 @@ $tempRoot = Join-Path $env:TEMP ("mosaic-install-" + [Guid]::NewGuid().ToString(
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 
 try {
+    if ($FromSource -and $ReleaseOnly) {
+        throw "-FromSource and -ReleaseOnly cannot be used together."
+    }
+
     $installed = $false
     if ($FromSource) {
         Install-FromSource
@@ -92,6 +121,9 @@ try {
     } else {
         $installed = Install-FromRelease
         if (-not $installed) {
+            if ($ReleaseOnly) {
+                throw "Release install failed and -ReleaseOnly is set."
+            }
             Write-Warning "Release asset install unavailable; falling back to source build."
             Install-FromSource
             $installed = $true

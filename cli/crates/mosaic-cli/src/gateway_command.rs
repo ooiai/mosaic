@@ -1,5 +1,3 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
 use std::path::Path;
 use std::time::Instant;
 
@@ -9,6 +7,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use mosaic_core::error::MosaicError;
+use mosaic_core::privacy::append_sanitized_jsonl;
 use mosaic_gateway::{GatewayClient, GatewayRequest};
 
 use super::{
@@ -1315,13 +1314,7 @@ fn write_gateway_event(path: &Path, input: GatewayEventInput<'_>) {
 }
 
 fn append_jsonl<T: Serialize>(path: &Path, record: &T) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    let line = serde_json::to_string(record)
-        .map_err(|err| MosaicError::Validation(format!("failed to encode gateway event: {err}")))?;
-    file.write_all(line.as_bytes())?;
-    file.write_all(b"\n")?;
-    Ok(())
+    append_sanitized_jsonl(path, record, "gateway event persistence").map_err(|err| {
+        err.with_context(format!("failed to append gateway event {}", path.display()))
+    })
 }

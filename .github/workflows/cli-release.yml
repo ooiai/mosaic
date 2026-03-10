@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release tag (e.g. v0.2.0-beta.2)"
+        description: "Release tag (e.g. v0.2.0-beta.6)"
         required: true
         type: string
 
@@ -102,6 +102,39 @@ jobs:
             --output-dir "$PWD/release-assets"
           cp cli/install.sh release-assets/install.sh
           cp cli/install.ps1 release-assets/install.ps1
+
+      - name: Verify release assets integrity (archives + checksums/manifests)
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          fi
+          chmod +x cli/scripts/release_verify_archives.sh
+          ./cli/scripts/release_verify_archives.sh \
+            --version "$VERSION" \
+            --assets-dir "$PWD/release-assets"
+          chmod +x cli/scripts/release_verify_assets.sh
+          ./cli/scripts/release_verify_assets.sh \
+            --version "$VERSION" \
+            --assets-dir "$PWD/release-assets"
+
+      - name: Smoke install from assembled release assets (linux)
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ inputs.version }}"
+          fi
+          chmod +x cli/install.sh
+          INSTALL_DIR="$RUNNER_TEMP/mosaic-bin"
+          mkdir -p "$INSTALL_DIR"
+          ./cli/install.sh \
+            --version "$VERSION" \
+            --assets-dir "$PWD/release-assets" \
+            --install-dir "$INSTALL_DIR" \
+            --release-only
+          "$INSTALL_DIR/mosaic" --version
 
       - name: Upload release manifests
         uses: actions/upload-artifact@v4

@@ -1,0 +1,15 @@
+[package]
+name = "mosaic-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mosaic-agent = { path = "../mosaic-agent" }
+mosaic-core = { path = "../mosaic-core" }
+chrono.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

@@ -37,6 +37,7 @@
         <a class="side-link" href="learning-path.html">Learning Path</a>
         <a class="side-link" href="models-profiles.html">Models & Profiles</a>
         <a class="side-link" href="sessions.html">Sessions</a>
+        <a class="side-link" href="tui.html">TUI Guide</a>
         <a class="side-link" href="policy.html">Policy</a>
         <a class="side-link" href="agents.html">Agents</a>
         <a class="side-link" href="channels.html">Channels</a>
@@ -83,9 +84,10 @@ mosaic --project-state --profile default setup \
 mosaic --project-state --profile default health
 mosaic --project-state --profile default status</code></pre>
 
-          <h2>4. Run your first ask/chat</h2>
+          <h2>4. Run your first ask/chat/tui</h2>
           <pre><code>mosaic --project-state --profile default ask "hello"
-mosaic --project-state --profile default chat</code></pre>
+mosaic --project-state --profile default chat
+mosaic --project-state --profile default tui</code></pre>
           <p>Inside REPL, use <code>/help</code>, <code>/status</code>, and <code>/exit</code>.</p>
 
           <h2>5. Inspect sessions</h2>
@@ -101,7 +103,7 @@ mosaic --project-state channels send &lt;channel_id&gt; --text "quickstart ok"</
           <ul>
             <li><code>models list</code> succeeds without network/config errors.</li>
             <li><code>ask</code> returns a model response.</li>
-            <li><code>chat</code> can start and exit normally.</li>
+            <li><code>chat</code> and <code>tui</code> can start and exit normally.</li>
             <li><code>session list</code> shows generated sessions.</li>
           </ul>
 

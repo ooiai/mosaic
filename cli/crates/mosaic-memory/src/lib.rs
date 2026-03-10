@@ -81,7 +81,7 @@ pub struct MemoryNamespaceStatus {
     pub exists: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MemoryPruneOptions {
     pub max_namespaces: Option<usize>,
     pub max_age_hours: Option<u64>,
@@ -142,17 +142,6 @@ impl Default for MemoryIndexOptions {
             max_files: DEFAULT_MAX_FILES,
             max_file_size: DEFAULT_MAX_FILE_SIZE,
             max_content_bytes: DEFAULT_MAX_CONTENT_BYTES,
-        }
-    }
-}
-
-impl Default for MemoryPruneOptions {
-    fn default() -> Self {
-        Self {
-            max_namespaces: None,
-            max_age_hours: None,
-            max_documents_per_namespace: None,
-            dry_run: false,
         }
     }
 }

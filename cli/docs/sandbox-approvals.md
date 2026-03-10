@@ -53,6 +53,39 @@ mosaic --project-state sandbox explain --profile restricted
 3. Existing tool guard (`confirm_dangerous` / `all_confirm` / `unrestricted`)
 4. Command execution and audit log write
 
+## Private Data Guard (New)
+
+`mosaic-tools` now enforces privacy guardrails for local sensitive data.
+
+Default behavior:
+
+1. `read_file` / `write_file`
+   - blocks critical sensitive files:
+     - shell profiles/histories (`.zshrc`, `.bashrc`, `.zsh_history`, ...)
+     - key material (`.ssh/*`, `.gnupg/*`, `*.pem`, `id_rsa`, ...)
+     - cloud cluster credentials (`.aws/credentials`, `.kube/config`)
+   - treats `.env` / `.env.*` as confidential:
+     - requires explicit `--yes` (otherwise `approval_required`)
+2. `search_text`
+   - automatically skips sensitive files unless explicitly allowed
+   - in non-`--yes` mode, confidential files are excluded from results
+3. `run_cmd`
+   - blocks direct command access to sensitive local credential/profile paths
+   - requires confirmation for `env` / `printenv` style dumps
+4. Tool output redaction
+   - redacts secret-like payloads in `read_file`, `write_file`, `search_text`, and `run_cmd` outputs
+   - examples: `*_TOKEN`, `*_API_KEY`, `password=...`, OpenAI-like keys, AWS key markers, bearer tokens
+5. Persistence guard (session/audit/events)
+   - before writing `sessions/*.jsonl`, `audit/commands.jsonl`, system events, channel events, gateway/realtime events, hook/webhook/cron events, plugin runtime events, observability history files, and knowledge evaluate history:
+     - secret-like values are redacted
+     - private key markers (`BEGIN ... PRIVATE KEY`) trigger hard block (write rejected)
+
+Override env switches (for explicit audited admin workflows):
+
+- `MOSAIC_ALLOW_SENSITIVE_FILES=1`
+- `MOSAIC_ALLOW_SENSITIVE_COMMANDS=1`
+- `MOSAIC_DISABLE_SECRET_REDACTION=1`
+
 `plugins run` is processed in this order:
 
 1. Resolve timeout (`--timeout-ms` > plugin `[runtime].timeout_ms` > default `15000ms`)

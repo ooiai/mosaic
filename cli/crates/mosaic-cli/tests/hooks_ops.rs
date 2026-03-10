@@ -153,6 +153,65 @@ fn hooks_add_run_and_system_event_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn hook_event_log_redacts_secret_payload() {
+    let temp = tempdir().expect("tempdir");
+    setup_project(&temp);
+
+    let add_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "hooks",
+            "add",
+            "--name",
+            "secret-hook",
+            "--event",
+            "deploy",
+            "--command",
+            "echo hook-secret",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let add_json: Value = serde_json::from_slice(&add_output).expect("add json");
+    let hook_id = add_json["hook"]["id"]
+        .as_str()
+        .expect("hook id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--yes",
+            "--json",
+            "system",
+            "event",
+            "deploy",
+            "--data",
+            "{\"token\":\"sk-live-secret-12345678901234567890\"}",
+        ])
+        .assert()
+        .success();
+
+    let path = temp
+        .path()
+        .join(".mosaic")
+        .join("data")
+        .join("hook-events")
+        .join(format!("{hook_id}.jsonl"));
+    let raw = fs::read_to_string(path).expect("read hook log");
+    assert!(raw.contains("\"token\":\"[REDACTED]\""));
+    assert!(!raw.contains("sk-live-secret-12345678901234567890"));
+}
+
+#[test]
+#[allow(deprecated)]
 fn hooks_run_without_yes_returns_approval_required() {
     let temp = tempdir().expect("tempdir");
     setup_project(&temp);

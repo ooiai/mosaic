@@ -99,6 +99,14 @@ cd cli
 ./scripts/run_regression_suite.sh
 ```
 
+`run_regression_suite.sh` now includes:
+
+- `update_regression_catalog.sh`
+- `release_tooling_smoke.sh`
+- `release_install_smoke.sh`
+- `cargo test --workspace`
+- `from_scratch_smoke.sh` (with `SKIP_WORKSPACE_TESTS=1`)
+
 CI uploads latest regression report artifact:
 
 - `rust-cli-regression-report` (file: `cli/reports/regression-latest.log`)
@@ -110,11 +118,13 @@ CI uploads latest regression report artifact:
 ## 8) Pre-merge Checklist
 
 1. Run `./scripts/update_regression_catalog.sh`
-2. Run `./scripts/run_regression_suite.sh`
-3. Run `cargo clippy -p mosaic-cli -- -D warnings`
-4. Confirm `docs/regression-catalog.md` is updated and committed
-5. Confirm `reports/regression-latest.log` shows no failures
-6. Append concise change note:
+2. Run `./scripts/release_tooling_smoke.sh`
+3. Run `./scripts/release_install_smoke.sh`
+4. Run `./scripts/run_regression_suite.sh`
+5. Run `cargo clippy -p mosaic-cli -- -D warnings`
+6. Confirm `docs/regression-catalog.md` is updated and committed
+7. Confirm `reports/regression-latest.log` shows no failures
+8. Append concise change note:
 
 ```bash
 cd cli
@@ -131,7 +141,7 @@ Canonical log files:
 ```bash
 cd cli
 ./scripts/beta_release_check.sh
-./scripts/package_beta.sh --version v0.2.0-beta.1
+./scripts/package_beta.sh --version <version>
 ```
 
 ## 10) Cross-platform Release Packaging
@@ -140,13 +150,13 @@ cd cli
 cd cli
 
 # package one target (after building that target)
-./scripts/package_release_asset.sh --version v0.2.0-beta.5 --target aarch64-apple-darwin
+./scripts/package_release_asset.sh --version <version> --target aarch64-apple-darwin
 
 # generate Homebrew/Scoop manifests from collected assets
 ./scripts/update_distribution_manifests.sh \
-  --version v0.2.0-beta.5 \
-  --assets-dir ./dist/v0.2.0-beta.5 \
-  --output-dir ./dist/v0.2.0-beta.5
+  --version <version> \
+  --assets-dir ./dist/<version> \
+  --output-dir ./dist/<version>
 ```
 
 GitHub release automation:
@@ -157,3 +167,74 @@ GitHub release automation:
   - checksums (`*.sha256`, `SHA256SUMS`)
   - installers (`install.sh`, `install.ps1`)
   - package manifests (`mosaic.rb`, `mosaic.json`)
+
+## 11) Release Notes Draft
+
+```bash
+cd cli
+./scripts/release_notes_from_worklog.sh \
+  --version <version> \
+  --out docs/release-notes-<version>.md
+```
+
+Optional filters:
+
+- `--from-date 2026-03-01T00:00:00Z`
+- `--max-entries 30`
+
+## 12) Local Release Prepare (One Command)
+
+```bash
+cd cli
+./scripts/release_prepare.sh --version <version>
+```
+
+Optional release-tooling smoke:
+
+```bash
+cd cli
+./scripts/release_tooling_smoke.sh --version <version>
+./scripts/release_install_smoke.sh --version <version>
+```
+
+Common variants:
+
+- `--target aarch64-apple-darwin`
+- `--skip-check` (skip beta readiness checks)
+- `--skip-archive-check` (skip archive content verification when `--assets-dir` is set)
+- `--skip-verify` (skip assets verification when `--assets-dir` is set)
+- `--assets-dir ../release-assets --output-dir ../release-assets`
+- `--summary-out reports/release-prepare-summary.json`
+- `--summary-out` is written in both normal and dry-run modes (dry-run fields are marked as planned)
+- `--assets-dir` requires a full release matrix (`darwin-arm64/darwin-x64/linux-x64/windows-x64`) for the same version
+
+## 13) Release Archive Verification (Standalone)
+
+```bash
+cd cli
+./scripts/release_verify_archives.sh --version <version> --assets-dir <dir>
+./scripts/release_verify_archives.sh --version <version> --assets-dir <dir> --json
+```
+
+## 14) Release Asset Verification (Standalone)
+
+```bash
+cd cli
+./scripts/release_verify_assets.sh --version <version> --assets-dir <dir>
+./scripts/release_verify_assets.sh --version <version> --assets-dir <dir> --json
+```
+
+## 15) Installer Smoke From Assembled Assets
+
+```bash
+cd cli
+./install.sh --version <version> --assets-dir <dir> --install-dir <tmp-bin-dir> --release-only
+```
+
+## 16) Published Release Verification
+
+```bash
+cd cli
+./scripts/release_publish_check.sh --version <version>
+./scripts/release_publish_check.sh --version <version> --repo ooiai/mosaic --json
+```
