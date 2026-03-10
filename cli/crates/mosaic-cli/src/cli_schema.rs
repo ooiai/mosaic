@@ -1744,6 +1744,18 @@ struct TuiArgs {
     prompt: Option<String>,
     #[arg(long)]
     agent: Option<String>,
+    #[arg(long, value_enum, default_value_t = TuiFocusArg::Input)]
+    focus: TuiFocusArg,
+    #[arg(long)]
+    no_inspector: bool,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+enum TuiFocusArg {
+    Messages,
+    Input,
+    Sessions,
+    Inspector,
 }
 
 #[derive(Args, Debug, Clone)]

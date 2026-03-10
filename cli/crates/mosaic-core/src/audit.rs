@@ -1,11 +1,11 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs::{self};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::Result;
+use crate::privacy::append_sanitized_jsonl;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandAudit {
@@ -40,17 +40,63 @@ impl AuditStore {
 
     pub fn append_command(&self, entry: &CommandAudit) -> Result<()> {
         self.ensure_dirs()?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.audit_log_path)?;
-        let line = serde_json::to_string(entry)?;
-        file.write_all(line.as_bytes())?;
-        file.write_all(b"\n")?;
-        Ok(())
+        append_sanitized_jsonl(&self.audit_log_path, entry, "command audit persistence")
     }
 
     pub fn path(&self) -> &Path {
         &self.audit_log_path
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+    use uuid::Uuid;
+
+    use super::*;
+
+    #[test]
+    fn append_command_redacts_secret_like_command() {
+        let temp = tempdir().expect("tempdir");
+        let store = AuditStore::new(
+            temp.path().join("audit"),
+            temp.path().join("audit").join("commands.jsonl"),
+        );
+        store
+            .append_command(&CommandAudit {
+                id: Uuid::new_v4().to_string(),
+                ts: Utc::now(),
+                session_id: "s1".to_string(),
+                command: "echo sk-live-secret-12345678901234567890".to_string(),
+                cwd: temp.path().display().to_string(),
+                approved_by: "flag_yes".to_string(),
+                exit_code: 0,
+                duration_ms: 1,
+            })
+            .expect("append");
+        let raw = std::fs::read_to_string(store.path()).expect("read audit log");
+        assert!(raw.contains("[REDACTED_OPENAI_KEY]"));
+    }
+
+    #[test]
+    fn append_command_blocks_private_key_material() {
+        let temp = tempdir().expect("tempdir");
+        let store = AuditStore::new(
+            temp.path().join("audit"),
+            temp.path().join("audit").join("commands.jsonl"),
+        );
+        let err = store
+            .append_command(&CommandAudit {
+                id: Uuid::new_v4().to_string(),
+                ts: Utc::now(),
+                session_id: "s1".to_string(),
+                command: "cat <<'EOF'\n-----BEGIN PRIVATE KEY-----\nEOF".to_string(),
+                cwd: temp.path().display().to_string(),
+                approved_by: "flag_yes".to_string(),
+                exit_code: 0,
+                duration_ms: 1,
+            })
+            .expect_err("should block");
+        assert!(err.to_string().contains("private key material"));
     }
 }

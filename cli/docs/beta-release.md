@@ -39,13 +39,13 @@ Reports:
 
 ```bash
 cd /Users/jerrychir/Desktop/dev/coding/ooiai/mosaic/cli
-./scripts/package_beta.sh --version v0.2.0-beta.1
+./scripts/package_beta.sh --version <version>
 ```
 
 Output:
 
-- unpacked: `cli/dist/v0.2.0-beta.1/mosaic-cli-v0.2.0-beta.1-<os>-<arch>/`
-- archive: `cli/dist/v0.2.0-beta.1/mosaic-cli-v0.2.0-beta.1-<os>-<arch>.tar.gz`
+- unpacked: `cli/dist/<version>/mosaic-cli-<version>-<os>-<arch>/`
+- archive: `cli/dist/<version>/mosaic-cli-<version>-<os>-<arch>.tar.gz`
 
 ## 4) Internal Beta Checklist
 
@@ -74,6 +74,10 @@ For installable delivery (macOS/Linux/Windows), use:
 - workflow: `.github/workflows/cli-release.yml`
 - packaging script: `cli/scripts/package_release_asset.sh`
 - manifest generator: `cli/scripts/update_distribution_manifests.sh`
+- release tooling smoke: `cli/scripts/release_tooling_smoke.sh`
+- release install smoke: `cli/scripts/release_install_smoke.sh`
+- archive verifier: `cli/scripts/release_verify_archives.sh`
+- asset verifier: `cli/scripts/release_verify_assets.sh`
 - installers: `cli/install.sh`, `cli/install.ps1`
 
 Release assets include:

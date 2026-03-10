@@ -5,18 +5,21 @@ REPO="ooiai/mosaic"
 GIT_URL="https://github.com/${REPO}.git"
 VERSION=""
 INSTALL_DIR="${MOSAIC_INSTALL_DIR:-$HOME/.local/bin}"
+ASSETS_DIR=""
 FROM_SOURCE=0
+RELEASE_ONLY=0
 
 usage() {
   cat <<USAGE
 Install Mosaic CLI.
 
 Usage:
-  $0 [--version <tag>] [--install-dir <path>] [--from-source]
+  $0 [--version <tag>] [--install-dir <path>] [--assets-dir <path>] [--from-source] [--release-only]
 
 Examples:
   $0
   $0 --version v0.2.0-beta.5
+  $0 --version v0.2.0-beta.5 --assets-dir ./release-assets --release-only
   $0 --from-source
   $0 --install-dir /usr/local/bin
 USAGE
@@ -32,8 +35,16 @@ while [[ $# -gt 0 ]]; do
       INSTALL_DIR="${2:-}"
       shift 2
       ;;
+    --assets-dir)
+      ASSETS_DIR="${2:-}"
+      shift 2
+      ;;
     --from-source)
       FROM_SOURCE=1
+      shift 1
+      ;;
+    --release-only)
+      RELEASE_ONLY=1
       shift 1
       ;;
     -h|--help)
@@ -47,6 +58,20 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$FROM_SOURCE" -eq 1 && "$RELEASE_ONLY" -eq 1 ]]; then
+  echo "error: --from-source and --release-only cannot be used together" >&2
+  usage >&2
+  exit 1
+fi
+
+if [[ -n "$ASSETS_DIR" ]]; then
+  if [[ ! -d "$ASSETS_DIR" ]]; then
+    echo "error: --assets-dir does not exist: $ASSETS_DIR" >&2
+    exit 1
+  fi
+  ASSETS_DIR="$(cd "$ASSETS_DIR" && pwd)"
+fi
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -115,10 +140,13 @@ install_from_source() {
 }
 
 install_from_release() {
-  require_cmd curl
   require_cmd tar
 
   if [[ -z "$VERSION" ]]; then
+    if [[ -n "$ASSETS_DIR" ]]; then
+      echo "error: --version is required when using --assets-dir" >&2
+      return 1
+    fi
     VERSION="$(resolve_latest_version || true)"
     if [[ -z "$VERSION" ]]; then
       return 1
@@ -134,11 +162,29 @@ install_from_release() {
   esac
 
   local asset="mosaic-${VERSION}-${platform}.tar.gz"
-  local url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
-  echo "Installing mosaic ${VERSION} (${platform})"
-  echo "Download: $url"
-  if ! curl -fL "$url" -o "$TMP_DIR/$asset"; then
-    return 1
+  if [[ -n "$ASSETS_DIR" ]]; then
+    local local_asset="$ASSETS_DIR/$asset"
+    if [[ ! -f "$local_asset" ]]; then
+      local found
+      found="$(find "$ASSETS_DIR" -maxdepth 3 -type f -name "$asset" | head -n 1 || true)"
+      if [[ -n "$found" ]]; then
+        local_asset="$found"
+      else
+        echo "error: release asset not found in --assets-dir: $asset" >&2
+        return 1
+      fi
+    fi
+    echo "Installing mosaic ${VERSION} (${platform}) from local assets"
+    echo "Asset: $local_asset"
+    cp "$local_asset" "$TMP_DIR/$asset"
+  else
+    require_cmd curl
+    local url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+    echo "Installing mosaic ${VERSION} (${platform})"
+    echo "Download: $url"
+    if ! curl -fL "$url" -o "$TMP_DIR/$asset"; then
+      return 1
+    fi
   fi
   tar -xzf "$TMP_DIR/$asset" -C "$TMP_DIR"
   local extracted_dir="$TMP_DIR/mosaic-${VERSION}-${platform}"
@@ -159,6 +205,10 @@ if [[ "$FROM_SOURCE" -eq 1 ]]; then
   install_from_source
 else
   if ! install_from_release; then
+    if [[ "$RELEASE_ONLY" -eq 1 ]]; then
+      echo "error: release install failed and --release-only is set" >&2
+      exit 1
+    fi
     echo "warning: release asset install unavailable; falling back to source build" >&2
     install_from_source
   fi

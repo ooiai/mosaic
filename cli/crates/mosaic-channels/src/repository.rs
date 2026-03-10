@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::append_sanitized_jsonl;
 
 use crate::policy::RetryPolicy;
 use crate::providers;
@@ -1050,16 +1051,7 @@ impl ChannelRepository {
     fn append_event(&self, channel_id: &str, event: &ChannelLogEntry) -> Result<PathBuf> {
         std::fs::create_dir_all(&self.events_dir)?;
         let path = self.events_dir.join(format!("{channel_id}.jsonl"));
-        let encoded = serde_json::to_string(event).map_err(|err| {
-            MosaicError::Validation(format!("failed to encode channel event: {err}"))
-        })?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-        use std::io::Write as _;
-        file.write_all(encoded.as_bytes())?;
-        file.write_all(b"\n")?;
+        append_sanitized_jsonl(&path, event, "channel event persistence")?;
         Ok(path)
     }
 
@@ -1891,5 +1883,67 @@ mod tests {
         let login_b = repo.login(&tg_b.id, None).expect("login b");
         assert_eq!(login_a.channel.auth.token_env.as_deref(), Some("NEW_ENV"));
         assert_eq!(login_b.channel.auth.token_env.as_deref(), Some("OLD_B"));
+    }
+
+    #[tokio::test]
+    async fn send_redacts_secret_like_text_in_channel_event_log() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let channel = repo
+            .add(AddChannelInput {
+                name: "slack".to_string(),
+                kind: "slack_webhook".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: None,
+                token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add channel");
+
+        repo.send(
+            &channel.id,
+            "token=sk-live-secret-12345678901234567890",
+            None,
+            false,
+        )
+        .await
+        .expect("send");
+
+        let event_path = channels_events_dir(temp.path()).join(format!("{}.jsonl", channel.id));
+        let raw = std::fs::read_to_string(event_path).expect("read channel event");
+        assert!(raw.contains("token=[REDACTED]"));
+    }
+
+    #[tokio::test]
+    async fn send_blocks_private_key_text_persistence() {
+        let temp = tempdir().expect("tempdir");
+        let repo = ChannelRepository::new(
+            channels_file_path(temp.path()),
+            channels_events_dir(temp.path()),
+        );
+        let channel = repo
+            .add(AddChannelInput {
+                name: "slack".to_string(),
+                kind: "slack_webhook".to_string(),
+                endpoint: Some("mock-http://200".to_string()),
+                target: None,
+                token_env: None,
+                template_defaults: ChannelTemplateDefaults::default(),
+            })
+            .expect("add channel");
+
+        let err = repo
+            .send(
+                &channel.id,
+                "-----BEGIN OPENSSH PRIVATE KEY-----",
+                None,
+                false,
+            )
+            .await
+            .expect_err("private key marker should be blocked");
+        assert!(err.to_string().contains("private key material"));
     }
 }

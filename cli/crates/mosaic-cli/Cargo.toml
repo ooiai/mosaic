@@ -20,6 +20,7 @@ mosaic-ops = { path = "../mosaic-ops" }
 mosaic-plugins = { path = "../mosaic-plugins" }
 mosaic-provider-openai = { path = "../mosaic-provider-openai" }
 mosaic-security = { path = "../mosaic-security" }
+mosaic-tui = { path = "../mosaic-tui" }
 mosaic-tools = { path = "../mosaic-tools" }
 async-trait.workspace = true
 chrono.workspace = true
@@ -42,3 +43,4 @@ assert_cmd.workspace = true
 predicates.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+portable-pty = "0.8"

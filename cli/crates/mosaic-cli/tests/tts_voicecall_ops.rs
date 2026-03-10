@@ -212,6 +212,49 @@ fn voicecall_start_send_history_stop_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn voicecall_event_log_redacts_secret_payload() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "voicecall",
+            "start",
+            "--target",
+            "ops-room",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "voicecall",
+            "send",
+            "--text",
+            "token=sk-live-secret-12345678901234567890",
+        ])
+        .assert()
+        .success();
+
+    let events_path = temp
+        .path()
+        .join(".mosaic")
+        .join("data")
+        .join("voicecall-events.jsonl");
+    let events = fs::read_to_string(events_path).expect("voicecall events");
+    assert!(events.contains("token=[REDACTED]"));
+    assert!(!events.contains("sk-live-secret-12345678901234567890"));
+}
+
+#[test]
+#[allow(deprecated)]
 fn voicecall_send_without_start_returns_validation_error() {
     let temp = tempdir().expect("tempdir");
 

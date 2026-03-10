@@ -717,6 +717,63 @@ fn knowledge_evaluate_history_trend_and_file_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn knowledge_evaluate_history_does_not_persist_raw_secret_query_text() {
+    let temp = tempdir().expect("tempdir");
+    setup_project(&temp);
+
+    let docs_dir = temp.path().join("docs");
+    std::fs::create_dir_all(&docs_dir).expect("create docs dir");
+    std::fs::write(
+        docs_dir.join("ops.md"),
+        "# Retry Guide\nretry jitter retry jitter retry jitter.\n",
+    )
+    .expect("write md");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "knowledge",
+            "ingest",
+            "--source",
+            "local_md",
+            "--path",
+            "docs",
+            "--namespace",
+            "kb_eval_redaction",
+        ])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "knowledge",
+            "evaluate",
+            "--query",
+            "token=sk-live-secret-12345678901234567890",
+            "--namespace",
+            "kb_eval_redaction",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let payload: Value = serde_json::from_slice(&output).expect("evaluate json");
+    let history_path = payload["history"]["path"].as_str().expect("history path");
+    let raw = std::fs::read_to_string(history_path).expect("read history");
+    assert!(!raw.contains("sk-live-secret-12345678901234567890"));
+    assert!(!raw.contains("token="));
+}
+
+#[test]
+#[allow(deprecated)]
 fn knowledge_evaluate_rejects_invalid_history_window() {
     let temp = tempdir().expect("tempdir");
     setup_project(&temp);

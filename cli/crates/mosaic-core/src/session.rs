@@ -1,6 +1,6 @@
 use std::cmp::Reverse;
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -9,6 +9,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::error::{MosaicError, Result};
+use crate::privacy::append_sanitized_jsonl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,11 +69,7 @@ impl SessionStore {
     pub fn append_event(&self, event: &SessionEvent) -> Result<()> {
         self.ensure_dirs()?;
         let path = self.session_path(&event.session_id);
-        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-        let line = serde_json::to_string(event)?;
-        file.write_all(line.as_bytes())?;
-        file.write_all(b"\n")?;
-        Ok(())
+        append_sanitized_jsonl(&path, event, "session event persistence")
     }
 
     pub fn read_events(&self, session_id: &str) -> Result<Vec<SessionEvent>> {
@@ -212,5 +209,41 @@ mod tests {
             .unwrap();
         let removed = store.clear_all().unwrap();
         assert_eq!(removed, 2);
+    }
+
+    #[test]
+    fn append_event_redacts_secret_like_payload_before_persist() {
+        let temp = tempdir().unwrap();
+        let store = SessionStore::new(temp.path().join("sessions"));
+        let sid = store.create_session_id();
+        let event = SessionStore::build_event(
+            &sid,
+            EventKind::User,
+            json!({
+                "text": "token=sk-test-secret-value-1234567890123",
+                "api_key": "raw-value"
+            }),
+        );
+        store.append_event(&event).unwrap();
+
+        let saved = std::fs::read_to_string(store.session_path(&sid)).unwrap();
+        assert!(saved.contains("token=[REDACTED]"));
+        assert!(saved.contains("\"api_key\":\"[REDACTED]\""));
+    }
+
+    #[test]
+    fn append_event_blocks_private_key_material() {
+        let temp = tempdir().unwrap();
+        let store = SessionStore::new(temp.path().join("sessions"));
+        let sid = store.create_session_id();
+        let event = SessionStore::build_event(
+            &sid,
+            EventKind::User,
+            json!({
+                "text": "-----BEGIN OPENSSH PRIVATE KEY-----"
+            }),
+        );
+        let err = store.append_event(&event).unwrap_err();
+        assert!(err.to_string().contains("private key material"));
     }
 }

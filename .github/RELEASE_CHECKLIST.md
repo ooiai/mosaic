@@ -1,179 +1,82 @@
-# 🚀 Mosaic Release Checklist
+# Mosaic CLI Release Checklist
 
-This checklist ensures that every release of Mosaic meets our quality standards and provides the best experience for our users.
+This checklist is the canonical release gate for the Rust CLI (`cli/`) and distribution assets.
 
-## 📋 Pre-Release Checklist
+## 1. Scope And Version
 
-### 🔍 Code Quality & Testing
+- [ ] Confirm release scope is CLI-only (no unrelated web/desktop changes)
+- [ ] Confirm target version tag (for example: `v0.2.0-beta.6`)
+- [ ] Confirm `cli/Cargo.toml` and `cli/Cargo.lock` version alignment
+- [ ] Confirm `README.md`, `README_CN.md`, and `cli/README.md` mention the new release where needed
 
-- [ ] All unit tests pass
-- [ ] Integration tests pass 
-- [ ] Manual testing completed on all platforms (Windows, macOS, Linux)
-- [ ] Web application tested in major browsers (Chrome, Firefox, Safari, Edge)
-- [ ] Desktop application tested with file system operations
-- [ ] AI integration functionality verified
-- [ ] Component generation accuracy tested
-- [ ] Performance benchmarks meet requirements
-- [ ] Memory leaks checked and resolved
-- [ ] Security audit completed
+## 2. Quality Gates (must pass)
 
-### 📚 Documentation
+- [ ] `cd cli && cargo test --workspace`
+- [ ] `cd cli && cargo clippy -p mosaic-cli -- -D warnings`
+- [ ] `cd cli && ./scripts/run_regression_suite.sh`
+- [ ] `bash site/scripts/check_docs.sh --report-dir reports --report-prefix release-docs-check`
+- [ ] Verify no failing snapshots/help contracts (`json_contract*`, `help_snapshot`, `command_surface`)
 
-- [ ] README.md updated with new features
-- [ ] API documentation updated
-- [ ] Change log (CHANGELOG.md) updated
-- [ ] Migration guide created (if breaking changes)
-- [ ] Component library documentation updated
-- [ ] Installation instructions verified
-- [ ] Screenshots and demos updated
-- [ ] Video tutorials updated (if applicable)
+## 3. Feature-Specific Gates (if touched)
 
-### 🏗️ Build & Infrastructure
+- [ ] TUI changes: run `cargo test -p mosaic-tui -p mosaic-cli --test tui_ops --test tui_interactive`
+- [ ] Channels/gateway changes: run `cargo test -p mosaic-cli --test gateway_channels`
+- [ ] Policy/runtime changes: run `cargo test -p mosaic-cli --test policy_ops --test error_codes`
+- [ ] Knowledge/memory changes: run `cargo test -p mosaic-cli --test knowledge_ops --test memory_ops`
 
-- [ ] All GitHub Actions workflows pass
-- [ ] Desktop application builds successfully on all platforms
-- [ ] Web application builds and deploys correctly
-- [ ] Bundle sizes are within acceptable limits
-- [ ] Dependencies updated and security vulnerabilities addressed
-- [ ] Version numbers bumped in all relevant files:
-  - [ ] `package.json` files
-  - [ ] `Cargo.toml` files
-  - [ ] `tauri.conf.json`
-  - [ ] Documentation references
+## 4. Release Notes And Logs
 
-### 🎨 VIBECODING Platform Specific
+- [ ] Generate draft release notes from `WORKLOG.md`:
+  - `cd cli && ./scripts/release_notes_from_worklog.sh --version <tag> --out docs/release-notes-<tag>.md`
+- [ ] Manually prune noisy entries and ensure user-facing wording
+- [ ] Ensure migration/breaking-change section is explicit (or state "none")
+- [ ] Update `cli/docs/progress.md` with final verification summary
 
-- [ ] AI model integration working correctly
-- [ ] Conversational UI generation tested with various inputs
-- [ ] Component modification functionality verified
-- [ ] Real-time preview working in both web and desktop
-- [ ] Component library save/load functionality tested
-- [ ] Template system (if implemented) working correctly
-- [ ] Error handling for AI service failures
-- [ ] Fallback mechanisms tested
+## 5. Packaging And Manifests
 
-### 🖥️ Desktop Application
+- [ ] Build release binaries for all targets via workflow or local matrix
+- [ ] Optional local one-command prepare:
+  - `cd cli && ./scripts/release_prepare.sh --version <tag>`
+- [ ] Optional local release tooling smoke:
+  - `cd cli && ./scripts/release_tooling_smoke.sh --version <tag>`
+- [ ] Optional local release install smoke:
+  - `cd cli && ./scripts/release_install_smoke.sh --version <tag>`
+- [ ] Verify packaged archive internals:
+  - `cd cli && ./scripts/release_verify_archives.sh --version <tag> --assets-dir <dir>`
+- [ ] Verify assembled release assets directory:
+  - `cd cli && ./scripts/release_verify_assets.sh --version <tag> --assets-dir <dir>`
+- [ ] Smoke installer against assembled local assets:
+  - `cd cli && ./install.sh --version <tag> --assets-dir <dir> --install-dir <tmp-bin> --release-only`
+- [ ] Package release assets:
+  - `cd cli && ./scripts/package_release_asset.sh --version <tag> --target <triple>`
+- [ ] Generate Homebrew/Scoop manifests and checksums:
+  - `cd cli && ./scripts/update_distribution_manifests.sh --version <tag> --assets-dir <dir> --output-dir <dir>`
+- [ ] Verify checksum files (`*.sha256`, `SHA256SUMS`) are present and consistent
 
-- [ ] Tauri configuration validated
-- [ ] File system permissions working correctly
-- [ ] IPC communication between frontend and backend tested
-- [ ] Native menu and window controls functional
-- [ ] Auto-updater configured (if implemented)
-- [ ] Code signing certificates ready
-- [ ] Installer packages tested on target platforms
+## 6. Publish
 
-### 🌐 Web Application
+- [ ] Push tag (`git tag <tag> && git push origin <tag>`) or run `workflow_dispatch`
+- [ ] Confirm `.github/workflows/cli-release.yml` completed on all matrix jobs
+- [ ] Confirm release page contains all archives/manifests/installers
+- [ ] Smoke install from release assets:
+  - macOS: Homebrew formula URL install
+  - Linux/macOS: `install.sh`
+  - Windows: `install.ps1`
 
-- [ ] PWA functionality tested (if implemented)
-- [ ] Responsive design verified on multiple screen sizes
-- [ ] Accessibility standards met (WCAG compliance)
-- [ ] SEO meta tags updated
-- [ ] Analytics tracking configured
-- [ ] CDN configuration optimized
+## 7. Post-Release
 
-## 🎯 Release Process
+- [ ] Run one post-release smoke:
+  - `mosaic --version`
+  - `mosaic --help`
+  - `mosaic --project-state --json status`
+- [ ] Verify published release assets by tag:
+  - `cd cli && ./scripts/release_publish_check.sh --version <tag>`
+- [ ] Record release note link and verification summary into `WORKLOG.md`
+- [ ] Open next milestone items in `planing.md`
 
-### 1. Version Management
+## 8. Hotfix Process
 
-- [ ] Create release branch: `release/vX.Y.Z`
-- [ ] Update version in all configuration files
-- [ ] Tag the release: `git tag vX.Y.Z`
-- [ ] Verify version consistency across all packages
-
-### 2. Build & Package
-
-- [ ] Run full build process locally
-- [ ] Generate desktop installers for all platforms
-- [ ] Build optimized web application
-- [ ] Generate source maps and debugging symbols
-- [ ] Compress and optimize assets
-
-### 3. GitHub Release
-
-- [ ] Create GitHub release draft
-- [ ] Upload desktop application installers
-- [ ] Upload web application build artifacts
-- [ ] Write comprehensive release notes
-- [ ] Include upgrade instructions
-- [ ] Highlight breaking changes (if any)
-
-### 4. Deployment
-
-- [ ] Deploy web application to production
-- [ ] Update GitHub Pages (if used for demo)
-- [ ] Update package registries (npm, if applicable)
-- [ ] Distribute desktop applications to app stores (if applicable)
-
-## 📢 Post-Release Activities
-
-### Communication
-
-- [ ] Announce release on social media
-- [ ] Update project website
-- [ ] Send newsletter to subscribers (if applicable)
-- [ ] Post in relevant community forums
-- [ ] Update Discord/Slack announcements
-
-### Monitoring
-
-- [ ] Monitor error tracking services
-- [ ] Check download/usage metrics
-- [ ] Monitor user feedback and GitHub issues
-- [ ] Verify AI service performance and costs
-- [ ] Check application performance metrics
-
-### Follow-up
-
-- [ ] Create milestone for next release
-- [ ] Address any critical issues found post-release
-- [ ] Update project roadmap if necessary
-- [ ] Document lessons learned
-- [ ] Plan hotfixes if needed
-
-## 🚨 Hotfix Process
-
-For critical issues that require immediate attention:
-
-- [ ] Create hotfix branch from main: `hotfix/vX.Y.Z+1`
-- [ ] Apply minimal fix for the critical issue
-- [ ] Test the specific fix thoroughly
-- [ ] Update patch version number
-- [ ] Create emergency release
-- [ ] Merge hotfix back to main and develop branches
-
-## 🎯 Release Types
-
-### Major Release (vX.0.0)
-- [ ] Breaking changes documented
-- [ ] Migration guide provided
-- [ ] Extended testing period
-- [ ] Community feedback incorporated
-- [ ] Backward compatibility plan
-
-### Minor Release (vX.Y.0)
-- [ ] New features thoroughly tested
-- [ ] Feature documentation complete
-- [ ] Backward compatibility maintained
-- [ ] Performance impact assessed
-
-### Patch Release (vX.Y.Z)
-- [ ] Bug fixes verified
-- [ ] No new features introduced
-- [ ] Minimal risk assessment
-- [ ] Quick deployment process
-
-## ✅ Sign-off
-
-**Release Manager**: _________________ Date: _________
-
-**QA Lead**: _________________ Date: _________
-
-**Product Owner**: _________________ Date: _________
-
-**Technical Lead**: _________________ Date: _________
-
----
-
-**Remember**: Quality over speed. It's better to delay a release than to ship with known critical issues.
-
-🎨 **Mosaic Team** - Building the future of conversational development
+- [ ] Branch from `main` using `codex/hotfix-<tag>`
+- [ ] Apply minimal fix and rerun targeted + full critical tests
+- [ ] Tag patch (`vX.Y.Z` or next beta tag)
+- [ ] Publish with same packaging/verification flow

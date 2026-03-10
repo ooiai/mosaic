@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use mosaic_core::error::MosaicError;
+use mosaic_core::privacy::append_sanitized_jsonl;
 use mosaic_memory::{
     MemoryCleanupPolicyStore, MemoryIndexOptions, MemoryPruneOptions, MemoryStore,
     list_memory_namespace_statuses, memory_cleanup_policy_path, memory_index_path_for_namespace,
@@ -3306,31 +3307,9 @@ fn append_plugin_event(
     let path = data_dir
         .join("plugin-events")
         .join(format!("{plugin_id}.jsonl"));
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            MosaicError::Io(format!(
-                "failed to create plugin event directory '{}': {err}",
-                parent.display()
-            ))
-        })?;
-    }
-    let mut serialized = serde_json::to_string(event)
-        .map_err(|err| MosaicError::Io(format!("failed to serialize plugin event: {err}")))?;
-    serialized.push('\n');
-    use std::io::Write as _;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|err| {
-            MosaicError::Io(format!(
-                "failed to open plugin event file '{}': {err}",
-                path.display()
-            ))
-        })?;
-    file.write_all(serialized.as_bytes()).map_err(|err| {
+    append_sanitized_jsonl(&path, event, "plugin event persistence").map_err(|err| {
         MosaicError::Io(format!(
-            "failed to write plugin event file '{}': {err}",
+            "failed to append plugin event file '{}': {err}",
             path.display()
         ))
     })?;

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mosaic CLI Docs | TUI Guide</title>
+    <meta name="description" content="Step-by-step guide for Mosaic Terminal UI (tui)." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/style.css" />
+    <script src="assets/docs.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="index.html">Mosaic CLI Docs</a>
+        <nav class="top-nav">
+          <a href="index.html">Overview</a>          <a href="guide.html">Guide</a>          <a href="quickstart.html">Quickstart</a>          <a href="operations.html">Operations</a>          <a href="install.html">Install</a>          <a href="configure.html">Configure</a>          <a href="troubleshooting.html">Troubleshooting</a>          <a href="https://github.com/ooiai/mosaic" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+        <div class="top-search">
+          <input id="doc-search" type="search" placeholder="Search docs... ( / )" autocomplete="off" />
+          <div id="doc-search-results" class="search-results" aria-label="Search results"></div>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button"></button>
+        <a class="lang-switch" href="cn/tui.html">中文</a>
+      </div>
+    </header>
+
+    <div class="docs-shell">
+      <aside class="sidebar">
+        <p class="sidebar-title">Getting Started</p>
+        <a class="side-link" href="index.html">Overview</a>
+        <a class="side-link" href="guide.html">Guide Hub</a>
+        <a class="side-link" href="quickstart.html">Quickstart</a>
+        <a class="side-link" href="learning-path.html">Learning Path</a>
+        <a class="side-link" href="models-profiles.html">Models & Profiles</a>
+        <a class="side-link" href="sessions.html">Sessions</a>
+        <a class="side-link active" href="tui.html">TUI Guide</a>
+        <a class="side-link" href="policy.html">Policy</a>
+        <a class="side-link" href="agents.html">Agents</a>
+        <a class="side-link" href="channels.html">Channels</a>
+        <a class="side-link" href="memory.html">Memory</a>
+        <a class="side-link" href="knowledge.html">Knowledge</a>
+        <a class="side-link" href="gateway.html">Gateway</a>
+        <a class="side-link" href="operations.html">Operations</a>
+        <a class="side-link" href="regression.html">Regression</a>
+      </aside>
+
+      <main id="doc-main" class="content">
+        <article class="doc">
+          <nav class="breadcrumb" aria-label="Breadcrumb"><a href="index.html">Docs</a><span>/</span><span>TUI Guide</span></nav>
+          <p class="kicker">TUI</p>
+          <h1>Mosaic Terminal UI (tui)</h1>
+          <p class="lead">
+            Use <code>mosaic tui</code> when you want a chat-first full-screen terminal interface with sessions list, message stream, and live tool inspector.
+          </p>
+
+          <div class="callout">
+            <strong>Contract:</strong> interactive mode is full-screen TUI; non-interactive mode is one-shot via <code>--prompt</code>.
+          </div>
+
+          <h2>1. Start TUI</h2>
+          <pre><code>mosaic --project-state tui</code></pre>
+
+          <h2>2. Common startup options</h2>
+          <pre><code># initial focus: messages|input|sessions|inspector
+mosaic --project-state tui --focus sessions
+
+# hide right inspector at startup
+mosaic --project-state tui --no-inspector
+
+# resume a specific session
+mosaic --project-state tui --session &lt;session_id&gt;
+
+# choose agent/profile as usual
+mosaic --project-state --profile default tui --agent writer</code></pre>
+
+          <h2>3. Non-interactive one-shot</h2>
+          <pre><code># script-friendly path, no fullscreen UI
+mosaic --project-state tui --prompt "hello"
+
+# JSON contract compatible one-shot
+mosaic --project-state --json tui --prompt "hello"</code></pre>
+          <p>
+            If stdin/stdout is not a TTY and you don't provide <code>--prompt</code>, command returns a validation error.
+          </p>
+
+          <h2>4. Keyboard shortcuts</h2>
+          <ul>
+            <li><code>Enter</code>: send message</li>
+            <li><code>Ctrl+J</code>: insert newline</li>
+            <li><code>Tab</code>: switch focus (messages/input/sessions/inspector)</li>
+            <li><code>Ctrl+N</code>: start a new session</li>
+            <li><code>Ctrl+R</code>: refresh sessions list</li>
+            <li><code>Ctrl+I</code>: toggle inspector</li>
+            <li><code>?</code>: help overlay</li>
+            <li><code>q</code> or <code>Ctrl+C</code>: quit</li>
+          </ul>
+
+          <h2>5. Layout behavior</h2>
+          <ul>
+            <li>Wide terminal: left sessions + center messages + right inspector.</li>
+            <li>Narrow terminal: inspector auto-hidden.</li>
+            <li>Very narrow terminal: left panel collapses to compact top status line.</li>
+          </ul>
+
+          <h2>6. Troubleshooting</h2>
+          <pre><code># check state path and writable status
+mosaic --project-state directory --ensure --check-writable
+
+# verify config/provider is healthy before opening TUI
+mosaic --project-state status
+mosaic --project-state health</code></pre>
+
+          <div class="quick-links">
+            <a href="quickstart.html">Quickstart</a>
+            <a href="sessions.html">Sessions Guide</a>
+            <a href="agents.html">Agents Guide</a>
+            <a href="policy.html">Policy Guide</a>
+            <a href="operations.html">Operations</a>
+            <a href="troubleshooting.html">Troubleshooting</a>
+            <a href="guide.html">Back to Guide Hub</a>
+          </div>
+        </article>
+      </main>
+
+      <aside class="toc" id="doc-toc">
+        <p class="toc-title">On This Page</p>
+        <div id="doc-toc-list"></div>
+      </aside>
+    </div>
+
+    <footer class="footer">MIT License · Mosaic</footer>
+  </body>
+</html>

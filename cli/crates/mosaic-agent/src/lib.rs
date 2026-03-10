@@ -13,12 +13,54 @@ use mosaic_core::provider::{ChatMessage, ChatRequest, ChatResponse, ChatRole, Pr
 use mosaic_core::session::{EventKind, SessionStore};
 use mosaic_tools::{RunCommandOutput, ToolContext, ToolExecutor};
 
-#[derive(Debug, Clone)]
+pub type AgentEventCallback = Arc<dyn Fn(AgentEvent) + Send + Sync>;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentEvent {
+    User {
+        session_id: String,
+        text: String,
+    },
+    Assistant {
+        session_id: String,
+        text: String,
+    },
+    ToolCall {
+        session_id: String,
+        name: String,
+        args: Value,
+    },
+    ToolResult {
+        session_id: String,
+        name: String,
+        result: Value,
+    },
+    Error {
+        session_id: String,
+        message: String,
+    },
+}
+
+#[derive(Clone)]
 pub struct AgentRunOptions {
     pub session_id: Option<String>,
     pub cwd: PathBuf,
     pub yes: bool,
     pub interactive: bool,
+    pub event_callback: Option<AgentEventCallback>,
+}
+
+impl std::fmt::Debug for AgentRunOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentRunOptions")
+            .field("session_id", &self.session_id)
+            .field("cwd", &self.cwd)
+            .field("yes", &self.yes)
+            .field("interactive", &self.interactive)
+            .field("event_callback", &self.event_callback.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +70,7 @@ pub struct AgentRunResult {
     pub turns: u32,
 }
 
+#[derive(Clone)]
 pub struct AgentRunner {
     provider: Arc<dyn Provider>,
     profile: ProfileConfig,
@@ -82,6 +125,10 @@ impl AgentRunner {
         &self.session_store
     }
 
+    pub fn profile(&self) -> &ProfileConfig {
+        &self.profile
+    }
+
     pub async fn ask(&self, prompt: &str, options: AgentRunOptions) -> Result<AgentRunResult> {
         if prompt.trim().is_empty() {
             return Err(MosaicError::Validation(
@@ -104,30 +151,61 @@ impl AgentRunner {
             }
             None => self.session_store.create_session_id(),
         };
+        let emit_error = |message: String| {
+            self.emit_event(
+                &options,
+                AgentEvent::Error {
+                    session_id: session_id.clone(),
+                    message,
+                },
+            );
+        };
 
         let user_event =
             SessionStore::build_event(&session_id, EventKind::User, json!({ "text": prompt }));
-        self.session_store.append_event(&user_event)?;
+        self.session_store
+            .append_event(&user_event)
+            .inspect_err(|err| {
+                emit_error(err.to_string());
+            })?;
+        self.emit_event(
+            &options,
+            AgentEvent::User {
+                session_id: session_id.clone(),
+                text: prompt.to_string(),
+            },
+        );
 
         let mut turns = 0u32;
         loop {
             turns += 1;
             if turns > self.profile.agent.max_turns {
-                return Err(MosaicError::Validation(format!(
+                let err = MosaicError::Validation(format!(
                     "agent exceeded max_turns={}",
                     self.profile.agent.max_turns
-                )));
+                ));
+                emit_error(err.to_string());
+                return Err(err);
             }
 
-            let messages = self.build_messages_for_session(&session_id)?;
+            let messages = self
+                .build_messages_for_session(&session_id)
+                .inspect_err(|err| {
+                    emit_error(err.to_string());
+                })?;
             let request = ChatRequest {
                 model: self.profile.provider.model.clone(),
                 temperature: self.profile.agent.temperature,
                 messages,
             };
-            let response = self.provider.chat(request).await?;
+            let response = self.provider.chat(request).await.inspect_err(|err| {
+                emit_error(err.to_string());
+            })?;
             if let Some(tool_call) = parse_tool_call(&response) {
-                self.handle_tool_call(&session_id, tool_call, &options)?;
+                self.handle_tool_call(&session_id, tool_call, &options)
+                    .inspect_err(|err| {
+                        emit_error(err.to_string());
+                    })?;
                 continue;
             }
 
@@ -136,7 +214,18 @@ impl AgentRunner {
                 EventKind::Assistant,
                 json!({ "text": response.content }),
             );
-            self.session_store.append_event(&assistant_event)?;
+            self.session_store
+                .append_event(&assistant_event)
+                .inspect_err(|err| {
+                    emit_error(err.to_string());
+                })?;
+            self.emit_event(
+                &options,
+                AgentEvent::Assistant {
+                    session_id: session_id.clone(),
+                    text: response.content.clone(),
+                },
+            );
             return Ok(AgentRunResult {
                 session_id,
                 response: response.content,
@@ -201,22 +290,31 @@ impl AgentRunner {
                 "tools are disabled in the current profile".to_string(),
             ));
         }
+        let tool_name = tool_call.name;
+        let tool_args = tool_call.args;
+
         let tool_call_event = SessionStore::build_event(
             session_id,
             EventKind::ToolCall,
-            json!({ "name": tool_call.name, "args": tool_call.args }),
+            json!({ "name": tool_name, "args": tool_args }),
         );
         self.session_store.append_event(&tool_call_event)?;
+        self.emit_event(
+            options,
+            AgentEvent::ToolCall {
+                session_id: session_id.to_string(),
+                name: tool_name.clone(),
+                args: tool_args.clone(),
+            },
+        );
         let tool_context = ToolContext {
             cwd: options.cwd.clone(),
             yes: options.yes,
             interactive: options.interactive,
         };
-        let result = self
-            .tools
-            .execute(&tool_call.name, tool_call.args.clone(), &tool_context)?;
+        let result = self.tools.execute(&tool_name, tool_args, &tool_context)?;
 
-        if tool_call.name == "run_cmd" {
+        if tool_name == "run_cmd" {
             let parsed: RunCommandOutput = serde_json::from_value(result.clone())?;
             self.audit_store.append_command(&CommandAudit {
                 id: Uuid::new_v4().to_string(),
@@ -230,13 +328,28 @@ impl AgentRunner {
             })?;
         }
 
+        let result_payload = result.clone();
         let tool_result_event = SessionStore::build_event(
             session_id,
             EventKind::ToolResult,
-            json!({ "name": tool_call.name, "result": result }),
+            json!({ "name": tool_name, "result": result }),
         );
         self.session_store.append_event(&tool_result_event)?;
+        self.emit_event(
+            options,
+            AgentEvent::ToolResult {
+                session_id: session_id.to_string(),
+                name: tool_name,
+                result: result_payload,
+            },
+        );
         Ok(())
+    }
+
+    fn emit_event(&self, options: &AgentRunOptions, event: AgentEvent) {
+        if let Some(callback) = &options.event_callback {
+            callback(event);
+        }
     }
 }
 
@@ -400,6 +513,7 @@ mod tests {
                     cwd: temp.path().to_path_buf(),
                     yes: false,
                     interactive: false,
+                    event_callback: None,
                 },
             )
             .await
@@ -427,6 +541,7 @@ mod tests {
                     cwd: temp.path().to_path_buf(),
                     yes: true,
                     interactive: false,
+                    event_callback: None,
                 },
             )
             .await

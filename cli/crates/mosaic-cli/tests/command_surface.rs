@@ -1048,7 +1048,13 @@ fn dns_help_includes_resolve_command() {
 #[allow(deprecated)]
 fn tui_help_includes_prompt_and_session_options() {
     let help = run_help(&["tui", "--help"]);
-    let expected = ["--prompt", "--session", "--agent"];
+    let expected = [
+        "--prompt",
+        "--session",
+        "--agent",
+        "--focus",
+        "--no-inspector",
+    ];
     for name in expected {
         assert!(
             help.contains(name),

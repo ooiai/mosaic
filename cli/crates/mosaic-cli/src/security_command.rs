@@ -6,7 +6,8 @@ use serde_json::json;
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::state::StatePaths;
 use mosaic_security::{
-    SecurityAuditOptions, SecurityAuditor, SecurityBaselineConfig, apply_baseline, report_to_sarif,
+    SecurityAuditOptions, SecurityAuditor, SecurityBaselineConfig, apply_baseline,
+    refresh_report_metadata, report_to_sarif,
 };
 
 use super::{
@@ -161,6 +162,10 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                     report.summary.scanned_files,
                     report.summary.skipped_files
                 );
+                println!(
+                    "risk: score={} level={:?}",
+                    report.risk.score, report.risk.level
+                );
                 if min_severity.is_some() || !categories.is_empty() || top.is_some() {
                     println!(
                         "filters: min_severity={} categories={} top={} filtered_out={}",
@@ -186,6 +191,9 @@ pub(super) fn handle_security(cli: &Cli, args: SecurityArgs) -> Result<()> {
                     dimensions["severities"]["medium"].as_u64().unwrap_or(0),
                     dimensions["severities"]["low"].as_u64().unwrap_or(0),
                 );
+                for recommendation in &report.risk.recommendations {
+                    println!("recommendation: {recommendation}");
+                }
                 if baseline_enabled {
                     println!("baseline: {baseline_path_display}");
                 }
@@ -266,23 +274,7 @@ fn apply_audit_filters(
 }
 
 fn update_audit_summary(report: &mut mosaic_security::SecurityAuditReport) {
-    report.summary.findings = report.findings.len();
-    report.summary.high = report
-        .findings
-        .iter()
-        .filter(|finding| finding.severity == mosaic_security::SecuritySeverity::High)
-        .count();
-    report.summary.medium = report
-        .findings
-        .iter()
-        .filter(|finding| finding.severity == mosaic_security::SecuritySeverity::Medium)
-        .count();
-    report.summary.low = report
-        .findings
-        .iter()
-        .filter(|finding| finding.severity == mosaic_security::SecuritySeverity::Low)
-        .count();
-    report.summary.ok = report.summary.high == 0;
+    refresh_report_metadata(report);
 }
 
 fn audit_dimensions(report: &mosaic_security::SecurityAuditReport) -> serde_json::Value {

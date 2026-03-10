@@ -1,5 +1,4 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
+use std::fs::{self};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -11,6 +10,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::append_sanitized_jsonl;
 
 use super::{
     Cli, TtsArgs, TtsCommand, VoicecallArgs, VoicecallCommand, print_json, resolve_state_paths,
@@ -615,15 +615,8 @@ fn normalize_optional(value: &Option<String>) -> Option<String> {
 }
 
 fn append_jsonl<T: Serialize>(path: &Path, record: &T) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    let line = serde_json::to_string(record)
-        .map_err(|err| MosaicError::Validation(format!("failed to encode jsonl record: {err}")))?;
-    file.write_all(line.as_bytes())?;
-    file.write_all(b"\n")?;
-    Ok(())
+    append_sanitized_jsonl(path, record, "realtime event persistence")
+        .map_err(|err| err.with_context(format!("failed to append event {}", path.display())))
 }
 
 fn write_json_report(path: &Path, payload: &serde_json::Value) -> Result<()> {

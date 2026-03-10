@@ -51,6 +51,18 @@ enum GuardDecision {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SensitivePathLevel {
+    Critical,
+    Confidential,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SensitivePathMatch {
+    level: SensitivePathLevel,
+    reason: &'static str,
+}
+
 #[derive(Debug, Deserialize)]
 struct ReadFileArgs {
     path: String,
@@ -95,9 +107,11 @@ impl ToolExecutor {
     fn read_file(&self, args: Value, context: &ToolContext) -> Result<Value> {
         let parsed: ReadFileArgs = serde_json::from_value(args)?;
         let path = self.resolve_in_cwd(&context.cwd, &parsed.path)?;
+        enforce_sensitive_path_policy(&path, context, "read_file")?;
         let content = fs::read_to_string(&path).map_err(|err| {
             MosaicError::Tool(format!("failed to read {}: {err}", path.display()))
         })?;
+        let content = redact_sensitive_text(&content);
         Ok(json!({
             "path": path.display().to_string(),
             "content": content,
@@ -107,6 +121,7 @@ impl ToolExecutor {
     fn write_file(&self, args: Value, context: &ToolContext) -> Result<Value> {
         let parsed: WriteFileArgs = serde_json::from_value(args)?;
         let path = self.resolve_in_cwd(&context.cwd, &parsed.path)?;
+        enforce_sensitive_path_policy(&path, context, "write_file")?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -130,13 +145,26 @@ impl ToolExecutor {
             Some(path) => self.resolve_in_cwd(&context.cwd, &path)?,
             None => context.cwd.clone(),
         };
+        if root.is_file() {
+            enforce_sensitive_path_policy(&root, context, "search_text")?;
+        }
         let max_results = parsed.max_results.unwrap_or(MAX_DEFAULT_SEARCH_RESULTS);
         let regex = Regex::new(&parsed.query).ok();
+        let skip_sensitive = !allow_sensitive_file_access_override();
         let mut matches = Vec::new();
         for entry in WalkDir::new(&root).into_iter().flatten() {
             let path = entry.path();
             if !path.is_file() || should_skip(path) {
                 continue;
+            }
+            if skip_sensitive {
+                if let Some(sensitive) = classify_sensitive_path(path) {
+                    match sensitive.level {
+                        SensitivePathLevel::Critical => continue,
+                        SensitivePathLevel::Confidential if !context.yes => continue,
+                        SensitivePathLevel::Confidential => {}
+                    }
+                }
             }
             let content = match fs::read_to_string(path) {
                 Ok(value) => value,
@@ -152,7 +180,7 @@ impl ToolExecutor {
                     matches.push(json!({
                         "path": path.display().to_string(),
                         "line_number": idx + 1,
-                        "line": line,
+                        "line": redact_sensitive_text(line),
                     }));
                     if matches.len() >= max_results {
                         return Ok(json!({ "matches": matches, "truncated": true }));
@@ -254,8 +282,8 @@ impl ToolExecutor {
             command: parsed.command,
             cwd: context.cwd.display().to_string(),
             approved_by,
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            stdout: redact_sensitive_text(&String::from_utf8_lossy(&output.stdout)),
+            stderr: redact_sensitive_text(&String::from_utf8_lossy(&output.stderr)),
             exit_code,
             duration_ms: elapsed,
         };
@@ -264,6 +292,9 @@ impl ToolExecutor {
 
     fn classify_command(&self, command: &str) -> GuardDecision {
         let cmd = command.trim().to_lowercase();
+        if let Some(sensitive_decision) = classify_sensitive_command(&cmd) {
+            return sensitive_decision;
+        }
         let blocked_patterns = [
             "rm -rf /",
             "mkfs",
@@ -322,6 +353,218 @@ fn should_skip(path: &Path) -> bool {
         || text.contains("/target/")
         || text.contains("/node_modules/")
         || text.contains("/.pnpm-store/")
+}
+
+fn allow_sensitive_file_access_override() -> bool {
+    env_truthy("MOSAIC_ALLOW_SENSITIVE_FILES")
+}
+
+fn allow_sensitive_command_override() -> bool {
+    env_truthy("MOSAIC_ALLOW_SENSITIVE_COMMANDS")
+}
+
+fn disable_secret_redaction() -> bool {
+    env_truthy("MOSAIC_DISABLE_SECRET_REDACTION")
+}
+
+fn env_truthy(key: &str) -> bool {
+    std::env::var(key).ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
+fn classify_sensitive_path(path: &Path) -> Option<SensitivePathMatch> {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let components = path
+        .components()
+        .filter_map(|component| component.as_os_str().to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    let has_component = |name: &str| components.iter().any(|item| item == name);
+
+    if has_component(".ssh") {
+        return Some(SensitivePathMatch {
+            level: SensitivePathLevel::Critical,
+            reason: "ssh private material",
+        });
+    }
+    if has_component(".gnupg") {
+        return Some(SensitivePathMatch {
+            level: SensitivePathLevel::Critical,
+            reason: "gnupg key material",
+        });
+    }
+    if has_component(".aws") && (file_name == "credentials" || file_name == "config") {
+        return Some(SensitivePathMatch {
+            level: SensitivePathLevel::Critical,
+            reason: "aws credentials/config",
+        });
+    }
+    if has_component(".kube") && file_name == "config" {
+        return Some(SensitivePathMatch {
+            level: SensitivePathLevel::Critical,
+            reason: "kubernetes config",
+        });
+    }
+    if has_component(".docker") && file_name == "config.json" {
+        return Some(SensitivePathMatch {
+            level: SensitivePathLevel::Confidential,
+            reason: "docker auth config",
+        });
+    }
+
+    let critical_names = [
+        ".zshrc",
+        ".bashrc",
+        ".bash_profile",
+        ".zprofile",
+        ".zsh_history",
+        ".bash_history",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+    ];
+    if critical_names.contains(&file_name.as_str()) || file_name.ends_with(".pem") {
+        return Some(SensitivePathMatch {
+            level: SensitivePathLevel::Critical,
+            reason: "local credential or shell profile file",
+        });
+    }
+
+    if file_name == ".env" || file_name.starts_with(".env.") {
+        return Some(SensitivePathMatch {
+            level: SensitivePathLevel::Confidential,
+            reason: "environment secrets file",
+        });
+    }
+
+    None
+}
+
+fn enforce_sensitive_path_policy(
+    path: &Path,
+    context: &ToolContext,
+    operation: &str,
+) -> Result<()> {
+    if allow_sensitive_file_access_override() {
+        return Ok(());
+    }
+    let Some(sensitive) = classify_sensitive_path(path) else {
+        return Ok(());
+    };
+
+    match sensitive.level {
+        SensitivePathLevel::Critical => Err(MosaicError::Tool(format!(
+            "blocked {operation} on sensitive path {} ({})",
+            path.display(),
+            sensitive.reason
+        ))),
+        SensitivePathLevel::Confidential => {
+            if context.yes {
+                Ok(())
+            } else {
+                Err(MosaicError::ApprovalRequired(format!(
+                    "{operation} on sensitive path {} requires explicit approval (--yes): {}",
+                    path.display(),
+                    sensitive.reason
+                )))
+            }
+        }
+    }
+}
+
+fn classify_sensitive_command(command: &str) -> Option<GuardDecision> {
+    if allow_sensitive_command_override() {
+        return None;
+    }
+
+    let blocked_markers = [
+        "~/.ssh",
+        "~/.gnupg",
+        "~/.aws/credentials",
+        "~/.kube/config",
+        "~/.zshrc",
+        "~/.bashrc",
+        "~/.zsh_history",
+        "~/.bash_history",
+        "~/.netrc",
+        "/.ssh/",
+        "/.gnupg/",
+        "/.aws/credentials",
+        "/.kube/config",
+        "/.zshrc",
+        "/.bashrc",
+        "/.zsh_history",
+        "/.bash_history",
+        "/.netrc",
+    ];
+    if blocked_markers
+        .iter()
+        .any(|marker| command.contains(marker))
+    {
+        return Some(GuardDecision::Blocked {
+            reason: "attempted access to sensitive local config/credential files".to_string(),
+            suggestion: Some(
+                "set MOSAIC_ALLOW_SENSITIVE_COMMANDS=1 only for explicit audited operations"
+                    .to_string(),
+            ),
+        });
+    }
+
+    if command == "env"
+        || command.starts_with("env ")
+        || command == "printenv"
+        || command.starts_with("printenv ")
+    {
+        return Some(GuardDecision::NeedsConfirmation {
+            reason: "environment dump may expose tokens/passwords".to_string(),
+        });
+    }
+
+    None
+}
+
+fn redact_sensitive_text(text: &str) -> String {
+    if text.is_empty() || disable_secret_redaction() {
+        return text.to_string();
+    }
+
+    let mut output = text.to_string();
+    let replacement_patterns = [
+        (
+            r#"(?i)\b((?:[a-z_][a-z0-9_]*(?:api[_-]?key|token|secret|password))|api[_-]?key|token|secret|password)\b\s*[:=]\s*["']?([^\s"']+)["']?"#,
+            "$1=[REDACTED]",
+        ),
+        (r#"sk-[A-Za-z0-9_-]{20,}"#, "[REDACTED_OPENAI_KEY]"),
+        (r#"AKIA[0-9A-Z]{16}"#, "[REDACTED_AWS_ACCESS_KEY]"),
+        (r#"xox[baprs]-[A-Za-z0-9-]{10,}"#, "[REDACTED_SLACK_TOKEN]"),
+    ];
+
+    for (pattern, replacement) in replacement_patterns {
+        if let Ok(regex) = Regex::new(pattern) {
+            output = regex.replace_all(&output, replacement).into_owned();
+        }
+    }
+
+    if let Ok(bearer) = Regex::new(r#"(?i)bearer\s+[A-Za-z0-9._-]{12,}"#) {
+        output = bearer
+            .replace_all(&output, "Bearer [REDACTED]")
+            .into_owned();
+    }
+
+    output
 }
 
 fn ensure_within(cwd: &Path, path: &Path) -> Result<()> {
@@ -420,6 +663,8 @@ fn is_dangerous_or_mutating(command: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use mosaic_ops::{ApprovalMode, ApprovalPolicy, RuntimePolicy, SandboxPolicy, SandboxProfile};
 
     use super::*;
@@ -541,5 +786,113 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, MosaicError::SandboxDenied(_)));
+    }
+
+    #[test]
+    fn read_file_requires_yes_for_confidential_env_file() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join(".env"),
+            "OPENAI_API_KEY=sk-test-secret-key-value",
+        )
+        .unwrap();
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: false,
+            interactive: false,
+        };
+
+        let err = executor
+            .execute("read_file", json!({"path":".env"}), &ctx)
+            .unwrap_err();
+        assert!(matches!(err, MosaicError::ApprovalRequired(_)));
+    }
+
+    #[test]
+    fn read_file_blocks_critical_sensitive_path() {
+        let temp = tempdir().unwrap();
+        let ssh_dir = temp.path().join(".ssh");
+        fs::create_dir_all(&ssh_dir).unwrap();
+        fs::write(ssh_dir.join("id_rsa"), "PRIVATE").unwrap();
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: true,
+            interactive: false,
+        };
+
+        let err = executor
+            .execute("read_file", json!({"path":".ssh/id_rsa"}), &ctx)
+            .unwrap_err();
+        assert!(matches!(err, MosaicError::Tool(_)));
+        assert!(err.to_string().contains("sensitive path"));
+    }
+
+    #[test]
+    fn run_cmd_blocks_sensitive_shell_profile_access() {
+        let temp = tempdir().unwrap();
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: true,
+            interactive: false,
+        };
+
+        let err = executor
+            .execute("run_cmd", json!({"command":"cat ~/.zshrc"}), &ctx)
+            .unwrap_err();
+        assert!(matches!(err, MosaicError::Tool(_)));
+        assert!(
+            err.to_string()
+                .contains("sensitive local config/credential files")
+        );
+    }
+
+    #[test]
+    fn run_cmd_redacts_secret_like_output() {
+        let temp = tempdir().unwrap();
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: true,
+            interactive: false,
+        };
+
+        let result = executor
+            .execute(
+                "run_cmd",
+                json!({"command":"echo OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxy123456"}),
+                &ctx,
+            )
+            .unwrap();
+        let stdout = result["stdout"].as_str().unwrap_or_default();
+        assert!(stdout.contains("OPENAI_API_KEY=[REDACTED]"));
+        assert!(!stdout.contains("sk-abcdefghijklmnopqrstuvwxy123456"));
+    }
+
+    #[test]
+    fn search_text_skips_sensitive_files_without_yes() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("notes.txt"), "token visible").unwrap();
+        fs::write(temp.path().join(".env"), "token hidden").unwrap();
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: false,
+            interactive: false,
+        };
+
+        let result = executor
+            .execute(
+                "search_text",
+                json!({"query":"token","path":".","max_results":10}),
+                &ctx,
+            )
+            .unwrap();
+        let matches = result["matches"].as_array().unwrap();
+        assert_eq!(matches.len(), 1);
+        let path = matches[0]["path"].as_str().unwrap_or_default();
+        assert!(path.ends_with("/notes.txt"));
     }
 }

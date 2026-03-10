@@ -37,6 +37,7 @@
         <a class="side-link" href="learning-path.html">分阶段学习</a>
         <a class="side-link" href="models-profiles.html">Models 与 Profiles</a>
         <a class="side-link" href="sessions.html">Sessions 教程</a>
+        <a class="side-link" href="tui.html">TUI 教程</a>
         <a class="side-link" href="policy.html">策略教程</a>
         <a class="side-link" href="agents.html">Agents 专项</a>
         <a class="side-link" href="channels.html">Channels</a>
@@ -83,9 +84,10 @@ mosaic --project-state --profile default setup \
 mosaic --project-state --profile default health
 mosaic --project-state --profile default status</code></pre>
 
-          <h2>4. 执行首个 ask/chat</h2>
+          <h2>4. 执行首个 ask/chat/tui</h2>
           <pre><code>mosaic --project-state --profile default ask "hello"
-mosaic --project-state --profile default chat</code></pre>
+mosaic --project-state --profile default chat
+mosaic --project-state --profile default tui</code></pre>
           <p>REPL 内常用命令：<code>/help</code>、<code>/status</code>、<code>/exit</code>。</p>
 
           <h2>5. 查看会话记录</h2>
@@ -101,7 +103,7 @@ mosaic --project-state channels send &lt;channel_id&gt; --text "quickstart ok"</
           <ul>
             <li><code>models list</code> 无网络/配置错误。</li>
             <li><code>ask</code> 能返回模型输出。</li>
-            <li><code>chat</code> 能正常进入和退出。</li>
+            <li><code>chat</code> 与 <code>tui</code> 都能正常进入和退出。</li>
             <li><code>session list</code> 能看到会话记录。</li>
           </ul>
 

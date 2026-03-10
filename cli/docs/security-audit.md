@@ -2,6 +2,12 @@
 
 `mosaic security audit` performs local static checks for common security risks.
 
+Runtime data-protection guardrails for agent tools are documented in:
+
+- `docs/sandbox-approvals.md` (`Private Data Guard` section)
+
+That section also documents pre-persistence protection for session/audit/event/history JSONL files.
+
 ## Commands
 
 ```bash
@@ -37,6 +43,10 @@ mosaic --project-state security baseline clear
   - `fingerprint`
   - `severity`, `category`, `title`, `detail`
   - `path`, `line`, `suggestion`
+- `report.risk`
+  - `score` (`0-100`)
+  - `level` (`low|moderate|high|critical`)
+  - `recommendations[]`
 - `filters`
   - `min_severity`, `categories`, `top`, `filtered_out`
 - `dimensions`
@@ -67,6 +77,7 @@ mosaic --project-state security baseline clear
 - `--category <name>` (repeatable) to keep only selected categories
 - `--top <n>` to cap returned findings after sorting by severity/path/line
 - Skips common folders: `.git`, `target`, `node_modules`, `.pnpm-store`, `.mosaic`
+- Text output also prints risk score/level and recommended remediation actions.
 
 ## Baseline
 
