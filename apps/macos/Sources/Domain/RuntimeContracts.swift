@@ -327,3 +327,8 @@ public protocol CommandHistoryStoring: Sendable {
     func recordCommandActionID(_ actionID: String) async
     func clearRecentCommandActionIDs() async
 }
+
+public protocol PinnedSessionsStoring: Sendable {
+    func pinnedSessionIDs(for workspaceID: UUID) async -> [String]
+    func setPinnedSessionID(_ sessionID: String, pinned: Bool, workspaceID: UUID) async
+}

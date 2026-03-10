@@ -474,7 +474,37 @@ struct SettingsView: View {
             return "Toggle Inspector"
         default:
             if actionID.hasPrefix("workspace-") {
+                let rawID = String(actionID.dropFirst("workspace-".count))
+                if
+                    let workspaceID = UUID(uuidString: rawID),
+                    let workspace = ([viewModel.selectedWorkspace].compactMap { $0 } + viewModel.recentWorkspaces)
+                        .first(where: { $0.id == workspaceID })
+                {
+                    return "Switch to \(workspace.name)"
+                }
                 return "Switch Workspace"
+            }
+            if actionID.hasPrefix("session-open-") {
+                let sessionID = String(actionID.dropFirst("session-open-".count))
+                if let thread = viewModel.workbench?.state.sidebar.threads.first(where: { $0.id == sessionID }) {
+                    return "Resume \(thread.title)"
+                }
+                return "Open Session"
+            }
+            if actionID.hasPrefix("session-pin-") {
+                let sessionID = String(actionID.dropFirst("session-pin-".count))
+                if let thread = viewModel.workbench?.state.sidebar.threads.first(where: { $0.id == sessionID }) {
+                    let isPinned = viewModel.workbench?.isPinnedThread(sessionID) == true
+                    return isPinned ? "Unpin \(thread.title)" : "Pin \(thread.title)"
+                }
+                return "Pin Session"
+            }
+            if actionID.hasPrefix("session-clear-") {
+                let sessionID = String(actionID.dropFirst("session-clear-".count))
+                if let thread = viewModel.workbench?.state.sidebar.threads.first(where: { $0.id == sessionID }) {
+                    return "Clear \(thread.title)"
+                }
+                return "Clear Session"
             }
             return actionID
         }

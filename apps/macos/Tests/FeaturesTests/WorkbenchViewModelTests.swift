@@ -1,5 +1,6 @@
 import Domain
 import Features
+import Infrastructure
 import XCTest
 
 @MainActor
@@ -9,7 +10,8 @@ final class WorkbenchViewModelTests: XCTestCase {
         let viewModel = WorkbenchViewModel(
             workspace: PreviewFixtures.workspace,
             recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            runtimeClient: client
+            runtimeClient: client,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
 
         await viewModel.refresh()
@@ -75,7 +77,8 @@ final class WorkbenchViewModelTests: XCTestCase {
         let viewModel = WorkbenchViewModel(
             workspace: PreviewFixtures.workspace,
             recentWorkspaces: [PreviewFixtures.workspace],
-            runtimeClient: client
+            runtimeClient: client,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
         viewModel.composerText = "Open the new inspector design."
 
@@ -97,7 +100,8 @@ final class WorkbenchViewModelTests: XCTestCase {
         let viewModel = WorkbenchViewModel(
             workspace: PreviewFixtures.workspace,
             recentWorkspaces: [PreviewFixtures.workspace],
-            runtimeClient: client
+            runtimeClient: client,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
         viewModel.composerText = "retry this"
 
@@ -114,7 +118,8 @@ final class WorkbenchViewModelTests: XCTestCase {
         let viewModel = WorkbenchViewModel(
             workspace: PreviewFixtures.workspace,
             recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            runtimeClient: client
+            runtimeClient: client,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
 
         await viewModel.refresh()
@@ -173,7 +178,8 @@ final class WorkbenchViewModelTests: XCTestCase {
         let viewModel = WorkbenchViewModel(
             workspace: PreviewFixtures.workspace,
             recentWorkspaces: [PreviewFixtures.workspace],
-            runtimeClient: client
+            runtimeClient: client,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
 
         await viewModel.refresh()
@@ -185,5 +191,29 @@ final class WorkbenchViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state.conversation.sessionID, "thread-2")
         XCTAssertEqual(viewModel.state.sidebar.threads.count, 1)
         XCTAssertNil(viewModel.state.conversation.inlineError)
+    }
+
+    func testPinnedThreadsPersistIntoSections() async {
+        let pinnedStore = InMemoryPinnedSessionStore(state: [
+            PreviewFixtures.workspace.id: ["thread-2"]
+        ])
+        let client = MockRuntimeClient()
+        let viewModel = WorkbenchViewModel(
+            workspace: PreviewFixtures.workspace,
+            recentWorkspaces: [PreviewFixtures.workspace],
+            runtimeClient: client,
+            pinnedSessionsStore: pinnedStore
+        )
+
+        await viewModel.refresh()
+
+        XCTAssertEqual(viewModel.pinnedThreads.map(\.id), ["thread-2"])
+        XCTAssertEqual(viewModel.recentThreads.map(\.id), ["thread-1"])
+        XCTAssertEqual(viewModel.threadSections.map(\.id), ["pinned", "recent"])
+
+        await viewModel.togglePinnedThread("thread-1")
+
+        XCTAssertTrue(viewModel.isPinnedThread("thread-1"))
+        XCTAssertEqual(Set(viewModel.pinnedThreads.map(\.id)), Set(["thread-1", "thread-2"]))
     }
 }

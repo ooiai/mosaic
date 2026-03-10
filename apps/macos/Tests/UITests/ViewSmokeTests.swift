@@ -23,7 +23,8 @@ final class ViewSmokeTests: XCTestCase {
         let viewModel = WorkbenchViewModel(
             workspace: PreviewFixtures.workspace,
             recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            runtimeClient: client
+            runtimeClient: client,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
         viewModel.replaceStateForPreview(WorkbenchStateMapper.map(
             workspace: PreviewFixtures.workspace,
@@ -80,7 +81,8 @@ final class ViewSmokeTests: XCTestCase {
         let workbench = WorkbenchViewModel(
             workspace: PreviewFixtures.workspace,
             recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            runtimeClient: client
+            runtimeClient: client,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
         workbench.replaceStateForPreview(WorkbenchStateMapper.map(
             workspace: PreviewFixtures.workspace,

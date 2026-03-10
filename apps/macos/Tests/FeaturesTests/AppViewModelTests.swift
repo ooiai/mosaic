@@ -183,6 +183,91 @@ final class AppViewModelTests: XCTestCase {
         XCTAssertTrue(originalWorkbench === viewModel.workbench)
     }
 
+    func testQuickSwitchModelPersistsAndKeepsWorkbenchInstance() async {
+        actor RuntimeStore {
+            var baseURL = "https://demo-resource.openai.azure.com/openai/v1"
+            var model = "gpt-5.2"
+            var apiKeyEnv = "AZURE_OPENAI_API_KEY"
+
+            func applyModel(_ value: String) {
+                model = value
+            }
+
+            func configurationSummary() -> ConfigurationSummary {
+                ConfigurationSummary(
+                    profileName: "default",
+                    agent: .init(maxTurns: 8, temperature: 0.2),
+                    provider: .init(
+                        apiKeyEnv: apiKeyEnv,
+                        baseURL: baseURL,
+                        kind: "openai_compatible",
+                        model: model
+                    ),
+                    stateMode: "project",
+                    projectDir: ".mosaic"
+                )
+            }
+
+            func modelsStatus() -> ModelsStatusSummary {
+                ModelsStatusSummary(
+                    profile: "default",
+                    currentModel: model,
+                    effectiveModel: model,
+                    baseURL: baseURL,
+                    apiKeyEnv: apiKeyEnv,
+                    aliases: [:],
+                    fallbacks: []
+                )
+            }
+
+            func listModels() -> [ModelSummary] {
+                [
+                    ModelSummary(id: "gpt-5.2", ownedBy: "azure"),
+                    ModelSummary(id: "gpt-5-mini", ownedBy: "azure"),
+                ]
+            }
+        }
+
+        let store = RuntimeStore()
+        let client = MockRuntimeClient()
+        client.configureShowHandler = { _ in
+            await store.configurationSummary()
+        }
+        client.modelsStatusHandler = { _ in
+            await store.modelsStatus()
+        }
+        client.modelsListHandler = { _ in
+            await store.listModels()
+        }
+        client.setModelHandler = { _, model in
+            let previousStatus = await store.modelsStatus()
+            await store.applyModel(model)
+            return ModelSelectionSummary(
+                requestedModel: model,
+                effectiveModel: model,
+                previousModel: previousStatus.effectiveModel
+            )
+        }
+
+        let workspaceStore = InMemoryWorkspaceStore(
+            workspaces: [PreviewFixtures.workspace],
+            selectedID: PreviewFixtures.workspace.id
+        )
+        let viewModel = AppViewModel(runtimeClient: client, workspaceStore: workspaceStore)
+
+        await viewModel.bootstrap()
+
+        let originalWorkbench = viewModel.workbench
+        XCTAssertEqual(viewModel.currentModelLabel, "gpt-5.2")
+
+        await viewModel.quickSwitchModel("gpt-5-mini")
+
+        XCTAssertEqual(viewModel.currentModelLabel, "gpt-5-mini")
+        XCTAssertEqual(viewModel.runtimeDraftModel, "gpt-5-mini")
+        XCTAssertNil(viewModel.globalError)
+        XCTAssertTrue(originalWorkbench === viewModel.workbench)
+    }
+
     func testBootstrapLoadsRecentCommandHistory() async {
         let client = MockRuntimeClient()
         let workspaceStore = InMemoryWorkspaceStore()
@@ -196,5 +281,34 @@ final class AppViewModelTests: XCTestCase {
         await viewModel.bootstrap()
 
         XCTAssertEqual(viewModel.recentCommandActionIDs, ["new-thread", "refresh-workspace"])
+    }
+
+    func testSessionAndWorkspaceActionsRecordDynamicHistory() async {
+        let client = MockRuntimeClient()
+        let workspaceStore = InMemoryWorkspaceStore(
+            workspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
+            selectedID: PreviewFixtures.workspace.id
+        )
+        let historyStore = InMemoryCommandHistoryStore()
+        let viewModel = AppViewModel(
+            runtimeClient: client,
+            workspaceStore: workspaceStore,
+            commandHistoryStore: historyStore,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
+        )
+
+        await viewModel.bootstrap()
+        await viewModel.openSession("thread-1", recordHistory: true)
+        await viewModel.togglePinnedSession("thread-1", recordHistory: true)
+        await viewModel.activateWorkspace(PreviewFixtures.secondaryWorkspace, recordHistory: true)
+
+        XCTAssertEqual(
+            viewModel.recentCommandActionIDs,
+            [
+                "workspace-\(PreviewFixtures.secondaryWorkspace.id.uuidString)",
+                "session-pin-thread-1",
+                "session-open-thread-1",
+            ]
+        )
     }
 }
