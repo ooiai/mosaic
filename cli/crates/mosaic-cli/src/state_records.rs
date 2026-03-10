@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 
 use chrono::Utc;
 
-use crate::utils::{load_json_file_opt, save_json_file};
+use crate::utils::{load_json_file_opt, save_state_json_file};
 
 use super::{
     BROWSER_SEQ, BrowserRuntimeState, BrowserVisitRecord, CRON_SEQ, CronJobRecord, DeviceRecord,
@@ -77,7 +77,7 @@ pub(super) fn load_nodes_or_default(path: &Path) -> Result<Vec<NodeRecord>> {
 }
 
 pub(super) fn save_nodes(path: &Path, nodes: &[NodeRecord]) -> Result<()> {
-    save_json_file(path, &nodes.to_vec())
+    save_state_json_file(path, &nodes.to_vec(), "nodes state")
 }
 
 pub(super) fn load_devices_or_default(path: &Path) -> Result<Vec<DeviceRecord>> {
@@ -85,7 +85,7 @@ pub(super) fn load_devices_or_default(path: &Path) -> Result<Vec<DeviceRecord>> 
 }
 
 pub(super) fn save_devices(path: &Path, devices: &[DeviceRecord]) -> Result<()> {
-    save_json_file(path, &devices.to_vec())
+    save_state_json_file(path, &devices.to_vec(), "devices state")
 }
 
 pub(super) fn load_pairing_requests_or_default(path: &Path) -> Result<Vec<PairingRequestRecord>> {
@@ -93,7 +93,7 @@ pub(super) fn load_pairing_requests_or_default(path: &Path) -> Result<Vec<Pairin
 }
 
 pub(super) fn save_pairing_requests(path: &Path, requests: &[PairingRequestRecord]) -> Result<()> {
-    save_json_file(path, &requests.to_vec())
+    save_state_json_file(path, &requests.to_vec(), "pairing requests state")
 }
 
 pub(super) fn load_hooks_or_default(path: &Path) -> Result<Vec<HookRecord>> {
@@ -101,7 +101,7 @@ pub(super) fn load_hooks_or_default(path: &Path) -> Result<Vec<HookRecord>> {
 }
 
 pub(super) fn save_hooks(path: &Path, hooks: &[HookRecord]) -> Result<()> {
-    save_json_file(path, &hooks.to_vec())
+    save_state_json_file(path, &hooks.to_vec(), "hooks state")
 }
 
 pub(super) fn load_webhooks_or_default(path: &Path) -> Result<Vec<WebhookRecord>> {
@@ -109,7 +109,7 @@ pub(super) fn load_webhooks_or_default(path: &Path) -> Result<Vec<WebhookRecord>
 }
 
 pub(super) fn save_webhooks(path: &Path, webhooks: &[WebhookRecord]) -> Result<()> {
-    save_json_file(path, &webhooks.to_vec())
+    save_state_json_file(path, &webhooks.to_vec(), "webhooks state")
 }
 
 pub(super) fn load_browser_history_or_default(path: &Path) -> Result<Vec<BrowserVisitRecord>> {
@@ -117,7 +117,7 @@ pub(super) fn load_browser_history_or_default(path: &Path) -> Result<Vec<Browser
 }
 
 pub(super) fn save_browser_history(path: &Path, visits: &[BrowserVisitRecord]) -> Result<()> {
-    save_json_file(path, &visits.to_vec())
+    save_state_json_file(path, &visits.to_vec(), "browser history state")
 }
 
 pub(super) fn load_browser_state_or_default(path: &Path) -> Result<BrowserRuntimeState> {
@@ -125,7 +125,7 @@ pub(super) fn load_browser_state_or_default(path: &Path) -> Result<BrowserRuntim
 }
 
 pub(super) fn save_browser_state(path: &Path, state: &BrowserRuntimeState) -> Result<()> {
-    save_json_file(path, state)
+    save_state_json_file(path, state, "browser runtime state")
 }
 
 pub(super) fn load_cron_jobs_or_default(path: &Path) -> Result<Vec<CronJobRecord>> {
@@ -133,7 +133,7 @@ pub(super) fn load_cron_jobs_or_default(path: &Path) -> Result<Vec<CronJobRecord
 }
 
 pub(super) fn save_cron_jobs(path: &Path, jobs: &[CronJobRecord]) -> Result<()> {
-    save_json_file(path, &jobs.to_vec())
+    save_state_json_file(path, &jobs.to_vec(), "cron jobs state")
 }
 
 fn default_local_node() -> NodeRecord {

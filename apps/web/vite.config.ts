@@ -16,7 +16,6 @@ export default defineConfig({
       react: path.resolve(appRoot, 'node_modules/react'),
       'react/jsx-runtime': path.resolve(appRoot, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime': path.resolve(appRoot, 'node_modules/react/jsx-dev-runtime.js'),
-      '@tauri-apps/api/core': path.resolve(appRoot, 'node_modules/@tauri-apps/api/core.js'),
     },
   },
 })

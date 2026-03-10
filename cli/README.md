@@ -7,7 +7,7 @@ This workspace ships a pure CLI with no frontend dependency.
 
 - Local agent core (`ask`, `chat`, `session`, `models`, `dashboard`, `status`, `health`, `doctor`)
 - Gateway control plane (`gateway install|start|restart|status|health|probe|discover|diagnose|call|stop|uninstall`)
-- MCP runtime (`mcp list|add|show|check|diagnose|repair|enable|disable|remove`, supports `check --all`)
+- MCP runtime (`mcp list|add|show|update|check|diagnose|repair|enable|disable|remove`, supports `check --all`)
 - Channels runtime (`channels add|update|list|status|test|send|logs|replay|capabilities|resolve|export|import|rotate-token-env|remove|logout`)
 - Nodes/device pairing runtime (`nodes list|status|diagnose|run|invoke`, `devices list|approve|reject|rotate|revoke`, `pairing list|request|approve|reject`)
 - Hooks runtime (`hooks list|add|remove|enable|disable|run|logs|replay`, auto-trigger on `system event`)
@@ -339,8 +339,10 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --json voicecall send --
 
 ```bash
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp list
-cargo run -p mosaic-cli --bin mosaic -- --project-state mcp add --name local-mcp --command /usr/bin/env --arg bash
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp add --name local-mcp --command /usr/bin/env --arg bash --env MCP_MODE=local --env-from OPENAI_API_KEY=AZURE_OPENAI_API_KEY
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp show <server-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp update <server-id> --env-from OPENAI_API_KEY=AZURE_OPENAI_API_KEY --clear-cwd
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp update <server-id> --clear-args --disable
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check --all
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check --all --deep --timeout-ms 2000
@@ -348,11 +350,16 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state mcp check --all --deep -
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp diagnose <server-id> --timeout-ms 2000
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp diagnose <server-id> --timeout-ms 2000 --report-out .mosaic/reports/mcp-diagnose.json
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp repair <server-id> --timeout-ms 2000
+cargo run -p mosaic-cli --bin mosaic -- --project-state mcp repair <server-id> --timeout-ms 2000 --set-env-from OPENAI_API_KEY=AZURE_OPENAI_API_KEY
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp repair --all --timeout-ms 2000 --clear-missing-cwd --report-out .mosaic/reports/mcp-repair.json
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp disable <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp enable <server-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state mcp remove <server-id>
 ```
+
+`--env` persists non-sensitive runtime pairs. `--env-from KEY=ENV_NAME` persists only the env variable reference and resolves the real value from Mosaic's process environment during MCP checks and launches.
+
+Use `mcp update` for deliberate config mutations and `mcp repair` for diagnose-driven remediation. `update` replaces the full `args`/`env`/`env_from` collection you pass and supports `--clear-args`, `--clear-env`, `--clear-env-from`, and `--clear-cwd`.
 
 ### Nodes/Devices/Pairing Runtime
 

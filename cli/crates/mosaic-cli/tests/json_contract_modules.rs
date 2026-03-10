@@ -3712,7 +3712,9 @@ fn json_mcp_module_schema_matches_snapshot() {
                 "--arg",
                 "--version",
                 "--env",
-                "MCP_TOKEN=contract",
+                "MCP_MODE=contract",
+                "--env-from",
+                "MCP_PATH=PATH",
             ])
             .assert()
             .success()
@@ -3757,6 +3759,30 @@ fn json_mcp_module_schema_matches_snapshot() {
             .stdout,
     );
     assert_success_envelope(&show);
+
+    let update = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "update",
+                &server_id,
+                "--name",
+                "contract-mcp-updated",
+                "--env",
+                "MCP_MODE=contract-updated",
+                "--env-from",
+                "OPENAI_API_KEY=PATH",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&update);
 
     let check_all = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -3872,6 +3898,7 @@ fn json_mcp_module_schema_matches_snapshot() {
 
     let actual_schema = json!({
         "add": schema_of(&add),
+        "update": schema_of(&update),
         "list": schema_of(&list),
         "check": schema_of(&check),
         "show": schema_of(&show),

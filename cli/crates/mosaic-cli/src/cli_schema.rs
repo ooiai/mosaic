@@ -295,10 +295,39 @@ enum McpCommand {
         args: Vec<String>,
         #[arg(long = "env", value_name = "KEY=VALUE", action = ArgAction::Append)]
         env: Vec<String>,
+        #[arg(long = "env-from", value_name = "KEY=ENV_NAME", action = ArgAction::Append)]
+        env_from: Vec<String>,
         #[arg(long)]
         cwd: Option<String>,
         #[arg(long)]
         disabled: bool,
+    },
+    Update {
+        server_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long = "arg", action = ArgAction::Append, allow_hyphen_values = true)]
+        args: Vec<String>,
+        #[arg(long)]
+        clear_args: bool,
+        #[arg(long = "env", value_name = "KEY=VALUE", action = ArgAction::Append)]
+        env: Vec<String>,
+        #[arg(long)]
+        clear_env: bool,
+        #[arg(long = "env-from", value_name = "KEY=ENV_NAME", action = ArgAction::Append)]
+        env_from: Vec<String>,
+        #[arg(long)]
+        clear_env_from: bool,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        clear_cwd: bool,
+        #[arg(long, conflicts_with = "disable")]
+        enable: bool,
+        #[arg(long, conflicts_with = "enable")]
+        disable: bool,
     },
     Show {
         server_id: String,
@@ -329,6 +358,8 @@ enum McpCommand {
         timeout_ms: u64,
         #[arg(long)]
         clear_missing_cwd: bool,
+        #[arg(long = "set-env-from", value_name = "KEY=ENV_NAME", action = ArgAction::Append)]
+        set_env_from: Vec<String>,
         #[arg(long)]
         report_out: Option<String>,
     },

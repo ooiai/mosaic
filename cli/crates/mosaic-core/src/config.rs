@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MosaicError, Result};
+use crate::privacy::write_pretty_state_toml_file;
 use crate::state::StateMode;
 
 pub const CURRENT_CONFIG_VERSION: u32 = 1;
@@ -254,12 +255,7 @@ impl ConfigManager {
 
     pub fn save(&self, config: &ConfigFile) -> Result<()> {
         config.validate()?;
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let raw = toml::to_string_pretty(config)?;
-        fs::write(&self.path, raw)?;
-        Ok(())
+        write_pretty_state_toml_file(&self.path, config, "config state")
     }
 }
 

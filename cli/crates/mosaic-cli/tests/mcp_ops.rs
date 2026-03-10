@@ -29,7 +29,9 @@ fn mcp_add_list_check_toggle_remove_flow() {
                 "--arg",
                 "--version",
                 "--env",
-                "MCP_TOKEN=test",
+                "MCP_MODE=test",
+                "--env-from",
+                "MCP_PATH=PATH",
                 "--cwd",
                 temp.path().to_str().expect("cwd"),
             ])
@@ -55,6 +57,7 @@ fn mcp_add_list_check_toggle_remove_flow() {
     let servers = list["servers"].as_array().expect("servers array");
     assert_eq!(servers.len(), 1);
     assert_eq!(servers[0]["id"], server_id.as_str());
+    assert_eq!(servers[0]["env_from"]["MCP_PATH"], "PATH");
 
     let check = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -69,6 +72,9 @@ fn mcp_add_list_check_toggle_remove_flow() {
     assert_eq!(check["ok"], true);
     assert_eq!(check["all"], false);
     assert_eq!(check["healthy"], true);
+    assert_eq!(check["check"]["env_refs"][0]["key"], "MCP_PATH");
+    assert_eq!(check["check"]["env_refs"][0]["source"], "PATH");
+    assert_eq!(check["check"]["env_refs"][0]["present"], true);
 
     let show = parse_stdout_json(
         &Command::cargo_bin("mosaic")
@@ -82,6 +88,7 @@ fn mcp_add_list_check_toggle_remove_flow() {
     );
     assert_eq!(show["ok"], true);
     assert_eq!(show["server"]["id"], server_id.as_str());
+    assert_eq!(show["server"]["env_from"]["MCP_PATH"], "PATH");
 
     let diagnose_report_path = temp.path().join("reports").join("mcp-diagnose.json");
     let diagnose = parse_stdout_json(
@@ -382,6 +389,120 @@ fn mcp_repair_clear_missing_cwd_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn mcp_update_replaces_runtime_fields_and_reports_noop() {
+    let temp = tempdir().expect("tempdir");
+    let command_path = std::env::current_exe().expect("current exe");
+    let command_path = command_path.to_string_lossy().to_string();
+
+    let add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "add",
+                "--name",
+                "update-me",
+                "--command",
+                &command_path,
+                "--arg",
+                "--version",
+                "--env",
+                "MCP_MODE=before",
+                "--env-from",
+                "MCP_PATH=PATH",
+                "--cwd",
+                temp.path().to_str().expect("cwd"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    let server_id = add["server"]["id"].as_str().expect("server id").to_string();
+
+    let update = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "update",
+                &server_id,
+                "--name",
+                "updated-mcp",
+                "--clear-args",
+                "--env",
+                "MCP_MODE=after",
+                "--env-from",
+                "OPENAI_API_KEY=PATH",
+                "--clear-cwd",
+                "--disable",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(update["ok"], true);
+    assert_eq!(update["changed"], true);
+    assert_eq!(update["server"]["name"], "updated-mcp");
+    assert!(
+        update["server"]["args"]
+            .as_array()
+            .expect("args")
+            .is_empty()
+    );
+    assert_eq!(update["server"]["env"]["MCP_MODE"], "after");
+    assert!(update["server"]["env"]["MCP_PATH"].is_null());
+    assert_eq!(update["server"]["env_from"]["OPENAI_API_KEY"], "PATH");
+    assert!(update["server"]["env_from"]["MCP_PATH"].is_null());
+    assert!(update["server"]["cwd"].is_null());
+    assert_eq!(update["server"]["enabled"], false);
+
+    let show = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "show", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(show["server"]["name"], "updated-mcp");
+    assert_eq!(show["server"]["env_from"]["OPENAI_API_KEY"], "PATH");
+    assert!(show["server"]["cwd"].is_null());
+    assert_eq!(show["server"]["enabled"], false);
+
+    let noop = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "update",
+                &server_id,
+                "--name",
+                "updated-mcp",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(noop["ok"], true);
+    assert_eq!(noop["changed"], false);
+}
+
+#[test]
+#[allow(deprecated)]
 fn mcp_show_missing_server_returns_validation_error() {
     let temp = tempdir().expect("tempdir");
 
@@ -416,6 +537,277 @@ fn mcp_add_invalid_env_returns_validation_error() {
         .assert()
         .failure()
         .code(7);
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_add_rejects_secret_literal_env_with_guidance() {
+    let temp = tempdir().expect("tempdir");
+
+    let output = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "add",
+                "--name",
+                "bad",
+                "--command",
+                "echo",
+                "--env",
+                "OPENAI_API_KEY=sk-live-secret-12345678901234567890",
+            ])
+            .assert()
+            .failure()
+            .code(7)
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(output["ok"], false);
+    assert_eq!(output["error"]["code"], "validation");
+    assert!(
+        output["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("process environment that launches Mosaic")
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_check_and_doctor_report_missing_env_from_source() {
+    let temp = tempdir().expect("tempdir");
+    let command_path = std::env::current_exe().expect("current exe");
+    let command_path = command_path.to_string_lossy().to_string();
+    let missing_env = "MOSAIC_TEST_MCP_MISSING_ENV_SOURCE";
+    assert!(
+        std::env::var_os(missing_env).is_none(),
+        "test requires {missing_env} to be unset"
+    );
+
+    let add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "add",
+                "--name",
+                "missing-env",
+                "--command",
+                &command_path,
+                "--arg",
+                "--version",
+                "--env-from",
+                "OPENAI_API_KEY=MOSAIC_TEST_MCP_MISSING_ENV_SOURCE",
+                "--cwd",
+                temp.path().to_str().expect("cwd"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    let server_id = add["server"]["id"].as_str().expect("server id").to_string();
+
+    let check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "check", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(check["ok"], true);
+    assert_eq!(check["healthy"], false);
+    assert_eq!(check["check"]["env_refs"][0]["key"], "OPENAI_API_KEY");
+    assert_eq!(
+        check["check"]["env_refs"][0]["source"],
+        "MOSAIC_TEST_MCP_MISSING_ENV_SOURCE"
+    );
+    assert_eq!(check["check"]["env_refs"][0]["present"], false);
+    assert!(
+        check["check"]["issues"]
+            .as_array()
+            .expect("issues")
+            .iter()
+            .any(|entry| entry
+                .as_str()
+                .unwrap_or_default()
+                .contains("MOSAIC_TEST_MCP_MISSING_ENV_SOURCE"))
+    );
+
+    let doctor = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "doctor"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    let checks = doctor["checks"].as_array().expect("doctor checks");
+    let mcp_env_refs = checks
+        .iter()
+        .find(|entry| entry["name"].as_str() == Some("mcp_env_refs"))
+        .expect("mcp_env_refs check");
+    assert_eq!(mcp_env_refs["status"], "warn");
+    assert!(
+        mcp_env_refs["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("OPENAI_API_KEY<-MOSAIC_TEST_MCP_MISSING_ENV_SOURCE")
+    );
+
+    let diagnose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "diagnose",
+                &server_id,
+                "--timeout-ms",
+                "300",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert!(
+        diagnose["recommendations"]
+            .as_array()
+            .expect("recommendations")
+            .iter()
+            .any(|entry| entry
+                .as_str()
+                .unwrap_or_default()
+                .contains("--set-env-from OPENAI_API_KEY=<ENV_NAME>"))
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_add_invalid_env_from_returns_validation_error() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "mcp",
+            "add",
+            "--name",
+            "bad",
+            "--command",
+            "echo",
+            "--env-from",
+            "OPENAI_API_KEY=bad-value",
+        ])
+        .assert()
+        .failure()
+        .code(7);
+}
+
+#[test]
+#[allow(deprecated)]
+fn mcp_repair_set_env_from_recovers_missing_env_source() {
+    let temp = tempdir().expect("tempdir");
+    let command_path = std::env::current_exe().expect("current exe");
+    let command_path = command_path.to_string_lossy().to_string();
+
+    let add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "add",
+                "--name",
+                "repair-env",
+                "--command",
+                &command_path,
+                "--arg",
+                "--version",
+                "--env-from",
+                "OPENAI_API_KEY=MOSAIC_TEST_MCP_MISSING_ENV_SOURCE",
+                "--cwd",
+                temp.path().to_str().expect("cwd"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    let server_id = add["server"]["id"].as_str().expect("server id").to_string();
+
+    let repair = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "repair",
+                &server_id,
+                "--timeout-ms",
+                "300",
+                "--set-env-from",
+                "OPENAI_API_KEY=PATH",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(repair["ok"], true);
+    assert_eq!(repair["changed"], 1);
+    assert_eq!(repair["set_env_from"]["OPENAI_API_KEY"], "PATH");
+    assert!(
+        repair["results"][0]["actions"]
+            .as_array()
+            .expect("actions")
+            .iter()
+            .any(|entry| entry.as_str() == Some("updated_env_from"))
+    );
+    assert_eq!(
+        repair["results"][0]["before"]["env_from"]["OPENAI_API_KEY"],
+        "MOSAIC_TEST_MCP_MISSING_ENV_SOURCE"
+    );
+    assert_eq!(
+        repair["results"][0]["after"]["env_from"]["OPENAI_API_KEY"],
+        "PATH"
+    );
+    assert_eq!(repair["results"][0]["after"]["check_healthy"], true);
+
+    let check = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "mcp", "check", &server_id])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(check["healthy"], true);
+    assert_eq!(check["check"]["env_refs"][0]["source"], "PATH");
+    assert_eq!(check["check"]["env_refs"][0]["present"], true);
 }
 
 #[test]

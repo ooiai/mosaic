@@ -5,6 +5,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::write_pretty_state_json_file;
 use mosaic_core::state::StatePaths;
 
 pub(super) fn extract_html_title(body: &str) -> Option<String> {
@@ -133,6 +134,17 @@ where
     })?;
     std::fs::write(path, raw)?;
     Ok(())
+}
+
+pub(super) fn save_state_json_file<T>(
+    path: &std::path::Path,
+    value: &T,
+    context: &str,
+) -> Result<()>
+where
+    T: Serialize,
+{
+    write_pretty_state_json_file(path, value, context)
 }
 
 pub(super) fn print_json(value: &Value) {

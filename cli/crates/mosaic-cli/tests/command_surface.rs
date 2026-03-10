@@ -270,13 +270,43 @@ fn gateway_help_includes_lifecycle_commands() {
 fn mcp_help_includes_management_commands() {
     let help = run_help(&["mcp", "--help"]);
     let expected = [
-        "list", "add", "show", "check", "diagnose", "repair", "enable", "disable", "remove",
+        "list", "add", "update", "show", "check", "diagnose", "repair", "enable", "disable",
+        "remove",
     ];
 
     for name in expected {
         assert!(
             help.contains(name),
             "mcp --help missing expected subcommand: {name}\n{help}"
+        );
+    }
+
+    let add_help = run_help(&["mcp", "add", "--help"]);
+    for option in ["--arg", "--env", "--env-from", "--cwd", "--disabled"] {
+        assert!(
+            add_help.contains(option),
+            "mcp add --help missing expected option {option}:\n{add_help}"
+        );
+    }
+
+    let update_help = run_help(&["mcp", "update", "--help"]);
+    for option in [
+        "--name",
+        "--command",
+        "--arg",
+        "--clear-args",
+        "--env",
+        "--clear-env",
+        "--env-from",
+        "--clear-env-from",
+        "--cwd",
+        "--clear-cwd",
+        "--enable",
+        "--disable",
+    ] {
+        assert!(
+            update_help.contains(option),
+            "mcp update --help missing expected option {option}:\n{update_help}"
         );
     }
 
@@ -301,6 +331,7 @@ fn mcp_help_includes_management_commands() {
         "--all",
         "--timeout-ms",
         "--clear-missing-cwd",
+        "--set-env-from",
         "--report-out",
     ] {
         assert!(

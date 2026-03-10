@@ -2,7 +2,6 @@ import { Button, Icon, Pill, SegmentedTabs } from '@mosaic/ui';
 import {
     PRIMARY_NAV_ITEMS,
     WEB_SNAPSHOT,
-    isTauriRuntime,
     loadShellSnapshot,
     resolveActiveThread,
     resolveWorkspaceName,
@@ -67,7 +66,7 @@ function App() {
           setSnapshot(WEB_SNAPSHOT);
           setActiveThreadId(WEB_SNAPSHOT.activeThreadId);
           setActiveStageTab(WEB_SNAPSHOT.defaultStageTab);
-          console.error('Unable to load desktop snapshot. Falling back to web snapshot.', error);
+          console.error('Unable to load workbench snapshot. Falling back to web snapshot.', error);
         }
       }
     };
@@ -78,8 +77,6 @@ function App() {
       cancelled = true;
     };
   }, []);
-
-  const runtimeKind: 'desktop' | 'web' = isTauriRuntime() ? 'desktop' : 'web';
 
   const activeThread = useMemo(
     () => resolveActiveThread(snapshot, activeThreadId),
@@ -212,7 +209,7 @@ function App() {
             </div>
 
             <div className="composer-footer">
-              <span>{runtimeKind === 'desktop' ? 'Desktop' : 'Web'}</span>
+              <span>Web</span>
               <span>{snapshot.runtimeLabel}</span>
               <span className="branch-pill">
                 <Icon name="branch" size={13} />

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use mosaic_core::error::{MosaicError, Result};
-use mosaic_core::privacy::append_sanitized_jsonl;
+use mosaic_core::privacy::{append_sanitized_jsonl, write_pretty_state_json_file};
 
 use crate::policy::RetryPolicy;
 use crate::providers;
@@ -1038,14 +1038,7 @@ impl ChannelRepository {
     }
 
     fn save_channels_file(&self, file: &ChannelsFile) -> Result<()> {
-        if let Some(parent) = self.channels_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let rendered = serde_json::to_string_pretty(file).map_err(|err| {
-            MosaicError::Validation(format!("failed to encode channels JSON: {err}"))
-        })?;
-        std::fs::write(&self.channels_path, rendered)?;
-        Ok(())
+        write_pretty_state_json_file(&self.channels_path, file, "channels state")
     }
 
     fn append_event(&self, channel_id: &str, event: &ChannelLogEntry) -> Result<PathBuf> {
@@ -1131,9 +1124,7 @@ impl ChannelRepository {
         let next = ChannelRateState {
             last_sent_at: Utc::now(),
         };
-        let rendered = serde_json::to_string(&next)
-            .map_err(|err| MosaicError::Validation(format!("invalid channel rate JSON: {err}")))?;
-        std::fs::write(path, rendered)?;
+        write_pretty_state_json_file(&path, &next, "channel rate state")?;
         Ok(Some(waited_ms))
     }
 
@@ -1163,11 +1154,7 @@ impl ChannelRepository {
                 MosaicError::Validation(format!("failed to encode channel cache payload: {err}"))
             })?,
         };
-        let encoded = serde_json::to_string_pretty(&envelope).map_err(|err| {
-            MosaicError::Validation(format!("failed to encode channel cache JSON: {err}"))
-        })?;
-        std::fs::write(path, encoded)?;
-        Ok(())
+        write_pretty_state_json_file(&path, &envelope, "channel cache state")
     }
 
     fn cache_path(&self, key: &str) -> PathBuf {

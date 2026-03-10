@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::write_pretty_state_toml_file;
 
 const CURRENT_APPROVAL_POLICY_VERSION: u32 = 1;
 
@@ -108,12 +109,7 @@ impl ApprovalStore {
         policy.version = CURRENT_APPROVAL_POLICY_VERSION;
         policy.normalize();
         policy.validate()?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let rendered = toml::to_string_pretty(&policy)?;
-        std::fs::write(&self.path, rendered)?;
-        Ok(())
+        write_pretty_state_toml_file(&self.path, &policy, "approvals policy state")
     }
 
     pub fn set_mode(&self, mode: ApprovalMode) -> Result<ApprovalPolicy> {
@@ -203,5 +199,22 @@ mod tests {
             .remove_allowlist("cargo test")
             .expect("remove allowlist");
         assert!(policy.allowlist.is_empty());
+    }
+
+    #[test]
+    fn save_rejects_secret_like_allowlist_literal() {
+        let temp = tempdir().expect("tempdir");
+        let path = temp.path().join("approvals.toml");
+        let store = ApprovalStore::new(path);
+        let policy = ApprovalPolicy {
+            version: CURRENT_APPROVAL_POLICY_VERSION,
+            mode: ApprovalMode::Allowlist,
+            allowlist: vec!["echo sk-live-secret-12345678901234567890".to_string()],
+        };
+
+        let err = store
+            .save(&policy)
+            .expect_err("secret-like allowlist should fail");
+        assert!(err.to_string().contains("blocked approvals policy state"));
     }
 }

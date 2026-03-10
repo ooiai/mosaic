@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::write_pretty_state_json_file;
 
 const MCP_SERVERS_VERSION: u32 = 1;
 
@@ -22,6 +23,8 @@ pub struct McpServer {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_from: BTreeMap<String, String>,
     pub cwd: Option<String>,
     pub enabled: bool,
     pub created_at: DateTime<Utc>,
@@ -37,8 +40,37 @@ pub struct AddMcpServerInput {
     pub command: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub env_from: BTreeMap<String, String>,
     pub cwd: Option<String>,
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateMcpServerInput {
+    pub name: Option<String>,
+    pub command: Option<String>,
+    pub args: Option<Vec<String>>,
+    pub clear_args: bool,
+    pub env: Option<BTreeMap<String, String>>,
+    pub clear_env: bool,
+    pub env_from: Option<BTreeMap<String, String>>,
+    pub clear_env_from: bool,
+    pub cwd: Option<String>,
+    pub clear_cwd: bool,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateMcpServerResult {
+    pub server: McpServer,
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct McpEnvReferenceStatus {
+    pub key: String,
+    pub source: String,
+    pub present: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -49,6 +81,7 @@ pub struct McpServerCheck {
     pub enabled: bool,
     pub executable_resolved: Option<String>,
     pub cwd_exists: bool,
+    pub env_refs: Vec<McpEnvReferenceStatus>,
     pub issues: Vec<String>,
 }
 
@@ -150,6 +183,15 @@ impl McpStore {
         for key in input.env.keys() {
             validate_env_key(key)?;
         }
+        for (key, source) in &input.env_from {
+            validate_env_key(key)?;
+            validate_env_key(source)?;
+            if input.env.contains_key(key) {
+                return Err(MosaicError::Validation(format!(
+                    "mcp server env key '{key}' cannot be configured via both env and env_from"
+                )));
+            }
+        }
 
         let mut file = self.load_file()?;
         let id = input
@@ -175,6 +217,7 @@ impl McpStore {
                 .map(|value| value.trim().to_string())
                 .collect(),
             env: input.env,
+            env_from: input.env_from,
             cwd,
             enabled: input.enabled,
             created_at: now,
@@ -197,6 +240,163 @@ impl McpStore {
         }
         self.save_file(&file)?;
         Ok(true)
+    }
+
+    pub fn update(
+        &self,
+        server_id: &str,
+        input: UpdateMcpServerInput,
+    ) -> Result<UpdateMcpServerResult> {
+        let server_id = normalize_server_id(server_id)?;
+        let mut file = self.load_file()?;
+        let server = file
+            .servers
+            .iter_mut()
+            .find(|server| server.id == server_id)
+            .ok_or_else(|| {
+                MosaicError::Validation(format!("mcp server '{server_id}' not found"))
+            })?;
+
+        if input.name.is_none()
+            && input.command.is_none()
+            && input.args.is_none()
+            && !input.clear_args
+            && input.env.is_none()
+            && !input.clear_env
+            && input.env_from.is_none()
+            && !input.clear_env_from
+            && input.cwd.is_none()
+            && !input.clear_cwd
+            && input.enabled.is_none()
+        {
+            return Err(MosaicError::Validation(
+                "mcp update requires at least one field change".to_string(),
+            ));
+        }
+
+        if input.clear_args && input.args.is_some() {
+            return Err(MosaicError::Validation(
+                "use either --arg or --clear-args".to_string(),
+            ));
+        }
+        if input.clear_env && input.env.is_some() {
+            return Err(MosaicError::Validation(
+                "use either --env or --clear-env".to_string(),
+            ));
+        }
+        if input.clear_env_from && input.env_from.is_some() {
+            return Err(MosaicError::Validation(
+                "use either --env-from or --clear-env-from".to_string(),
+            ));
+        }
+        if input.clear_cwd && input.cwd.is_some() {
+            return Err(MosaicError::Validation(
+                "use either --cwd or --clear-cwd".to_string(),
+            ));
+        }
+
+        let mut next = server.clone();
+        let mut changed = false;
+
+        if let Some(name) = input.name {
+            let name = normalize_non_empty("mcp server name", &name)?;
+            if next.name != name {
+                next.name = name;
+                changed = true;
+            }
+        }
+
+        if let Some(command) = input.command {
+            let command = normalize_non_empty("mcp server command", &command)?;
+            if next.command != command {
+                next.command = command;
+                changed = true;
+            }
+        }
+
+        if input.clear_args {
+            if !next.args.is_empty() {
+                next.args.clear();
+                changed = true;
+            }
+        } else if let Some(args) = input.args {
+            let args = args
+                .into_iter()
+                .map(|value| value.trim().to_string())
+                .collect();
+            if next.args != args {
+                next.args = args;
+                changed = true;
+            }
+        }
+
+        if input.clear_env {
+            if !next.env.is_empty() {
+                next.env.clear();
+                changed = true;
+            }
+        } else if let Some(env) = input.env {
+            for key in env.keys() {
+                validate_env_key(key)?;
+            }
+            if next.env != env {
+                next.env = env;
+                changed = true;
+            }
+        }
+
+        if input.clear_env_from {
+            if !next.env_from.is_empty() {
+                next.env_from.clear();
+                changed = true;
+            }
+        } else if let Some(env_from) = input.env_from {
+            for (key, source) in &env_from {
+                validate_env_key(key)?;
+                validate_env_key(source)?;
+            }
+            if next.env_from != env_from {
+                next.env_from = env_from;
+                changed = true;
+            }
+        }
+
+        if let Some(cwd) = input.cwd {
+            let cwd = normalize_non_empty("mcp server cwd", &cwd)?;
+            if next.cwd.as_deref() != Some(cwd.as_str()) {
+                next.cwd = Some(cwd);
+                changed = true;
+            }
+        } else if input.clear_cwd && next.cwd.is_some() {
+            next.cwd = None;
+            changed = true;
+        }
+
+        if let Some(enabled) = input.enabled
+            && next.enabled != enabled
+        {
+            next.enabled = enabled;
+            changed = true;
+        }
+
+        for key in next.env.keys() {
+            if next.env_from.contains_key(key) {
+                return Err(MosaicError::Validation(format!(
+                    "mcp server env key '{key}' cannot be configured via both env and env_from"
+                )));
+            }
+        }
+
+        if changed {
+            next.updated_at = Utc::now();
+            *server = next.clone();
+            self.save_file(&file)?;
+        }
+
+        Ok(UpdateMcpServerResult {
+            server: next,
+            changed,
+        })
     }
 
     pub fn set_enabled(&self, server_id: &str, enabled: bool) -> Result<McpServer> {
@@ -227,6 +427,40 @@ impl McpStore {
                 MosaicError::Validation(format!("mcp server '{server_id}' not found"))
             })?;
         server.cwd = normalize_optional(&cwd);
+        server.updated_at = Utc::now();
+        let updated = server.clone();
+        self.save_file(&file)?;
+        Ok(updated)
+    }
+
+    pub fn merge_env_from(
+        &self,
+        server_id: &str,
+        updates: &BTreeMap<String, String>,
+    ) -> Result<McpServer> {
+        let server_id = normalize_server_id(server_id)?;
+        let mut file = self.load_file()?;
+        let server = file
+            .servers
+            .iter_mut()
+            .find(|server| server.id == server_id)
+            .ok_or_else(|| {
+                MosaicError::Validation(format!("mcp server '{server_id}' not found"))
+            })?;
+
+        for (key, source) in updates {
+            validate_env_key(key)?;
+            validate_env_key(source)?;
+            if server.env.contains_key(key) {
+                return Err(MosaicError::Validation(format!(
+                    "mcp server env key '{key}' cannot be configured via both env and env_from"
+                )));
+            }
+        }
+
+        for (key, source) in updates {
+            server.env_from.insert(key.clone(), source.clone());
+        }
         server.updated_at = Utc::now();
         let updated = server.clone();
         self.save_file(&file)?;
@@ -367,11 +601,7 @@ impl McpStore {
 
     fn save_file(&self, file: &McpServersFile) -> Result<()> {
         self.ensure_dirs()?;
-        let payload = serde_json::to_string_pretty(file).map_err(|err| {
-            MosaicError::Validation(format!("failed to encode mcp servers JSON: {err}"))
-        })?;
-        std::fs::write(&self.path, payload)?;
-        Ok(())
+        write_pretty_state_json_file(&self.path, file, "mcp servers state")
     }
 }
 
@@ -444,6 +674,31 @@ fn validate_env_key(key: &str) -> Result<()> {
     Ok(())
 }
 
+fn resolve_server_env(
+    server: &McpServer,
+) -> (BTreeMap<String, String>, Vec<McpEnvReferenceStatus>) {
+    let mut merged = server.env.clone();
+    let mut refs = Vec::with_capacity(server.env_from.len());
+    for (key, source) in &server.env_from {
+        match std::env::var(source) {
+            Ok(value) => {
+                merged.insert(key.clone(), value);
+                refs.push(McpEnvReferenceStatus {
+                    key: key.clone(),
+                    source: source.clone(),
+                    present: true,
+                });
+            }
+            Err(_) => refs.push(McpEnvReferenceStatus {
+                key: key.clone(),
+                source: source.clone(),
+                present: false,
+            }),
+        }
+    }
+    (merged, refs)
+}
+
 fn resolve_executable(command: &str) -> Option<PathBuf> {
     let command = command.trim();
     if command.is_empty() {
@@ -476,6 +731,7 @@ fn evaluate_server_check(server: &McpServer) -> McpServerCheck {
     let checked_at = Utc::now();
     let mut issues = Vec::new();
     let resolved = resolve_executable(&server.command);
+    let (_, env_refs) = resolve_server_env(server);
     if !server.enabled {
         issues.push("server is disabled".to_string());
     }
@@ -496,6 +752,14 @@ fn evaluate_server_check(server: &McpServer) -> McpServerCheck {
                 .unwrap_or_else(|| "cwd does not exist or is not a directory".to_string()),
         );
     }
+    for env_ref in &env_refs {
+        if !env_ref.present {
+            issues.push(format!(
+                "environment source '{}' for key '{}' is missing",
+                env_ref.source, env_ref.key
+            ));
+        }
+    }
 
     McpServerCheck {
         server_id: server.id.clone(),
@@ -504,6 +768,7 @@ fn evaluate_server_check(server: &McpServer) -> McpServerCheck {
         enabled: server.enabled,
         executable_resolved: resolved.map(|path| path.display().to_string()),
         cwd_exists,
+        env_refs,
         issues,
     }
 }
@@ -531,8 +796,9 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
     if let Some(cwd) = server.cwd.as_deref() {
         command.current_dir(cwd);
     }
-    if !server.env.is_empty() {
-        command.envs(&server.env);
+    let (resolved_env, _) = resolve_server_env(server);
+    if !resolved_env.is_empty() {
+        command.envs(&resolved_env);
     }
 
     let mut child = match command.spawn() {
@@ -840,7 +1106,7 @@ mod tests {
         let store = McpStore::new(path);
 
         let mut env = BTreeMap::new();
-        env.insert("MCP_TOKEN".to_string(), "token".to_string());
+        env.insert("MCP_MODE".to_string(), "token".to_string());
 
         let created = store
             .add(AddMcpServerInput {
@@ -852,6 +1118,7 @@ mod tests {
                     .to_string(),
                 args: vec!["--version".to_string()],
                 env,
+                env_from: BTreeMap::new(),
                 cwd: Some(temp.path().display().to_string()),
                 enabled: true,
             })
@@ -918,6 +1185,7 @@ mod tests {
                 command: "__missing_command__".to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: None,
                 enabled: true,
             })
@@ -932,6 +1200,232 @@ mod tests {
                 .iter()
                 .any(|issue| issue.contains("not found"))
         );
+    }
+
+    #[test]
+    fn add_rejects_secret_like_env_literal() {
+        let temp = tempdir().expect("tempdir");
+        let path = mcp_servers_file_path(&temp.path().join("data"));
+        let store = McpStore::new(path);
+
+        let mut env = BTreeMap::new();
+        env.insert(
+            "OPENAI_API_KEY".to_string(),
+            "sk-live-secret-12345678901234567890".to_string(),
+        );
+
+        let err = store
+            .add(AddMcpServerInput {
+                id: Some("secret".to_string()),
+                name: "Secret".to_string(),
+                command: "echo".to_string(),
+                args: Vec::new(),
+                env,
+                env_from: BTreeMap::new(),
+                cwd: None,
+                enabled: true,
+            })
+            .expect_err("secret-like env should fail");
+        assert!(err.to_string().contains("blocked mcp servers state"));
+    }
+
+    #[test]
+    fn add_allows_env_from_secret_key_reference_and_resolves_present_source() {
+        let temp = tempdir().expect("tempdir");
+        let path = mcp_servers_file_path(&temp.path().join("data"));
+        let store = McpStore::new(path);
+
+        let mut env_from = BTreeMap::new();
+        env_from.insert("OPENAI_API_KEY".to_string(), "PATH".to_string());
+
+        let created = store
+            .add(AddMcpServerInput {
+                id: Some("env-from".to_string()),
+                name: "Env From".to_string(),
+                command: std::env::current_exe()
+                    .expect("current exe")
+                    .display()
+                    .to_string(),
+                args: vec!["--version".to_string()],
+                env: BTreeMap::new(),
+                env_from,
+                cwd: Some(temp.path().display().to_string()),
+                enabled: true,
+            })
+            .expect("add");
+
+        assert_eq!(created.env_from["OPENAI_API_KEY"], "PATH");
+        let checked = store.check("env-from").expect("check");
+        assert!(checked.check.healthy);
+        assert_eq!(checked.check.env_refs.len(), 1);
+        assert_eq!(checked.check.env_refs[0].key, "OPENAI_API_KEY");
+        assert_eq!(checked.check.env_refs[0].source, "PATH");
+        assert!(checked.check.env_refs[0].present);
+    }
+
+    #[test]
+    fn check_reports_missing_env_from_source() {
+        let temp = tempdir().expect("tempdir");
+        let path = mcp_servers_file_path(&temp.path().join("data"));
+        let store = McpStore::new(path);
+
+        let mut env_from = BTreeMap::new();
+        env_from.insert(
+            "OPENAI_API_KEY".to_string(),
+            "MOSAIC_TEST_MCP_MISSING_ENV_SOURCE".to_string(),
+        );
+
+        store
+            .add(AddMcpServerInput {
+                id: Some("missing-env".to_string()),
+                name: "Missing Env".to_string(),
+                command: std::env::current_exe()
+                    .expect("current exe")
+                    .display()
+                    .to_string(),
+                args: vec!["--version".to_string()],
+                env: BTreeMap::new(),
+                env_from,
+                cwd: Some(temp.path().display().to_string()),
+                enabled: true,
+            })
+            .expect("add");
+
+        let checked = store.check("missing-env").expect("check");
+        assert!(!checked.check.healthy);
+        assert_eq!(checked.check.env_refs.len(), 1);
+        assert_eq!(checked.check.env_refs[0].key, "OPENAI_API_KEY");
+        assert_eq!(
+            checked.check.env_refs[0].source,
+            "MOSAIC_TEST_MCP_MISSING_ENV_SOURCE"
+        );
+        assert!(!checked.check.env_refs[0].present);
+        assert!(
+            checked
+                .check
+                .issues
+                .iter()
+                .any(|issue| issue.contains("MOSAIC_TEST_MCP_MISSING_ENV_SOURCE"))
+        );
+    }
+
+    #[test]
+    fn merge_env_from_updates_existing_mapping() {
+        let temp = tempdir().expect("tempdir");
+        let path = mcp_servers_file_path(&temp.path().join("data"));
+        let store = McpStore::new(path);
+
+        let mut env_from = BTreeMap::new();
+        env_from.insert(
+            "OPENAI_API_KEY".to_string(),
+            "MOSAIC_TEST_MCP_OLD_ENV_SOURCE".to_string(),
+        );
+
+        store
+            .add(AddMcpServerInput {
+                id: Some("repair-env".to_string()),
+                name: "Repair Env".to_string(),
+                command: std::env::current_exe()
+                    .expect("current exe")
+                    .display()
+                    .to_string(),
+                args: vec!["--version".to_string()],
+                env: BTreeMap::new(),
+                env_from,
+                cwd: Some(temp.path().display().to_string()),
+                enabled: true,
+            })
+            .expect("add");
+
+        let mut updates = BTreeMap::new();
+        updates.insert("OPENAI_API_KEY".to_string(), "PATH".to_string());
+        let updated = store
+            .merge_env_from("repair-env", &updates)
+            .expect("merge env");
+        assert_eq!(updated.env_from["OPENAI_API_KEY"], "PATH");
+
+        let checked = store.check("repair-env").expect("check");
+        assert!(checked.check.healthy);
+        assert!(checked.check.env_refs[0].present);
+    }
+
+    #[test]
+    fn update_replaces_selected_fields_and_supports_noop() {
+        let temp = tempdir().expect("tempdir");
+        let path = mcp_servers_file_path(&temp.path().join("data"));
+        let store = McpStore::new(path);
+
+        let mut env = BTreeMap::new();
+        env.insert("MCP_MODE".to_string(), "before".to_string());
+        let mut env_from = BTreeMap::new();
+        env_from.insert("MCP_PATH".to_string(), "PATH".to_string());
+
+        store
+            .add(AddMcpServerInput {
+                id: Some("update-target".to_string()),
+                name: "Update Target".to_string(),
+                command: std::env::current_exe()
+                    .expect("current exe")
+                    .display()
+                    .to_string(),
+                args: vec!["--version".to_string()],
+                env,
+                env_from,
+                cwd: Some(temp.path().display().to_string()),
+                enabled: true,
+            })
+            .expect("add");
+
+        let mut next_env = BTreeMap::new();
+        next_env.insert("MCP_MODE".to_string(), "after".to_string());
+        let mut next_env_from = BTreeMap::new();
+        next_env_from.insert("OPENAI_API_KEY".to_string(), "PATH".to_string());
+
+        let updated = store
+            .update(
+                "update-target",
+                UpdateMcpServerInput {
+                    name: Some("Updated".to_string()),
+                    command: None,
+                    args: None,
+                    clear_args: true,
+                    env: Some(next_env),
+                    clear_env: false,
+                    env_from: Some(next_env_from),
+                    clear_env_from: false,
+                    cwd: None,
+                    clear_cwd: true,
+                    enabled: Some(false),
+                },
+            )
+            .expect("update");
+        assert!(updated.changed);
+        assert_eq!(updated.server.name, "Updated");
+        assert!(updated.server.args.is_empty());
+        assert_eq!(updated.server.env["MCP_MODE"], "after");
+        assert_eq!(updated.server.env_from["OPENAI_API_KEY"], "PATH");
+        assert!(updated.server.cwd.is_none());
+        assert!(!updated.server.enabled);
+
+        let noop = store
+            .update(
+                "update-target",
+                UpdateMcpServerInput {
+                    name: Some("Updated".to_string()),
+                    command: None,
+                    args: None,
+                    clear_args: false,
+                    env: None,
+                    clear_env: false,
+                    env_from: None,
+                    clear_env_from: false,
+                    cwd: None,
+                    clear_cwd: false,
+                    enabled: None,
+                },
+            )
+            .expect("noop update");
+        assert!(!noop.changed);
     }
 
     #[test]
@@ -950,6 +1444,7 @@ mod tests {
                     .to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: None,
                 enabled: true,
             })
@@ -961,6 +1456,7 @@ mod tests {
                 command: "__missing_cmd__".to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: None,
                 enabled: true,
             })
@@ -990,6 +1486,7 @@ mod tests {
                 command: "__missing_command__".to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: None,
                 enabled: true,
             })
@@ -1038,6 +1535,7 @@ mod tests {
                 command: script_path.display().to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: Some(temp.path().display().to_string()),
                 enabled: true,
             })
@@ -1084,6 +1582,7 @@ mod tests {
                 command: script_path.display().to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: Some(temp.path().display().to_string()),
                 enabled: true,
             })
@@ -1120,6 +1619,7 @@ mod tests {
                     .to_string(),
                 args: vec!["--version".to_string()],
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: Some(temp.path().display().to_string()),
                 enabled: true,
             })
@@ -1131,6 +1631,7 @@ mod tests {
                 command: "__missing_command__".to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
                 cwd: Some(temp.path().display().to_string()),
                 enabled: true,
             })

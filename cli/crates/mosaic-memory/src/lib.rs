@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::{write_pretty_state_json_file, write_pretty_state_toml_file};
 
 const DEFAULT_MAX_FILES: usize = 500;
 const DEFAULT_MAX_FILE_SIZE: usize = 256 * 1024;
@@ -235,12 +236,7 @@ impl MemoryCleanupPolicyStore {
         let mut policy = policy.clone();
         policy.version = CURRENT_MEMORY_CLEANUP_POLICY_VERSION;
         policy.validate()?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let rendered = toml::to_string_pretty(&policy)?;
-        std::fs::write(&self.path, rendered)?;
-        Ok(())
+        write_pretty_state_toml_file(&self.path, &policy, "memory cleanup policy state")
     }
 
     pub fn mark_run(&self, removed_count: usize) -> Result<MemoryCleanupPolicy> {
@@ -514,14 +510,7 @@ impl MemoryStore {
     }
 
     fn save_status(&self, status: &MemoryStatus) -> Result<()> {
-        if let Some(parent) = self.status_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let encoded = serde_json::to_string_pretty(status).map_err(|err| {
-            MosaicError::Validation(format!("failed to encode memory status JSON: {err}"))
-        })?;
-        std::fs::write(&self.status_path, encoded)?;
-        Ok(())
+        write_pretty_state_json_file(&self.status_path, status, "memory status state")
     }
 
     fn load_documents(&self) -> Result<Vec<MemoryDocument>> {

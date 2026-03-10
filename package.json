@@ -12,6 +12,10 @@
     "build:web": "pnpm -C apps/web build",
     "preview:web": "pnpm -C apps/web preview",
     "lint:web": "pnpm -C apps/web lint",
-    "typecheck:web": "pnpm -C apps/web typecheck"
+    "typecheck:web": "pnpm -C apps/web typecheck",
+    "dev:macos": "cd cli && cargo build --release -p mosaic-cli && cd ../apps/macos && swift run MosaicMacApp",
+    "build:macos": "cd apps/macos && swift build -c release",
+    "test:macos": "cd apps/macos && swift test",
+    "package:macos": "./apps/macos/scripts/package_app.sh"
   }
 }

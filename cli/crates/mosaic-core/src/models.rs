@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{MosaicError, Result};
+use crate::privacy::write_pretty_state_toml_file;
 
 const CURRENT_MODELS_VERSION: u32 = 1;
 
@@ -115,12 +116,7 @@ impl ModelRoutingStore {
         config.version = CURRENT_MODELS_VERSION;
         config.normalize();
         config.validate()?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let rendered = toml::to_string_pretty(&config)?;
-        std::fs::write(&self.path, rendered)?;
-        Ok(())
+        write_pretty_state_toml_file(&self.path, &config, "models state")
     }
 
     pub fn profile(&self, profile_name: &str) -> Result<ModelProfileConfig> {
@@ -309,5 +305,16 @@ mod tests {
 
         let profile = store.clear_fallbacks("default").expect("clear fallbacks");
         assert!(profile.fallbacks.is_empty());
+    }
+
+    #[test]
+    fn store_rejects_secret_like_model_literal() {
+        let temp = tempdir().expect("tempdir");
+        let store = ModelRoutingStore::new(temp.path().join("models.toml"));
+
+        let err = store
+            .add_fallback("default", "sk-live-secret-12345678901234567890")
+            .expect_err("secret-like fallback should fail");
+        assert!(err.to_string().contains("blocked models state"));
     }
 }

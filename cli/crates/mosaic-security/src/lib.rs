@@ -8,6 +8,10 @@ use serde_json::{Value, json};
 use walkdir::WalkDir;
 
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::privacy::{
+    StatePersistenceIssue, StatePersistenceIssueKind, inspect_value_for_state_persistence,
+    write_pretty_state_toml_file,
+};
 
 const DEFAULT_MAX_FILES: usize = 800;
 const DEFAULT_MAX_FILE_SIZE: usize = 256 * 1024;
@@ -134,14 +138,7 @@ impl SecurityBaselineConfig {
         let mut normalized = self.clone();
         normalized.validate()?;
         normalized.normalize();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let raw = toml::to_string_pretty(&normalized).map_err(|err| {
-            MosaicError::Validation(format!("failed to encode baseline TOML: {err}"))
-        })?;
-        std::fs::write(path, raw)?;
-        Ok(())
+        write_pretty_state_toml_file(path, &normalized, "security baseline state")
     }
 
     pub fn add_findings(&mut self, findings: &[SecurityFinding]) -> usize {
@@ -319,6 +316,9 @@ fn build_risk_profile(findings: &[SecurityFinding]) -> SecurityRiskProfile {
     if categories.contains("credential_exposure") {
         score = score.saturating_add(10);
     }
+    if categories.contains("state_persistence") {
+        score = score.saturating_add(12);
+    }
     if categories.contains("transport_security") && high > 0 {
         score = score.saturating_add(8);
     }
@@ -341,6 +341,12 @@ fn build_risk_profile(findings: &[SecurityFinding]) -> SecurityRiskProfile {
     if high > 0 && categories.contains("credential_exposure") {
         recommendations.push(
             "Rotate exposed credentials immediately and move secrets to managed secret storage."
+                .to_string(),
+        );
+    }
+    if categories.contains("state_persistence") {
+        recommendations.push(
+            "Remove literal secrets from persisted state/config files and replace them with environment-variable references."
                 .to_string(),
         );
     }
@@ -441,6 +447,12 @@ impl SecurityAuditor {
                 &mut finding_keys,
             );
         }
+
+        scanned_files = scanned_files.saturating_add(scan_state_persistence_files(
+            &root,
+            &mut findings,
+            &mut finding_keys,
+        ));
 
         let high = findings
             .iter()
@@ -740,6 +752,178 @@ fn scan_content(
     }
 }
 
+fn scan_state_persistence_files(
+    root: &Path,
+    findings: &mut Vec<SecurityFinding>,
+    keys: &mut HashSet<String>,
+) -> usize {
+    if root.is_file() {
+        let base = root.parent().unwrap_or(root);
+        return scan_state_persistence_file(base, root, findings, keys) as usize;
+    }
+
+    let mut scanned = 0usize;
+    let mut seen = HashSet::new();
+    let mut bases = vec![root.to_path_buf()];
+    let project_state_root = root.join(".mosaic");
+    if project_state_root.is_dir() {
+        bases.push(project_state_root);
+    }
+
+    for base in bases {
+        for entry in WalkDir::new(&base)
+            .max_depth(6)
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.file_type().is_file())
+        {
+            let path = entry.path();
+            if !seen.insert(path.to_path_buf()) {
+                continue;
+            }
+            scanned = scanned
+                .saturating_add(scan_state_persistence_file(root, path, findings, keys) as usize);
+        }
+    }
+    scanned
+}
+
+fn scan_state_persistence_file(
+    audit_root: &Path,
+    path: &Path,
+    findings: &mut Vec<SecurityFinding>,
+    keys: &mut HashSet<String>,
+) -> bool {
+    let Some(context) = state_persistence_context(audit_root, path) else {
+        return false;
+    };
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(_) => return false,
+    };
+    let Some(value) = parse_state_persistence_value(path, &raw) else {
+        return false;
+    };
+    let relative = relative_path(audit_root, path);
+    for issue in inspect_value_for_state_persistence(&value) {
+        push_finding(
+            findings,
+            keys,
+            state_persistence_finding(&relative, context, &issue),
+        );
+    }
+    true
+}
+
+fn state_persistence_context(audit_root: &Path, path: &Path) -> Option<&'static str> {
+    let relative = relative_path(audit_root, path).replace('\\', "/");
+    match relative.as_str() {
+        ".mosaic/config.toml" | "config.toml" => Some("config state"),
+        ".mosaic/models.toml" | "models.toml" => Some("models state"),
+        ".mosaic/policy/approvals.toml" | "policy/approvals.toml" => Some("approvals policy state"),
+        ".mosaic/policy/sandbox.toml" | "policy/sandbox.toml" => Some("sandbox policy state"),
+        ".mosaic/policy/memory.toml" | "policy/memory.toml" => Some("memory cleanup policy state"),
+        ".mosaic/security/baseline.toml" | "security/baseline.toml" => {
+            Some("security baseline state")
+        }
+        ".mosaic/data/channels.json" | "data/channels.json" => Some("channels state"),
+        ".mosaic/data/mcp-servers.json" | "data/mcp-servers.json" => Some("mcp servers state"),
+        ".mosaic/data/agents.json" | "data/agents.json" => Some("agents state"),
+        ".mosaic/data/agent-routes.json" | "data/agent-routes.json" => Some("agent routes state"),
+        ".mosaic/data/gateway.json" | "data/gateway.json" => Some("gateway runtime state"),
+        ".mosaic/data/gateway-service.json" | "data/gateway-service.json" => {
+            Some("gateway service state")
+        }
+        ".mosaic/data/browser-history.json" | "data/browser-history.json" => {
+            Some("browser history state")
+        }
+        ".mosaic/data/browser-state.json" | "data/browser-state.json" => {
+            Some("browser runtime state")
+        }
+        ".mosaic/data/voicecall-state.json" | "data/voicecall-state.json" => {
+            Some("voicecall state")
+        }
+        ".mosaic/data/nodes.json" | "data/nodes.json" => Some("nodes state"),
+        ".mosaic/data/devices.json" | "data/devices.json" => Some("devices state"),
+        ".mosaic/data/pairing-requests.json" | "data/pairing-requests.json" => {
+            Some("pairing requests state")
+        }
+        ".mosaic/data/hooks.json" | "data/hooks.json" => Some("hooks state"),
+        ".mosaic/data/webhooks.json" | "data/webhooks.json" => Some("webhooks state"),
+        ".mosaic/data/cron-jobs.json" | "data/cron-jobs.json" => Some("cron jobs state"),
+        ".mosaic/data/memory/status.json" | "data/memory/status.json" => {
+            Some("memory status state")
+        }
+        _ => {
+            if relative.starts_with(".mosaic/data/channel-cache/")
+                || relative.starts_with("data/channel-cache/")
+            {
+                return relative.ends_with(".json").then_some("channel cache state");
+            }
+            if relative.starts_with(".mosaic/data/channel-rate/")
+                || relative.starts_with("data/channel-rate/")
+            {
+                return relative.ends_with(".json").then_some("channel rate state");
+            }
+            if (relative.starts_with(".mosaic/data/memory/namespaces/")
+                || relative.starts_with("data/memory/namespaces/"))
+                && relative.ends_with("/status.json")
+            {
+                return Some("memory status state");
+            }
+            None
+        }
+    }
+}
+
+fn parse_state_persistence_value(path: &Path, raw: &str) -> Option<Value> {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("json") => serde_json::from_str::<Value>(raw).ok(),
+        Some("toml") => toml::from_str::<toml::Value>(raw)
+            .ok()
+            .and_then(|value| serde_json::to_value(value).ok()),
+        _ => None,
+    }
+}
+
+fn state_persistence_finding(
+    path: &str,
+    context: &str,
+    issue: &StatePersistenceIssue,
+) -> SecurityFinding {
+    let (title, detail) = match issue.kind {
+        StatePersistenceIssueKind::PrivateKeyMaterial => (
+            "Private key persisted in state/config file",
+            format!("{context} contains private key material at {}", issue.path),
+        ),
+        StatePersistenceIssueKind::SensitiveFieldLiteral => (
+            "Sensitive credential field persisted in state/config file",
+            format!(
+                "{context} stores a literal value in credential-like field {}",
+                issue.path
+            ),
+        ),
+        StatePersistenceIssueKind::SecretLikeLiteral => (
+            "Secret-like literal persisted in state/config file",
+            format!("{context} contains a secret-like literal at {}", issue.path),
+        ),
+    };
+    SecurityFinding {
+        id: format!("sec_{}", uuid::Uuid::new_v4()),
+        fingerprint: String::new(),
+        severity: SecuritySeverity::High,
+        category: "state_persistence".to_string(),
+        title: title.to_string(),
+        detail,
+        path: path.to_string(),
+        line: None,
+        suggestion: Some(
+            "Move the credential out of persisted state/config and reference it via environment variables or a secret manager."
+                .to_string(),
+        ),
+    }
+}
+
 fn push_finding(
     findings: &mut Vec<SecurityFinding>,
     keys: &mut HashSet<String>,
@@ -1010,6 +1194,88 @@ mod tests {
     }
 
     #[test]
+    fn audit_detects_secret_persisted_in_project_state_dir() {
+        let temp = tempdir().expect("tempdir");
+        let state_root = temp.path().join(".mosaic");
+        std::fs::create_dir_all(&state_root).expect("create state root");
+        std::fs::write(
+            state_root.join("config.toml"),
+            r#"version = 1
+active_profile = "default"
+[provider]
+api_key = "sk-live-secret-12345678901234567890"
+"#,
+        )
+        .expect("write config");
+
+        let auditor = SecurityAuditor::new();
+        let report = auditor
+            .audit(SecurityAuditOptions {
+                root: temp.path().to_path_buf(),
+                ..SecurityAuditOptions::default()
+            })
+            .expect("audit report");
+
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.category == "state_persistence")
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.path == ".mosaic/config.toml")
+        );
+        assert!(report.risk.score >= 12);
+    }
+
+    #[test]
+    fn audit_detects_secret_persisted_in_state_json_registry() {
+        let temp = tempdir().expect("tempdir");
+        let data_dir = temp.path().join(".mosaic/data");
+        std::fs::create_dir_all(&data_dir).expect("create data dir");
+        std::fs::write(
+            data_dir.join("mcp-servers.json"),
+            r#"{
+  "version": 1,
+  "servers": [
+    {
+      "id": "secret",
+      "name": "Secret",
+      "command": "echo",
+      "args": [],
+      "env": {
+        "OPENAI_API_KEY": "sk-live-secret-12345678901234567890"
+      },
+      "cwd": null,
+      "enabled": true,
+      "created_at": "2026-03-10T00:00:00Z",
+      "updated_at": "2026-03-10T00:00:00Z",
+      "last_check_at": null,
+      "last_check_error": null
+    }
+  ]
+}"#,
+        )
+        .expect("write registry");
+
+        let auditor = SecurityAuditor::new();
+        let report = auditor
+            .audit(SecurityAuditOptions {
+                root: temp.path().to_path_buf(),
+                ..SecurityAuditOptions::default()
+            })
+            .expect("audit report");
+
+        assert!(report.findings.iter().any(|finding| {
+            finding.category == "state_persistence"
+                && finding.path == ".mosaic/data/mcp-servers.json"
+        }));
+    }
+
+    #[test]
     fn baseline_filters_known_fingerprints() {
         let temp = tempdir().expect("tempdir");
         std::fs::write(
@@ -1057,6 +1323,23 @@ mod tests {
         assert_eq!(loaded.ignored_fingerprints.len(), 1);
         assert_eq!(loaded.ignored_paths.len(), 1);
         assert_eq!(loaded.ignored_categories.len(), 1);
+    }
+
+    #[test]
+    fn baseline_save_rejects_secret_like_literal() {
+        let temp = tempdir().expect("tempdir");
+        let baseline_path = temp.path().join("baseline.toml");
+        let baseline = SecurityBaselineConfig {
+            version: CURRENT_BASELINE_VERSION,
+            ignored_fingerprints: vec!["sk-live-secret-12345678901234567890".to_string()],
+            ignored_paths: Vec::new(),
+            ignored_categories: Vec::new(),
+        };
+
+        let err = baseline
+            .save_to_path(&baseline_path)
+            .expect_err("secret-like baseline should fail");
+        assert!(err.to_string().contains("blocked security baseline state"));
     }
 
     #[test]
