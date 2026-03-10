@@ -9,11 +9,12 @@ use mosaic_ops::{
 };
 
 use super::{
-    Cli, DeviceStatus, NodeRuntimeStatus, NodesArgs, NodesCommand, PairingStatus, Result,
-    devices_file_path, dispatch_gateway_call, load_devices_or_default, load_nodes_or_default,
-    load_pairing_requests_or_default, next_pairing_seq, nodes_file_path,
-    pairing_requests_file_path, parse_json_input, print_json, resolve_state_paths, save_devices,
-    save_nodes, save_pairing_requests,
+    Cli, DeviceStatus, NodeRuntimeStatus, NodeTelemetryEventInput, NodesArgs, NodesCommand,
+    PairingStatus, Result, devices_file_path, dispatch_gateway_call, load_devices_or_default,
+    load_nodes_or_default, load_pairing_requests_or_default, next_pairing_seq,
+    nodes_events_file_path, nodes_file_path, pairing_requests_file_path, parse_json_input,
+    print_json, resolve_state_paths, save_devices, save_json_file, save_nodes,
+    save_pairing_requests, write_nodes_event,
 };
 
 pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
@@ -22,6 +23,7 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
     let nodes_path = nodes_file_path(&paths.data_dir);
     let devices_path = devices_file_path(&paths.data_dir);
     let pairings_path = pairing_requests_file_path(&paths.data_dir);
+    let events_path = nodes_events_file_path(&paths.data_dir);
     let mut nodes = load_nodes_or_default(&nodes_path)?;
 
     match args.command {
@@ -159,6 +161,7 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
             node_id,
             stale_after_minutes,
             repair,
+            report_out,
         } => {
             if stale_after_minutes == 0 {
                 return Err(MosaicError::Validation(
@@ -377,22 +380,53 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                 "saved_pairings": pairings_changed,
             });
 
-            if cli.json {
-                print_json(&json!({
-                    "ok": true,
-                    "node_scope": node_scope,
-                    "stale_after_minutes": stale_after_minutes,
-                    "cutoff": cutoff.to_rfc3339(),
-                    "repair": repair,
-                    "summary": summary,
-                    "issues": issues,
-                    "actions": actions,
-                    "paths": {
-                        "nodes": nodes_path.display().to_string(),
-                        "devices": devices_path.display().to_string(),
-                        "pairings": pairings_path.display().to_string(),
+            let payload = json!({
+                "ok": true,
+                "node_scope": node_scope,
+                "stale_after_minutes": stale_after_minutes,
+                "cutoff": cutoff.to_rfc3339(),
+                "repair": repair,
+                "summary": summary,
+                "issues": issues,
+                "actions": actions,
+                "report_out": report_out.as_ref().map(|path| path.to_string()),
+                "paths": {
+                    "nodes": nodes_path.display().to_string(),
+                    "devices": devices_path.display().to_string(),
+                    "pairings": pairings_path.display().to_string(),
+                    "events": events_path.display().to_string(),
+                },
+            });
+            if let Some(path) = report_out.as_deref() {
+                save_json_file(std::path::Path::new(path), &payload)?;
+            }
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "nodes",
+                    action: "diagnose",
+                    target_type: if node_scope.is_some() {
+                        "node"
+                    } else {
+                        "scope"
                     },
-                }));
+                    target_id: node_scope.clone().unwrap_or_else(|| "all".to_string()),
+                    success: issues_total == 0,
+                    detail: format!(
+                        "nodes diagnose issues={} actions_applied={} stale_after={}m repair={}",
+                        issues_total, actions_applied, stale_after_minutes, repair
+                    ),
+                    node_id: node_scope.clone(),
+                    device_id: None,
+                    pairing_id: None,
+                    repair: Some(repair),
+                    issues_total: Some(issues_total),
+                    actions_applied: Some(actions_applied),
+                },
+            );
+
+            if cli.json {
+                print_json(&payload);
             } else {
                 println!(
                     "nodes diagnose scope={} stale_after={}m repair={}",
@@ -432,6 +466,9 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                         );
                     }
                 }
+                if let Some(path) = report_out.as_deref() {
+                    println!("report: {path}");
+                }
             }
         }
         NodesCommand::Run { node_id, command } => {
@@ -470,7 +507,7 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
             };
             let gateway_path = paths.data_dir.join("gateway.json");
             let gateway_service_path = paths.data_dir.join("gateway-service.json");
-            let gateway = dispatch_gateway_call(
+            let gateway = match dispatch_gateway_call(
                 &gateway_path,
                 &gateway_service_path,
                 "nodes.run",
@@ -480,7 +517,30 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                     "approved_by": approved_by.clone(),
                 }),
             )
-            .await?;
+            .await
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    write_nodes_event(
+                        &events_path,
+                        NodeTelemetryEventInput {
+                            scope: "nodes",
+                            action: "run",
+                            target_type: "node",
+                            target_id: node_id.clone(),
+                            success: false,
+                            detail: err.to_string(),
+                            node_id: Some(node_id.clone()),
+                            device_id: None,
+                            pairing_id: None,
+                            repair: None,
+                            issues_total: None,
+                            actions_applied: None,
+                        },
+                    );
+                    return Err(err);
+                }
+            };
             let accepted = gateway
                 .result
                 .get("ok")
@@ -491,6 +551,26 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                 .get("status")
                 .and_then(Value::as_str)
                 .unwrap_or(if accepted { "accepted" } else { "failed" });
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "nodes",
+                    action: "run",
+                    target_type: "node",
+                    target_id: node_id.clone(),
+                    success: accepted,
+                    detail: format!(
+                        "nodes.run status={} gateway={} request_id={}",
+                        status, gateway.host, gateway.request_id
+                    ),
+                    node_id: Some(node_id.clone()),
+                    device_id: None,
+                    pairing_id: None,
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
 
             if cli.json {
                 print_json(&json!({
@@ -540,7 +620,7 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                 .unwrap_or(Value::Null);
             let gateway_path = paths.data_dir.join("gateway.json");
             let gateway_service_path = paths.data_dir.join("gateway-service.json");
-            let gateway = dispatch_gateway_call(
+            let gateway = match dispatch_gateway_call(
                 &gateway_path,
                 &gateway_service_path,
                 "nodes.invoke",
@@ -550,7 +630,55 @@ pub(super) async fn handle_nodes(cli: &Cli, args: NodesArgs) -> Result<()> {
                     "params": parsed_params.clone(),
                 }),
             )
-            .await?;
+            .await
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    write_nodes_event(
+                        &events_path,
+                        NodeTelemetryEventInput {
+                            scope: "nodes",
+                            action: "invoke",
+                            target_type: "node",
+                            target_id: node_id.clone(),
+                            success: false,
+                            detail: err.to_string(),
+                            node_id: Some(node_id.clone()),
+                            device_id: None,
+                            pairing_id: None,
+                            repair: None,
+                            issues_total: None,
+                            actions_applied: None,
+                        },
+                    );
+                    return Err(err);
+                }
+            };
+            let invoke_ok = gateway
+                .result
+                .get("ok")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            write_nodes_event(
+                &events_path,
+                NodeTelemetryEventInput {
+                    scope: "nodes",
+                    action: "invoke",
+                    target_type: "node",
+                    target_id: node_id.clone(),
+                    success: invoke_ok,
+                    detail: format!(
+                        "nodes.invoke method={} gateway={} request_id={}",
+                        method, gateway.host, gateway.request_id
+                    ),
+                    node_id: Some(node_id.clone()),
+                    device_id: None,
+                    pairing_id: None,
+                    repair: None,
+                    issues_total: None,
+                    actions_applied: None,
+                },
+            );
 
             if cli.json {
                 print_json(&json!({

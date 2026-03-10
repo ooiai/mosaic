@@ -129,6 +129,7 @@ public struct ConversationState: Equatable, Sendable {
     public var sessionID: String?
     public var status: RuntimeStripState
     public var messages: [ConversationMessage]
+    public var suggestedPrompts: [String]
     public var composerText: String
     public var isSending: Bool
     public var inlineError: String?
@@ -138,6 +139,7 @@ public struct ConversationState: Equatable, Sendable {
         sessionID: String?,
         status: RuntimeStripState,
         messages: [ConversationMessage],
+        suggestedPrompts: [String] = [],
         composerText: String = "",
         isSending: Bool = false,
         inlineError: String? = nil
@@ -146,6 +148,7 @@ public struct ConversationState: Equatable, Sendable {
         self.sessionID = sessionID
         self.status = status
         self.messages = messages
+        self.suggestedPrompts = suggestedPrompts
         self.composerText = composerText
         self.isSending = isSending
         self.inlineError = inlineError
@@ -211,6 +214,8 @@ public struct WorkbenchState: Equatable, Sendable {
                 quickActions: [
                     QuickAction(id: "new-thread", title: "New Thread", systemImage: "square.and.pencil"),
                     QuickAction(id: "refresh", title: "Refresh", systemImage: "arrow.clockwise"),
+                    QuickAction(id: "switch-workspace", title: "Switch Workspace", systemImage: "folder"),
+                    QuickAction(id: "reveal-workspace", title: "Reveal in Finder", systemImage: "folder.badge.gearshape"),
                     QuickAction(id: "settings", title: "Settings", systemImage: "gearshape"),
                 ]
             ),
@@ -222,7 +227,12 @@ public struct WorkbenchState: Equatable, Sendable {
                     detail: "Select a thread or start a new conversation.",
                     tone: .quiet
                 ),
-                messages: []
+                messages: [],
+                suggestedPrompts: [
+                    "Summarize this workspace and identify the important moving parts.",
+                    "Review the current runtime health for this project.",
+                    "Propose the next three concrete tasks for this workspace.",
+                ]
             ),
             inspector: InspectorState(
                 sections: [

@@ -28,22 +28,36 @@ public actor WorkspaceStore: WorkspaceStoring {
 
     public func save(workspace: WorkspaceReference) async {
         var workspaces = loadWorkspaces()
+        let normalizedPath = normalize(path: workspace.path)
         let updated = WorkspaceReference(
             id: workspace.id,
             name: workspace.name,
             path: workspace.path,
             lastOpenedAt: Date()
         )
-        if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
-            workspaces[index] = updated
+        if let index = workspaces.firstIndex(where: {
+            $0.id == workspace.id || normalize(path: $0.path) == normalizedPath
+        }) {
+            let preservedID = workspaces[index].id
+            workspaces[index] = WorkspaceReference(
+                id: preservedID,
+                name: updated.name,
+                path: updated.path,
+                lastOpenedAt: updated.lastOpenedAt
+            )
         } else {
             workspaces.append(updated)
         }
         persist(workspaces)
-        defaults.set(updated.id.uuidString, forKey: selectedWorkspaceKey)
+        defaults.set((workspaces.first { normalize(path: $0.path) == normalizedPath }?.id ?? updated.id).uuidString, forKey: selectedWorkspaceKey)
     }
 
     public func select(workspaceID: UUID) async {
+        var workspaces = loadWorkspaces()
+        if let index = workspaces.firstIndex(where: { $0.id == workspaceID }) {
+            workspaces[index].lastOpenedAt = Date()
+            persist(workspaces)
+        }
         defaults.set(workspaceID.uuidString, forKey: selectedWorkspaceKey)
     }
 
@@ -61,6 +75,10 @@ public actor WorkspaceStore: WorkspaceStoring {
         if let data = try? JSONEncoder().encode(workspaces) {
             defaults.set(data, forKey: workspacesKey)
         }
+    }
+
+    private func normalize(path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 }
 
@@ -84,7 +102,10 @@ public actor InMemoryWorkspaceStore: WorkspaceStoring {
     }
 
     public func save(workspace: WorkspaceReference) async {
-        if let index = workspaces.firstIndex(where: { $0.id == workspace.id }) {
+        let normalizedPath = URL(fileURLWithPath: workspace.path).standardizedFileURL.path
+        if let index = workspaces.firstIndex(where: {
+            $0.id == workspace.id || URL(fileURLWithPath: $0.path).standardizedFileURL.path == normalizedPath
+        }) {
             workspaces[index] = workspace
         } else {
             workspaces.append(workspace)
@@ -93,6 +114,9 @@ public actor InMemoryWorkspaceStore: WorkspaceStoring {
     }
 
     public func select(workspaceID: UUID) async {
+        if let index = workspaces.firstIndex(where: { $0.id == workspaceID }) {
+            workspaces[index].lastOpenedAt = Date()
+        }
         selectedID = workspaceID
     }
 }

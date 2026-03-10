@@ -183,6 +183,12 @@ pub(super) async fn collect_gateway_runtime_status(
         } else {
             probe_gateway_health(&value.host, value.port).await
         }
+    } else if let Some(value) = &service {
+        if gateway_test_mode() {
+            false
+        } else {
+            probe_gateway_health(&value.host, value.port).await
+        }
     } else {
         false
     };

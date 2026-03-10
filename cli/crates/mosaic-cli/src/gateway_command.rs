@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Instant;
 
@@ -172,69 +173,97 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                 collect_gateway_runtime_status(&gateway_path, &gateway_service_path).await?;
             let mut repair_check: Option<(bool, String)> = None;
             if repair {
+                let repair_target = status
+                    .state
+                    .as_ref()
+                    .map(|state| (state.host.clone(), state.port))
+                    .or_else(|| {
+                        status
+                            .service
+                            .as_ref()
+                            .map(|service| (service.host.clone(), service.port))
+                    })
+                    .unwrap_or_else(|| (status.target_host.clone(), status.target_port));
+                let service_needs_reconcile = status.service.as_ref().is_none_or(|service| {
+                    !service.installed
+                        || service.host != repair_target.0
+                        || service.port != repair_target.1
+                });
                 if status.endpoint_healthy {
-                    repair_check = Some((
-                        true,
-                        "auto-repair skipped: endpoint already healthy".to_string(),
-                    ));
-                } else {
-                    match resolve_gateway_start_target(
-                        &gateway_service_path,
-                        None,
-                        None,
-                        "127.0.0.1",
-                        8787,
-                    ) {
-                        Ok((target_host, target_port)) => {
-                            if let Err(err) = upsert_gateway_service(
-                                &gateway_service_path,
-                                Some(target_host.clone()),
-                                Some(target_port),
-                                true,
-                            ) {
-                                repair_check = Some((false, format!("auto-repair failed: {err}")));
-                            } else {
-                                match start_gateway_runtime(
-                                    cli,
+                    if service_needs_reconcile {
+                        match upsert_gateway_service(
+                            &gateway_service_path,
+                            Some(repair_target.0.clone()),
+                            Some(repair_target.1),
+                            true,
+                        ) {
+                            Ok(_) => {
+                                status = collect_gateway_runtime_status(
                                     &gateway_path,
-                                    target_host.clone(),
-                                    target_port,
+                                    &gateway_service_path,
                                 )
-                                .await
-                                {
-                                    Ok(started) => {
-                                        status = collect_gateway_runtime_status(
-                                            &gateway_path,
-                                            &gateway_service_path,
-                                        )
-                                        .await?;
-                                        let repaired = status.endpoint_healthy;
-                                        repair_check = Some((
-                                            repaired,
-                                            if repaired {
-                                                format!(
-                                                    "auto-repair attempted on {}:{} (already_running={}) and endpoint is healthy",
-                                                    target_host,
-                                                    target_port,
-                                                    started.already_running
-                                                )
-                                            } else {
-                                                format!(
-                                                    "auto-repair attempted on {}:{} but endpoint is still unreachable",
-                                                    target_host, target_port
-                                                )
-                                            },
-                                        ));
-                                    }
-                                    Err(err) => {
-                                        repair_check =
-                                            Some((false, format!("auto-repair failed: {err}")));
-                                    }
-                                }
+                                .await?;
+                                repair_check = Some((
+                                    true,
+                                    format!(
+                                        "auto-repair reconciled service target to {}:{} without restarting the endpoint",
+                                        repair_target.0, repair_target.1
+                                    ),
+                                ));
+                            }
+                            Err(err) => {
+                                repair_check = Some((false, format!("auto-repair failed: {err}")));
                             }
                         }
-                        Err(err) => {
-                            repair_check = Some((false, format!("auto-repair failed: {err}")));
+                    } else {
+                        repair_check = Some((
+                            true,
+                            "auto-repair skipped: endpoint already healthy".to_string(),
+                        ));
+                    }
+                } else {
+                    let (target_host, target_port) = repair_target;
+                    if let Err(err) = upsert_gateway_service(
+                        &gateway_service_path,
+                        Some(target_host.clone()),
+                        Some(target_port),
+                        true,
+                    ) {
+                        repair_check = Some((false, format!("auto-repair failed: {err}")));
+                    } else {
+                        match start_gateway_runtime(
+                            cli,
+                            &gateway_path,
+                            target_host.clone(),
+                            target_port,
+                        )
+                        .await
+                        {
+                            Ok(started) => {
+                                status = collect_gateway_runtime_status(
+                                    &gateway_path,
+                                    &gateway_service_path,
+                                )
+                                .await?;
+                                let repaired = status.endpoint_healthy;
+                                repair_check = Some((
+                                    repaired,
+                                    if repaired {
+                                        format!(
+                                            "auto-repair attempted on {}:{} (already_running={}) and endpoint is healthy",
+                                            target_host, target_port, started.already_running
+                                        )
+                                    } else {
+                                        format!(
+                                            "auto-repair attempted on {}:{} but endpoint is still unreachable",
+                                            target_host, target_port
+                                        )
+                                    },
+                                ));
+                            }
+                            Err(err) => {
+                                repair_check = Some((false, format!("auto-repair failed: {err}")));
+                            }
                         }
                     }
                 }
@@ -304,6 +333,15 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     },
                 ));
                 checks.push(run_check(
+                    "gateway_discover_schema_profile",
+                    running,
+                    if running {
+                        "discover schema profile: basic"
+                    } else {
+                        "discover schema check skipped (runtime not running)"
+                    },
+                ));
+                checks.push(run_check(
                     "gateway_call_status",
                     running,
                     if running {
@@ -339,9 +377,46 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                         "health schema check skipped (runtime not running)"
                     },
                 ));
+                checks.push(run_check(
+                    "gateway_call_nodes_run",
+                    running,
+                    if running {
+                        "test mode nodes.run method callable"
+                    } else {
+                        "nodes.run method check skipped (runtime not running)"
+                    },
+                ));
+                checks.push(run_check(
+                    "gateway_nodes_run_schema_profile",
+                    running,
+                    if running {
+                        "nodes.run schema profile: basic"
+                    } else {
+                        "nodes.run schema check skipped (runtime not running)"
+                    },
+                ));
+                checks.push(run_check(
+                    "gateway_call_nodes_invoke",
+                    running,
+                    if running {
+                        "test mode nodes.invoke method callable"
+                    } else {
+                        "nodes.invoke method check skipped (runtime not running)"
+                    },
+                ));
+                checks.push(run_check(
+                    "gateway_nodes_invoke_schema_profile",
+                    running,
+                    if running {
+                        "nodes.invoke schema profile: basic"
+                    } else {
+                        "nodes.invoke schema check skipped (runtime not running)"
+                    },
+                ));
             } else if status.endpoint_healthy {
                 match HttpGatewayClient::new(&status.target_host, status.target_port) {
                     Ok(client) => {
+                        let mut advertised_methods = None;
                         let discovery_result = client.discover().await;
                         match discovery_result {
                             Ok(discovery) => {
@@ -370,6 +445,16 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                                         )
                                     },
                                 ));
+                                let (schema_ok, schema_detail) =
+                                    validate_gateway_discovery_schema(&discovery);
+                                checks.push(run_check(
+                                    "gateway_discover_schema_profile",
+                                    schema_ok,
+                                    schema_detail,
+                                ));
+                                advertised_methods = Some(
+                                    discovery.methods.iter().cloned().collect::<BTreeSet<_>>(),
+                                );
                             }
                             Err(err) => {
                                 checks.push(run_check(
@@ -381,6 +466,11 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                                     "gateway_protocol_methods",
                                     false,
                                     "required methods unknown (discover failed)",
+                                ));
+                                checks.push(run_check(
+                                    "gateway_discover_schema_profile",
+                                    false,
+                                    "discover schema check skipped (discover failed)",
                                 ));
                             }
                         }
@@ -449,6 +539,140 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                                 ));
                             }
                         }
+
+                        if let Some(methods) = advertised_methods.as_ref() {
+                            if methods.contains("nodes.run") {
+                                match client
+                                    .call(GatewayRequest::new(
+                                        "nodes.run",
+                                        Some(json!({
+                                            "node_id": "gateway-health-check",
+                                            "command": "echo gateway-health",
+                                        })),
+                                    ))
+                                    .await
+                                {
+                                    Ok(response) => {
+                                        let result_payload = response.result.unwrap_or(Value::Null);
+                                        let (schema_ok, schema_detail) =
+                                            validate_gateway_method_schema(
+                                                "nodes.run",
+                                                &result_payload,
+                                            );
+                                        checks.push(run_check(
+                                            "gateway_call_nodes_run",
+                                            true,
+                                            "nodes.run method callable",
+                                        ));
+                                        checks.push(run_check(
+                                            "gateway_nodes_run_schema_profile",
+                                            schema_ok,
+                                            schema_detail,
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        checks.push(run_check(
+                                            "gateway_call_nodes_run",
+                                            false,
+                                            format!("nodes.run call failed: {err}"),
+                                        ));
+                                        checks.push(run_check(
+                                            "gateway_nodes_run_schema_profile",
+                                            false,
+                                            "nodes.run schema check skipped (nodes.run call failed)",
+                                        ));
+                                    }
+                                }
+                            } else {
+                                checks.push(run_check(
+                                    "gateway_call_nodes_run",
+                                    true,
+                                    "nodes.run optional check skipped (method not advertised)",
+                                ));
+                                checks.push(run_check(
+                                    "gateway_nodes_run_schema_profile",
+                                    true,
+                                    "nodes.run schema check skipped (method not advertised)",
+                                ));
+                            }
+
+                            if methods.contains("nodes.invoke") {
+                                match client
+                                    .call(GatewayRequest::new(
+                                        "nodes.invoke",
+                                        Some(json!({
+                                            "node_id": "gateway-health-check",
+                                            "method": "status",
+                                            "params": { "detail": true },
+                                        })),
+                                    ))
+                                    .await
+                                {
+                                    Ok(response) => {
+                                        let result_payload = response.result.unwrap_or(Value::Null);
+                                        let (schema_ok, schema_detail) =
+                                            validate_gateway_method_schema(
+                                                "nodes.invoke",
+                                                &result_payload,
+                                            );
+                                        checks.push(run_check(
+                                            "gateway_call_nodes_invoke",
+                                            true,
+                                            "nodes.invoke method callable",
+                                        ));
+                                        checks.push(run_check(
+                                            "gateway_nodes_invoke_schema_profile",
+                                            schema_ok,
+                                            schema_detail,
+                                        ));
+                                    }
+                                    Err(err) => {
+                                        checks.push(run_check(
+                                            "gateway_call_nodes_invoke",
+                                            false,
+                                            format!("nodes.invoke call failed: {err}"),
+                                        ));
+                                        checks.push(run_check(
+                                            "gateway_nodes_invoke_schema_profile",
+                                            false,
+                                            "nodes.invoke schema check skipped (nodes.invoke call failed)",
+                                        ));
+                                    }
+                                }
+                            } else {
+                                checks.push(run_check(
+                                    "gateway_call_nodes_invoke",
+                                    true,
+                                    "nodes.invoke optional check skipped (method not advertised)",
+                                ));
+                                checks.push(run_check(
+                                    "gateway_nodes_invoke_schema_profile",
+                                    true,
+                                    "nodes.invoke schema check skipped (method not advertised)",
+                                ));
+                            }
+                        } else {
+                            checks.push(run_check(
+                                "gateway_call_nodes_run",
+                                false,
+                                "nodes.run method check skipped (discover failed)",
+                            ));
+                            checks.push(run_check(
+                                "gateway_nodes_run_schema_profile",
+                                false,
+                                "nodes.run schema check skipped (discover failed)",
+                            ));
+                            checks.push(run_check(
+                                "gateway_call_nodes_invoke",
+                                false,
+                                "nodes.invoke method check skipped (discover failed)",
+                            ));
+                            checks.push(run_check(
+                                "gateway_nodes_invoke_schema_profile",
+                                false,
+                                "nodes.invoke schema check skipped (discover failed)",
+                            ));
+                        }
                     }
                     Err(err) => {
                         checks.push(run_check(
@@ -460,6 +684,11 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                             "gateway_protocol_methods",
                             false,
                             "required methods unknown (gateway client init failed)",
+                        ));
+                        checks.push(run_check(
+                            "gateway_discover_schema_profile",
+                            false,
+                            "discover schema check skipped (gateway client init failed)",
                         ));
                         checks.push(run_check(
                             "gateway_call_status",
@@ -481,6 +710,26 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                             false,
                             "health schema check skipped (gateway client init failed)",
                         ));
+                        checks.push(run_check(
+                            "gateway_call_nodes_run",
+                            false,
+                            "nodes.run method check skipped (gateway client init failed)",
+                        ));
+                        checks.push(run_check(
+                            "gateway_nodes_run_schema_profile",
+                            false,
+                            "nodes.run schema check skipped (gateway client init failed)",
+                        ));
+                        checks.push(run_check(
+                            "gateway_call_nodes_invoke",
+                            false,
+                            "nodes.invoke method check skipped (gateway client init failed)",
+                        ));
+                        checks.push(run_check(
+                            "gateway_nodes_invoke_schema_profile",
+                            false,
+                            "nodes.invoke schema check skipped (gateway client init failed)",
+                        ));
                     }
                 }
             } else {
@@ -493,6 +742,11 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     "gateway_protocol_methods",
                     false,
                     "required methods unknown (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_discover_schema_profile",
+                    false,
+                    "discover schema check skipped (endpoint unreachable)",
                 ));
                 checks.push(run_check(
                     "gateway_call_status",
@@ -513,6 +767,26 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
                     "gateway_health_schema_profile",
                     false,
                     "health schema check skipped (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_call_nodes_run",
+                    false,
+                    "nodes.run method check skipped (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_nodes_run_schema_profile",
+                    false,
+                    "nodes.run schema check skipped (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_call_nodes_invoke",
+                    false,
+                    "nodes.invoke method check skipped (endpoint unreachable)",
+                ));
+                checks.push(run_check(
+                    "gateway_nodes_invoke_schema_profile",
+                    false,
+                    "nodes.invoke schema check skipped (endpoint unreachable)",
                 ));
             }
             if let Some(state) = status.state {
@@ -1234,6 +1508,51 @@ pub(super) async fn handle_gateway(cli: &Cli, args: GatewayArgs) -> Result<()> {
     Ok(())
 }
 
+fn validate_gateway_discovery_schema(
+    discovery: &mosaic_gateway::GatewayDiscovery,
+) -> (bool, String) {
+    if discovery.endpoint.trim().is_empty() {
+        return (
+            false,
+            "discover schema profile failed: missing endpoint".to_string(),
+        );
+    }
+    if discovery.methods.is_empty() {
+        return (
+            false,
+            "discover schema profile failed: methods list is empty".to_string(),
+        );
+    }
+    if discovery
+        .methods
+        .iter()
+        .any(|method| method.trim().is_empty())
+    {
+        return (
+            false,
+            "discover schema profile failed: contains empty method name".to_string(),
+        );
+    }
+    let unique = discovery
+        .methods
+        .iter()
+        .map(|method| method.trim())
+        .collect::<BTreeSet<_>>();
+    if unique.len() != discovery.methods.len() {
+        return (
+            false,
+            "discover schema profile failed: duplicate method names".to_string(),
+        );
+    }
+    (
+        true,
+        format!(
+            "discover schema profile: basic (methods={})",
+            discovery.methods.len()
+        ),
+    )
+}
+
 fn validate_gateway_method_schema(method: &str, payload: &Value) -> (bool, String) {
     let Some(obj) = payload.as_object() else {
         return (
@@ -1259,6 +1578,64 @@ fn validate_gateway_method_schema(method: &str, payload: &Value) -> (bool, Strin
                 false,
                 "status schema profile failed: missing status payload key (service/status/gateway/runtime)"
                     .to_string(),
+            );
+        }
+    }
+    if method == "health" {
+        let has_health_signal = ["service", "status", "healthy", "gateway", "runtime", "ts"]
+            .iter()
+            .any(|key| obj.contains_key(*key));
+        if !has_health_signal {
+            return (
+                false,
+                "health schema profile failed: missing health payload key (service/status/healthy/gateway/runtime/ts)"
+                    .to_string(),
+            );
+        }
+    }
+    if method == "nodes.run" {
+        if !matches!(obj.get("status"), Some(Value::String(_))) {
+            return (
+                false,
+                "nodes.run schema profile failed: missing string field 'status'".to_string(),
+            );
+        }
+        if !obj.contains_key("node_id") {
+            return (
+                false,
+                "nodes.run schema profile failed: missing field 'node_id'".to_string(),
+            );
+        }
+        if !obj.contains_key("command") {
+            return (
+                false,
+                "nodes.run schema profile failed: missing field 'command'".to_string(),
+            );
+        }
+    }
+    if method == "nodes.invoke" {
+        if !matches!(obj.get("status"), Some(Value::String(_))) {
+            return (
+                false,
+                "nodes.invoke schema profile failed: missing string field 'status'".to_string(),
+            );
+        }
+        if !obj.contains_key("node_id") {
+            return (
+                false,
+                "nodes.invoke schema profile failed: missing field 'node_id'".to_string(),
+            );
+        }
+        if !obj.contains_key("method") {
+            return (
+                false,
+                "nodes.invoke schema profile failed: missing field 'method'".to_string(),
+            );
+        }
+        if !obj.contains_key("params") {
+            return (
+                false,
+                "nodes.invoke schema profile failed: missing field 'params'".to_string(),
             );
         }
     }

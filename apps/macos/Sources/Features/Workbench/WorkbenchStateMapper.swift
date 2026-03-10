@@ -50,6 +50,8 @@ public enum WorkbenchStateMapper {
                 quickActions: [
                     QuickAction(id: "new-thread", title: "New Thread", systemImage: "square.and.pencil"),
                     QuickAction(id: "refresh", title: "Refresh", systemImage: "arrow.clockwise"),
+                    QuickAction(id: "switch-workspace", title: "Switch Workspace", systemImage: "folder"),
+                    QuickAction(id: "reveal-workspace", title: "Reveal in Finder", systemImage: "folder.badge.gearshape"),
                     QuickAction(id: "settings", title: "Settings", systemImage: "gearshape"),
                 ]
             ),
@@ -62,6 +64,7 @@ public enum WorkbenchStateMapper {
                     tone: tone(for: health)
                 ),
                 messages: conversationMessages,
+                suggestedPrompts: suggestedPrompts(workspace: workspace, transcript: transcript, health: health),
                 composerText: composerText,
                 isSending: isSending,
                 inlineError: inlineError
@@ -131,5 +134,27 @@ public enum WorkbenchStateMapper {
         case .system, .toolCall, .toolResult, .error:
             .system
         }
+    }
+
+    private static func suggestedPrompts(
+        workspace: WorkspaceReference,
+        transcript: SessionTranscript?,
+        health: HealthSummary?
+    ) -> [String] {
+        if transcript == nil {
+            return [
+                "Summarize the \(workspace.name) workspace and explain where I should start.",
+                "Check the runtime health and tell me what needs attention.",
+                "Propose a concrete implementation plan for the next change in this project.",
+            ]
+        }
+
+        return [
+            "Continue this thread with the next concrete action.",
+            "Turn the discussion so far into a short execution plan.",
+            health?.overallStatus == "Healthy"
+                ? "Given the current healthy runtime, what should I do next?"
+                : "The runtime is not fully healthy. What should I fix first?",
+        ]
     }
 }

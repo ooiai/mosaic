@@ -6,20 +6,45 @@ struct MosaicAppCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Workspace") {
+            Button("Command Palette") {
+                viewModel.presentCommandPalette()
+            }
+            .keyboardShortcut("p", modifiers: [.command, .shift])
+
+            Button("Choose Workspace…") {
+                viewModel.showSetupHub()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+
             Button("Refresh Workspace") {
-                Task { await viewModel.workbench?.refresh() }
+                Task { await viewModel.refreshActiveWorkspace() }
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
 
+            Button("Reveal in Finder") {
+                viewModel.revealSelectedWorkspaceInFinder()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .option])
+
             Button("New Thread") {
-                viewModel.workbench?.newThread()
+                viewModel.createNewThread()
             }
             .keyboardShortcut("n", modifiers: [.command])
+
+            Button("Send Prompt") {
+                Task { await viewModel.sendCurrentPrompt() }
+            }
+            .keyboardShortcut(.return, modifiers: [.command])
+
+            Button("Clear Selected Thread") {
+                Task { await viewModel.clearCurrentThread() }
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
         }
 
         CommandMenu("View") {
             Button("Toggle Inspector") {
-                viewModel.workbench?.toggleInspector()
+                viewModel.toggleInspector()
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
         }

@@ -447,6 +447,8 @@ enum NodesCommand {
         stale_after_minutes: u64,
         #[arg(long)]
         repair: bool,
+        #[arg(long)]
+        report_out: Option<String>,
     },
     Run {
         node_id: String,

@@ -277,6 +277,105 @@ fn gateway_health_repair_recovers_test_mode_runtime() {
 
 #[test]
 #[allow(deprecated)]
+fn gateway_health_repair_reconciles_missing_service_metadata() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "start",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "9898",
+        ])
+        .assert()
+        .success();
+
+    let service_path = temp.path().join(".mosaic/data/gateway-service.json");
+    std::fs::remove_file(&service_path).expect("remove gateway service file");
+
+    let status_before = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "status", "--deep"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_before: Value = serde_json::from_slice(&status_before).expect("status before");
+    assert_eq!(status_before["running"], true);
+    assert_eq!(status_before["installed"], false);
+    assert_eq!(status_before["deep"]["service_file_exists"], false);
+
+    let health_repair = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args([
+            "--project-state",
+            "--json",
+            "gateway",
+            "health",
+            "--verbose",
+            "--repair",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let health_repair: Value = serde_json::from_slice(&health_repair).expect("health repair");
+    let checks = health_repair["checks"].as_array().expect("checks");
+    let find = |name: &str| {
+        checks
+            .iter()
+            .find(|entry| entry["name"].as_str() == Some(name))
+            .unwrap_or_else(|| panic!("missing check: {name}"))
+    };
+    assert_eq!(find("gateway_auto_repair")["status"], "ok");
+    assert!(
+        find("gateway_auto_repair")["detail"]
+            .as_str()
+            .expect("repair detail")
+            .contains("reconciled service target")
+    );
+    assert_eq!(find("gateway_endpoint")["status"], "ok");
+
+    let status_after = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "status", "--deep"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let status_after: Value = serde_json::from_slice(&status_after).expect("status after");
+    assert_eq!(status_after["running"], true);
+    assert_eq!(status_after["installed"], true);
+    assert_eq!(status_after["deep"]["service_file_exists"], true);
+    assert_eq!(status_after["deep"]["target_port"], 9898);
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_GATEWAY_TEST_MODE", "1")
+        .args(["--project-state", "--json", "gateway", "stop"])
+        .assert()
+        .success();
+}
+
+#[test]
+#[allow(deprecated)]
 fn channels_real_send_flow() {
     let temp = tempdir().expect("tempdir");
 
@@ -2202,10 +2301,24 @@ fn gateway_probe_discover_call_flow() {
     };
     assert_eq!(find_check("gateway_discover")["status"], "ok");
     assert_eq!(find_check("gateway_protocol_methods")["status"], "ok");
+    assert_eq!(
+        find_check("gateway_discover_schema_profile")["status"],
+        "ok"
+    );
     assert_eq!(find_check("gateway_call_status")["status"], "ok");
     assert_eq!(find_check("gateway_call_health")["status"], "ok");
     assert_eq!(find_check("gateway_status_schema_profile")["status"], "ok");
     assert_eq!(find_check("gateway_health_schema_profile")["status"], "ok");
+    assert_eq!(find_check("gateway_call_nodes_run")["status"], "ok");
+    assert_eq!(
+        find_check("gateway_nodes_run_schema_profile")["status"],
+        "ok"
+    );
+    assert_eq!(find_check("gateway_call_nodes_invoke")["status"], "ok");
+    assert_eq!(
+        find_check("gateway_nodes_invoke_schema_profile")["status"],
+        "ok"
+    );
 
     let events_path = temp.path().join(".mosaic/data/gateway-events.jsonl");
     let events_raw = std::fs::read_to_string(&events_path).expect("gateway events");

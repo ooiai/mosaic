@@ -685,7 +685,7 @@ fn nodes_help_includes_control_plane_commands() {
 #[allow(deprecated)]
 fn nodes_diagnose_help_includes_repair_and_stale_threshold() {
     let help = run_help(&["nodes", "diagnose", "--help"]);
-    let expected = ["--stale-after-minutes", "--repair"];
+    let expected = ["--stale-after-minutes", "--repair", "--report-out"];
     for option in expected {
         assert!(
             help.contains(option),

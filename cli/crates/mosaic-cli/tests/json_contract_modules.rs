@@ -1355,6 +1355,8 @@ fn json_nodes_pairing_module_schema_matches_snapshot() {
                 "--stale-after-minutes",
                 "30",
                 "--repair",
+                "--report-out",
+                ".mosaic/reports/contract-nodes-diagnose.json",
             ])
             .assert()
             .success()

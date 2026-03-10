@@ -31,10 +31,12 @@
     "ok": "bool",
     "paths": {
       "devices": "string",
+      "events": "string",
       "nodes": "string",
       "pairings": "string"
     },
     "repair": "bool",
+    "report_out": "string",
     "stale_after_minutes": "number",
     "summary": {
       "actions_applied": "number",

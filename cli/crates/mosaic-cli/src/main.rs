@@ -31,6 +31,7 @@ mod knowledge_command;
 mod maintenance_commands;
 mod mcp_command;
 mod nodes_command;
+mod nodes_telemetry;
 mod ops_command;
 mod runtime_context;
 mod security_command;
@@ -69,6 +70,7 @@ use knowledge_command::handle_knowledge;
 use maintenance_commands::{handle_reset, handle_uninstall, handle_update};
 use mcp_command::handle_mcp;
 use nodes_command::handle_nodes;
+use nodes_telemetry::{NodeTelemetryEventInput, nodes_events_file_path, write_nodes_event};
 use ops_command::{
     handle_approvals, handle_logs, handle_observability, handle_safety, handle_sandbox,
     handle_system,

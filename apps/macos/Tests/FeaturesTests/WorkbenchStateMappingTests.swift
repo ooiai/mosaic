@@ -21,6 +21,7 @@ final class WorkbenchStateMappingTests: XCTestCase {
         XCTAssertEqual(state.sidebar.recentWorkspaces.count, 1)
         XCTAssertEqual(state.sidebar.threads.count, 2)
         XCTAssertEqual(state.conversation.messages.count, 4)
+        XCTAssertFalse(state.conversation.suggestedPrompts.isEmpty)
         XCTAssertEqual(state.conversation.status.title, "Healthy")
         XCTAssertEqual(state.inspector.sections.count, 3)
     }

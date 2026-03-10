@@ -72,6 +72,9 @@ cargo test --workspace
 # full regression catalog + workspace tests + from-scratch smoke
 ./scripts/run_regression_suite.sh
 
+# MCP-only beta freeze gate
+./scripts/mcp_freeze_check.sh
+
 # beginner-friendly end-to-end tutorial regression (offline by default)
 ./scripts/tutorial_regression.sh
 
@@ -314,6 +317,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state gateway stop
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway uninstall
 ```
 
+`gateway health --verbose` now validates discovery shape plus `status`, `health`, `nodes.run`, and `nodes.invoke` schema profiles, and `--repair` can reconcile missing service metadata before falling back to restart behavior.
+
 ### TTS / Voicecall Runtime
 
 ```bash
@@ -360,6 +365,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state mcp remove <server-id>
 `--env` persists non-sensitive runtime pairs. `--env-from KEY=ENV_NAME` persists only the env variable reference and resolves the real value from Mosaic's process environment during MCP checks and launches.
 
 Use `mcp update` for deliberate config mutations and `mcp repair` for diagnose-driven remediation. `update` replaces the full `args`/`env`/`env_from` collection you pass and supports `--clear-args`, `--clear-env`, `--clear-env-from`, and `--clear-cwd`.
+
+`mcp diagnose` now accepts standard `Content-Length` framed MCP stdio responses and the lightweight newline-JSON mocks used in local regression tests. Deep probe health now means `initialize` succeeded and Mosaic could send `notifications/initialized` on the same session.
 
 ### Nodes/Devices/Pairing Runtime
 

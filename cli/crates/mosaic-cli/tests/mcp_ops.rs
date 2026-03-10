@@ -501,6 +501,78 @@ fn mcp_update_replaces_runtime_fields_and_reports_noop() {
     assert_eq!(noop["changed"], false);
 }
 
+#[cfg(unix)]
+#[test]
+#[allow(deprecated)]
+fn mcp_diagnose_accepts_framed_initialize_response() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = tempdir().expect("tempdir");
+    let script_path = temp.path().join("framed-mcp.sh");
+    std::fs::write(
+        &script_path,
+        "#!/bin/sh\nbody='{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{}}}'\nlen=$(printf %s \"$body\" | wc -c | tr -d ' ')\nprintf 'Content-Length: %s\\r\\nContent-Type: application/vscode-jsonrpc; charset=utf-8\\r\\n\\r\\n%s' \"$len\" \"$body\"\nsleep 1\n",
+    )
+    .expect("write script");
+    let mut permissions = std::fs::metadata(&script_path)
+        .expect("metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&script_path, permissions).expect("set permissions");
+
+    let add = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "add",
+                "--name",
+                "framed-mcp",
+                "--command",
+                script_path.to_string_lossy().as_ref(),
+                "--cwd",
+                temp.path().to_str().expect("cwd"),
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    let server_id = add["server"]["id"].as_str().expect("server id").to_string();
+
+    let diagnose = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "mcp",
+                "diagnose",
+                &server_id,
+                "--timeout-ms",
+                "1000",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_eq!(diagnose["ok"], true);
+    assert_eq!(diagnose["protocol_probe"]["attempted"], true);
+    assert_eq!(diagnose["protocol_probe"]["handshake_ok"], true);
+    assert_eq!(
+        diagnose["protocol_probe"]["initialized_notification_sent"],
+        true
+    );
+    assert_eq!(diagnose["protocol_probe"]["session_ready"], true);
+    assert_eq!(diagnose["protocol_probe"]["response_kind"], "result");
+    assert_eq!(diagnose["healthy"], true);
+}
+
 #[test]
 #[allow(deprecated)]
 fn mcp_show_missing_server_returns_validation_error() {

@@ -181,8 +181,10 @@
             "duration_ms": "number",
             "error": "string",
             "handshake_ok": "bool",
+            "initialized_notification_sent": "bool",
             "response_kind": "null",
             "response_preview": "null",
+            "session_ready": "bool",
             "stderr_preview": "string",
             "timeout_ms": "number"
           },
@@ -246,8 +248,10 @@
       "duration_ms": "number",
       "error": "string",
       "handshake_ok": "bool",
+      "initialized_notification_sent": "bool",
       "response_kind": "null",
       "response_preview": "null",
+      "session_ready": "bool",
       "stderr_preview": "string",
       "timeout_ms": "number"
     },
@@ -398,7 +402,9 @@
               "items": [],
               "type": "array"
             },
-            "protocol_handshake_ok": "bool"
+            "protocol_handshake_ok": "bool",
+            "protocol_initialized_notification_sent": "bool",
+            "protocol_session_ready": "bool"
           },
           "before": {
             "check_healthy": "bool",
@@ -412,7 +418,9 @@
               ],
               "type": "array"
             },
-            "protocol_handshake_ok": "bool"
+            "protocol_handshake_ok": "bool",
+            "protocol_initialized_notification_sent": "bool",
+            "protocol_session_ready": "bool"
           },
           "changed": "bool",
           "remaining_recommendations": {

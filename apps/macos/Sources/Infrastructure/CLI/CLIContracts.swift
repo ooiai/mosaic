@@ -246,6 +246,31 @@ public struct CLIConfigurePayload: Decodable {
     }
 }
 
+public struct CLIConfigureSetPayload: Decodable {
+    let action: String
+    let key: String
+}
+
+public struct CLIModelsSetPayload: Decodable {
+    let requestedModel: String
+    let effectiveModel: String
+    let previousModel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case requestedModel = "requested_model"
+        case effectiveModel = "effective_model"
+        case previousModel = "previous_model"
+    }
+
+    public func toDomain() -> ModelSelectionSummary {
+        ModelSelectionSummary(
+            requestedModel: requestedModel,
+            effectiveModel: effectiveModel,
+            previousModel: previousModel
+        )
+    }
+}
+
 public struct CLIPromptPayload: Decodable {
     let sessionID: String
     let response: String
@@ -334,5 +359,17 @@ public struct CLISessionTranscriptPayload: Decodable {
                 )
             }
         )
+    }
+}
+
+public struct CLISessionClearPayload: Decodable {
+    let removedSession: String
+
+    enum CodingKeys: String, CodingKey {
+        case removedSession = "removed_session"
+    }
+
+    public func toDomain() -> String {
+        removedSession
     }
 }

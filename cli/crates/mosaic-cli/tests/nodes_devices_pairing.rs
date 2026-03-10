@@ -433,6 +433,8 @@ fn nodes_diagnose_reports_and_repairs_operational_issues() {
             "--stale-after-minutes",
             "30",
             "--repair",
+            "--report-out",
+            ".mosaic/reports/nodes-diagnose.json",
         ],
     );
     assert_eq!(repair["ok"], true);
@@ -441,6 +443,7 @@ fn nodes_diagnose_reports_and_repairs_operational_issues() {
     assert_eq!(repair["summary"]["saved_nodes"], true);
     assert_eq!(repair["summary"]["saved_devices"], true);
     assert_eq!(repair["summary"]["saved_pairings"], true);
+    assert_eq!(repair["report_out"], ".mosaic/reports/nodes-diagnose.json");
 
     let status = run_json(
         &temp,
@@ -477,5 +480,26 @@ fn nodes_diagnose_reports_and_repairs_operational_issues() {
     assert!(
         rejected_ids.iter().any(|id| *id == blocked_request_id),
         "expected blocked request to be auto-rejected after repair: {rejected}"
+    );
+
+    let report_path = temp.path().join(".mosaic/reports/nodes-diagnose.json");
+    let report_json: Value =
+        serde_json::from_slice(&fs::read(&report_path).expect("read diagnose report"))
+            .expect("parse diagnose report");
+    assert_eq!(report_json["summary"]["actions_applied"], 3);
+
+    let events_path = temp.path().join(".mosaic/data/nodes-events.jsonl");
+    let events_raw = fs::read_to_string(events_path).expect("read nodes events");
+    assert!(
+        events_raw.contains("\"action\":\"diagnose\""),
+        "expected diagnose event in telemetry log"
+    );
+    assert!(
+        events_raw.contains("\"action\":\"request\""),
+        "expected pairing request event in telemetry log"
+    );
+    assert!(
+        events_raw.contains("\"action\":\"approve\""),
+        "expected approve event in telemetry log"
     );
 }

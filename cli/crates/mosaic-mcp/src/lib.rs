@@ -108,6 +108,8 @@ pub struct McpProtocolProbe {
     pub timeout_ms: u64,
     pub duration_ms: u128,
     pub handshake_ok: bool,
+    pub initialized_notification_sent: bool,
+    pub session_ready: bool,
     pub response_kind: Option<String>,
     pub response_preview: Option<String>,
     pub stderr_preview: Option<String>,
@@ -518,7 +520,7 @@ impl McpStore {
             run_stdio_initialize_probe(&checked.server, timeout_ms)
         };
 
-        let healthy = checked.check.healthy && probe.handshake_ok;
+        let healthy = checked.check.healthy && probe.session_ready;
         Ok(McpServerDiagnoseResult {
             server: checked.server,
             check: checked.check,
@@ -550,7 +552,7 @@ impl McpStore {
                         run_stdio_initialize_probe(&checked.server, timeout_ms)
                     };
                 let result = McpServerDiagnoseResult {
-                    healthy: checked.check.healthy && probe.handshake_ok,
+                    healthy: checked.check.healthy && probe.session_ready,
                     server: checked.server,
                     check: checked.check,
                     protocol_probe: probe,
@@ -809,6 +811,8 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
                 timeout_ms,
                 duration_ms: started.elapsed().as_millis(),
                 handshake_ok: false,
+                initialized_notification_sent: false,
+                session_ready: false,
                 response_kind: None,
                 response_preview: None,
                 stderr_preview: None,
@@ -827,6 +831,8 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
                 timeout_ms,
                 duration_ms: started.elapsed().as_millis(),
                 handshake_ok: false,
+                initialized_notification_sent: false,
+                session_ready: false,
                 response_kind: None,
                 response_preview: None,
                 stderr_preview: None,
@@ -845,6 +851,8 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
                 timeout_ms,
                 duration_ms: started.elapsed().as_millis(),
                 handshake_ok: false,
+                initialized_notification_sent: false,
+                session_ready: false,
                 response_kind: None,
                 response_preview: None,
                 stderr_preview: None,
@@ -853,21 +861,10 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
         }
     };
 
-    let (stdout_tx, stdout_rx) = mpsc::channel::<String>();
+    let (stdout_tx, stdout_rx) = mpsc::channel::<InitializeProbeReadResult>();
     std::thread::spawn(move || {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    if stdout_tx.send(line).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
+        let result = read_initialize_response(stdout);
+        let _ = stdout_tx.send(result);
     });
 
     let (stderr_tx, stderr_rx) = mpsc::channel::<Option<String>>();
@@ -896,7 +893,7 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
             "capabilities": {}
         }
     });
-    let request_body = match serde_json::to_string(&request) {
+    let framed_request = match encode_protocol_message(&request) {
         Ok(payload) => payload,
         Err(err) => {
             let _ = child.kill();
@@ -906,6 +903,8 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
                 timeout_ms,
                 duration_ms: started.elapsed().as_millis(),
                 handshake_ok: false,
+                initialized_notification_sent: false,
+                session_ready: false,
                 response_kind: None,
                 response_preview: None,
                 stderr_preview: stderr_rx
@@ -916,15 +915,7 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
             };
         }
     };
-    let framed = format!(
-        "Content-Length: {}\r\n\r\n{}",
-        request_body.len(),
-        request_body
-    );
-    if let Err(err) = stdin
-        .write_all(framed.as_bytes())
-        .and_then(|_| stdin.flush())
-    {
+    if let Err(err) = stdin.write_all(&framed_request).and_then(|_| stdin.flush()) {
         let _ = child.kill();
         let _ = child.wait();
         return McpProtocolProbe {
@@ -932,6 +923,8 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
             timeout_ms,
             duration_ms: started.elapsed().as_millis(),
             handshake_ok: false,
+            initialized_notification_sent: false,
+            session_ready: false,
             response_kind: None,
             response_preview: None,
             stderr_preview: stderr_rx
@@ -941,53 +934,45 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
             error: Some(format!("failed to write initialize request: {err}")),
         };
     }
-    drop(stdin);
 
-    let deadline = Instant::now() + timeout;
-    let mut response_kind = None;
-    let mut response_preview = None;
-    let mut probe_error = None;
-    let mut handshake_ok = false;
+    let probe_result = match stdout_rx.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(RecvTimeoutError::Timeout) => InitializeProbeReadResult {
+            handshake_ok: false,
+            response_kind: None,
+            response_preview: None,
+            error: Some("timed out waiting for initialize response".to_string()),
+        },
+        Err(RecvTimeoutError::Disconnected) => InitializeProbeReadResult {
+            handshake_ok: false,
+            response_kind: None,
+            response_preview: None,
+            error: Some("server stdout closed before initialize response".to_string()),
+        },
+    };
 
-    loop {
-        let now = Instant::now();
-        if now >= deadline {
-            probe_error = Some("timed out waiting for initialize response".to_string());
-            break;
-        }
-
-        match stdout_rx.recv_timeout(deadline.saturating_duration_since(now)) {
-            Ok(line) => {
-                if response_preview.is_none() {
-                    response_preview = Some(trim_preview(&line, 512));
-                }
-                match classify_initialize_response_line(&line) {
-                    InitializeResponse::Result => {
-                        response_kind = Some("result".to_string());
-                        handshake_ok = true;
-                        break;
-                    }
-                    InitializeResponse::Error(message) => {
-                        response_kind = Some("error".to_string());
-                        probe_error = Some(message);
-                        handshake_ok = false;
-                        break;
-                    }
-                    InitializeResponse::Ignore => {}
+    let mut initialized_notification_sent = false;
+    let mut probe_error = probe_result.error;
+    if probe_result.handshake_ok {
+        let notification = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        });
+        match encode_protocol_message(&notification) {
+            Ok(payload) => {
+                if let Err(err) = stdin.write_all(&payload).and_then(|_| stdin.flush()) {
+                    probe_error = Some(format!("failed to send initialized notification: {err}"));
+                } else {
+                    initialized_notification_sent = true;
                 }
             }
-            Err(RecvTimeoutError::Timeout) => {
-                probe_error = Some("timed out waiting for initialize response".to_string());
-                break;
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                if probe_error.is_none() {
-                    probe_error = Some("server stdout closed before initialize response".into());
-                }
-                break;
+            Err(err) => {
+                probe_error = Some(format!("failed to encode initialized notification: {err}"));
             }
         }
     }
+    drop(stdin);
 
     let _ = child.kill();
     let _ = child.wait();
@@ -999,9 +984,11 @@ fn run_stdio_initialize_probe(server: &McpServer, timeout_ms: u64) -> McpProtoco
         attempted: true,
         timeout_ms,
         duration_ms: started.elapsed().as_millis(),
-        handshake_ok,
-        response_kind,
-        response_preview,
+        handshake_ok: probe_result.handshake_ok,
+        initialized_notification_sent,
+        session_ready: probe_result.handshake_ok && initialized_notification_sent,
+        response_kind: probe_result.response_kind,
+        response_preview: probe_result.response_preview,
         stderr_preview,
         error: probe_error,
     }
@@ -1013,6 +1000,8 @@ fn skipped_probe(timeout_ms: u64) -> McpProtocolProbe {
         timeout_ms,
         duration_ms: 0,
         handshake_ok: false,
+        initialized_notification_sent: false,
+        session_ready: false,
         response_kind: None,
         response_preview: None,
         stderr_preview: None,
@@ -1020,10 +1009,153 @@ fn skipped_probe(timeout_ms: u64) -> McpProtocolProbe {
     }
 }
 
+fn encode_protocol_message(value: &serde_json::Value) -> std::result::Result<Vec<u8>, String> {
+    let payload = serde_json::to_string(value)
+        .map_err(|err| format!("failed to encode protocol payload: {err}"))?;
+    let framed = format!("Content-Length: {}\r\n\r\n{}", payload.len(), payload);
+    Ok(framed.into_bytes())
+}
+
 enum InitializeResponse {
     Ignore,
     Result,
     Error(String),
+}
+
+struct InitializeProbeReadResult {
+    handshake_ok: bool,
+    response_kind: Option<String>,
+    response_preview: Option<String>,
+    error: Option<String>,
+}
+
+fn read_initialize_response(stdout: impl Read) -> InitializeProbeReadResult {
+    let mut reader = BufReader::new(stdout);
+    let mut response_preview = None;
+
+    loop {
+        match read_next_stdout_message(&mut reader) {
+            Ok(Some(message)) => {
+                let preview = trim_preview(&message, 512);
+                match classify_initialize_response_line(&message) {
+                    InitializeResponse::Result => {
+                        return InitializeProbeReadResult {
+                            handshake_ok: true,
+                            response_kind: Some("result".to_string()),
+                            response_preview: Some(preview),
+                            error: None,
+                        };
+                    }
+                    InitializeResponse::Error(message) => {
+                        return InitializeProbeReadResult {
+                            handshake_ok: false,
+                            response_kind: Some("error".to_string()),
+                            response_preview: Some(preview),
+                            error: Some(message),
+                        };
+                    }
+                    InitializeResponse::Ignore => {
+                        if response_preview.is_none() {
+                            response_preview = Some(preview);
+                        }
+                    }
+                }
+            }
+            Ok(None) => {
+                return InitializeProbeReadResult {
+                    handshake_ok: false,
+                    response_kind: None,
+                    response_preview,
+                    error: Some("server stdout closed before initialize response".to_string()),
+                };
+            }
+            Err(err) => {
+                return InitializeProbeReadResult {
+                    handshake_ok: false,
+                    response_kind: None,
+                    response_preview,
+                    error: Some(err),
+                };
+            }
+        }
+    }
+}
+
+fn read_next_stdout_message<R: BufRead>(
+    reader: &mut R,
+) -> std::result::Result<Option<String>, String> {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|err| format!("failed to read server stdout: {err}"))?;
+        if read == 0 {
+            return Ok(None);
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if looks_like_protocol_header_line(trimmed) {
+            return read_protocol_frame_payload(reader, trimmed);
+        }
+        return Ok(Some(trimmed.to_string()));
+    }
+}
+
+fn looks_like_protocol_header_line(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.starts_with("content-length:") || lower.starts_with("content-type:")
+}
+
+fn read_protocol_frame_payload<R: BufRead>(
+    reader: &mut R,
+    first_header_line: &str,
+) -> std::result::Result<Option<String>, String> {
+    let mut content_length = parse_content_length_header(first_header_line)?;
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|err| format!("failed to read protocol headers: {err}"))?;
+        if read == 0 {
+            return Err("server stdout closed before protocol headers completed".to_string());
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        if content_length.is_none() {
+            content_length = parse_content_length_header(trimmed)?;
+        }
+    }
+
+    let content_length =
+        content_length.ok_or_else(|| "protocol frame missing Content-Length header".to_string())?;
+    let mut body = vec![0_u8; content_length];
+    reader
+        .read_exact(&mut body)
+        .map_err(|err| format!("failed to read initialize response body: {err}"))?;
+    let payload = String::from_utf8(body)
+        .map_err(|err| format!("initialize response body is not valid UTF-8: {err}"))?;
+    Ok(Some(payload))
+}
+
+fn parse_content_length_header(line: &str) -> std::result::Result<Option<usize>, String> {
+    let Some((name, value)) = line.split_once(':') else {
+        return Ok(None);
+    };
+    if !name.trim().eq_ignore_ascii_case("content-length") {
+        return Ok(None);
+    }
+    let parsed = value
+        .trim()
+        .parse::<usize>()
+        .map_err(|err| format!("invalid Content-Length header '{line}': {err}"))?;
+    Ok(Some(parsed))
 }
 
 fn classify_initialize_response_line(line: &str) -> InitializeResponse {
@@ -1096,6 +1228,7 @@ fn executable_if_valid(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
     use tempfile::tempdir;
 
     #[test]
@@ -1497,6 +1630,8 @@ mod tests {
             .expect("diagnose");
         assert!(!diagnosed.healthy);
         assert!(!diagnosed.protocol_probe.attempted);
+        assert!(!diagnosed.protocol_probe.initialized_notification_sent);
+        assert!(!diagnosed.protocol_probe.session_ready);
         assert!(
             diagnosed
                 .protocol_probe
@@ -1551,9 +1686,72 @@ mod tests {
             "probe={:?}",
             diagnosed.protocol_probe
         );
+        assert!(diagnosed.protocol_probe.initialized_notification_sent);
+        assert!(diagnosed.protocol_probe.session_ready);
         assert_eq!(
             diagnosed.protocol_probe.response_kind.as_deref(),
             Some("result")
+        );
+        assert!(diagnosed.healthy);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diagnose_protocol_probe_success_with_framed_mock_script() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().expect("tempdir");
+        let path = mcp_servers_file_path(&temp.path().join("data"));
+        let store = McpStore::new(path);
+
+        let script_path = temp.path().join("framed-mcp.sh");
+        std::fs::write(
+            &script_path,
+            "#!/bin/sh\nbody='{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{}}}'\nlen=$(printf %s \"$body\" | wc -c | tr -d ' ')\nprintf 'Content-Length: %s\\r\\nContent-Type: application/vscode-jsonrpc; charset=utf-8\\r\\n\\r\\n%s' \"$len\" \"$body\"\nsleep 1\n",
+        )
+        .expect("write script");
+        let mut permissions = std::fs::metadata(&script_path)
+            .expect("metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&script_path, permissions).expect("set permissions");
+
+        store
+            .add(AddMcpServerInput {
+                id: Some("framed".to_string()),
+                name: "Framed".to_string(),
+                command: script_path.display().to_string(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                env_from: BTreeMap::new(),
+                cwd: Some(temp.path().display().to_string()),
+                enabled: true,
+            })
+            .expect("add");
+
+        let diagnosed = store
+            .diagnose("framed", McpDiagnoseOptions { timeout_ms: 3_000 })
+            .expect("diagnose");
+        assert!(diagnosed.check.healthy);
+        assert!(diagnosed.protocol_probe.attempted);
+        assert!(
+            diagnosed.protocol_probe.handshake_ok,
+            "probe={:?}",
+            diagnosed.protocol_probe
+        );
+        assert!(diagnosed.protocol_probe.initialized_notification_sent);
+        assert!(diagnosed.protocol_probe.session_ready);
+        assert_eq!(
+            diagnosed.protocol_probe.response_kind.as_deref(),
+            Some("result")
+        );
+        assert!(
+            diagnosed
+                .protocol_probe
+                .response_preview
+                .as_deref()
+                .unwrap_or_default()
+                .contains("\"result\"")
         );
         assert!(diagnosed.healthy);
     }
@@ -1592,6 +1790,8 @@ mod tests {
             .diagnose("silent", McpDiagnoseOptions { timeout_ms: 200 })
             .expect("diagnose");
         assert!(!diagnosed.protocol_probe.handshake_ok);
+        assert!(!diagnosed.protocol_probe.initialized_notification_sent);
+        assert!(!diagnosed.protocol_probe.session_ready);
         assert!(
             diagnosed
                 .protocol_probe
@@ -1647,6 +1847,49 @@ mod tests {
             results
                 .iter()
                 .any(|item| item.server.id == "missing" && !item.protocol_probe.attempted)
+        );
+    }
+
+    #[test]
+    fn read_initialize_response_supports_content_length_frames() {
+        let body = r#"{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}"#;
+        let framed = format!(
+            "Content-Length: {}\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n{}",
+            body.len(),
+            body
+        );
+
+        let result = read_initialize_response(Cursor::new(framed.into_bytes()));
+        assert!(result.handshake_ok, "result={:?}", result.error);
+        assert_eq!(result.response_kind.as_deref(), Some("result"));
+        assert!(
+            result
+                .response_preview
+                .as_deref()
+                .unwrap_or_default()
+                .contains("\"result\"")
+        );
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn read_initialize_response_ignores_logs_before_protocol_frame() {
+        let body = r#"{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}"#;
+        let framed = format!(
+            "server booting\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+
+        let result = read_initialize_response(Cursor::new(framed.into_bytes()));
+        assert!(result.handshake_ok, "result={:?}", result.error);
+        assert_eq!(result.response_kind.as_deref(), Some("result"));
+        assert!(
+            result
+                .response_preview
+                .as_deref()
+                .unwrap_or_default()
+                .contains("\"result\"")
         );
     }
 }

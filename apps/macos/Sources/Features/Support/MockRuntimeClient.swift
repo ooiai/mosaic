@@ -6,12 +6,15 @@ public final class MockRuntimeClient: MosaicRuntimeClient, @unchecked Sendable {
     public var statusHandler: ((WorkspaceReference) async throws -> RuntimeStatusSummary)?
     public var healthHandler: ((WorkspaceReference) async throws -> HealthSummary)?
     public var configureShowHandler: ((WorkspaceReference) async throws -> ConfigurationSummary)?
+    public var configureSetHandler: ((WorkspaceReference, RuntimeConfigKey, String) async throws -> Void)?
     public var modelsStatusHandler: ((WorkspaceReference) async throws -> ModelsStatusSummary)?
     public var modelsListHandler: ((WorkspaceReference) async throws -> [ModelSummary])?
+    public var setModelHandler: ((WorkspaceReference, String) async throws -> ModelSelectionSummary)?
     public var askHandler: ((WorkspaceReference, String) async throws -> PromptResponse)?
     public var chatHandler: ((WorkspaceReference, String, String?) async throws -> PromptResponse)?
     public var sessionsHandler: ((WorkspaceReference) async throws -> [SessionSummaryData])?
     public var transcriptHandler: ((WorkspaceReference, String) async throws -> SessionTranscript)?
+    public var clearSessionHandler: ((WorkspaceReference, String) async throws -> String)?
 
     public init() {}
 
@@ -48,6 +51,16 @@ public final class MockRuntimeClient: MosaicRuntimeClient, @unchecked Sendable {
         return PreviewFixtures.configurationSummary
     }
 
+    public func configureSet(
+        workspace: WorkspaceReference,
+        key: RuntimeConfigKey,
+        value: String
+    ) async throws {
+        if let configureSetHandler {
+            try await configureSetHandler(workspace, key, value)
+        }
+    }
+
     public func modelsStatus(workspace: WorkspaceReference) async throws -> ModelsStatusSummary {
         if let modelsStatusHandler {
             return try await modelsStatusHandler(workspace)
@@ -60,6 +73,20 @@ public final class MockRuntimeClient: MosaicRuntimeClient, @unchecked Sendable {
             return try await modelsListHandler(workspace)
         }
         return PreviewFixtures.modelList
+    }
+
+    public func setModel(
+        workspace: WorkspaceReference,
+        model: String
+    ) async throws -> ModelSelectionSummary {
+        if let setModelHandler {
+            return try await setModelHandler(workspace, model)
+        }
+        return ModelSelectionSummary(
+            requestedModel: model,
+            effectiveModel: model,
+            previousModel: PreviewFixtures.modelsStatusSummary.currentModel
+        )
     }
 
     public func ask(workspace: WorkspaceReference, prompt: String) async throws -> PromptResponse {
@@ -95,5 +122,15 @@ public final class MockRuntimeClient: MosaicRuntimeClient, @unchecked Sendable {
             return try await transcriptHandler(workspace, sessionID)
         }
         return PreviewFixtures.transcript
+    }
+
+    public func clearSession(
+        workspace: WorkspaceReference,
+        sessionID: String
+    ) async throws -> String {
+        if let clearSessionHandler {
+            return try await clearSessionHandler(workspace, sessionID)
+        }
+        return sessionID
     }
 }

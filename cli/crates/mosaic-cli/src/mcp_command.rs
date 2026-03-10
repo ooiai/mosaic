@@ -266,6 +266,8 @@ fn handle_repair(
                 "healthy": target.healthy,
                 "check_healthy": target.check.healthy,
                 "protocol_handshake_ok": target.protocol_probe.handshake_ok,
+                "protocol_initialized_notification_sent": target.protocol_probe.initialized_notification_sent,
+                "protocol_session_ready": target.protocol_probe.session_ready,
                 "issues": target.check.issues,
                 "env_from": before_env_from,
             },
@@ -273,6 +275,8 @@ fn handle_repair(
                 "healthy": after.healthy,
                 "check_healthy": after.check.healthy,
                 "protocol_handshake_ok": after.protocol_probe.handshake_ok,
+                "protocol_initialized_notification_sent": after.protocol_probe.initialized_notification_sent,
+                "protocol_session_ready": after.protocol_probe.session_ready,
                 "issues": after.check.issues,
                 "env_from": after.server.env_from.clone(),
             },
@@ -394,6 +398,18 @@ fn handle_diagnose(
             .unwrap_or(false)
     );
     println!(
+        "protocol_probe_initialized_notification_sent: {}",
+        payload["protocol_probe"]["initialized_notification_sent"]
+            .as_bool()
+            .unwrap_or(false)
+    );
+    println!(
+        "protocol_probe_session_ready: {}",
+        payload["protocol_probe"]["session_ready"]
+            .as_bool()
+            .unwrap_or(false)
+    );
+    println!(
         "protocol_probe_response_kind: {}",
         payload["protocol_probe"]["response_kind"]
             .as_str()
@@ -497,6 +513,12 @@ fn recommend_actions(result: &McpServerDiagnoseResult) -> Vec<String> {
             );
         }
     }
+    if result.protocol_probe.handshake_ok && !result.protocol_probe.session_ready {
+        actions.push(
+            "verify server keeps the stdio session open after initialize and accepts `notifications/initialized`"
+                .to_string(),
+        );
+    }
     actions
 }
 
@@ -583,11 +605,11 @@ fn handle_check(
             let healthy_count = results.iter().filter(|item| item.healthy).count();
             let protocol_ok = results
                 .iter()
-                .filter(|item| item.protocol_probe.handshake_ok)
+                .filter(|item| item.protocol_probe.session_ready)
                 .count();
             let protocol_failed = results
                 .iter()
-                .filter(|item| item.protocol_probe.attempted && !item.protocol_probe.handshake_ok)
+                .filter(|item| item.protocol_probe.attempted && !item.protocol_probe.session_ready)
                 .count();
             let probe_skipped = results
                 .iter()

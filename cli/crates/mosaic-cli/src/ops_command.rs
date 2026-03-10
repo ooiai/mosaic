@@ -16,9 +16,12 @@ use mosaic_ops::{
 };
 
 use super::{
-    AllowlistCommand, ApprovalsArgs, ApprovalsCommand, Cli, LogsArgs, ObservabilityArgs,
-    ObservabilityCommand, SafetyArgs, SafetyCommand, SandboxArgs, SandboxCommand, SystemArgs,
-    SystemCommand, collect_gateway_runtime_status, dispatch_system_event, parse_json_input,
+    AllowlistCommand, ApprovalsArgs, ApprovalsCommand, Cli, DeviceStatus, LogsArgs,
+    NodeRuntimeStatus, ObservabilityArgs, ObservabilityCommand, PairingStatus, SafetyArgs,
+    SafetyCommand, SandboxArgs, SandboxCommand, SystemArgs, SystemCommand,
+    collect_gateway_runtime_status, devices_file_path, dispatch_system_event,
+    load_devices_or_default, load_nodes_or_default, load_pairing_requests_or_default,
+    nodes_events_file_path, nodes_file_path, pairing_requests_file_path, parse_json_input,
     print_json, resolve_state_paths, save_json_file,
 };
 
@@ -259,6 +262,34 @@ pub(super) async fn handle_observability(cli: &Cli, args: ObservabilityArgs) -> 
         println!(
             "channel_failed_events: {}",
             report["summary"]["channel_failed_events"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "nodes_total: {}",
+            report["summary"]["nodes_total"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "nodes_online: {}",
+            report["summary"]["nodes_online"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "devices_total: {}",
+            report["summary"]["devices_total"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "pairings_total: {}",
+            report["summary"]["pairings_total"].as_u64().unwrap_or(0)
+        );
+        println!(
+            "nodes_events_count: {}",
+            report["summary"]["nodes_events_count"]
+                .as_u64()
+                .unwrap_or(0)
+        );
+        println!(
+            "nodes_failed_events: {}",
+            report["summary"]["nodes_failed_events"]
                 .as_u64()
                 .unwrap_or(0)
         );
@@ -547,6 +578,7 @@ async fn build_observability_report(
         object.insert("history".to_string(), gateway_history.clone());
     }
     let channels = build_channels_observability(&paths.data_dir, options.tail);
+    let nodes = build_nodes_observability(&paths.data_dir, options.tail);
     let mut mcp = build_mcp_observability(&paths.data_dir);
     let mcp_history = build_mcp_observability_history(&mcp, &paths.data_dir);
     if let Value::Object(object) = &mut mcp {
@@ -608,6 +640,10 @@ async fn build_observability_report(
             "gateway_history_file": gateway_history_path(&paths.data_dir).display().to_string(),
             "channels_file": channels_file_path(&paths.data_dir).display().to_string(),
             "channel_events_dir": channels_events_dir(&paths.data_dir).display().to_string(),
+            "nodes_file": nodes_file_path(&paths.data_dir).display().to_string(),
+            "devices_file": devices_file_path(&paths.data_dir).display().to_string(),
+            "pairings_file": pairing_requests_file_path(&paths.data_dir).display().to_string(),
+            "nodes_events_file": nodes_events_file_path(&paths.data_dir).display().to_string(),
             "mcp_registry_file": mcp_servers_file_path(&paths.data_dir).display().to_string(),
             "mcp_history_file": mcp_history_path(&paths.data_dir).display().to_string(),
         },
@@ -629,6 +665,15 @@ async fn build_observability_report(
             "channels_with_errors": channels["summary"]["channels_with_errors"],
             "channel_events_count": channels["summary"]["event_count"],
             "channel_failed_events": channels["summary"]["failed_events"],
+            "nodes_total": nodes["summary"]["total_nodes"],
+            "nodes_online": nodes["summary"]["online_nodes"],
+            "nodes_offline": nodes["summary"]["offline_nodes"],
+            "devices_total": nodes["summary"]["total_devices"],
+            "approved_devices": nodes["summary"]["approved_devices"],
+            "pairings_total": nodes["summary"]["total_pairings"],
+            "pending_pairings": nodes["summary"]["pending_pairings"],
+            "nodes_events_count": nodes["summary"]["event_count"],
+            "nodes_failed_events": nodes["summary"]["failed_events"],
             "mcp_configured": mcp["summary"]["configured"],
             "mcp_enabled": mcp["summary"]["enabled"],
             "mcp_healthy": mcp["summary"]["healthy"],
@@ -685,6 +730,7 @@ async fn build_observability_report(
         "system_events": system_events,
         "gateway": gateway,
         "channels": channels,
+        "nodes": nodes,
         "mcp": mcp,
         "realtime": realtime,
         "alerts": alerts,
@@ -849,6 +895,46 @@ fn append_history_entry<T: Serialize>(
             history_path.display()
         )
     })
+}
+
+fn read_jsonl_values(path: &Path) -> (Vec<Value>, Option<Value>) {
+    if !path.exists() {
+        return (Vec::new(), None);
+    }
+    let raw = match std::fs::read_to_string(path) {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                Vec::new(),
+                Some(json!({
+                    "message": format!("failed to read '{}': {err}", path.display())
+                })),
+            );
+        }
+    };
+    let mut values = Vec::new();
+    for (idx, line) in raw.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Value>(trimmed) {
+            Ok(value) => values.push(value),
+            Err(err) => {
+                return (
+                    values,
+                    Some(json!({
+                        "message": format!(
+                            "failed to parse JSONL '{}' at line {}: {err}",
+                            path.display(),
+                            idx + 1
+                        )
+                    })),
+                );
+            }
+        }
+    }
+    (values, None)
 }
 
 fn rewrite_history_entries<T: Serialize>(
@@ -1358,6 +1444,177 @@ fn build_channels_observability(data_dir: &Path, tail: usize) -> Value {
         "recent_events": recent_events,
         "errors": {
             "status": status_error,
+            "events": events_error,
+        },
+    })
+}
+
+fn build_nodes_observability(data_dir: &Path, tail: usize) -> Value {
+    let nodes_path = nodes_file_path(data_dir);
+    let devices_path = devices_file_path(data_dir);
+    let pairings_path = pairing_requests_file_path(data_dir);
+    let events_path = nodes_events_file_path(data_dir);
+
+    let (nodes, nodes_error) = match load_nodes_or_default(&nodes_path) {
+        Ok(value) => (Some(value), None),
+        Err(err) => (None, Some(error_to_json(&err))),
+    };
+    let (devices, devices_error) = match load_devices_or_default(&devices_path) {
+        Ok(value) => (Some(value), None),
+        Err(err) => (None, Some(error_to_json(&err))),
+    };
+    let (pairings, pairings_error) = match load_pairing_requests_or_default(&pairings_path) {
+        Ok(value) => (Some(value), None),
+        Err(err) => (None, Some(error_to_json(&err))),
+    };
+    let (events, events_error) = read_jsonl_values(&events_path);
+
+    let total_nodes = nodes.as_ref().map_or(0usize, Vec::len);
+    let online_nodes = nodes.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == NodeRuntimeStatus::Online)
+            .count()
+    });
+    let offline_nodes = total_nodes.saturating_sub(online_nodes);
+    let total_devices = devices.as_ref().map_or(0usize, Vec::len);
+    let approved_devices = devices.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == DeviceStatus::Approved)
+            .count()
+    });
+    let pending_devices = devices.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == DeviceStatus::Pending)
+            .count()
+    });
+    let rejected_devices = devices.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == DeviceStatus::Rejected)
+            .count()
+    });
+    let revoked_devices = devices.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == DeviceStatus::Revoked)
+            .count()
+    });
+    let total_pairings = pairings.as_ref().map_or(0usize, Vec::len);
+    let pending_pairings = pairings.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == PairingStatus::Pending)
+            .count()
+    });
+    let approved_pairings = pairings.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == PairingStatus::Approved)
+            .count()
+    });
+    let rejected_pairings = pairings.as_ref().map_or(0usize, |items| {
+        items
+            .iter()
+            .filter(|item| item.status == PairingStatus::Rejected)
+            .count()
+    });
+
+    let mut scope_counts = BTreeMap::<String, usize>::new();
+    let mut action_counts = BTreeMap::<String, usize>::new();
+    let mut failed_events = 0usize;
+    let mut latest_event_ts = None::<String>;
+    let mut issue_events = 0usize;
+    let mut repair_runs = 0usize;
+    let mut repaired_actions = 0usize;
+
+    for event in &events {
+        if let Some(scope) = event.get("scope").and_then(Value::as_str) {
+            *scope_counts.entry(scope.to_string()).or_default() += 1;
+        }
+        if let Some(action) = event.get("action").and_then(Value::as_str) {
+            *action_counts.entry(action.to_string()).or_default() += 1;
+        }
+        if event
+            .get("success")
+            .and_then(Value::as_bool)
+            .is_some_and(|success| !success)
+        {
+            failed_events += 1;
+        }
+        if event
+            .get("issues_total")
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value > 0)
+        {
+            issue_events += 1;
+        }
+        if event
+            .get("repair")
+            .and_then(Value::as_bool)
+            .is_some_and(|value| value)
+        {
+            repair_runs += 1;
+        }
+        repaired_actions += event
+            .get("actions_applied")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
+        latest_event_ts = event
+            .get("ts")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or(latest_event_ts);
+    }
+
+    let recent_events = events
+        .iter()
+        .rev()
+        .take(tail.clamp(1, 50))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    json!({
+        "ok": nodes_error.is_none()
+            && devices_error.is_none()
+            && pairings_error.is_none()
+            && events_error.is_none(),
+        "paths": {
+            "nodes_file": nodes_path.display().to_string(),
+            "devices_file": devices_path.display().to_string(),
+            "pairings_file": pairings_path.display().to_string(),
+            "events_file": events_path.display().to_string(),
+        },
+        "summary": {
+            "total_nodes": total_nodes,
+            "online_nodes": online_nodes,
+            "offline_nodes": offline_nodes,
+            "total_devices": total_devices,
+            "approved_devices": approved_devices,
+            "pending_devices": pending_devices,
+            "rejected_devices": rejected_devices,
+            "revoked_devices": revoked_devices,
+            "total_pairings": total_pairings,
+            "pending_pairings": pending_pairings,
+            "approved_pairings": approved_pairings,
+            "rejected_pairings": rejected_pairings,
+            "event_count": events.len(),
+            "failed_events": failed_events,
+            "success_events": events.len().saturating_sub(failed_events),
+            "issue_events": issue_events,
+            "repair_runs": repair_runs,
+            "repaired_actions": repaired_actions,
+            "latest_event_ts": latest_event_ts,
+            "scopes": scope_counts,
+            "actions": action_counts,
+        },
+        "recent_events": recent_events,
+        "errors": {
+            "nodes": nodes_error,
+            "devices": devices_error,
+            "pairings": pairings_error,
             "events": events_error,
         },
     })
