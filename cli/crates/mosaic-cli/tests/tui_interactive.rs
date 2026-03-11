@@ -155,6 +155,175 @@ fn tui_interactive_json_mode_returns_validation_error() {
     assert_eq!(status.exit_code(), 7, "unexpected exit status: {status:?}");
 }
 
+#[test]
+#[allow(deprecated)]
+fn tui_interactive_without_session_prefers_latest_session_runtime_agent() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    let first_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-seed")
+        .args([
+            "--project-state",
+            "--json",
+            "tui",
+            "--agent",
+            "writer",
+            "--prompt",
+            "seed latest session",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first_json: serde_json::Value =
+        serde_json::from_slice(&first_output).expect("first tui json");
+    let session_id = first_json["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "reviewer",
+            "--name",
+            "Reviewer",
+            "--model",
+            "mock-model",
+            "--set-default",
+        ])
+        .assert()
+        .success();
+
+    let bin = assert_cmd::cargo::cargo_bin("mosaic");
+    let pty = native_pty_system();
+    let pair = pty
+        .openpty(PtySize {
+            rows: 40,
+            cols: 140,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("open pty");
+
+    let mut cmd = CommandBuilder::new(bin);
+    cmd.cwd(temp.path());
+    cmd.env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-resume");
+    cmd.arg("--project-state");
+    cmd.arg("tui");
+
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn tui");
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().expect("clone reader");
+    let mut writer = pair.master.take_writer().expect("writer");
+    let drain = std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    });
+
+    std::thread::sleep(Duration::from_millis(300));
+    writer.write_all(b"resume latest").expect("write prompt");
+    writer.write_all(b"\r").expect("send enter");
+    writer.flush().expect("flush prompt");
+
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(6) {
+        let show_output = Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args(["--project-state", "--json", "session", "show", &session_id])
+            .output()
+            .expect("session show");
+        if show_output.status.success() {
+            let show_json: serde_json::Value =
+                serde_json::from_slice(&show_output.stdout).expect("session show json");
+            let runtime = &show_json["runtime"];
+            let has_reply = show_json["events"]
+                .as_array()
+                .expect("events")
+                .iter()
+                .any(|event| event["payload"]["text"].as_str() == Some("writer-resume"));
+            if runtime["agent_id"] == "writer" && has_reply {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(120));
+    }
+
+    writer.write_all(b"q").expect("send q");
+    writer.flush().expect("flush q");
+
+    let status = wait_with_timeout(child.as_mut(), Duration::from_secs(8));
+    drop(writer);
+    let _ = drain.join();
+    assert_eq!(status.exit_code(), 0, "unexpected exit status: {status:?}");
+
+    let show_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "session", "show", &session_id])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show_json: serde_json::Value =
+        serde_json::from_slice(&show_output).expect("session show json");
+    assert_eq!(show_json["runtime"]["agent_id"], "writer");
+    assert!(
+        show_json["events"]
+            .as_array()
+            .expect("events")
+            .iter()
+            .any(|event| event["payload"]["text"].as_str() == Some("writer-resume"))
+    );
+}
+
 fn wait_with_timeout(child: &mut dyn Child, timeout: Duration) -> ExitStatus {
     let started = std::time::Instant::now();
     loop {

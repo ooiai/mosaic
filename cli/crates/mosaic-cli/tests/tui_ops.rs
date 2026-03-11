@@ -96,6 +96,23 @@ fn tui_prompt_json_supports_session_resume() {
         .assert()
         .success();
 
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
     let first: Value = serde_json::from_slice(
         &Command::cargo_bin("mosaic")
             .expect("binary")
@@ -105,6 +122,8 @@ fn tui_prompt_json_supports_session_resume() {
                 "--project-state",
                 "--json",
                 "tui",
+                "--agent",
+                "writer",
                 "--prompt",
                 "first prompt",
             ])
@@ -119,6 +138,25 @@ fn tui_prompt_json_supports_session_resume() {
         .as_str()
         .expect("session id")
         .to_string();
+    assert_eq!(first["agent_id"], "writer");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "reviewer",
+            "--name",
+            "Reviewer",
+            "--model",
+            "mock-model",
+            "--set-default",
+        ])
+        .assert()
+        .success();
 
     let second: Value = serde_json::from_slice(
         &Command::cargo_bin("mosaic")
@@ -144,4 +182,106 @@ fn tui_prompt_json_supports_session_resume() {
     assert_eq!(second["ok"], true);
     assert_eq!(second["session_id"], session_id);
     assert_eq!(second["response"], "second-tui");
+    assert_eq!(second["agent_id"], "writer");
+}
+
+#[test]
+#[allow(deprecated)]
+fn tui_prompt_resume_keeps_original_agent_when_default_changes() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--set-default",
+        ])
+        .assert()
+        .success();
+
+    let first: Value = serde_json::from_slice(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-tui")
+            .args([
+                "--project-state",
+                "--json",
+                "tui",
+                "--prompt",
+                "writer tui prompt",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .expect("first tui json");
+    let session_id = first["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    assert_eq!(first["agent_id"], "writer");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "reviewer",
+            "--name",
+            "Reviewer",
+            "--set-default",
+        ])
+        .assert()
+        .success();
+
+    let resumed: Value = serde_json::from_slice(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-tui-resumed")
+            .args([
+                "--project-state",
+                "--json",
+                "tui",
+                "--session",
+                &session_id,
+                "--prompt",
+                "resume tui prompt",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone(),
+    )
+    .expect("resumed tui json");
+    assert_eq!(resumed["session_id"], session_id);
+    assert_eq!(resumed["agent_id"], "writer");
 }

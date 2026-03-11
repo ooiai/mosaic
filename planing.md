@@ -40,11 +40,12 @@ This section tracks **functional depth completion** (not only command existence)
 | Module | Depth | Main Missing Pieces |
 | --- | --- | --- |
 | `mcp` | 100% | no open blocking gap in current beta scope |
+| `core agent/agents` | 87% | richer multi-agent TUI controls and deeper agent/session management ergonomics |
 | `gateway` | 97% | deeper auto-remediation workflows around runtime/state reconciliation |
 | `channels` | 95% | richer multi-channel recovery ergonomics and operator guardrails |
 | `memory` | 100% | no open blocking gap in current beta scope |
 | `knowledge` | 99% | source adapter depth (batch/http auth/mcp metadata) and long-horizon lifecycle automation polish |
-| `nodes/devices/pairing` | 88% | broaden lifecycle diagnostics/recovery automation and richer operational telemetry exports |
+| `nodes/devices/pairing` | 92% | deeper lifecycle policy automation and remote execution recovery workflows |
 | `hooks/cron/webhooks` | 94% | further enrich long-horizon replay analytics (trend scoring + backlog-age prioritization guidance) |
 | `tts/voicecall` | 90% | deeper provider/runtime drill coverage beyond mock synth probe and broader external integration depth |
 | `browser` | 92% | richer protocol-aware probe workflows (multi-target scheduling + report export) and retention policy automation tuning |
@@ -111,10 +112,10 @@ This section tracks **functional depth completion** (not only command existence)
 | `setup`, `onboard` | `setup` + alias `onboard` | done | 100% |
 | `configure`, `config` | `configure` + alias `config` + `configure keys/get/set/unset/patch/preview/template` (`patch --target-profile`, `preview` dry-run, `template` JSON/TOML, grouped diff summaries by provider/agent/tools) | done | 100% |
 | `models` | `models list/status/resolve/set/aliases/fallbacks` (`list` includes `--query/--limit`) | partial | 82% |
-| `message` | `ask` + alias `message` + stdin prompt (`ask -`) + file/script input (`--prompt-file`, `--script`, including `--script -`) + batch session chaining in script mode | partial | 84% |
-| `agent` | `chat` + alias `agent` + extended REPL commands (`/status`, `/agent`, `/session`, `/new`) + stdin prompt (`chat --prompt -`) + prompt/script files (`--prompt-file`, `--script`) | partial | 82% |
-| `agents` | `agents list/add/update/show/remove/default/route` | partial | 80% |
-| `sessions` | `session list/show/resume/clear` + alias `sessions` | partial | 80% |
+| `message` | `ask` + alias `message` + stdin prompt (`ask -`) + file/script input (`--prompt-file`, `--script`, including `--script -`) + batch session chaining in script mode + session-bound agent resume when `--session` is used without `--agent` | partial | 86% |
+| `agent` | `chat` + alias `agent` + extended REPL commands (`/status`, `/agent`, `/agent <id>`, `/session`, `/new`) + stdin prompt (`chat --prompt -`) + prompt/script files (`--prompt-file`, `--script`) + session-bound agent resume when reopening an existing session + safe agent switch with automatic session reset once conversation history exists | partial | 88% |
+| `agents` | `agents list/add/update/show/remove/default/route` + route/default-driven runtime selection + session stickiness on resume + REPL-time agent switching through `chat /agent <id>` | partial | 84% |
+| `sessions` | `session list/show/resume/clear` + alias `sessions` + runtime metadata exposure (`runtime.profile_name`, `runtime.agent_id`) | partial | 84% |
 | `status`, `health`, `doctor` | same commands | done | 90% |
 | `gateway`, `daemon` | `gateway ...` + alias `daemon` + protocol health checks (`gateway_discover`/`gateway_discover_schema_profile`/`gateway_protocol_methods`/`gateway_call_status`/`gateway_call_health`/`gateway_call_nodes_run`/`gateway_call_nodes_invoke`) + method-level schema checks in health (`gateway_status_schema_profile`/`gateway_health_schema_profile`/`gateway_nodes_run_schema_profile`/`gateway_nodes_invoke_schema_profile`) + optional health auto-remediation (`gateway health --repair` + `gateway_auto_repair`, including service-target reconciliation before restart) + stricter discover/call response validation + persisted request telemetry (`.mosaic/data/gateway-events.jsonl`) + persisted gateway degradation history (`gateway.history`) surfaced in observability (`gateway.telemetry.*`, `gateway.recent_events`, `gateway.request_failures`/`gateway.failure_rate_regression` alerts) | partial | 97% |
 | `mcp` | `mcp list/add/show/update/check/diagnose/repair/enable/disable/remove` + local registry + readiness checks (`check --all` batch summary) + deep batch protocol probes (`check --all --deep --timeout-ms --report-out`) + single-target protocol initialize/session probe (`diagnose --timeout-ms --report-out`) with framed-response conformance (`Content-Length` stdio parsing plus newline-JSON mock fallback) and post-initialize session readiness (`notifications/initialized`, `session_ready`) + explicit config mutation path (`update` with replace/clear semantics for `args/env/env_from/cwd` and enable-state toggles) + auto-remediation workflow (`repair [<server_id>|--all]` with optional `--clear-missing-cwd` + `--set-env-from KEY=ENV_NAME` and before/after deltas) + doctor/observability MCP telemetry integration + persisted MCP observability history (`mcp.history`) with delta/regression alerts and incident hints + secret-safe env indirection (`--env-from KEY=ENV_NAME`) with missing-env diagnostics + dedicated freeze gate (`scripts/mcp_freeze_check.sh`) + from-scratch smoke coverage for `session_ready` | done | 100% |
@@ -125,7 +126,7 @@ This section tracks **functional depth completion** (not only command existence)
 | `approvals`, `acp` | `approvals ...` + alias `acp` + `approvals check --command` + `allowlist list` | partial | 83% |
 | `sandbox` | `sandbox get/set/check/list/explain` | partial | 83% |
 | `safety` | `safety get/check/report` + merged sandbox/approvals decision surface + audit summary/diff (`--audit-tail`, `--compare-window`) | partial | 91% |
-| `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject` + `nodes diagnose [node-id] --stale-after-minutes --repair` for drift detection/remediation) | partial | 88% |
+| `nodes`, `node`, `devices`, `pairing` | `nodes/devices/pairing` + alias `node` (includes `pairing reject` + `nodes diagnose [node-id] --stale-after-minutes --repair --report-out` for drift detection/remediation, normalized lifecycle telemetry in `.mosaic/data/nodes-events.jsonl`, and observability aggregation via `nodes.*`) | partial | 92% |
 | `hooks`, `cron`, `webhooks` | same command families (`logs` support `--summary` + `--since-minutes`; `replay` supports failed-event planning + optional `--apply` with `--stop-on-error`, reason filters `--reason`, retryable-only filters, batch planning `--batch-size` + `batch_plan`, partial apply capping `--max-apply`, recovery diagnostics (`recovery_diagnostics`), report export `--report-out`, and webhook secret-env reuse) | partial | 94% |
 | `tts` | `tts voices/speak/diagnose` (`diagnose` adds synth probe with timeout guard, optional output write check, and report export) | partial | 84% |
 | `voicecall` | `voicecall start/status/send/history/stop` (supports channel-bound delivery path with `send --parse-mode/--token-env` overrides, reusing channels retry/telemetry and observability realtime/alert telemetry) | partial | 86% |
@@ -142,7 +143,7 @@ This section tracks **functional depth completion** (not only command existence)
 | `uninstall` (top-level) | `uninstall` (`--yes` destructive guard + state removal) | partial | 80% |
 | `dns` | `dns resolve <host> [--port]` | partial | 75% |
 | `docs` | `docs [topic]` topic listing and URL routing | partial | 75% |
-| `tui` | `tui` chat-first terminal UI (`mosaic-tui` + `ratatui/crossterm`) with sessions/messages/inspector panes, focus control (`--focus`), inspector toggle (`--no-inspector`), interactive keymap, and non-interactive `--prompt` JSON mode compatibility | partial | 90% |
+| `tui` | `tui` chat-first terminal UI (`mosaic-tui` + `ratatui/crossterm`) with sessions/messages/inspector panes, focus control (`--focus`), inspector toggle (`--no-inspector`), interactive keymap, non-interactive `--prompt` JSON mode compatibility, and session-bound agent resume | partial | 91% |
 | `qr` | `qr encode` + `qr pairing` with payload/ascii/png render | partial | 85% |
 | `clawbot` | `clawbot ask/chat/send/status` (routes to existing runtime; supports `--prompt-file`/`--script`/`--text-file`, including stdin source `-`) | partial | 96% |
 | `distribution` | cross-platform release packaging (`linux/mac/windows`) + installers (`install.sh`/`install.ps1`) + Homebrew/Scoop manifest generation + archive/assets verifiers + local installer smoke (`release_install_smoke.sh`) | partial | 90% |

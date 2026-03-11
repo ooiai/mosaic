@@ -9,7 +9,7 @@ use mosaic_core::config::ConfigManager;
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::models::{ModelProfileConfig, ModelRoutingStore};
 use mosaic_core::provider::{ChatRequest, ChatResponse, ModelInfo, Provider, ProviderHealth};
-use mosaic_core::session::SessionStore;
+use mosaic_core::session::{SessionRuntimeMetadata, SessionStore};
 use mosaic_core::state::{StateMode, StatePaths};
 use mosaic_ops::{ApprovalStore, RuntimePolicy, SandboxStore};
 use mosaic_plugins::{ExtensionRegistry, RegistryRoots, SkillEntry};
@@ -23,6 +23,15 @@ pub(super) struct RuntimeContext {
     pub(super) agent: AgentRunner,
     pub(super) active_agent_id: Option<String>,
     pub(super) active_profile_name: String,
+}
+
+impl RuntimeContext {
+    pub(super) fn session_metadata(&self) -> SessionRuntimeMetadata {
+        SessionRuntimeMetadata {
+            agent_id: self.active_agent_id.clone(),
+            profile_name: self.active_profile_name.clone(),
+        }
+    }
 }
 
 pub(super) struct ModelRoutingProvider {
@@ -108,19 +117,29 @@ pub(super) fn build_runtime(
     cli: &Cli,
     requested_agent_id: Option<&str>,
     route_hint: Option<&str>,
+    session_hint: Option<&str>,
 ) -> Result<RuntimeContext> {
     let state_paths = resolve_state_paths(cli.project_state)?;
     state_paths.ensure_dirs()?;
     let manager = ConfigManager::new(state_paths.config_path.clone());
     let config = manager.load()?;
+    let session_store = SessionStore::new(state_paths.sessions_dir.clone());
     let agent_store = AgentStore::new(
         agents_file_path(&state_paths.data_dir),
         agent_routes_path(&state_paths.data_dir),
     );
+    let session_agent_id = if requested_agent_id.is_none() {
+        session_hint
+            .and_then(|session_id| session_store.latest_runtime_metadata(session_id).ok())
+            .flatten()
+            .and_then(|metadata| metadata.agent_id)
+    } else {
+        None
+    };
     let mut resolved = agent_store.resolve_effective_profile(
         &config,
         &cli.profile,
-        requested_agent_id,
+        requested_agent_id.or(session_agent_id.as_deref()),
         route_hint,
     )?;
     let model_store = ModelRoutingStore::new(state_paths.models_path.clone());
@@ -143,7 +162,6 @@ pub(super) fn build_runtime(
     if !fallback_models.is_empty() {
         provider = Arc::new(ModelRoutingProvider::new(provider, fallback_models));
     }
-    let session_store = SessionStore::new(state_paths.sessions_dir.clone());
     let audit_store = AuditStore::new(
         state_paths.audit_dir.clone(),
         state_paths.audit_log_path.clone(),

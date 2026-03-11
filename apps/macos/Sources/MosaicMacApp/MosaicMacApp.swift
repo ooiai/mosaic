@@ -79,6 +79,7 @@ struct SettingsView: View {
 
     @Bindable var viewModel: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
     @State private var selection: SettingsSection = .general
 
     var body: some View {
@@ -93,8 +94,11 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     VStack(alignment: .leading, spacing: 8) {
+                        Text("SETTINGS")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tokens.accent)
                         Text(selection.title)
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .font(.system(size: 28, weight: .semibold))
                             .foregroundStyle(tokens.primaryText)
                         Text(selection.subtitle)
                             .font(.system(size: 13))
@@ -103,7 +107,10 @@ struct SettingsView: View {
 
                     settingsContent(tokens: tokens)
                 }
-                .padding(28)
+                .frame(maxWidth: 820, alignment: .leading)
+                .padding(.horizontal, 36)
+                .padding(.vertical, 28)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
         }
         .frame(minWidth: 980, minHeight: 720)
@@ -111,11 +118,11 @@ struct SettingsView: View {
             LinearGradient(
                 colors: [
                     tokens.windowBackground,
+                    tokens.elevatedBackground.opacity(colorScheme == .dark ? 0.34 : 0.14),
                     tokens.windowBackground,
-                    tokens.accent.opacity(colorScheme == .dark ? 0.06 : 0.03),
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
         )
     }
@@ -138,11 +145,23 @@ struct SettingsView: View {
 
     private func settingsSidebar(tokens: ThemeTokens) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Mosaic")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
+            Button {
+                dismiss()
+            } label: {
+                Label("Back to app", systemImage: "arrow.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(tokens.secondaryText)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("mosaic")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(tokens.accent)
+                Text("Desktop Settings")
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(tokens.primaryText)
-                Text("Native desktop workbench settings")
+                Text("Native workbench controls and runtime defaults.")
                     .font(.system(size: 12))
                     .foregroundStyle(tokens.secondaryText)
             }
@@ -157,9 +176,9 @@ struct SettingsView: View {
                                 .frame(width: 18)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(item.title)
-                                    .font(.system(size: 13, weight: .semibold))
+                                    .font(.system(size: 13, weight: .medium))
                                 Text(item.subtitle)
-                                    .font(.caption2)
+                                    .font(.system(size: 11))
                                     .lineLimit(1)
                             }
                             Spacer()
@@ -200,7 +219,7 @@ struct SettingsView: View {
         }
         .padding(22)
         .frame(width: 290, alignment: .topLeading)
-        .background(tokens.panelBackground.opacity(0.80))
+        .background(tokens.panelBackground.opacity(0.76))
     }
 
     private func generalSettingsContent(tokens: ThemeTokens) -> some View {
@@ -530,36 +549,36 @@ struct SettingsView: View {
             content()
         }
         .padding(18)
-        .background(tokens.panelBackground.opacity(0.88), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(tokens.panelBackground.opacity(0.78), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(tokens.border.opacity(0.72), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tokens.border.opacity(0.62), lineWidth: 1)
         )
     }
 
     private func settingsMetricPill(title: String, value: String, tokens: ThemeTokens) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.caption2)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tokens.tertiaryText)
             Text(value)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(tokens.primaryText)
                 .lineLimit(1)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(tokens.elevatedBackground.opacity(0.86), in: Capsule())
+        .padding(.vertical, 9)
+        .background(tokens.elevatedBackground.opacity(0.72), in: Capsule())
     }
 
     private func settingsValueRow(tokens: ThemeTokens, label: String, value: String) -> some View {
         HStack(alignment: .top) {
             Text(label)
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundStyle(tokens.secondaryText)
             Spacer()
             Text(value)
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundStyle(tokens.primaryText)
                 .multilineTextAlignment(.trailing)
         }

@@ -274,6 +274,10 @@ OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
 # run ask script from stdin
 printf "first ask\nsecond ask\n" | OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
   --project-state --json ask --script -
+
+# resume an existing session; if --agent is omitted, Mosaic reuses the last agent bound to that session
+OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state --json ask --session <session-id> "continue this thread"
 ```
 
 ### Chat REPL
@@ -289,6 +293,10 @@ OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
 # run line-based chat script (one non-empty line = one turn)
 OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
   --project-state --json chat --script prompts/chat-script.txt
+
+# resume an existing chat session with its last bound agent
+OPENAI_API_KEY=... cargo run -p mosaic-cli --bin mosaic -- \
+  --project-state chat --session <session-id>
 ```
 
 REPL commands:
@@ -296,9 +304,12 @@ REPL commands:
 - `/help`: show command help
 - `/status`: show active profile, agent, and session
 - `/agent`: show active agent
+- `/agent <id>`: switch active agent; if the current chat already has a session, Mosaic starts a new session before switching
 - `/session`: show current session id
 - `/new`: reset chat and start a new session
 - `/exit`: quit chat
+
+`session show --json` now includes a `runtime` object with the last persisted `profile_name` and `agent_id`.
 
 ### Gateway Runtime
 
@@ -375,6 +386,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state nodes list
 cargo run -p mosaic-cli --bin mosaic -- --project-state nodes status local
 cargo run -p mosaic-cli --bin mosaic -- --project-state nodes diagnose local --stale-after-minutes 30
 cargo run -p mosaic-cli --bin mosaic -- --project-state nodes diagnose local --stale-after-minutes 30 --repair
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json nodes diagnose local --stale-after-minutes 30 --repair --report-out .mosaic/reports/nodes-diagnose.json
 # run/invoke go through gateway; start gateway first
 cargo run -p mosaic-cli --bin mosaic -- --project-state gateway start
 # default approvals policy is confirm, so run needs --yes (or allowlist policy)
@@ -391,6 +403,8 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state pairing list --status pe
 cargo run -p mosaic-cli --bin mosaic -- --project-state pairing approve <request-id>
 cargo run -p mosaic-cli --bin mosaic -- --project-state pairing reject <request-id> --reason "policy denied"
 ```
+
+`nodes diagnose --report-out` writes the full remediation report to disk, and node/device/pairing lifecycle actions append normalized telemetry to `.mosaic/data/nodes-events.jsonl`, which is aggregated into `observability report/export`.
 
 ### Hooks Runtime
 
@@ -662,6 +676,7 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state safety report --command 
 ```
 
 `observability report/export` appends plugin soak samples to `.mosaic/data/reports/plugin-soak-history.jsonl` (or XDG equivalent) when `plugin_soak.available=true`, supports retention (`MOSAIC_OBS_PLUGIN_SOAK_HISTORY_MAX_SAMPLES`), exposes history/delta summary fields, includes gateway + channels telemetry slices, and adds alert suppression/SLO controls (`MOSAIC_OBS_ALERT_*`, `MOSAIC_OBS_SLO_*`).
+It also includes node/device/pairing runtime telemetry from `.mosaic/data/nodes-events.jsonl` under `nodes.*`, with summary counters for online/offline nodes, approved devices, pending pairings, and failed lifecycle events.
 
 ### Memory Runtime
 
@@ -731,7 +746,13 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state agents update writer --c
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents show writer
 cargo run -p mosaic-cli --bin mosaic -- --project-state agents route list
 cargo run -p mosaic-cli --bin mosaic -- --project-state ask --agent writer "hello"
+cargo run -p mosaic-cli --bin mosaic -- --project-state --json session show <session-id>
+cargo run -p mosaic-cli --bin mosaic -- --project-state chat
+# inside the REPL:
+/agent writer
 ```
+
+If you resume a session with `ask/chat/tui --session <id>` and do not pass `--agent`, Mosaic now reuses the session's last bound agent before considering route/default-agent fallback. Inside `chat`, `/agent <id>` switches the active agent, and if the current conversation already has a session Mosaic resets to a new session before applying the new binding.
 
 ### Plugins and Skills Runtime
 
