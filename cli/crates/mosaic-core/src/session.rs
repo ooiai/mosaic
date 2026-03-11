@@ -39,6 +39,12 @@ pub struct SessionSummary {
     pub last_updated: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionRuntimeMetadata {
+    pub agent_id: Option<String>,
+    pub profile_name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionStore {
     sessions_dir: PathBuf,
@@ -108,6 +114,18 @@ impl SessionStore {
         Ok(sessions)
     }
 
+    pub fn latest_runtime_metadata(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionRuntimeMetadata>> {
+        let path = self.session_path(session_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let events = Self::read_events_from_path(&path)?;
+        Ok(Self::latest_runtime_metadata_from_events(&events))
+    }
+
     pub fn latest_session_id(&self) -> Result<Option<String>> {
         let sessions = self.list_sessions()?;
         Ok(sessions.first().map(|summary| summary.session_id.clone()))
@@ -147,6 +165,27 @@ impl SessionStore {
         }
     }
 
+    pub fn build_runtime_metadata_event(
+        session_id: &str,
+        metadata: &SessionRuntimeMetadata,
+    ) -> SessionEvent {
+        Self::build_event(
+            session_id,
+            EventKind::System,
+            serde_json::json!({
+                "category": "runtime_metadata",
+                "agent_id": metadata.agent_id,
+                "profile_name": metadata.profile_name,
+            }),
+        )
+    }
+
+    pub fn latest_runtime_metadata_from_events(
+        events: &[SessionEvent],
+    ) -> Option<SessionRuntimeMetadata> {
+        events.iter().rev().find_map(Self::parse_runtime_metadata)
+    }
+
     fn read_events_from_path(path: &Path) -> Result<Vec<SessionEvent>> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
@@ -162,6 +201,30 @@ impl SessionStore {
             events.push(event);
         }
         Ok(events)
+    }
+
+    fn parse_runtime_metadata(event: &SessionEvent) -> Option<SessionRuntimeMetadata> {
+        if event.kind != EventKind::System {
+            return None;
+        }
+        if event.payload.get("category")?.as_str()? != "runtime_metadata" {
+            return None;
+        }
+        let profile_name = event.payload.get("profile_name")?.as_str()?.trim();
+        if profile_name.is_empty() {
+            return None;
+        }
+        let agent_id = event
+            .payload
+            .get("agent_id")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned);
+        Some(SessionRuntimeMetadata {
+            agent_id,
+            profile_name: profile_name.to_string(),
+        })
     }
 }
 
@@ -209,6 +272,47 @@ mod tests {
             .unwrap();
         let removed = store.clear_all().unwrap();
         assert_eq!(removed, 2);
+    }
+
+    #[test]
+    fn latest_runtime_metadata_reads_last_runtime_event() {
+        let temp = tempdir().unwrap();
+        let store = SessionStore::new(temp.path().join("sessions"));
+        let sid = store.create_session_id();
+        store
+            .append_event(&SessionStore::build_runtime_metadata_event(
+                &sid,
+                &SessionRuntimeMetadata {
+                    agent_id: Some("writer".to_string()),
+                    profile_name: "default".to_string(),
+                },
+            ))
+            .unwrap();
+        store
+            .append_event(&SessionStore::build_event(
+                &sid,
+                EventKind::User,
+                json!({ "text": "hello" }),
+            ))
+            .unwrap();
+        store
+            .append_event(&SessionStore::build_runtime_metadata_event(
+                &sid,
+                &SessionRuntimeMetadata {
+                    agent_id: Some("editor".to_string()),
+                    profile_name: "default".to_string(),
+                },
+            ))
+            .unwrap();
+
+        let runtime = store.latest_runtime_metadata(&sid).unwrap();
+        assert_eq!(
+            runtime,
+            Some(SessionRuntimeMetadata {
+                agent_id: Some("editor".to_string()),
+                profile_name: "default".to_string(),
+            })
+        );
     }
 
     #[test]

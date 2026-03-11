@@ -17,31 +17,31 @@ public struct ThemeTokens: Sendable {
         switch colorScheme {
         case .dark:
             ThemeTokens(
-                windowBackground: Color(red: 0.035, green: 0.055, blue: 0.08),
-                panelBackground: Color(red: 0.075, green: 0.10, blue: 0.14),
-                elevatedBackground: Color(red: 0.11, green: 0.15, blue: 0.20),
-                border: Color.white.opacity(0.1),
-                primaryText: Color.white.opacity(0.95),
-                secondaryText: Color.white.opacity(0.74),
-                tertiaryText: Color.white.opacity(0.52),
-                accent: Color(red: 0.20, green: 0.72, blue: 0.95),
-                success: Color(red: 0.38, green: 0.82, blue: 0.62),
-                warning: Color(red: 0.98, green: 0.75, blue: 0.31),
-                failure: Color(red: 0.94, green: 0.40, blue: 0.42)
+                windowBackground: Color(red: 0.043, green: 0.047, blue: 0.056),
+                panelBackground: Color(red: 0.074, green: 0.079, blue: 0.092),
+                elevatedBackground: Color(red: 0.106, green: 0.112, blue: 0.129),
+                border: Color.white.opacity(0.085),
+                primaryText: Color.white.opacity(0.94),
+                secondaryText: Color.white.opacity(0.68),
+                tertiaryText: Color.white.opacity(0.46),
+                accent: Color(red: 0.33, green: 0.64, blue: 0.96),
+                success: Color(red: 0.39, green: 0.78, blue: 0.60),
+                warning: Color(red: 0.93, green: 0.70, blue: 0.33),
+                failure: Color(red: 0.91, green: 0.42, blue: 0.45)
             )
         default:
             ThemeTokens(
-                windowBackground: Color(red: 0.95, green: 0.97, blue: 0.985),
-                panelBackground: Color.white.opacity(0.84),
+                windowBackground: Color(red: 0.948, green: 0.955, blue: 0.968),
+                panelBackground: Color.white.opacity(0.88),
                 elevatedBackground: Color.white.opacity(0.97),
-                border: Color.black.opacity(0.07),
-                primaryText: Color.black.opacity(0.86),
-                secondaryText: Color.black.opacity(0.63),
+                border: Color.black.opacity(0.065),
+                primaryText: Color.black.opacity(0.87),
+                secondaryText: Color.black.opacity(0.62),
                 tertiaryText: Color.black.opacity(0.42),
-                accent: Color(red: 0.08, green: 0.52, blue: 0.86),
-                success: Color(red: 0.17, green: 0.60, blue: 0.35),
-                warning: Color(red: 0.82, green: 0.56, blue: 0.10),
-                failure: Color(red: 0.77, green: 0.23, blue: 0.25)
+                accent: Color(red: 0.15, green: 0.46, blue: 0.84),
+                success: Color(red: 0.18, green: 0.58, blue: 0.39),
+                warning: Color(red: 0.78, green: 0.53, blue: 0.14),
+                failure: Color(red: 0.75, green: 0.26, blue: 0.28)
             )
         }
     }

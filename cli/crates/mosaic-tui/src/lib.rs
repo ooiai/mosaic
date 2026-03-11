@@ -8,7 +8,9 @@ use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use mosaic_agent::{AgentEvent, AgentRunOptions, AgentRunner};
 use mosaic_core::error::{MosaicError, Result};
-use mosaic_core::session::{EventKind, SessionEvent, SessionStore, SessionSummary};
+use mosaic_core::session::{
+    EventKind, SessionEvent, SessionRuntimeMetadata, SessionStore, SessionSummary,
+};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -45,6 +47,7 @@ pub struct TuiRuntime {
     pub agent: AgentRunner,
     pub profile_name: String,
     pub agent_id: Option<String>,
+    pub session_metadata: SessionRuntimeMetadata,
     pub policy_summary: String,
 }
 
@@ -532,6 +535,7 @@ fn spawn_agent_task(
     let cwd = options.cwd.clone();
     let yes = options.yes;
     let session_id = state.active_session_id.clone();
+    let session_metadata = runtime.session_metadata.clone();
     tokio::spawn(async move {
         let callback = Arc::new(move |event: AgentEvent| {
             let _ = tx_events.send(AppEvent::Agent(event));
@@ -541,6 +545,7 @@ fn spawn_agent_task(
                 &prompt,
                 AgentRunOptions {
                     session_id,
+                    session_metadata,
                     cwd,
                     yes,
                     interactive: true,

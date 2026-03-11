@@ -62,6 +62,8 @@ fn setup_models_ask_session_show_flow() {
         .stdout
         .clone();
     let show_json: Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_eq!(show_json["runtime"]["profile_name"], "default");
+    assert!(show_json["runtime"]["agent_id"].is_null());
     let events = show_json["events"].as_array().expect("events array");
     assert!(events.len() >= 2);
 }

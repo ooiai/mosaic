@@ -174,6 +174,118 @@ fn agents_add_route_and_ask_flow() {
 
 #[test]
 #[allow(deprecated)]
+fn ask_session_resume_prefers_session_runtime_agent_over_current_default() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    let first_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-first")
+        .args([
+            "--project-state",
+            "--json",
+            "ask",
+            "--agent",
+            "writer",
+            "hello writer",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first_json: Value = serde_json::from_slice(&first_output).expect("first ask json");
+    let session_id = first_json["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    assert_eq!(first_json["agent_id"], "writer");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "reviewer",
+            "--name",
+            "Reviewer",
+            "--model",
+            "mock-model",
+            "--set-default",
+        ])
+        .assert()
+        .success();
+
+    let second_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-second")
+        .args([
+            "--project-state",
+            "--json",
+            "ask",
+            "--session",
+            &session_id,
+            "resume writer session",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second_json: Value = serde_json::from_slice(&second_output).expect("second ask json");
+    assert_eq!(second_json["agent_id"], "writer");
+    assert_eq!(second_json["session_id"], session_id);
+
+    let show_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "session", "show", &session_id])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show_json: Value = serde_json::from_slice(&show_output).expect("session show json");
+    assert_eq!(show_json["runtime"]["agent_id"], "writer");
+}
+
+#[test]
+#[allow(deprecated)]
 fn agents_show_missing_returns_validation_error() {
     let temp = tempdir().expect("tempdir");
     let output = Command::cargo_bin("mosaic")
@@ -380,4 +492,111 @@ fn agents_with_skill_injects_skill_prompt() {
         .expect("system prompt");
     assert!(system_prompt.contains("BEGIN AGENT SKILL: writer"));
     assert!(system_prompt.contains("Always answer with concise bullet points"));
+}
+
+#[test]
+#[allow(deprecated)]
+fn ask_session_resume_keeps_original_agent_when_default_changes() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--set-default",
+            "--route",
+            "ask",
+        ])
+        .assert()
+        .success();
+
+    let first_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-first")
+        .args(["--project-state", "--json", "ask", "hello writer"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let first_json: Value = serde_json::from_slice(&first_output).expect("first ask json");
+    let session_id = first_json["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    assert_eq!(first_json["agent_id"], "writer");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "reviewer",
+            "--name",
+            "Reviewer",
+            "--set-default",
+            "--route",
+            "ask",
+        ])
+        .assert()
+        .success();
+
+    let second_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_MOCK_CHAT_RESPONSE", "writer-resumed")
+        .args([
+            "--project-state",
+            "--json",
+            "ask",
+            "--session",
+            &session_id,
+            "resume writer session",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let second_json: Value = serde_json::from_slice(&second_output).expect("second ask json");
+    assert_eq!(second_json["agent_id"], "writer");
+    assert_eq!(second_json["session_id"], session_id);
+
+    let show_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "session", "show", &session_id])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let show_json: Value = serde_json::from_slice(&show_output).expect("show json");
+    assert_eq!(show_json["runtime"]["agent_id"], "writer");
+    assert_eq!(show_json["runtime"]["profile_name"], "default");
 }

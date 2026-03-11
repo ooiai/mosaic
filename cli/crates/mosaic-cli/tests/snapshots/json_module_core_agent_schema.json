@@ -253,7 +253,9 @@
         {
           "id": "string",
           "payload": {
-            "text": "string"
+            "agent_id": "null",
+            "category": "string",
+            "profile_name": "string"
           },
           "session_id": "string",
           "ts": "string",
@@ -263,6 +265,10 @@
       "type": "array"
     },
     "ok": "bool",
+    "runtime": {
+      "agent_id": "null",
+      "profile_name": "string"
+    },
     "session_id": "string"
   },
   "setup": {

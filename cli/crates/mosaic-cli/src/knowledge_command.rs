@@ -318,13 +318,20 @@ pub(super) async fn handle_knowledge(cli: &Cli, args: KnowledgeArgs) -> Result<(
             }
             let augmented_prompt = render_augmented_prompt(&prompt, &hits);
 
-            let runtime = build_runtime(cli, agent.as_deref(), Some("knowledge.ask"))?;
+            let runtime = build_runtime(
+                cli,
+                agent.as_deref(),
+                Some("knowledge.ask"),
+                session.as_deref(),
+            )?;
+            let session_metadata = runtime.session_metadata();
             let result = runtime
                 .agent
                 .ask(
                     &augmented_prompt,
                     AgentRunOptions {
                         session_id: session,
+                        session_metadata,
                         cwd: std::env::current_dir()
                             .map_err(|err| MosaicError::Io(err.to_string()))?,
                         yes: cli.yes,

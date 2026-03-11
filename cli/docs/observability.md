@@ -26,12 +26,13 @@ mosaic --project-state --json observability export --out .mosaic/reports/obs.jso
 
 ## Report Structure
 
-- `summary`: log/event counts, gateway/channels runtime counters (`gateway_running`, `gateway_endpoint_healthy`, `channels_total`, `channel_events_count`, `channel_failed_events`), alert counters (`alerts_total`, `alerts_warning`, `alerts_critical`, `alerts_suppressed`), SLO booleans (`slo_gateway_met`, `slo_channels_met`), SLO history indicators (`slo_history_count`, `slo_gateway_ratio_delta`, `slo_channels_ratio_delta`, `slo_gateway_unmet_streak`, `slo_channels_unmet_streak`, `slo_incident_hints`), safety-audit counts, doctor check counts, safety diff deltas (`safety_failed_delta`, `safety_failure_rate_delta`), and plugin soak history indicators (`plugin_soak_history_count`, `plugin_soak_history_pruned`, `plugin_soak_delta_available`, `plugin_soak_completion_ratio_delta`, `plugin_soak_incident_hints`, `plugin_soak_completion_unmet_streak`, `plugin_soak_status_unmet_streak`).
+- `summary`: log/event counts, gateway/channels runtime counters (`gateway_running`, `gateway_endpoint_healthy`, `channels_total`, `channel_events_count`, `channel_failed_events`), node/device/pairing counters (`nodes_total`, `nodes_online`, `nodes_offline`, `devices_total`, `approved_devices`, `pairings_total`, `pending_pairings`, `nodes_events_count`, `nodes_failed_events`), alert counters (`alerts_total`, `alerts_warning`, `alerts_critical`, `alerts_suppressed`), SLO booleans (`slo_gateway_met`, `slo_channels_met`), SLO history indicators (`slo_history_count`, `slo_gateway_ratio_delta`, `slo_channels_ratio_delta`, `slo_gateway_unmet_streak`, `slo_channels_unmet_streak`, `slo_incident_hints`), safety-audit counts, doctor check counts, safety diff deltas (`safety_failed_delta`, `safety_failure_rate_delta`), and plugin soak history indicators (`plugin_soak_history_count`, `plugin_soak_history_pruned`, `plugin_soak_delta_available`, `plugin_soak_completion_ratio_delta`, `plugin_soak_incident_hints`, `plugin_soak_completion_unmet_streak`, `plugin_soak_status_unmet_streak`).
 - `policy`: current approvals mode + sandbox profile.
 - `logs`: unified log tail (same source as `mosaic logs`, including `plugin:*` event streams).
 - `system_events`: filtered event stream (same source as `mosaic system list`).
 - `gateway`: runtime status snapshot (running/process_alive/endpoint_healthy, selected target, state/service file metadata, and error envelope when unavailable).
 - `channels`: delivery telemetry snapshot from `channels status` + channel event tail aggregation (`delivery_status`, `event_kinds`, `http_status`, recent events).
+- `nodes`: runtime and lifecycle telemetry snapshot derived from `nodes/devices/pairing` state plus `.mosaic/data/nodes-events.jsonl` (`summary`, `scopes`, `actions`, `recent_events`, read errors).
 - `alerts`: alert-friendly rollup items derived from gateway/channels/safety/plugin-soak metrics, with `total/warning/critical` counters, suppression config (`min_severity`, `suppress_ids`), and `suppressed` audit section.
 - `slo`: windowed SLO view for gateway and channels (`target`, `ratio`, `samples`, `met`) plus persisted cross-run history (`sample_count`, `current_vs_previous.delta`, `streaks.gateway_unmet/channels_unmet`, `incident_hints`) for automation gating.
 - `safety_audit`: command audit summary, optional `comparison` window (`--compare-window`), and recent command decisions under current policy.
@@ -41,6 +42,7 @@ mosaic --project-state --json observability export --out .mosaic/reports/obs.jso
 When `--plugin-soak-report` is omitted, observability attempts auto-discovery (`cli/reports/plugin-soak-latest.log`, `reports/plugin-soak-latest.log`) and reports `plugin_soak.status=missing` if no report is found.
 Plugin soak history is stored at `.mosaic/data/reports/plugin-soak-history.jsonl` (or XDG data equivalent) and is appended only when the current report has `plugin_soak.available=true`.
 SLO history is stored at `.mosaic/data/reports/observability-slo-history.jsonl` (or XDG data equivalent) and is appended on every successful report/export run.
+Node/device/pairing lifecycle telemetry is stored at `.mosaic/data/nodes-events.jsonl` (or XDG data equivalent) and is folded into every observability report/export run.
 
 ## Alert Threshold Tuning
 

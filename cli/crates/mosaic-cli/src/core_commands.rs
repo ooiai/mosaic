@@ -1053,7 +1053,7 @@ fn guard_mode_name(mode: &RunGuardMode) -> &'static str {
 pub(super) async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
     match args.command {
         ModelsCommand::List { query, limit } => {
-            let runtime = build_runtime(cli, None, None)?;
+            let runtime = build_runtime(cli, None, None, None)?;
             let query = normalize_models_query(query)?;
             let limit = normalize_models_limit(limit)?;
             let mut models = runtime.provider.list_models().await?;
@@ -1340,7 +1340,13 @@ pub(super) async fn handle_models(cli: &Cli, args: ModelsArgs) -> Result<()> {
 }
 
 pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
-    let runtime = build_runtime(cli, args.agent.as_deref(), Some("ask"))?;
+    let runtime = build_runtime(
+        cli,
+        args.agent.as_deref(),
+        Some("ask"),
+        args.session.as_deref(),
+    )?;
+    let session_metadata = runtime.session_metadata();
     let mut session_id = args.session;
 
     if let Some(script_path) = args.script {
@@ -1354,6 +1360,7 @@ pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
                     &prompt,
                     AgentRunOptions {
                         session_id: session_id.clone(),
+                        session_metadata: session_metadata.clone(),
                         cwd: std::env::current_dir()
                             .map_err(|err| MosaicError::Io(err.to_string()))?,
                         yes: cli.yes,
@@ -1410,6 +1417,7 @@ pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
             &prompt,
             AgentRunOptions {
                 session_id,
+                session_metadata,
                 cwd: std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?,
                 yes: cli.yes,
                 interactive: false,
@@ -1437,7 +1445,13 @@ pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
 }
 
 pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
-    let runtime = build_runtime(cli, args.agent.as_deref(), Some("chat"))?;
+    let mut runtime = build_runtime(
+        cli,
+        args.agent.as_deref(),
+        Some("chat"),
+        args.session.as_deref(),
+    )?;
+    let mut session_metadata = runtime.session_metadata();
     let mut session_id = args.session;
     let initial_prompt = resolve_prompt_source_optional(args.prompt, args.prompt_file)?;
 
@@ -1452,6 +1466,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                     &prompt,
                     AgentRunOptions {
                         session_id: session_id.clone(),
+                        session_metadata: session_metadata.clone(),
                         cwd: std::env::current_dir()
                             .map_err(|err| MosaicError::Io(err.to_string()))?,
                         yes: cli.yes,
@@ -1509,6 +1524,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                 &prompt,
                 AgentRunOptions {
                     session_id: session_id.clone(),
+                    session_metadata: session_metadata.clone(),
                     cwd: std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?,
                     yes: cli.yes,
                     interactive: true,
@@ -1568,6 +1584,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                 println!("/help     Show help");
                 println!("/status   Show profile/agent/session");
                 println!("/agent    Show active agent");
+                println!("/agent ID Switch active agent");
                 println!("/session  Show current session id");
                 println!("/new      Start a new chat session");
                 println!("/exit     Exit chat");
@@ -1601,6 +1618,35 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                 );
                 continue;
             }
+            ChatReplCommand::AgentSet(agent_id) => {
+                if runtime.active_agent_id.as_deref() == Some(agent_id) {
+                    println!("agent: {}", format_chat_agent(Some(agent_id)));
+                    continue;
+                }
+
+                let switched_runtime = match build_runtime(cli, Some(agent_id), Some("chat"), None)
+                {
+                    Ok(runtime) => runtime,
+                    Err(err) => {
+                        println!("error: {err}");
+                        continue;
+                    }
+                };
+                runtime = switched_runtime;
+                session_metadata = runtime.session_metadata();
+                println!(
+                    "agent switched: {}",
+                    format_chat_agent(runtime.active_agent_id.as_deref())
+                );
+                if session_id.is_some() {
+                    session_id = None;
+                    println!(
+                        "session reset: {}",
+                        format_chat_session(session_id.as_deref())
+                    );
+                }
+                continue;
+            }
             ChatReplCommand::Prompt(prompt) => {
                 let result = runtime
                     .agent
@@ -1608,6 +1654,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                         prompt,
                         AgentRunOptions {
                             session_id: session_id.clone(),
+                            session_metadata: session_metadata.clone(),
                             cwd: std::env::current_dir()
                                 .map_err(|err| MosaicError::Io(err.to_string()))?,
                             yes: cli.yes,
@@ -1632,17 +1679,29 @@ enum ChatReplCommand<'a> {
     New,
     Status,
     Agent,
+    AgentSet(&'a str),
     Prompt(&'a str),
 }
 
 fn parse_chat_repl_command(prompt: &str) -> ChatReplCommand<'_> {
+    if let Some(rest) = prompt.strip_prefix("/agent") {
+        if rest.is_empty() {
+            return ChatReplCommand::Agent;
+        }
+        if rest.chars().next().is_some_and(char::is_whitespace) {
+            let requested = rest.trim();
+            if requested.is_empty() {
+                return ChatReplCommand::Agent;
+            }
+            return ChatReplCommand::AgentSet(requested);
+        }
+    }
     match prompt {
         "/exit" | "exit" | "quit" => ChatReplCommand::Exit,
         "/help" => ChatReplCommand::Help,
         "/session" => ChatReplCommand::Session,
         "/new" => ChatReplCommand::New,
         "/status" => ChatReplCommand::Status,
-        "/agent" => ChatReplCommand::Agent,
         _ => ChatReplCommand::Prompt(prompt),
     }
 }
@@ -1806,6 +1865,14 @@ mod repl_tests {
             ChatReplCommand::Agent
         ));
         assert!(matches!(
+            parse_chat_repl_command("/agent writer"),
+            ChatReplCommand::AgentSet("writer")
+        ));
+        assert!(matches!(
+            parse_chat_repl_command("/agent   reviewer"),
+            ChatReplCommand::AgentSet("reviewer")
+        ));
+        assert!(matches!(
             parse_chat_repl_command("hello"),
             ChatReplCommand::Prompt("hello")
         ));
@@ -1850,10 +1917,23 @@ pub(super) async fn handle_session(cli: &Cli, args: SessionArgs) -> Result<()> {
         }
         SessionCommand::Show { session_id } => {
             let events = store.read_events(&session_id)?;
+            let runtime = SessionStore::latest_runtime_metadata_from_events(&events);
             if cli.json {
-                print_json(&json!({ "ok": true, "session_id": session_id, "events": events }));
+                print_json(&json!({
+                    "ok": true,
+                    "session_id": session_id,
+                    "runtime": runtime,
+                    "events": events
+                }));
             } else {
                 println!("Session: {session_id}");
+                if let Some(runtime) = runtime {
+                    println!(
+                        "Runtime: profile={} agent={}",
+                        runtime.profile_name,
+                        runtime.agent_id.unwrap_or_else(|| "<none>".to_string())
+                    );
+                }
                 for event in events {
                     println!(
                         "{} {} {:?} {}",

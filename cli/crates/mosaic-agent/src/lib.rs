@@ -10,7 +10,7 @@ use mosaic_core::audit::{AuditStore, CommandAudit};
 use mosaic_core::config::ProfileConfig;
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::provider::{ChatMessage, ChatRequest, ChatResponse, ChatRole, Provider};
-use mosaic_core::session::{EventKind, SessionStore};
+use mosaic_core::session::{EventKind, SessionRuntimeMetadata, SessionStore};
 use mosaic_tools::{RunCommandOutput, ToolContext, ToolExecutor};
 
 pub type AgentEventCallback = Arc<dyn Fn(AgentEvent) + Send + Sync>;
@@ -45,6 +45,7 @@ pub enum AgentEvent {
 #[derive(Clone)]
 pub struct AgentRunOptions {
     pub session_id: Option<String>,
+    pub session_metadata: SessionRuntimeMetadata,
     pub cwd: PathBuf,
     pub yes: bool,
     pub interactive: bool,
@@ -55,6 +56,7 @@ impl std::fmt::Debug for AgentRunOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentRunOptions")
             .field("session_id", &self.session_id)
+            .field("session_metadata", &self.session_metadata)
             .field("cwd", &self.cwd)
             .field("yes", &self.yes)
             .field("interactive", &self.interactive)
@@ -160,6 +162,11 @@ impl AgentRunner {
                 },
             );
         };
+
+        self.ensure_runtime_metadata(&session_id, &options.session_metadata)
+            .inspect_err(|err| {
+                emit_error(err.to_string());
+            })?;
 
         let user_event =
             SessionStore::build_event(&session_id, EventKind::User, json!({ "text": prompt }));
@@ -277,6 +284,19 @@ impl AgentRunner {
             }
         }
         Ok(messages)
+    }
+
+    fn ensure_runtime_metadata(
+        &self,
+        session_id: &str,
+        metadata: &SessionRuntimeMetadata,
+    ) -> Result<()> {
+        let latest = self.session_store.latest_runtime_metadata(session_id)?;
+        if latest.as_ref() == Some(metadata) {
+            return Ok(());
+        }
+        let event = SessionStore::build_runtime_metadata_event(session_id, metadata);
+        self.session_store.append_event(&event)
     }
 
     fn handle_tool_call(
@@ -510,6 +530,10 @@ mod tests {
                 "create a file",
                 AgentRunOptions {
                     session_id: None,
+                    session_metadata: SessionRuntimeMetadata {
+                        agent_id: None,
+                        profile_name: "default".to_string(),
+                    },
                     cwd: temp.path().to_path_buf(),
                     yes: false,
                     interactive: false,
@@ -538,6 +562,10 @@ mod tests {
                 "create a file",
                 AgentRunOptions {
                     session_id: None,
+                    session_metadata: SessionRuntimeMetadata {
+                        agent_id: None,
+                        profile_name: "default".to_string(),
+                    },
                     cwd: temp.path().to_path_buf(),
                     yes: true,
                     interactive: false,

@@ -3,17 +3,19 @@ use std::io::{self, IsTerminal, Read};
 use mosaic_agent::AgentRunOptions;
 use mosaic_core::config::RunGuardMode;
 use mosaic_core::error::{MosaicError, Result};
+use mosaic_core::session::SessionStore;
 use mosaic_tui::{TuiFocus, TuiOptions, TuiRuntime, run_tui};
 use serde_json::json;
 
 use crate::runtime_context::build_runtime;
 use crate::utils::print_json;
-use crate::{Cli, TuiArgs, TuiFocusArg};
+use crate::{Cli, TuiArgs, TuiFocusArg, resolve_state_paths};
 
 pub(super) async fn handle_tui(cli: &Cli, args: TuiArgs) -> Result<()> {
     let has_prompt = args.prompt.is_some();
     let is_tty = io::stdin().is_terminal() && io::stdout().is_terminal();
     let interactive_mode = is_tty && !has_prompt;
+    let initial_session_id = resolve_tui_initial_session_id(cli, interactive_mode, &args)?;
 
     if interactive_mode {
         if cli.json {
@@ -23,7 +25,13 @@ pub(super) async fn handle_tui(cli: &Cli, args: TuiArgs) -> Result<()> {
             ));
         }
 
-        let runtime = build_runtime(cli, args.agent.as_deref(), Some("tui"))?;
+        let runtime = build_runtime(
+            cli,
+            args.agent.as_deref(),
+            Some("tui"),
+            initial_session_id.as_deref(),
+        )?;
+        let session_metadata = runtime.session_metadata();
         let policy_summary = format!(
             "tools={} guard={}",
             if runtime.agent.profile().tools.enabled {
@@ -39,10 +47,11 @@ pub(super) async fn handle_tui(cli: &Cli, args: TuiArgs) -> Result<()> {
                 agent: runtime.agent,
                 profile_name: runtime.active_profile_name,
                 agent_id: runtime.active_agent_id,
+                session_metadata,
                 policy_summary,
             },
             TuiOptions {
-                initial_session_id: args.session,
+                initial_session_id,
                 initial_focus: map_focus(args.focus),
                 show_inspector: !args.no_inspector,
                 yes: cli.yes,
@@ -61,13 +70,20 @@ pub(super) async fn handle_tui(cli: &Cli, args: TuiArgs) -> Result<()> {
         )
     })?;
 
-    let runtime = build_runtime(cli, args.agent.as_deref(), Some("tui"))?;
+    let runtime = build_runtime(
+        cli,
+        args.agent.as_deref(),
+        Some("tui"),
+        initial_session_id.as_deref(),
+    )?;
+    let session_metadata = runtime.session_metadata();
     let result = runtime
         .agent
         .ask(
             &prompt,
             AgentRunOptions {
-                session_id: args.session,
+                session_id: initial_session_id,
+                session_metadata,
                 cwd: std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?,
                 yes: cli.yes,
                 interactive: false,
@@ -120,6 +136,22 @@ fn resolve_tui_prompt(prompt: Option<String>) -> Result<Option<String>> {
         ));
     }
     Ok(Some(trimmed.to_string()))
+}
+
+fn resolve_tui_initial_session_id(
+    cli: &Cli,
+    interactive_mode: bool,
+    args: &TuiArgs,
+) -> Result<Option<String>> {
+    if let Some(session_id) = args.session.clone() {
+        return Ok(Some(session_id));
+    }
+    if !interactive_mode {
+        return Ok(None);
+    }
+    let paths = resolve_state_paths(cli.project_state)?;
+    let store = SessionStore::new(paths.sessions_dir);
+    store.latest_session_id()
 }
 
 fn map_focus(focus: TuiFocusArg) -> TuiFocus {

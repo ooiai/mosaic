@@ -74,23 +74,188 @@ public struct SetupHubView: View {
     }
 
     public var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                SetupHeroDeck(viewModel: viewModel)
+            HStack(alignment: .top, spacing: 0) {
+                SetupSidebarColumn(viewModel: viewModel)
+                    .frame(width: 280)
 
-                HStack(alignment: .top, spacing: 20) {
+                Rectangle()
+                    .fill(tokens.border.opacity(0.75))
+                    .frame(width: 1)
+                    .padding(.vertical, 10)
+
+                VStack(alignment: .leading, spacing: 20) {
+                    SetupHeroDeck(viewModel: viewModel)
                     SetupWorkspaceColumn(viewModel: viewModel)
-                    SetupActionColumn(viewModel: viewModel)
                 }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 24)
 
-                if !viewModel.recentWorkspaces.isEmpty {
-                    RecentWorkspaceSection(viewModel: viewModel)
-                }
+                Rectangle()
+                    .fill(tokens.border.opacity(0.75))
+                    .frame(width: 1)
+                    .padding(.vertical, 10)
+
+                SetupActionColumn(viewModel: viewModel)
+                    .frame(width: 360)
             }
-            .padding(28)
+            .padding(20)
             .frame(maxWidth: 1180, alignment: .leading)
         }
         .scrollIndicators(.hidden)
+    }
+}
+
+private struct SetupSidebarColumn: View {
+    @Bindable var viewModel: AppViewModel
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openSettings) private var openSettings
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("mosaic")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(tokens.accent)
+                Text("Setup")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(tokens.primaryText)
+                Text("Project-first runtime bootstrap for the native workbench.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(tokens.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(spacing: 8) {
+                setupSidebarAction(
+                    title: "Choose workspace",
+                    subtitle: "Pick the local project root.",
+                    systemImage: "folder"
+                ) {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                    panel.allowsMultipleSelection = false
+                    panel.prompt = "Use Workspace"
+                    if panel.runModal() == .OK, let url = panel.url {
+                        Task { await viewModel.registerWorkspace(url: url) }
+                    }
+                }
+
+                setupSidebarAction(
+                    title: "Refresh setup",
+                    subtitle: "Reload workspace and runtime status.",
+                    systemImage: "arrow.clockwise"
+                ) {
+                    Task { await viewModel.refreshSelectedWorkspace() }
+                }
+
+                setupSidebarAction(
+                    title: "Open settings",
+                    subtitle: "Tune desktop and runtime defaults.",
+                    systemImage: "gearshape"
+                ) {
+                    Task { await viewModel.recordCommandAction("settings") }
+                    openSettings()
+                }
+            }
+
+            Rectangle()
+                .fill(tokens.border.opacity(0.78))
+                .frame(height: 1)
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Recent Projects")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tokens.tertiaryText)
+                    Spacer()
+                    Text("\(viewModel.recentWorkspaces.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tokens.tertiaryText)
+                }
+
+                if viewModel.recentWorkspaces.isEmpty {
+                    Text("No recent workspaces yet.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(tokens.secondaryText)
+                } else {
+                    ForEach(viewModel.recentWorkspaces.prefix(8)) { workspace in
+                        Button {
+                            Task { await viewModel.previewWorkspace(workspace) }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "folder")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(tokens.warning)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(workspace.name)
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(tokens.primaryText)
+                                        .lineLimit(1)
+                                    Text(workspace.path)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(tokens.tertiaryText)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 9)
+                            .background(tokens.panelBackground.opacity(0.34), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            StatusHeroView(
+                title: viewModel.setupStatusTitle,
+                detail: viewModel.setupStatusDetail,
+                tone: viewModel.setupStatusTone
+            )
+        }
+        .padding(.trailing, 18)
+    }
+
+    private func setupSidebarAction(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        return Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tokens.accent)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(tokens.primaryText)
+                    Text(subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(tokens.tertiaryText)
+                }
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(tokens.tertiaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background(tokens.panelBackground.opacity(0.22), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -103,25 +268,13 @@ private struct SetupBackdrop: View {
 
             LinearGradient(
                 colors: [
-                    tokens.accent.opacity(0.14),
-                    Color.clear,
-                    tokens.success.opacity(0.08),
+                    tokens.windowBackground,
+                    tokens.elevatedBackground.opacity(0.4),
+                    tokens.windowBackground,
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
-
-            Circle()
-                .fill(tokens.accent.opacity(0.14))
-                .frame(width: 420, height: 420)
-                .blur(radius: 70)
-                .offset(x: -240, y: -260)
-
-            Circle()
-                .fill(tokens.success.opacity(0.10))
-                .frame(width: 360, height: 360)
-                .blur(radius: 72)
-                .offset(x: 360, y: 260)
         }
     }
 }
@@ -133,20 +286,19 @@ private struct SetupHeroDeck: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 24) {
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("AZURE-FIRST PROJECT SETUP")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .tracking(1.2)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("WORKSPACE SETUP")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tokens.accent)
 
-                    Text("Choose a project, connect Azure, and open a real workspace.")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                    Text("Connect the project and bring the runtime online.")
+                        .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text("The flow stays project-first like Codex, but the default runtime path now starts from Azure OpenAI. The UI exposes the Azure resource directly so setup feels closer to LM Studio’s workstation control surface and less like a raw config form.")
+                    Text("Start from the repo, confirm the runtime, then open the workbench. Azure OpenAI stays the default path, but the screen now behaves more like a Codex project launcher than a raw configuration form.")
                         .font(.system(size: 14))
                         .foregroundStyle(tokens.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
@@ -165,8 +317,8 @@ private struct SetupHeroDeck: View {
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Recommended Azure bootstrap")
-                        .font(.headline)
+                    Text("Current bootstrap")
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tokens.primaryText)
 
                     SetupValueRow(label: "Resource URL", value: viewModel.onboardingBaseURL)
@@ -187,33 +339,17 @@ private struct SetupHeroDeck: View {
                 }
                 .padding(16)
                 .frame(maxWidth: 360, alignment: .leading)
-                .background(tokens.panelBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(tokens.panelBackground.opacity(0.44), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
-
-            StatusHeroView(
-                title: viewModel.setupStatusTitle,
-                detail: viewModel.setupStatusDetail,
-                tone: viewModel.setupStatusTone
-            )
         }
-        .padding(26)
-        .background(
-            LinearGradient(
-                colors: [
-                    tokens.panelBackground.opacity(0.90),
-                    tokens.elevatedBackground.opacity(0.84),
-                    tokens.accent.opacity(0.14),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 30, style: .continuous)
-        )
+        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
         .overlay(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(tokens.border.opacity(0.8), lineWidth: 1)
+            Rectangle()
+                .fill(tokens.border.opacity(0.75))
+                .frame(height: 1),
+            alignment: .bottom
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.16 : 0.08), radius: 28, y: 10)
     }
 }
 
@@ -225,24 +361,38 @@ private struct SetupWorkspaceColumn: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         VStack(alignment: .leading, spacing: 18) {
-            Text("Workspace Root")
-                .font(.headline)
-                .foregroundStyle(tokens.primaryText)
+            Text("Workspace")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tokens.tertiaryText)
+
+            Text("Select the project root and confirm the local context before runtime initialization.")
+                .font(.system(size: 13))
+                .foregroundStyle(tokens.secondaryText)
 
             VStack(alignment: .leading, spacing: 12) {
                 if let workspace = viewModel.selectedWorkspace {
-                    Text(workspace.name)
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(tokens.primaryText)
-                    Text(workspace.path)
-                        .font(.system(size: 13))
-                        .foregroundStyle(tokens.secondaryText)
-                        .textSelection(.enabled)
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(tokens.warning)
+                            .frame(width: 28, height: 28)
+                            .background(tokens.panelBackground.opacity(0.4), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(workspace.name)
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(tokens.primaryText)
+                            Text(workspace.path)
+                                .font(.system(size: 12))
+                                .foregroundStyle(tokens.secondaryText)
+                                .textSelection(.enabled)
+                        }
+                    }
                 } else {
                     Text("No workspace selected")
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
-                    Text("Choose a local project folder first. Mosaic will keep runtime state, sessions, and config anchored to this workspace.")
+                    Text("Choose a local project folder first. Mosaic keeps runtime state, sessions, and configuration anchored to that directory.")
                         .font(.system(size: 13))
                         .foregroundStyle(tokens.secondaryText)
                 }
@@ -274,12 +424,15 @@ private struct SetupWorkspaceColumn: View {
                 .disabled(viewModel.selectedWorkspace == nil)
             }
 
-            Divider()
+            Rectangle()
+                .fill(tokens.border.opacity(0.75))
+                .frame(height: 1)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Text("What Mosaic anchors to this project")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(tokens.primaryText)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Anchored to this project")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+
                 SetupChecklistItem(text: "The existing project directory as your workspace root")
                 SetupChecklistItem(text: "A project-local Mosaic config once you initialize")
                 SetupChecklistItem(text: "Session history and runtime health scoped to this workspace")
@@ -287,10 +440,10 @@ private struct SetupWorkspaceColumn: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tokens.panelBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .background(tokens.panelBackground.opacity(0.56), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(tokens.border.opacity(0.85), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(tokens.border.opacity(0.66), lineWidth: 1)
         )
     }
 }
@@ -303,9 +456,9 @@ private struct SetupActionColumn: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         VStack(alignment: .leading, spacing: 18) {
-            Text("Runtime Setup")
-                .font(.headline)
-                .foregroundStyle(tokens.primaryText)
+            Text("Runtime")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(tokens.tertiaryText)
 
             HStack(spacing: 10) {
                 SetupMetricPill(title: "Profile", value: viewModel.currentProfileLabel)
@@ -331,7 +484,7 @@ private struct SetupActionColumn: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Azure OpenAI is now the default initialization path. Pick a workspace, replace the Azure resource host, and initialize the project-local Mosaic config.")
+                    Text("Azure OpenAI is the default initialization path. Pick a workspace, replace the Azure resource host, then initialize the project-local Mosaic config.")
                         .font(.system(size: 13))
                         .foregroundStyle(tokens.secondaryText)
 
@@ -415,25 +568,21 @@ private struct SetupActionColumn: View {
                 }
             }
 
-            Divider()
+            Rectangle()
+                .fill(tokens.border.opacity(0.75))
+                .frame(height: 1)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Why this flow")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(tokens.primaryText)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
                 Text("The app leads with project context, but the runtime defaults now bias toward Azure OpenAI or a local OpenAI-compatible server instead of a generic cloud preset.")
                     .font(.system(size: 13))
                     .foregroundStyle(tokens.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tokens.panelBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(tokens.border.opacity(0.85), lineWidth: 1)
-        )
+        .padding(.leading, 24)
     }
 }
 
@@ -444,49 +593,11 @@ private struct RecentWorkspaceSection: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Recent Workspaces")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Workspace")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tokens.primaryText)
-
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 14) {
-                ForEach(viewModel.recentWorkspaces) { workspace in
-                    Button {
-                        Task { await viewModel.previewWorkspace(workspace) }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(workspace.name)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(tokens.primaryText)
-                                .lineLimit(1)
-                            Text(workspace.path)
-                                .font(.caption)
-                                .foregroundStyle(tokens.secondaryText)
-                                .lineLimit(2)
-                            if let lastOpenedAt = workspace.lastOpenedAt {
-                                Text(relativeDateLabel(for: lastOpenedAt))
-                                    .font(.caption2)
-                                    .foregroundStyle(tokens.tertiaryText)
-                            }
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
         }
-    }
-
-    private func relativeDateLabel(for date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return "Opened \(formatter.localizedString(for: date, relativeTo: Date()))"
     }
 }
 
@@ -508,24 +619,24 @@ private struct StatusHeroView: View {
         HStack(alignment: .top, spacing: 16) {
             Circle()
                 .fill(toneColor)
-                .frame(width: 10, height: 10)
+                .frame(width: 8, height: 8)
                 .padding(.top, 5)
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(tokens.primaryText)
                 Text(detail)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundStyle(tokens.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
-        .padding(18)
-        .background(tokens.panelBackground.opacity(0.86), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(14)
+        .background(tokens.panelBackground.opacity(0.36), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(tokens.border.opacity(0.78), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(tokens.border.opacity(0.58), lineWidth: 1)
         )
     }
 }
@@ -771,23 +882,58 @@ private struct CommandPaletteOverlay: View {
                 }
 
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(tokens.tertiaryText)
-
-                    TextField("Search commands, sessions, and workspaces", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 16))
-                        .focused($isSearchFocused)
-                        .onSubmit {
-                            executeHighlightedItem(in: filteredItems)
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("COMMAND PALETTE")
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(tokens.accent)
+                            Text("Search commands, sessions, workspaces, and runtime actions.")
+                                .font(.system(size: 13))
+                                .foregroundStyle(tokens.secondaryText)
                         }
-
-                    HStack(spacing: 6) {
-                        CommandKeycap(label: "↑↓")
-                        CommandKeycap(label: "↩")
-                        CommandKeycap(label: "Esc")
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 6) {
+                            Text("\(filteredItems.count) RESULTS")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(tokens.tertiaryText)
+                            HStack(spacing: 6) {
+                                CommandKeycap(label: "↑↓")
+                                CommandKeycap(label: "↩")
+                                CommandKeycap(label: "Esc")
+                            }
+                        }
                     }
+
+                    HStack(spacing: 12) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(tokens.tertiaryText)
+
+                        TextField("Search commands, sessions, and workspaces", text: $query)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 16))
+                            .focused($isSearchFocused)
+                            .onSubmit {
+                                executeHighlightedItem(in: filteredItems)
+                            }
+
+                        if !query.isEmpty {
+                            Button {
+                                query = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(tokens.tertiaryText)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(tokens.panelBackground.opacity(0.62), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(tokens.border.opacity(0.6), lineWidth: 1)
+                    )
                 }
                 .padding(18)
 
@@ -806,10 +952,16 @@ private struct CommandPaletteOverlay: View {
                             } else {
                                 ForEach(filteredSections) { section in
                                     VStack(alignment: .leading, spacing: 8) {
-                                        Text(section.title)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(tokens.tertiaryText)
-                                            .padding(.horizontal, 2)
+                                        HStack {
+                                            Text(section.title.uppercased())
+                                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                                .foregroundStyle(tokens.tertiaryText)
+                                            Spacer()
+                                            Text("\(section.items.count)")
+                                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                                .foregroundStyle(tokens.tertiaryText)
+                                        }
+                                        .padding(.horizontal, 2)
 
                                         ForEach(section.items) { item in
                                             Button {
@@ -1267,35 +1419,58 @@ private struct CommandPaletteRow: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: item.systemImage)
-                .frame(width: 18, height: 18)
-                .foregroundStyle(tokens.accent)
+            RoundedRectangle(cornerRadius: 999, style: .continuous)
+                .fill(isHighlighted ? tokens.accent : tokens.border.opacity(0.42))
+                .frame(width: 3)
+
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(tokens.elevatedBackground.opacity(0.86))
+                    Image(systemName: item.systemImage)
+                        .frame(width: 18, height: 18)
+                        .foregroundStyle(tokens.accent)
+                }
+                .frame(width: 28, height: 28)
                 .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(tokens.primaryText)
-                Text(item.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(tokens.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text(item.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(tokens.primaryText)
+                        Text(item.group.rawValue.uppercased())
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tokens.tertiaryText)
+                    }
 
-            Spacer(minLength: 12)
+                    Text(item.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(tokens.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-            if let shortcutLabel = item.shortcutLabel {
-                Text(shortcutLabel)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tokens.tertiaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(tokens.panelBackground, in: Capsule())
+                Spacer(minLength: 12)
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    if let shortcutLabel = item.shortcutLabel {
+                        Text(shortcutLabel)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tokens.tertiaryText)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(tokens.panelBackground, in: Capsule())
+                    }
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(tokens.tertiaryText)
+                }
             }
         }
         .padding(14)
         .background(
-            (isHighlighted ? tokens.elevatedBackground : tokens.panelBackground),
+            (isHighlighted ? tokens.elevatedBackground : tokens.panelBackground.opacity(0.72)),
             in: RoundedRectangle(cornerRadius: 18, style: .continuous)
         )
         .overlay(
@@ -1403,11 +1578,11 @@ public struct WorkbenchView: View {
             LinearGradient(
                 colors: [
                     tokens.windowBackground,
-                    tokens.windowBackground,
-                    tokens.accent.opacity(colorScheme == .dark ? 0.08 : 0.04),
+                    tokens.windowBackground.opacity(0.985),
+                    tokens.elevatedBackground.opacity(colorScheme == .dark ? 0.58 : 0.22),
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                startPoint: .top,
+                endPoint: .bottom
             )
         )
         .toolbar {
@@ -1421,35 +1596,35 @@ public struct WorkbenchView: View {
                 Button {
                     appViewModel.presentCommandPalette()
                 } label: {
-                    Image(systemName: "magnifyingglass")
+                    ToolbarIconButton(systemImage: "magnifyingglass")
                 }
                 .help("Command palette")
 
                 Button {
                     appViewModel.createNewThread()
                 } label: {
-                    Image(systemName: "square.and.pencil")
+                    ToolbarIconButton(systemImage: "square.and.pencil", accentStyle: .accent)
                 }
                 .help("New thread")
 
                 Button {
                     appViewModel.showSetupHub()
                 } label: {
-                    Image(systemName: "folder")
+                    ToolbarIconButton(systemImage: "folder")
                 }
                 .help("Switch workspace")
 
                 Button {
                     Task { await appViewModel.refreshActiveWorkspace() }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    ToolbarIconButton(systemImage: "arrow.clockwise")
                 }
                 .help("Refresh workspace")
 
                 Button {
                     Task { await appViewModel.clearCurrentThread() }
                 } label: {
-                    Image(systemName: "trash")
+                    ToolbarIconButton(systemImage: "trash", accentStyle: .destructive)
                 }
                 .disabled(!viewModel.canClearSelectedThread)
                 .help("Clear selected thread")
@@ -1457,7 +1632,10 @@ public struct WorkbenchView: View {
                 Button {
                     appViewModel.toggleInspector()
                 } label: {
-                    Image(systemName: viewModel.isInspectorVisible ? "sidebar.right" : "sidebar.left")
+                    ToolbarIconButton(
+                        systemImage: viewModel.isInspectorVisible ? "sidebar.right" : "sidebar.left",
+                        accentStyle: viewModel.isInspectorVisible ? .accent : .neutral
+                    )
                 }
                 .help("Toggle inspector")
             }
@@ -1470,29 +1648,55 @@ private struct WorkbenchToolbarPrincipal: View {
     @Bindable var viewModel: WorkbenchViewModel
     @Environment(\.colorScheme) private var colorScheme
 
+    private var healthAccent: Color {
+        switch appViewModel.currentHealthLabel {
+        case "Degraded":
+            ThemeTokens.current(for: colorScheme).failure
+        case "Needs attention":
+            ThemeTokens.current(for: colorScheme).warning
+        default:
+            ThemeTokens.current(for: colorScheme).success
+        }
+    }
+
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(viewModel.selectedThreadSummary?.title ?? viewModel.state.conversation.threadTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(tokens.primaryText)
-                    .lineLimit(1)
-
-                HStack(spacing: 6) {
-                    Text(viewModel.state.sidebar.currentWorkspace.name)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(viewModel.state.sidebar.currentWorkspace.name.uppercased())
                     Text("•")
-                    Text(appViewModel.currentModelLabel)
+                    Text(appViewModel.currentProviderLabel.uppercased())
                     Text("•")
-                    Text(appViewModel.currentHealthLabel)
+                    Text(appViewModel.currentModelLabel.uppercased())
+                    if viewModel.isLoading {
+                        Text("•")
+                        Text("SYNCING")
+                    }
                 }
-                .font(.caption)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tokens.tertiaryText)
                 .lineLimit(1)
+
+                Text(viewModel.selectedThreadSummary?.title ?? viewModel.state.conversation.threadTitle)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(tokens.primaryText)
+                    .lineLimit(1)
             }
 
+            Spacer(minLength: 10)
+
+            ToolbarWorkspaceMenu(appViewModel: appViewModel, viewModel: viewModel)
+            ToolbarSessionMenu(appViewModel: appViewModel, viewModel: viewModel)
+
             HStack(spacing: 8) {
+                ToolbarStatusPill(
+                    title: "Health",
+                    value: appViewModel.currentHealthLabel,
+                    systemImage: "waveform.path.ecg",
+                    accent: healthAccent
+                )
                 ToolbarPill(
                     title: "Threads",
                     value: "\(viewModel.threadCount)",
@@ -1505,13 +1709,211 @@ private struct WorkbenchToolbarPrincipal: View {
                 )
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(tokens.panelBackground.opacity(0.76), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(tokens.panelBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(tokens.border.opacity(0.65), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(tokens.border.opacity(0.58), lineWidth: 1)
         )
+    }
+}
+
+private struct ToolbarSelectorLabel: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let accent: Color
+    var trailingBadge: String? = nil
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        HStack(spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(tokens.elevatedBackground.opacity(0.86))
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                Text(value)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tokens.primaryText)
+                    .lineLimit(1)
+            }
+
+            if let trailingBadge, !trailingBadge.isEmpty {
+                Text(trailingBadge.uppercased())
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 4)
+                    .background(tokens.elevatedBackground.opacity(0.76), in: Capsule())
+            }
+
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .foregroundStyle(tokens.tertiaryText)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(tokens.panelBackground.opacity(0.74), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tokens.border.opacity(0.55), lineWidth: 1)
+        )
+    }
+}
+
+private struct ToolbarIconButton: View {
+    enum AccentStyle {
+        case neutral
+        case accent
+        case destructive
+    }
+
+    let systemImage: String
+    var accentStyle: AccentStyle = .neutral
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+        let foreground: Color = switch accentStyle {
+        case .neutral: tokens.primaryText
+        case .accent: tokens.accent
+        case .destructive: tokens.failure
+        }
+
+        Image(systemName: systemImage)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(foreground)
+            .frame(width: 28, height: 28)
+            .background(tokens.panelBackground.opacity(0.78), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(tokens.border.opacity(0.52), lineWidth: 1)
+            )
+    }
+}
+
+private struct ToolbarWorkspaceMenu: View {
+    @Bindable var appViewModel: AppViewModel
+    @Bindable var viewModel: WorkbenchViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Menu {
+            Button("Reveal in Finder") {
+                appViewModel.revealSelectedWorkspaceInFinder()
+            }
+
+            Button("Choose Workspace") {
+                appViewModel.showSetupHub()
+            }
+
+            if !viewModel.state.sidebar.recentWorkspaces.isEmpty {
+                Divider()
+
+                ForEach(viewModel.state.sidebar.recentWorkspaces) { workspace in
+                    Button {
+                        Task { await appViewModel.activateWorkspace(workspace, recordHistory: true) }
+                    } label: {
+                        Label(workspace.name, systemImage: "folder")
+                    }
+                }
+            }
+        } label: {
+            ToolbarSelectorLabel(
+                title: "Workspace",
+                value: viewModel.state.sidebar.currentWorkspace.name,
+                systemImage: "folder",
+                accent: tokens.accent,
+                trailingBadge: viewModel.isLoading ? "sync" : nil
+            )
+        }
+        .menuStyle(.borderlessButton)
+    }
+}
+
+private struct ToolbarSessionMenu: View {
+    @Bindable var appViewModel: AppViewModel
+    @Bindable var viewModel: WorkbenchViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+        let selectedThread = viewModel.selectedThreadSummary
+
+        Menu {
+            Button("New Thread") {
+                appViewModel.createNewThread()
+            }
+
+            if !viewModel.state.sidebar.threads.isEmpty {
+                Divider()
+
+                ForEach(viewModel.state.sidebar.threads) { thread in
+                    Button {
+                        Task { await appViewModel.openSession(thread.id, recordHistory: true) }
+                    } label: {
+                        if viewModel.isPinnedThread(thread.id) {
+                            Label(thread.title, systemImage: "pin.fill")
+                        } else {
+                            Label(thread.title, systemImage: "text.bubble")
+                        }
+                    }
+                }
+            }
+        } label: {
+            ToolbarSelectorLabel(
+                title: "Session",
+                value: selectedThread?.title ?? "New thread",
+                systemImage: viewModel.state.conversation.sessionID == nil ? "plus.bubble" : "text.bubble",
+                accent: tokens.success,
+                trailingBadge: viewModel.state.conversation.sessionID.flatMap { viewModel.isPinnedThread($0) ? "pin" : nil }
+            )
+        }
+        .menuStyle(.borderlessButton)
+    }
+}
+
+private struct ToolbarStatusPill: View {
+    let title: String
+    let value: String
+    let systemImage: String
+    let accent: Color
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        HStack(spacing: 7) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                Text(value)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tokens.primaryText)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(tokens.elevatedBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
     }
 }
 
@@ -1529,15 +1931,15 @@ private struct ToolbarPill: View {
                 .fill(accent.opacity(0.9))
                 .frame(width: 6, height: 6)
             Text(title)
-                .font(.caption2)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tokens.tertiaryText)
             Text(value)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(tokens.primaryText)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(tokens.elevatedBackground.opacity(0.86), in: Capsule())
+        .padding(.vertical, 6)
+        .background(tokens.elevatedBackground.opacity(0.82), in: Capsule())
     }
 }
 
@@ -1565,21 +1967,12 @@ private struct ToolbarModelMenu: View {
                 }
             }
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "cpu")
-                Text(appViewModel.isApplyingQuickModel ? "Switching…" : appViewModel.currentModelLabel)
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(tokens.primaryText)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(tokens.panelBackground.opacity(0.82), in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(tokens.border.opacity(0.6), lineWidth: 1)
+            ToolbarSelectorLabel(
+                title: "Model",
+                value: appViewModel.isApplyingQuickModel ? "Switching…" : appViewModel.currentModelLabel,
+                systemImage: "cpu",
+                accent: tokens.success,
+                trailingBadge: "\(appViewModel.setupModelChoices.count)"
             )
         }
         .menuStyle(.borderlessButton)
@@ -1643,6 +2036,48 @@ struct SidebarContent: View {
         }
     }
 
+    private struct SidebarPrimaryActionRow: View {
+        let title: String
+        let subtitle: String
+        let systemImage: String
+        let accent: Color
+        let action: () -> Void
+        @Environment(\.colorScheme) private var colorScheme
+
+        var body: some View {
+            let tokens = ThemeTokens.current(for: colorScheme)
+
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .frame(width: 20, height: 20)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(tokens.primaryText)
+                        Text(subtitle)
+                            .font(.system(size: 11))
+                            .foregroundStyle(tokens.tertiaryText)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(tokens.tertiaryText)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(tokens.panelBackground.opacity(0.22), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     @Bindable var appViewModel: AppViewModel
     @Bindable var viewModel: WorkbenchViewModel
     @Environment(\.colorScheme) private var colorScheme
@@ -1652,61 +2087,132 @@ struct SidebarContent: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Current Workspace")
-                        .font(.caption)
-                        .foregroundStyle(tokens.tertiaryText)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(viewModel.state.sidebar.currentWorkspace.name)
-                            .font(.headline)
-                        Text(viewModel.state.sidebar.currentWorkspace.path)
-                            .font(.caption)
-                            .foregroundStyle(tokens.secondaryText)
-                            .lineLimit(2)
-                        HStack(spacing: 10) {
-                            Button("Switch") {
-                                appViewModel.showSetupHub()
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("mosaic")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(tokens.accent)
+                            Text(viewModel.state.sidebar.currentWorkspace.name)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(tokens.primaryText)
+                                .lineLimit(1)
+                            HStack(spacing: 6) {
+                                Text(appViewModel.currentProviderLabel.uppercased())
+                                Text("•")
+                                Text(appViewModel.currentModelLabel.uppercased())
                             }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(tokens.accent)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tokens.tertiaryText)
+                        }
+                        Spacer()
+                        Button {
+                            Task { await appViewModel.recordCommandAction("settings") }
+                            openSettings()
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(tokens.tertiaryText)
+                                .frame(width: 28, height: 28)
+                                .background(tokens.panelBackground.opacity(0.3), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
 
-                            Button("Reveal") {
-                                appViewModel.revealSelectedWorkspaceInFinder()
-                            }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(tokens.secondaryText)
+                    Text(viewModel.state.sidebar.currentWorkspace.path)
+                        .font(.caption)
+                        .foregroundStyle(tokens.secondaryText)
+                        .lineLimit(2)
+                        .textSelection(.enabled)
+
+                    Rectangle()
+                        .fill(tokens.border.opacity(0.8))
+                        .frame(height: 1)
+
+                    VStack(spacing: 6) {
+                        SidebarPrimaryActionRow(
+                            title: "New thread",
+                            subtitle: "Start a new conversation in this workspace.",
+                            systemImage: "square.and.pencil",
+                            accent: tokens.accent
+                        ) {
+                            appViewModel.createNewThread()
+                        }
+
+                        SidebarPrimaryActionRow(
+                            title: "Command palette",
+                            subtitle: "Search commands, sessions, and workspaces.",
+                            systemImage: "magnifyingglass",
+                            accent: tokens.success
+                        ) {
+                            appViewModel.presentCommandPalette()
+                        }
+
+                        SidebarPrimaryActionRow(
+                            title: "Switch workspace",
+                            subtitle: "Return to setup and switch projects.",
+                            systemImage: "folder",
+                            accent: tokens.warning
+                        ) {
+                            appViewModel.showSetupHub()
+                        }
+
+                        SidebarPrimaryActionRow(
+                            title: "Refresh runtime",
+                            subtitle: "Reload sessions, health, and status.",
+                            systemImage: "arrow.clockwise",
+                            accent: tokens.success
+                        ) {
+                            Task { await appViewModel.refreshActiveWorkspace() }
+                        }
+
+                        SidebarPrimaryActionRow(
+                            title: "Reveal in Finder",
+                            subtitle: "Open the current project folder.",
+                            systemImage: "folder.badge.gearshape",
+                            accent: tokens.secondaryText
+                        ) {
+                            appViewModel.revealSelectedWorkspaceInFinder()
                         }
                     }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(tokens.panelBackground.opacity(0.88), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(tokens.border.opacity(0.7), lineWidth: 1)
-                    )
                 }
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(tokens.panelBackground.opacity(0.68), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(tokens.border.opacity(0.52), lineWidth: 1)
+                )
 
                 if !viewModel.state.sidebar.recentWorkspaces.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Recent Workspaces")
-                            .font(.caption)
+                        Text("Workspaces")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(tokens.tertiaryText)
                         ForEach(viewModel.state.sidebar.recentWorkspaces) { workspace in
                             Button {
                                 Task { await appViewModel.activateWorkspace(workspace, recordHistory: true) }
                             } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(workspace.name)
-                                        .foregroundStyle(tokens.primaryText)
-                                    Text(workspace.path)
-                                        .font(.caption)
-                                        .foregroundStyle(tokens.tertiaryText)
-                                        .lineLimit(1)
+                                HStack(spacing: 10) {
+                                    Image(systemName: "folder")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(tokens.warning)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(workspace.name)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .foregroundStyle(tokens.primaryText)
+                                        Text(workspace.path)
+                                            .font(.caption)
+                                            .foregroundStyle(tokens.tertiaryText)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer(minLength: 0)
                                 }
-                                .padding(12)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 9)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(tokens.panelBackground.opacity(0.78), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .background(tokens.panelBackground.opacity(0.66), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                             .buttonStyle(.plain)
                         }
@@ -1716,7 +2222,7 @@ struct SidebarContent: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         Text("Sessions")
-                            .font(.caption)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(tokens.tertiaryText)
                         Spacer()
                         Text("\(viewModel.state.sidebar.threads.count)")
@@ -1724,8 +2230,16 @@ struct SidebarContent: View {
                             .foregroundStyle(tokens.tertiaryText)
                     }
 
-                    TextField("Filter threads", text: $viewModel.threadFilter)
-                        .textFieldStyle(.roundedBorder)
+                    TextField("Search sessions", text: $viewModel.threadFilter)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(tokens.panelBackground.opacity(0.68), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(tokens.border.opacity(0.56), lineWidth: 1)
+                        )
 
                     if let selected = viewModel.selectedThreadSummary {
                         ActiveSessionCard(
@@ -1768,9 +2282,9 @@ struct SidebarContent: View {
                                         .foregroundStyle(tokens.tertiaryText)
                                 }
 
-                                ForEach(section.threads) { thread in
-                                    SidebarThreadRow(
-                                        thread: thread,
+                        ForEach(section.threads) { thread in
+                            SidebarThreadRow(
+                                thread: thread,
                                         isSelected: viewModel.state.conversation.sessionID == thread.id,
                                         isPinned: viewModel.isPinnedThread(thread.id),
                                         onOpen: { Task { await viewModel.selectThread(thread.id) } },
@@ -1783,19 +2297,10 @@ struct SidebarContent: View {
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Quick Actions")
-                        .font(.caption)
-                        .foregroundStyle(tokens.tertiaryText)
-                    ForEach(viewModel.state.sidebar.quickActions) { action in
-                        quickActionRow(for: action, tokens: tokens)
-                    }
-                }
-
                 if !appViewModel.recentCommandActionIDs.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Recent Tasks")
-                            .font(.caption)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(tokens.tertiaryText)
                         ForEach(resolvedRecentTasks) { task in
                             RecentTaskCard(task: task)
@@ -1803,8 +2308,19 @@ struct SidebarContent: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(14)
         }
+        .background(
+            LinearGradient(
+                colors: [
+                    tokens.panelBackground.opacity(0.92),
+                    tokens.windowBackground.opacity(0.98),
+                    tokens.accent.opacity(0.05),
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
     }
 
     private struct ActiveSessionCard: View {
@@ -1821,7 +2337,7 @@ struct SidebarContent: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text("Active Session")
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tokens.tertiaryText)
                     Spacer()
                     if isPinned {
@@ -1858,10 +2374,10 @@ struct SidebarContent: View {
                 }
             }
             .padding(14)
-            .background(tokens.panelBackground.opacity(0.84), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(tokens.panelBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(tokens.accent.opacity(0.35), lineWidth: 1)
+                    .stroke(tokens.accent.opacity(0.26), lineWidth: 1)
             )
         }
     }
@@ -1878,75 +2394,86 @@ struct SidebarContent: View {
         var body: some View {
             let tokens = ThemeTokens.current(for: colorScheme)
 
-            HStack(spacing: 10) {
-                Button {
-                    onOpen()
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
+            Button {
+                onOpen()
+            } label: {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isSelected ? tokens.accent.opacity(0.95) : tokens.border.opacity(0.45))
+                        .frame(width: 3)
+
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 8) {
                             Text(thread.title)
+                                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
                                 .foregroundStyle(tokens.primaryText)
                                 .lineLimit(1)
+                            if isPinned {
+                                Image(systemName: "pin.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(tokens.warning)
+                            }
                             Spacer()
                             Text(thread.updatedLabel)
                                 .font(.caption2)
                                 .foregroundStyle(tokens.tertiaryText)
                         }
+
                         HStack(spacing: 6) {
                             Text("\(thread.eventCount) events")
-                            if isPinned {
-                                Text("• pinned")
-                            }
+                            Text("•")
+                            Text(thread.subtitle)
+                                .lineLimit(1)
                         }
                         .font(.caption)
                         .foregroundStyle(tokens.secondaryText)
-                        .lineLimit(1)
                     }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(isSelected ? tokens.elevatedBackground : tokens.panelBackground.opacity(0.68))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(
-                                isSelected ? tokens.accent.opacity(0.4) : tokens.border.opacity(0.5),
-                                lineWidth: 1
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    Button("Open Session") {
-                        onOpen()
-                    }
-                    Button(isPinned ? "Unpin Session" : "Pin Session") {
-                        onTogglePinned()
-                    }
-                    Button("Clear Session", role: .destructive) {
-                        onClear()
-                    }
-                }
 
-                VStack(spacing: 8) {
-                    Button {
-                        onTogglePinned()
-                    } label: {
-                        Image(systemName: isPinned ? "pin.fill" : "pin")
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(isPinned ? tokens.warning : tokens.tertiaryText)
+                    HStack(spacing: 8) {
+                        Button {
+                            onTogglePinned()
+                        } label: {
+                            Image(systemName: isPinned ? "pin.fill" : "pin")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(isPinned ? tokens.warning : tokens.tertiaryText)
 
-                    Button(role: .destructive) {
-                        onClear()
-                    } label: {
-                        Image(systemName: "trash")
+                        Button(role: .destructive) {
+                            onClear()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(tokens.tertiaryText)
                     }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(tokens.tertiaryText)
+                    .opacity(isSelected ? 1 : 0.7)
                 }
-                .frame(width: 20)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(isSelected ? tokens.elevatedBackground.opacity(0.95) : tokens.panelBackground.opacity(0.56))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(
+                            isSelected ? tokens.accent.opacity(0.24) : tokens.border.opacity(0.42),
+                            lineWidth: 1
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+                Button("Open Session") {
+                    onOpen()
+                }
+                Button(isPinned ? "Unpin Session" : "Pin Session") {
+                    onTogglePinned()
+                }
+                Button("Clear Session", role: .destructive) {
+                    onClear()
+                }
             }
         }
     }
@@ -1958,52 +2485,64 @@ struct SidebarContent: View {
             Button {
                 appViewModel.createNewThread()
             } label: {
-                Label(action.title, systemImage: action.systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                quickActionLabel(for: action, tokens: tokens)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(tokens.secondaryText)
         case "refresh":
             Button {
                 Task { await appViewModel.refreshActiveWorkspace() }
             } label: {
-                Label(action.title, systemImage: action.systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                quickActionLabel(for: action, tokens: tokens)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(tokens.secondaryText)
         case "switch-workspace":
             Button {
                 appViewModel.showSetupHub()
             } label: {
-                Label(action.title, systemImage: action.systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                quickActionLabel(for: action, tokens: tokens)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(tokens.secondaryText)
         case "reveal-workspace":
             Button {
                 appViewModel.revealSelectedWorkspaceInFinder()
             } label: {
-                Label(action.title, systemImage: action.systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                quickActionLabel(for: action, tokens: tokens)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(tokens.secondaryText)
         case "settings":
             Button {
                 Task { await appViewModel.recordCommandAction("settings") }
                 openSettings()
             } label: {
-                Label(action.title, systemImage: action.systemImage)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                quickActionLabel(for: action, tokens: tokens)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(tokens.secondaryText)
         default:
-            Label(action.title, systemImage: action.systemImage)
-                .foregroundStyle(tokens.secondaryText)
+            quickActionLabel(for: action, tokens: tokens)
         }
+    }
+
+    private func quickActionLabel(for action: QuickAction, tokens: ThemeTokens) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: action.systemImage)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tokens.accent)
+            Text(action.title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(tokens.primaryText)
+            Spacer()
+            Image(systemName: "arrow.up.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(tokens.tertiaryText)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tokens.panelBackground.opacity(0.54), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(tokens.border.opacity(0.44), lineWidth: 1)
+        )
     }
 
     private var resolvedRecentTasks: [RecentTaskDescriptor] {
@@ -2209,9 +2748,10 @@ struct ConversationContent: View {
 
         VStack(spacing: 0) {
             ConversationHeaderCard(appViewModel: appViewModel, viewModel: viewModel)
-                .padding(.horizontal, 20)
+                .frame(maxWidth: 920)
+                .padding(.horizontal, 24)
                 .padding(.top, 18)
-                .padding(.bottom, 8)
+                .padding(.bottom, 6)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -2225,9 +2765,11 @@ struct ConversationContent: View {
                             }
                         }
                     }
+                    .frame(maxWidth: 920)
                     .padding(.horizontal, 24)
-                    .padding(.top, 8)
+                    .padding(.top, 12)
                     .padding(.bottom, 22)
+                    .frame(maxWidth: .infinity)
                 }
                 .onChange(of: viewModel.state.conversation.messages.count) {
                     if let last = viewModel.state.conversation.messages.last?.id {
@@ -2249,8 +2791,9 @@ struct ConversationContent: View {
             }
 
             ComposerDock(appViewModel: appViewModel, viewModel: viewModel)
-                .padding(.horizontal, 20)
-                .padding(.top, 6)
+                .frame(maxWidth: 920)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
                 .padding(.bottom, 20)
         }
         .background(tokens.windowBackground)
@@ -2265,72 +2808,103 @@ private struct ConversationHeaderCard: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        HStack(alignment: .top, spacing: 18) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(viewModel.state.conversation.threadTitle)
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundStyle(tokens.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Text("THREAD")
+                        Text("•")
+                        Text(viewModel.state.sidebar.currentWorkspace.name.uppercased())
+                        if let sessionID = viewModel.state.conversation.sessionID {
+                            Text("•")
+                            Text(String(sessionID.prefix(8)).uppercased())
+                        }
+                    }
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
 
-                Text(viewModel.selectedThreadSummary?.subtitle ?? "Project-first conversation workspace")
-                    .font(.system(size: 13))
-                    .foregroundStyle(tokens.secondaryText)
-                    .lineLimit(2)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(viewModel.state.conversation.threadTitle)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(tokens.primaryText)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                StatusStripView(status: viewModel.state.conversation.status)
-            }
+                        if let selected = viewModel.selectedThreadSummary {
+                            Text(selected.updatedLabel.uppercased())
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(tokens.tertiaryText)
+                        }
+                    }
 
-            Spacer(minLength: 18)
-
-            VStack(alignment: .trailing, spacing: 10) {
-                HStack(spacing: 8) {
-                    ConversationMetricBadge(
-                        title: "Session",
-                        value: viewModel.state.conversation.sessionID.map { String($0.prefix(8)) } ?? "New",
-                        accent: tokens.accent
-                    )
-                    ConversationMetricBadge(
-                        title: "Turns",
-                        value: "\(viewModel.messageCount)",
-                        accent: tokens.success
-                    )
-                    ConversationMetricBadge(
-                        title: "Threads",
-                        value: "\(viewModel.threadCount)",
-                        accent: tokens.warning
-                    )
+                    Text(viewModel.selectedThreadSummary?.subtitle ?? "Workspace-first execution thread")
+                        .font(.system(size: 13))
+                        .foregroundStyle(tokens.secondaryText)
+                        .lineLimit(2)
                 }
 
-                HStack(spacing: 8) {
-                    MiniActionButton(title: "Palette", systemImage: "magnifyingglass") {
-                        appViewModel.presentCommandPalette()
+                Spacer(minLength: 18)
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    HStack(spacing: 6) {
+                        ToolbarPill(
+                            title: "Provider",
+                            value: appViewModel.currentProviderLabel,
+                            accent: tokens.accent
+                        )
+                        ToolbarPill(
+                            title: "Model",
+                            value: appViewModel.currentModelLabel,
+                            accent: tokens.success
+                        )
+                        ToolbarStatusPill(
+                            title: "Health",
+                            value: appViewModel.currentHealthLabel,
+                            systemImage: "waveform.path.ecg",
+                            accent: appViewModel.currentHealthLabel == "Healthy" ? tokens.success : tokens.warning
+                        )
                     }
-                    MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
-                        Task { await appViewModel.refreshActiveWorkspace() }
-                    }
-                    MiniActionButton(title: "New", systemImage: "square.and.pencil") {
-                        appViewModel.createNewThread()
+
+                    HStack(spacing: 8) {
+                        ConversationMetricBadge(
+                            title: "Turns",
+                            value: "\(viewModel.messageCount)",
+                            accent: tokens.success
+                        )
+                        ConversationMetricBadge(
+                            title: "Sessions",
+                            value: "\(viewModel.threadCount)",
+                            accent: tokens.warning
+                        )
                     }
                 }
             }
+
+            HStack(spacing: 8) {
+                MiniActionButton(title: "Palette", systemImage: "magnifyingglass") {
+                    appViewModel.presentCommandPalette()
+                }
+                MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
+                    Task { await appViewModel.refreshActiveWorkspace() }
+                }
+                MiniActionButton(title: "New", systemImage: "square.and.pencil") {
+                    appViewModel.createNewThread()
+                }
+                Spacer()
+                Text("CMD+ENTER TO SEND")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+            }
+
+            StatusStripView(status: viewModel.state.conversation.status)
         }
-        .padding(22)
-        .background(
-            LinearGradient(
-                colors: [
-                    tokens.panelBackground.opacity(0.96),
-                    tokens.elevatedBackground.opacity(0.92),
-                    tokens.accent.opacity(0.10),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
-        )
+        .padding(.horizontal, 2)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(tokens.border.opacity(0.8))
+                .frame(height: 1)
+                .padding(.top, 8)
+        }
     }
 }
 
@@ -2343,22 +2917,20 @@ private struct ConversationMetricBadge: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.caption2)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(accent.opacity(0.92))
+                .frame(width: 5, height: 5)
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                 .foregroundStyle(tokens.tertiaryText)
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(accent.opacity(0.92))
-                    .frame(width: 6, height: 6)
-                Text(value)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(tokens.primaryText)
-            }
+            Text(value)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tokens.primaryText)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(tokens.windowBackground.opacity(0.4), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(tokens.panelBackground.opacity(0.5), in: Capsule())
     }
 }
 
@@ -2373,11 +2945,15 @@ private struct MiniActionButton: View {
 
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(tokens.primaryText)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(tokens.windowBackground.opacity(0.38), in: Capsule())
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(tokens.panelBackground.opacity(0.5), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(tokens.border.opacity(0.42), lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
     }
@@ -2392,63 +2968,109 @@ private struct ComposerDock: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Button {
+                    appViewModel.presentCommandPalette()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(tokens.primaryText)
+                        .frame(width: 28, height: 28)
+                        .background(tokens.windowBackground.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+
+                MiniActionButton(title: "Palette", systemImage: "magnifyingglass") {
+                    appViewModel.presentCommandPalette()
+                }
+
+                MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
+                    Task { await appViewModel.refreshActiveWorkspace() }
+                }
+
+                Spacer()
+
+                Text(viewModel.state.sidebar.currentWorkspace.name.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+            }
+
             if !viewModel.state.conversation.suggestedPrompts.isEmpty {
                 SuggestionPromptStrip(prompts: viewModel.state.conversation.suggestedPrompts) { prompt in
                     viewModel.applySuggestedPrompt(prompt)
                 }
             }
 
-            TextEditor(text: $viewModel.composerText)
-                .font(.system(size: 14))
-                .frame(minHeight: 108)
-                .scrollContentBackground(.hidden)
-                .padding(14)
-                .background(tokens.windowBackground.opacity(0.42), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(tokens.border.opacity(0.72), lineWidth: 1)
-                )
+            ZStack(alignment: .topLeading) {
+                if viewModel.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("Ask Mosaic to inspect the workspace, propose changes, or continue the current thread…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(tokens.tertiaryText)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 16)
+                }
+
+                TextEditor(text: $viewModel.composerText)
+                    .font(.system(size: 14))
+                    .frame(minHeight: 114)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(Color.clear)
+            }
 
             HStack(alignment: .center, spacing: 10) {
                 HStack(spacing: 8) {
-                    ConversationMetricBadge(
+                    ToolbarPill(
                         title: "Profile",
                         value: appViewModel.currentProfileLabel,
                         accent: tokens.accent
                     )
-                    ConversationMetricBadge(
+                    ToolbarPill(
                         title: "Model",
                         value: appViewModel.currentModelLabel,
                         accent: tokens.success
+                    )
+                    ToolbarStatusPill(
+                        title: "Runtime",
+                        value: appViewModel.currentHealthLabel,
+                        systemImage: "bolt.horizontal",
+                        accent: appViewModel.currentHealthLabel == "Healthy" ? tokens.success : tokens.warning
                     )
                 }
 
                 Spacer()
 
-                Text("Cmd+Enter to send")
-                    .font(.caption)
+                Text("CMD+ENTER")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(tokens.tertiaryText)
 
                 Button("Clear Thread", role: .destructive) {
                     Task { await appViewModel.clearCurrentThread() }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .foregroundStyle(tokens.failure)
                 .disabled(!viewModel.canClearSelectedThread)
 
-                Button(viewModel.state.conversation.isSending ? "Sending…" : "Send") {
+                Button {
                     Task { await appViewModel.sendCurrentPrompt() }
+                } label: {
+                    Image(systemName: viewModel.state.conversation.isSending ? "clock" : "arrow.up")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.white)
+                        .frame(width: 34, height: 34)
+                        .background(tokens.accent, in: Circle())
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
                 .disabled(viewModel.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.state.conversation.isSending)
             }
         }
-        .padding(18)
-        .background(tokens.panelBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .padding(16)
+        .background(tokens.panelBackground.opacity(0.76), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(tokens.border.opacity(0.74), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(tokens.border.opacity(0.62), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.18 : 0.08), radius: 18, y: 8)
     }
 }
 
@@ -2471,11 +3093,11 @@ private struct SuggestionPromptStrip: View {
                             .foregroundStyle(tokens.primaryText)
                             .lineLimit(1)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 9)
-                            .background(tokens.windowBackground.opacity(0.4), in: Capsule())
+                            .padding(.vertical, 8)
+                            .background(tokens.windowBackground.opacity(0.26), in: Capsule())
                             .overlay(
                                 Capsule()
-                                    .stroke(tokens.border.opacity(0.62), lineWidth: 1)
+                                    .stroke(tokens.border.opacity(0.52), lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
@@ -2495,12 +3117,12 @@ private struct EmptyConversationView: View {
 
         HStack(alignment: .top, spacing: 18) {
             VStack(alignment: .leading, spacing: 18) {
-                Text("Start from the workspace, not from a blank chat box.")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                Text("Start from the workspace.")
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(tokens.primaryText)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Ask Mosaic to inspect the project, audit runtime health, or turn the next change into an execution plan.")
+                Text("Use this thread to inspect the repo, audit runtime health, or turn the next change into an execution plan.")
                     .font(.system(size: 14))
                     .foregroundStyle(tokens.secondaryText)
 
@@ -2552,21 +3174,10 @@ private struct EmptyConversationView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(26)
-        .background(
-            LinearGradient(
-                colors: [
-                    tokens.panelBackground.opacity(0.94),
-                    tokens.elevatedBackground.opacity(0.90),
-                    tokens.accent.opacity(0.08),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-        )
+        .background(tokens.panelBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(tokens.border.opacity(0.56), lineWidth: 1)
         )
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -2696,17 +3307,21 @@ struct InspectorContent: View {
                 switch selectedPane {
                 case .overview:
                     InspectorWorkspaceActions(appViewModel: appViewModel, viewModel: viewModel)
+                    InspectorRuntimeSnapshotCard(appViewModel: appViewModel)
+                    InspectorSessionDetailCard(appViewModel: appViewModel, viewModel: viewModel)
                     InspectorModelSwitcherCard(appViewModel: appViewModel)
                     inspectorSections(for: ["context", "runtime"])
                     InspectorHealthChecksCard(appViewModel: appViewModel)
                 case .runtime:
+                    InspectorRuntimeSnapshotCard(appViewModel: appViewModel)
                     InspectorModelSwitcherCard(appViewModel: appViewModel)
                     RuntimeControlsCard(viewModel: appViewModel, title: "Runtime controls")
                     inspectorSections(for: ["runtime", "context"])
                     InspectorHealthChecksCard(appViewModel: appViewModel)
                 case .session:
+                    InspectorSessionDetailCard(appViewModel: appViewModel, viewModel: viewModel)
                     InspectorSessionActions(appViewModel: appViewModel, viewModel: viewModel)
-                    InspectorSessionListCard(viewModel: viewModel)
+                    InspectorSessionListCard(appViewModel: appViewModel, viewModel: viewModel)
                     inspectorSections(for: ["session", "context"])
                 }
             }
@@ -2734,15 +3349,38 @@ private struct InspectorHeroCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Inspector")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    Text("CONTROL SURFACE")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tokens.accent)
+                    Text(viewModel.state.sidebar.currentWorkspace.name)
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
-                    Text("Runtime, workspace, and session detail for the active thread.")
-                        .font(.system(size: 12))
+                    Text(viewModel.selectedThreadSummary?.title ?? "No active session selected")
+                        .font(.system(size: 13))
                         .foregroundStyle(tokens.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    if viewModel.isLoading {
+                        Text("SYNCING")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tokens.tertiaryText)
+                    }
+                    HStack(spacing: 8) {
+                        ConversationMetricBadge(
+                            title: "Sessions",
+                            value: "\(viewModel.threadCount)",
+                            accent: tokens.accent
+                        )
+                        ConversationMetricBadge(
+                            title: "Turns",
+                            value: "\(viewModel.messageCount)",
+                            accent: tokens.success
+                        )
+                    }
+                }
             }
 
             HStack(spacing: 10) {
@@ -2762,23 +3400,24 @@ private struct InspectorHeroCard: View {
                     accent: tokens.warning
                 )
             }
+
+            HStack(spacing: 8) {
+                MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
+                    Task { await appViewModel.refreshActiveWorkspace() }
+                }
+                MiniActionButton(title: "Setup", systemImage: "slider.horizontal.3") {
+                    appViewModel.showSetupHub()
+                }
+                MiniActionButton(title: "Palette", systemImage: "magnifyingglass") {
+                    appViewModel.presentCommandPalette()
+                }
+            }
         }
-        .padding(18)
-        .background(
-            LinearGradient(
-                colors: [
-                    tokens.panelBackground.opacity(0.94),
-                    tokens.elevatedBackground.opacity(0.90),
-                    tokens.accent.opacity(0.08),
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-        )
+        .padding(16)
+        .background(tokens.panelBackground.opacity(0.74), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tokens.border.opacity(0.64), lineWidth: 1)
         )
     }
 }
@@ -2805,6 +3444,198 @@ private struct InspectorWorkspaceActions: View {
                 }
                 MiniActionButton(title: "Setup", systemImage: "slider.horizontal.3") {
                     appViewModel.showSetupHub()
+                }
+            }
+        }
+        .padding(14)
+        .background(tokens.panelBackground.opacity(0.86), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
+        )
+    }
+}
+
+private struct InspectorRuntimeSnapshotCard: View {
+    @Bindable var appViewModel: AppViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var aliasesCount: Int {
+        appViewModel.selectedModelsStatus?.aliases.count ?? 0
+    }
+
+    private var fallbackCount: Int {
+        appViewModel.selectedModelsStatus?.fallbacks.count ?? 0
+    }
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Runtime Snapshot")
+                        .font(.headline)
+                        .foregroundStyle(tokens.primaryText)
+                    Text("Provider routing, profile, and config shape for the active workspace.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(tokens.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Text(appViewModel.currentProviderLabel)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tokens.accent)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(tokens.elevatedBackground.opacity(0.88), in: Capsule())
+            }
+
+            HStack(spacing: 8) {
+                ConversationMetricBadge(
+                    title: "Profile",
+                    value: appViewModel.currentProfileLabel,
+                    accent: tokens.accent
+                )
+                ConversationMetricBadge(
+                    title: "Aliases",
+                    value: "\(aliasesCount)",
+                    accent: tokens.success
+                )
+                ConversationMetricBadge(
+                    title: "Fallbacks",
+                    value: "\(fallbackCount)",
+                    accent: tokens.warning
+                )
+            }
+
+            SetupValueRow(label: "Endpoint", value: appViewModel.currentBaseURLLabel)
+            SetupValueRow(label: "API Key Env", value: appViewModel.currentAPIKeyEnvLabel)
+            SetupValueRow(label: "State Mode", value: appViewModel.selectedWorkspaceStatus?.stateMode ?? "project")
+            SetupValueRow(label: "Agents", value: "\(appViewModel.selectedWorkspaceStatus?.agentsCount ?? 0)")
+            SetupValueRow(label: "Config Path", value: appViewModel.selectedWorkspaceStatus?.configPath ?? "Unavailable")
+
+            if let fallbacks = appViewModel.selectedModelsStatus?.fallbacks, !fallbacks.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Fallback order")
+                        .font(.caption)
+                        .foregroundStyle(tokens.tertiaryText)
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], spacing: 8) {
+                        ForEach(fallbacks, id: \.self) { fallback in
+                            Text(fallback)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(tokens.primaryText)
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(tokens.windowBackground.opacity(0.36), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(tokens.border.opacity(0.5), lineWidth: 1)
+                                )
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(tokens.panelBackground.opacity(0.86), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tokens.border.opacity(0.7), lineWidth: 1)
+        )
+    }
+}
+
+private struct InspectorSessionDetailCard: View {
+    @Bindable var appViewModel: AppViewModel
+    @Bindable var viewModel: WorkbenchViewModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var latestMessagePreview: String? {
+        viewModel.state.conversation.messages.last?.body
+    }
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Current Session")
+                    .font(.headline)
+                    .foregroundStyle(tokens.primaryText)
+                Spacer()
+                if let sessionID = viewModel.state.conversation.sessionID, viewModel.isPinnedThread(sessionID) {
+                    Label("Pinned", systemImage: "pin.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tokens.warning)
+                }
+            }
+
+            if let selected = viewModel.selectedThreadSummary {
+                Text(selected.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(tokens.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    ConversationMetricBadge(
+                        title: "Session",
+                        value: String(selected.id.prefix(8)),
+                        accent: tokens.accent
+                    )
+                    ConversationMetricBadge(
+                        title: "Events",
+                        value: "\(selected.eventCount)",
+                        accent: tokens.success
+                    )
+                    ConversationMetricBadge(
+                        title: "Updated",
+                        value: selected.updatedLabel,
+                        accent: tokens.warning
+                    )
+                }
+
+                if let latestMessagePreview, !latestMessagePreview.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Latest message")
+                            .font(.caption)
+                            .foregroundStyle(tokens.tertiaryText)
+                        Text(latestMessagePreview)
+                            .font(.system(size: 12))
+                            .foregroundStyle(tokens.secondaryText)
+                            .lineLimit(4)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(tokens.windowBackground.opacity(0.34), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    MiniActionButton(title: "Open", systemImage: "arrow.up.right") {
+                        Task { await appViewModel.openSession(selected.id) }
+                    }
+                    MiniActionButton(
+                        title: viewModel.isPinnedThread(selected.id) ? "Unpin" : "Pin",
+                        systemImage: viewModel.isPinnedThread(selected.id) ? "pin.slash" : "pin"
+                    ) {
+                        Task { await appViewModel.togglePinnedSession(selected.id) }
+                    }
+                    Button("Clear Thread", role: .destructive) {
+                        Task { await appViewModel.clearSession(selected.id) }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.state.conversation.isSending)
+                }
+            } else {
+                Text("No active session selected.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(tokens.secondaryText)
+
+                MiniActionButton(title: "New Thread", systemImage: "square.and.pencil") {
+                    appViewModel.createNewThread()
                 }
             }
         }
@@ -2928,6 +3759,7 @@ private struct InspectorSessionActions: View {
 }
 
 private struct InspectorSessionListCard: View {
+    @Bindable var appViewModel: AppViewModel
     @Bindable var viewModel: WorkbenchViewModel
     @Environment(\.colorScheme) private var colorScheme
 
@@ -2947,7 +3779,7 @@ private struct InspectorSessionListCard: View {
                 ForEach(viewModel.state.sidebar.threads) { thread in
                     HStack(spacing: 10) {
                         Button {
-                            Task { await viewModel.selectThread(thread.id) }
+                            Task { await appViewModel.openSession(thread.id) }
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
@@ -2980,14 +3812,25 @@ private struct InspectorSessionListCard: View {
                         }
                         .buttonStyle(.plain)
 
-                        Button(role: .destructive) {
-                            Task { await viewModel.clearThread(thread.id) }
-                        } label: {
-                            Image(systemName: "trash")
-                                .frame(width: 28, height: 28)
+                        VStack(spacing: 8) {
+                            Button {
+                                Task { await appViewModel.togglePinnedSession(thread.id) }
+                            } label: {
+                                Image(systemName: viewModel.isPinnedThread(thread.id) ? "pin.fill" : "pin")
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(viewModel.isPinnedThread(thread.id) ? tokens.warning : tokens.tertiaryText)
+
+                            Button(role: .destructive) {
+                                Task { await appViewModel.clearSession(thread.id) }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .frame(width: 28, height: 28)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(viewModel.state.conversation.isSending)
                         }
-                        .buttonStyle(.borderless)
-                        .disabled(viewModel.state.conversation.isSending)
                     }
                 }
             }
@@ -3005,6 +3848,22 @@ private struct InspectorHealthChecksCard: View {
     @Bindable var appViewModel: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
 
+    private var checks: [HealthCheckSummary] {
+        appViewModel.selectedWorkspaceHealth?.checks ?? []
+    }
+
+    private var okCount: Int {
+        checks.filter { $0.status == "ok" }.count
+    }
+
+    private var warnCount: Int {
+        checks.filter { $0.status == "warn" }.count
+    }
+
+    private var failCount: Int {
+        checks.filter { $0.status == "fail" }.count
+    }
+
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
@@ -3019,30 +3878,61 @@ private struct InspectorHealthChecksCard: View {
                 }
             }
 
-            if let checks = appViewModel.selectedWorkspaceHealth?.checks, !checks.isEmpty {
+            HStack(spacing: 8) {
+                ConversationMetricBadge(
+                    title: "Healthy",
+                    value: "\(okCount)",
+                    accent: tokens.success
+                )
+                ConversationMetricBadge(
+                    title: "Warnings",
+                    value: "\(warnCount)",
+                    accent: tokens.warning
+                )
+                ConversationMetricBadge(
+                    title: "Failures",
+                    value: "\(failCount)",
+                    accent: tokens.failure
+                )
+            }
+
+            if !checks.isEmpty {
+                if failCount > 0 || warnCount > 0 {
+                    SetupHintRow(
+                        systemImage: failCount > 0 ? "exclamationmark.triangle.fill" : "info.circle.fill",
+                        text: failCount > 0
+                            ? "Runtime health is degraded. Review the failing checks, then adjust the workspace runtime if needed."
+                            : "Some checks need attention. Refresh after updating the runtime or workspace state."
+                    )
+                }
+
                 ForEach(Array(checks.enumerated()), id: \.offset) { index, check in
-                    HStack(alignment: .top, spacing: 10) {
-                        Circle()
-                            .fill(color(for: check.status, tokens: tokens))
-                            .frame(width: 8, height: 8)
-                            .padding(.top, 5)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(color(for: check.status, tokens: tokens))
+                                .frame(width: 8, height: 8)
+                                .padding(.top, 5)
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(check.name.replacingOccurrences(of: "_", with: " ").capitalized)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(tokens.primaryText)
-                            Text(check.detail)
-                                .font(.system(size: 12))
-                                .foregroundStyle(tokens.secondaryText)
-                                .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(check.name.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(tokens.primaryText)
+                                Text(check.detail)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(tokens.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            Text(check.status.capitalized)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(color(for: check.status, tokens: tokens))
                         }
-
-                        Spacer()
-
-                        Text(check.status.capitalized)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(color(for: check.status, tokens: tokens))
                     }
+                    .padding(12)
+                    .background(tokens.windowBackground.opacity(0.34), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     if index != checks.count - 1 {
                         Divider()
@@ -3251,60 +4141,86 @@ struct ConversationTimelineRow: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         let isUser = message.role == .user
         let isSystem = message.role == .system
-        let bubbleBackground: Color = switch message.role {
+        let leadingAccent: Color = switch message.role {
         case .assistant:
-            tokens.panelBackground.opacity(0.88)
+            tokens.accent
         case .user:
-            tokens.elevatedBackground.opacity(0.96)
+            tokens.success
         case .system:
-            tokens.windowBackground.opacity(0.82)
+            tokens.warning
+        }
+        let blockBackground: Color = switch message.role {
+        case .assistant:
+            .clear
+        case .user:
+            tokens.panelBackground.opacity(0.52)
+        case .system:
+            tokens.panelBackground.opacity(0.34)
+        }
+        let blockBorder: Color = switch message.role {
+        case .assistant:
+            .clear
+        case .user:
+            tokens.accent.opacity(0.18)
+        case .system:
+            tokens.border.opacity(0.34)
         }
 
-        HStack(alignment: .top, spacing: 14) {
-            if !isUser {
-                ConversationRoleGlyph(role: message.role)
-            } else {
-                Spacer(minLength: 80)
-            }
+        HStack(alignment: .top, spacing: 12) {
+            ConversationRoleGlyph(role: message.role)
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Text(message.role.title)
-                        .font(.system(size: 12, weight: .semibold))
+                    Text(message.role.title.uppercased())
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tokens.primaryText)
-                    Text(message.timestampLabel)
-                        .font(.caption)
+                    Text(message.timestampLabel.uppercased())
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(tokens.tertiaryText)
+                    if isUser {
+                        Text("PROMPT")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tokens.tertiaryText)
+                    }
+                    if isSystem {
+                        Text("RUNTIME")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(tokens.warning)
+                    }
                     Spacer()
                 }
 
-                Text(message.body)
-                    .font(.system(size: isSystem ? 14 : 15))
-                    .foregroundStyle(tokens.primaryText)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(18)
-            .background(
-                bubbleBackground,
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(
-                        isUser ? tokens.accent.opacity(0.30) : tokens.border.opacity(0.60),
-                        lineWidth: 1
-                    )
-            )
-            .frame(maxWidth: isUser ? 700 : 860, alignment: .leading)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
+                        RoundedRectangle(cornerRadius: 999, style: .continuous)
+                            .fill(leadingAccent.opacity(isSystem ? 0.74 : 0.95))
+                            .frame(width: 2)
 
-            if isUser {
-                ConversationRoleGlyph(role: message.role)
-            } else {
-                Spacer(minLength: 80)
+                        Text(message.body)
+                            .font(.system(size: isSystem ? 13 : 15))
+                            .foregroundStyle(tokens.primaryText)
+                            .lineSpacing(4)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.leading, 14)
+                    }
+                    .padding(.vertical, isUser || isSystem ? 12 : 2)
+                    .padding(.horizontal, isUser || isSystem ? 12 : 0)
+                    .background(
+                        blockBackground,
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    )
+                    .overlay {
+                        if isUser || isSystem {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(blockBorder, lineWidth: 1)
+                        }
+                    }
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .frame(maxWidth: isUser ? 720 : 860, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .id(message.id)
     }
 }
@@ -3327,12 +4243,15 @@ private struct ConversationRoleGlyph: View {
         }
 
         ZStack {
-            Circle()
-                .fill(accent.opacity(0.16))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(tokens.panelBackground.opacity(0.72))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(accent.opacity(0.28), lineWidth: 1)
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(accent)
         }
-        .frame(width: 34, height: 34)
+        .frame(width: 22, height: 22)
+        .padding(.top, 2)
     }
 }

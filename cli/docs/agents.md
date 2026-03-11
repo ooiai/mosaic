@@ -33,9 +33,33 @@ mosaic --project-state agents route resolve --route ask
 `ask/chat` choose agent in this order:
 
 1. `--agent <agent_id>`
-2. Route binding (`ask` or `chat`)
-3. Default agent (`agents default <id>`)
-4. Fallback to CLI `--profile` configuration
+2. Session-bound runtime metadata when resuming with `--session <id>`
+3. Route binding (`ask` or `chat`)
+4. Default agent (`agents default <id>`)
+5. Fallback to CLI `--profile` configuration
+
+When a session is first created, Mosaic persists runtime metadata in the session stream. Later `ask/chat/tui --session <id>` resumes the same agent automatically unless you explicitly override it with `--agent`.
+
+Inside `mosaic chat`, you can also switch agents mid-REPL with `/agent <agent_id>`. If the current chat already has a session, Mosaic resets to a new session before applying the new agent so conversation history never changes agent in place.
+
+## Session Runtime Metadata
+
+Use `session show` to inspect the runtime binding for an existing conversation:
+
+```bash
+mosaic --project-state --json session show <session_id>
+mosaic --project-state session resume <session_id>
+mosaic --project-state chat
+# inside REPL:
+/agent writer
+```
+
+`session show --json` now includes:
+
+- `runtime.profile_name`
+- `runtime.agent_id`
+
+The metadata is stored as a `system` event inside the session JSONL stream and does not get injected back into the model conversation history.
 
 ## Data Files
 
