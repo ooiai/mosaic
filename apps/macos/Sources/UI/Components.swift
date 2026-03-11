@@ -2141,15 +2141,6 @@ struct SidebarContent: View {
                         }
 
                         SidebarPrimaryActionRow(
-                            title: "Command palette",
-                            subtitle: "Search commands, sessions, and workspaces.",
-                            systemImage: "magnifyingglass",
-                            accent: tokens.success
-                        ) {
-                            appViewModel.presentCommandPalette()
-                        }
-
-                        SidebarPrimaryActionRow(
                             title: "Switch workspace",
                             subtitle: "Return to setup and switch projects.",
                             systemImage: "folder",
@@ -2880,9 +2871,6 @@ private struct ConversationHeaderCard: View {
             }
 
             HStack(spacing: 8) {
-                MiniActionButton(title: "Palette", systemImage: "magnifyingglass") {
-                    appViewModel.presentCommandPalette()
-                }
                 MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
                     Task { await appViewModel.refreshActiveWorkspace() }
                 }
@@ -2969,23 +2957,12 @@ private struct ComposerDock: View {
 
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
-                Button {
-                    appViewModel.presentCommandPalette()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(tokens.primaryText)
-                        .frame(width: 28, height: 28)
-                        .background(tokens.windowBackground.opacity(0.55), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                }
-                .buttonStyle(.plain)
-
-                MiniActionButton(title: "Palette", systemImage: "magnifyingglass") {
-                    appViewModel.presentCommandPalette()
-                }
-
                 MiniActionButton(title: "Refresh", systemImage: "arrow.clockwise") {
                     Task { await appViewModel.refreshActiveWorkspace() }
+                }
+
+                MiniActionButton(title: "New", systemImage: "square.and.pencil") {
+                    appViewModel.createNewThread()
                 }
 
                 Spacer()
@@ -3407,9 +3384,6 @@ private struct InspectorHeroCard: View {
                 }
                 MiniActionButton(title: "Setup", systemImage: "slider.horizontal.3") {
                     appViewModel.showSetupHub()
-                }
-                MiniActionButton(title: "Palette", systemImage: "magnifyingglass") {
-                    appViewModel.presentCommandPalette()
                 }
             }
         }
