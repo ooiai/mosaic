@@ -7,99 +7,70 @@ import XCTest
 
 @MainActor
 final class ViewSmokeTests: XCTestCase {
-    func testWorkbenchViewInstantiatesInDarkAndLightModes() {
-        let client = MockRuntimeClient()
+    func testWorkbenchViewInstantiatesInLightAndDarkModes() async {
+        let runtime = MockWorkbenchRuntime()
         let appViewModel = AppViewModel(
-            runtimeClient: client,
+            runtimeClient: runtime,
+            persistenceStore: InMemoryDesktopArchiveStore(
+                archive: DesktopArchive(
+                    projects: [PreviewFixtures.projectArchive],
+                    selectedProjectID: PreviewFixtures.project.id,
+                    settings: .init()
+                )
+            ),
             workspaceStore: InMemoryWorkspaceStore(
-                workspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
+                workspaces: [PreviewFixtures.workspace],
                 selectedID: PreviewFixtures.workspace.id
-            )
-        )
-        appViewModel.selectedWorkspace = PreviewFixtures.workspace
-        appViewModel.selectedWorkspaceStatus = PreviewFixtures.statusSummary
-        appViewModel.selectedModelsStatus = PreviewFixtures.modelsStatusSummary
-        appViewModel.selectedWorkspaceHealth = PreviewFixtures.healthSummary
-        let viewModel = WorkbenchViewModel(
-            workspace: PreviewFixtures.workspace,
-            recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            runtimeClient: client,
+            ),
             pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
-        viewModel.replaceStateForPreview(WorkbenchStateMapper.map(
-            workspace: PreviewFixtures.workspace,
-            recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            status: PreviewFixtures.statusSummary,
-            health: PreviewFixtures.healthSummary,
-            models: PreviewFixtures.modelsStatusSummary,
-            sessions: PreviewFixtures.sessions,
-            transcript: PreviewFixtures.transcript,
-            composerText: "",
-            isSending: false,
-            inlineError: nil
-        ))
+        await appViewModel.bootstrap()
+        guard let workbench = appViewModel.workbench else {
+            XCTFail("Expected workbench")
+            return
+        }
 
-        let light = NSHostingView(rootView: WorkbenchView(appViewModel: appViewModel, viewModel: viewModel).environment(\.colorScheme, .light))
-        let dark = NSHostingView(rootView: WorkbenchView(appViewModel: appViewModel, viewModel: viewModel).environment(\.colorScheme, .dark))
+        let light = NSHostingView(rootView: WorkbenchView(appViewModel: appViewModel, viewModel: workbench).environment(\.colorScheme, .light))
+        let dark = NSHostingView(rootView: WorkbenchView(appViewModel: appViewModel, viewModel: workbench).environment(\.colorScheme, .dark))
 
         XCTAssertNotNil(light)
         XCTAssertNotNil(dark)
     }
 
-    func testOnboardingAndWorkspacePickerInstantiate() {
-        let client = MockRuntimeClient()
-        let store = InMemoryWorkspaceStore(workspaces: [PreviewFixtures.workspace], selectedID: PreviewFixtures.workspace.id)
-        let appViewModel = AppViewModel(runtimeClient: client, workspaceStore: store)
-        appViewModel.screen = .setupHub
-        appViewModel.selectedWorkspace = PreviewFixtures.workspace
-        appViewModel.selectedWorkspaceStatus = PreviewFixtures.statusSummary
-        appViewModel.selectedModelsStatus = PreviewFixtures.modelsStatusSummary
-        appViewModel.selectedWorkspaceHealth = PreviewFixtures.healthSummary
+    func testSetupHubInstantiates() async {
+        let appViewModel = AppViewModel(
+            runtimeClient: MockWorkbenchRuntime(),
+            persistenceStore: InMemoryDesktopArchiveStore(),
+            workspaceStore: InMemoryWorkspaceStore(),
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
+        )
+        await appViewModel.bootstrap()
 
         let setupHub = NSHostingView(rootView: SetupHubView(viewModel: appViewModel))
-
         XCTAssertNotNil(setupHub)
     }
 
-    func testRootContentViewInstantiatesWithCommandPaletteVisible() {
-        let client = MockRuntimeClient()
+    func testRootContentViewInstantiatesWithCommandPaletteVisible() async {
+        let runtime = MockWorkbenchRuntime()
         let appViewModel = AppViewModel(
-            runtimeClient: client,
+            runtimeClient: runtime,
+            persistenceStore: InMemoryDesktopArchiveStore(
+                archive: DesktopArchive(
+                    projects: [PreviewFixtures.projectArchive],
+                    selectedProjectID: PreviewFixtures.project.id,
+                    settings: .init()
+                )
+            ),
             workspaceStore: InMemoryWorkspaceStore(
-                workspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
+                workspaces: [PreviewFixtures.workspace],
                 selectedID: PreviewFixtures.workspace.id
-            )
-        )
-        appViewModel.selectedWorkspace = PreviewFixtures.workspace
-        appViewModel.selectedWorkspaceStatus = PreviewFixtures.statusSummary
-        appViewModel.selectedModelsStatus = PreviewFixtures.modelsStatusSummary
-        appViewModel.selectedWorkspaceHealth = PreviewFixtures.healthSummary
-        appViewModel.selectedConfigurationSummary = PreviewFixtures.configurationSummary
-        appViewModel.screen = .workbench
-        appViewModel.isCommandPalettePresented = true
-
-        let workbench = WorkbenchViewModel(
-            workspace: PreviewFixtures.workspace,
-            recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            runtimeClient: client,
+            ),
             pinnedSessionsStore: InMemoryPinnedSessionStore()
         )
-        workbench.replaceStateForPreview(WorkbenchStateMapper.map(
-            workspace: PreviewFixtures.workspace,
-            recentWorkspaces: [PreviewFixtures.workspace, PreviewFixtures.secondaryWorkspace],
-            status: PreviewFixtures.statusSummary,
-            health: PreviewFixtures.healthSummary,
-            models: PreviewFixtures.modelsStatusSummary,
-            sessions: PreviewFixtures.sessions,
-            transcript: PreviewFixtures.transcript,
-            composerText: "Summarize the command palette work.",
-            isSending: false,
-            inlineError: nil
-        ))
-        appViewModel.workbench = workbench
+        await appViewModel.bootstrap()
+        appViewModel.isCommandPalettePresented = true
 
         let root = NSHostingView(rootView: RootContentView(viewModel: appViewModel).environment(\.colorScheme, .dark))
-
         XCTAssertNotNil(root)
     }
 }

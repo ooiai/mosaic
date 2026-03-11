@@ -152,6 +152,11 @@ pub(super) fn print_json(value: &Value) {
     println!("{rendered}");
 }
 
+pub(super) fn print_json_line(value: &Value) {
+    let rendered = serde_json::to_string(value).unwrap_or_else(|_| "{}".to_string());
+    println!("{rendered}");
+}
+
 pub(super) fn binary_in_path(name: &str) -> bool {
     if PathBuf::from(name).is_absolute() {
         return PathBuf::from(name).exists();
