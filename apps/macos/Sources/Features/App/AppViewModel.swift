@@ -1,84 +1,82 @@
-import Domain
 import AppKit
+import Domain
 import Foundation
 import Infrastructure
 import Observation
-
-private enum OnboardingDefaults {
-    static let azureBaseURL = "https://YOUR_RESOURCE_NAME.openai.azure.com/openai/v1"
-    static let azureModel = "gpt-5.2"
-    static let azureAPIKeyEnv = "AZURE_OPENAI_API_KEY"
-    static let localBaseURL = "http://localhost:1234/v1"
-    static let localAPIKeyEnv = "LOCAL_OPENAI_API_KEY"
-}
 
 @MainActor
 @Observable
 public final class AppViewModel {
     public var screen: AppScreen = .loading
-    public var workbench: WorkbenchViewModel?
-    public var recentWorkspaces: [WorkspaceReference] = []
-    public var selectedWorkspace: WorkspaceReference?
-    public var selectedWorkspaceStatus: RuntimeStatusSummary?
-    public var selectedWorkspaceHealth: HealthSummary?
-    public var selectedModelsStatus: ModelsStatusSummary?
-    public var selectedConfigurationSummary: ConfigurationSummary?
-    public var availableModels: [ModelSummary] = []
-    public var onboardingBaseURL = OnboardingDefaults.azureBaseURL
-    public var onboardingModel = OnboardingDefaults.azureModel
-    public var onboardingAPIKeyEnv = OnboardingDefaults.azureAPIKeyEnv
-    public var runtimeDraftBaseURL = OnboardingDefaults.azureBaseURL
-    public var runtimeDraftModel = OnboardingDefaults.azureModel
-    public var runtimeDraftAPIKeyEnv = OnboardingDefaults.azureAPIKeyEnv
+    public private(set) var workbench: WorkbenchViewModel?
+    public private(set) var projects: [Project] = []
+    public var settings: AppSettings = .init()
     public var isCommandPalettePresented = false
-    public var showAdvancedSetup = false
-    public var isPreparingWorkspace = false
-    public var isInitializingWorkspace = false
-    public var isSavingRuntimeSettings = false
-    public var isApplyingQuickModel = false
-    public private(set) var recentCommandActionIDs: [String] = []
     public var globalError: String?
 
-    private let runtimeClient: MosaicRuntimeClient
+    private var archive = DesktopArchive()
+    private let runtime: AgentWorkbenchRuntime
+    private let persistenceStore: DesktopPersistenceStoring
     private let workspaceStore: WorkspaceStoring
-    private let commandHistoryStore: CommandHistoryStoring
     private let pinnedSessionsStore: PinnedSessionsStoring
 
     public init(
-        runtimeClient: MosaicRuntimeClient,
-        workspaceStore: WorkspaceStoring,
-        commandHistoryStore: CommandHistoryStoring = CommandHistoryStore(),
+        runtimeClient: AgentWorkbenchRuntime,
+        persistenceStore: DesktopPersistenceStoring = DesktopArchiveStore(),
+        workspaceStore: WorkspaceStoring = WorkspaceStore(),
         pinnedSessionsStore: PinnedSessionsStoring = PinnedSessionStore()
     ) {
-        self.runtimeClient = runtimeClient
+        self.runtime = runtimeClient
+        self.persistenceStore = persistenceStore
         self.workspaceStore = workspaceStore
-        self.commandHistoryStore = commandHistoryStore
         self.pinnedSessionsStore = pinnedSessionsStore
+    }
+
+    public var selectedProject: Project? {
+        guard let selectedProjectID = archive.selectedProjectID else { return nil }
+        return projects.first(where: { $0.id == selectedProjectID })
+    }
+
+    public var recentProjects: [Project] {
+        projects.sorted { $0.lastOpenedAt > $1.lastOpenedAt }
+    }
+
+    public var canSendPrompt: Bool {
+        workbench?.canSend == true
     }
 
     public func bootstrap() async {
         screen = .loading
-        recentWorkspaces = await workspaceStore.recentWorkspaces()
-        recentCommandActionIDs = await commandHistoryStore.recentCommandActionIDs()
+        archive = await persistenceStore.loadArchive()
+        archive = await importLegacyWorkspacesIfNeeded(into: archive)
+        settings = archive.settings
+        projects = archive.projects.map(\.project).sorted { $0.lastOpenedAt > $1.lastOpenedAt }
 
-        guard let workspace = await workspaceStore.selectedWorkspace() ?? recentWorkspaces.first else {
+        guard let selectedProject = resolveSelectedProject() else {
+            workbench = nil
             screen = .setupHub
             return
         }
 
-        await prepareWorkspace(workspace, openWorkbenchIfConfigured: true)
+        await openProject(selectedProject.id)
     }
 
-    public func selectWorkspace(_ workspace: WorkspaceReference) async {
-        await workspaceStore.select(workspaceID: workspace.id)
-        recentWorkspaces = await workspaceStore.recentWorkspaces()
-        await prepareWorkspace(workspace, openWorkbenchIfConfigured: true)
-    }
+    public func openProject(_ projectID: UUID) async {
+        guard let projectArchive = archive.projects.first(where: { $0.project.id == projectID }) else { return }
+        archive.selectedProjectID = projectID
+        await persistArchive()
 
-    public func previewWorkspace(_ workspace: WorkspaceReference) async {
-        await workspaceStore.select(workspaceID: workspace.id)
-        recentWorkspaces = await workspaceStore.recentWorkspaces()
-        await prepareWorkspace(workspace, openWorkbenchIfConfigured: false)
+        let workbench = WorkbenchViewModel(
+            project: projectArchive.project,
+            archive: projectArchive,
+            runtime: runtime,
+            pinnedSessionsStore: pinnedSessionsStore
+        ) { [weak self] projectArchive in
+            await self?.persist(projectArchive: projectArchive)
+        }
+        self.workbench = workbench
+        screen = .workbench
+        await workbench.bootstrap()
     }
 
     public func registerWorkspace(url: URL) async {
@@ -87,38 +85,22 @@ public final class AppViewModel {
             path: url.path
         )
         await workspaceStore.save(workspace: workspace)
-        recentWorkspaces = await workspaceStore.recentWorkspaces()
-        await prepareWorkspace(workspace, openWorkbenchIfConfigured: false)
-    }
 
-    public func completeOnboarding() async {
-        guard let workspace = selectedWorkspace else { return }
-        isInitializingWorkspace = true
-        defer { isInitializingWorkspace = false }
-        do {
-            _ = try await runtimeClient.setup(
-                workspace: workspace,
-                baseURL: onboardingBaseURL,
-                model: onboardingModel,
-                apiKeyEnv: onboardingAPIKeyEnv
-            )
-            showAdvancedSetup = false
-            await prepareWorkspace(workspace, openWorkbenchIfConfigured: true)
-            await recordCommandAction("initialize-workspace")
-        } catch {
-            globalError = error.localizedDescription
-        }
-    }
-
-    public func openSelectedWorkspace() async {
-        guard let workspace = selectedWorkspace else { return }
-        await prepareWorkspace(workspace, openWorkbenchIfConfigured: true)
-        await recordCommandAction("open-workspace")
+        let project = Project(
+            workspace: workspace,
+            preferredProfile: settings.defaultProfile
+        )
+        archive.projects.removeAll { $0.project.id == project.id || $0.project.workspacePath == project.workspacePath }
+        archive.projects.insert(ProjectArchive(project: project), at: 0)
+        projects = archive.projects.map(\.project).sorted { $0.lastOpenedAt > $1.lastOpenedAt }
+        archive.selectedProjectID = project.id
+        settings.defaultWorkspacePath = project.workspacePath
+        await persistArchive()
+        await openProject(project.id)
     }
 
     public func showSetupHub() {
         screen = .setupHub
-        Task { await recordCommandAction("choose-workspace") }
     }
 
     public func presentCommandPalette() {
@@ -129,484 +111,88 @@ public final class AppViewModel {
         isCommandPalettePresented = false
     }
 
-    public func revealSelectedWorkspaceInFinder() {
-        guard let selectedWorkspace else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: selectedWorkspace.path)])
-        Task { await recordCommandAction("reveal-workspace") }
-    }
-
-    public func refreshSelectedWorkspace() async {
-        recentWorkspaces = await workspaceStore.recentWorkspaces()
-        guard let workspace = selectedWorkspace else {
-            screen = .setupHub
-            return
-        }
-        await prepareWorkspace(workspace, openWorkbenchIfConfigured: screen == .workbench)
-    }
-
-    public func dismissError() {
-        globalError = nil
-    }
-
-    public func recordCommandAction(_ actionID: String) async {
-        await commandHistoryStore.recordCommandActionID(actionID)
-        recentCommandActionIDs = await commandHistoryStore.recentCommandActionIDs()
-    }
-
-    public func clearRecentCommandActions() async {
-        await commandHistoryStore.clearRecentCommandActionIDs()
-        recentCommandActionIDs = []
-    }
-
-    public func refreshActiveWorkspace() async {
-        await refreshSelectedWorkspace()
-        await recordCommandAction("refresh-workspace")
+    public func refreshActiveProject() async {
+        await workbench?.refresh()
     }
 
     public func createNewThread() {
         workbench?.newThread()
-        Task { await recordCommandAction("new-thread") }
     }
 
     public func sendCurrentPrompt() async {
-        let hasPrompt = !(workbench?.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        await workbench?.sendCurrentPrompt()
-        if hasPrompt {
-            await recordCommandAction("send-prompt")
-        }
+        await workbench?.sendCurrentPrompt(settings: settings)
     }
 
-    public func clearCurrentThread() async {
-        let hadSelection = workbench?.selectedThreadID != nil
-        await workbench?.clearSelectedThread()
-        if hadSelection {
-            await recordCommandAction("clear-thread")
-        }
+    public func cancelActiveTask() async {
+        await workbench?.cancelActiveTask()
+    }
+
+    public func retrySelectedTask() async {
+        await workbench?.retrySelectedTask(settings: settings)
     }
 
     public func toggleInspector() {
         workbench?.toggleInspector()
-        Task { await recordCommandAction("toggle-inspector") }
     }
 
-    public func openSession(_ sessionID: String, recordHistory: Bool = false) async {
-        await workbench?.selectThread(sessionID)
-        if recordHistory {
-            await recordCommandAction("session-open-\(sessionID)")
+    public func revealSelectedWorkspaceInFinder() {
+        guard let selectedProject else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: selectedProject.workspacePath)])
+    }
+
+    public func persistSettings() async {
+        archive.settings = settings
+        if let selectedProjectID = archive.selectedProjectID,
+           let index = archive.projects.firstIndex(where: { $0.project.id == selectedProjectID }) {
+            archive.projects[index].project.preferredProfile = settings.defaultProfile
         }
+        await persistArchive()
     }
 
-    public func clearSession(_ sessionID: String, recordHistory: Bool = false) async {
-        await workbench?.clearThread(sessionID)
-        if recordHistory {
-            await recordCommandAction("session-clear-\(sessionID)")
+    public func selectProfile(_ profile: String) async {
+        workbench?.selectedProfile = profile
+        settings.defaultProfile = profile
+        await persistSettings()
+    }
+
+    private func persist(projectArchive: ProjectArchive) async {
+        archive.projects.removeAll { $0.project.id == projectArchive.project.id }
+        archive.projects.insert(projectArchive, at: 0)
+        projects = archive.projects.map(\.project).sorted { $0.lastOpenedAt > $1.lastOpenedAt }
+        if archive.selectedProjectID == nil {
+            archive.selectedProjectID = projectArchive.project.id
         }
+        await persistArchive()
     }
 
-    public func togglePinnedSession(_ sessionID: String, recordHistory: Bool = false) async {
-        await workbench?.togglePinnedThread(sessionID)
-        if recordHistory {
-            await recordCommandAction("session-pin-\(sessionID)")
-        }
-    }
-
-    public func activateWorkspace(_ workspace: WorkspaceReference, recordHistory: Bool = false) async {
-        await selectWorkspace(workspace)
-        if recordHistory {
-            await recordCommandAction("workspace-\(workspace.id.uuidString)")
-        }
-    }
-
-    public var selectedWorkspaceConfigured: Bool {
-        selectedWorkspaceStatus?.configured == true
-    }
-
-    public var setupStatusTitle: String {
-        if isInitializingWorkspace {
-            return "Initializing workspace"
-        }
-        if isPreparingWorkspace {
-            return "Checking workspace"
-        }
-        if selectedWorkspaceConfigured {
-            return "Ready to open"
-        }
-        if selectedWorkspace != nil {
-            return "Needs configuration"
-        }
-        return "Choose a workspace"
-    }
-
-    public var setupStatusDetail: String {
-        if let workspace = selectedWorkspace, selectedWorkspaceConfigured {
-            let profile = selectedWorkspaceStatus?.profile ?? "default"
-            let model = selectedModelsStatus?.effectiveModel ?? selectedWorkspaceStatus?.provider?.model ?? onboardingModel
-            return "\(workspace.name) is configured with profile \(profile) and model \(model)."
-        }
-        if let workspace = selectedWorkspace {
-            if onboardingRequiresAzureResourceHost {
-                return "\(workspace.name) still needs your Azure OpenAI resource host before Mosaic can initialize the workspace."
-            }
-            return "\(workspace.name) is ready for an Azure OpenAI-backed setup."
-        }
-        return "Pick a local project folder first, then point Mosaic at your Azure OpenAI resource."
-    }
-
-    public var setupStatusTone: RuntimeStripState.Tone {
-        if globalError != nil { return .failure }
-        if selectedWorkspaceConfigured { return .success }
-        if selectedWorkspace != nil { return .warning }
-        return .quiet
-    }
-
-    public var currentModelLabel: String {
-        selectedModelsStatus?.effectiveModel ?? selectedWorkspaceStatus?.provider?.model ?? onboardingModel
-    }
-
-    public var setupModelChoices: [String] {
-        var seen = Set<String>()
-        let candidates = availableModels.map(\.id)
-            + [onboardingModel, currentModelLabel, "gpt-5.2", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini"]
-        return candidates.filter {
-            let value = $0.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !value.isEmpty, !seen.contains(value) else { return false }
-            seen.insert(value)
-            return true
-        }
-    }
-
-    public var currentProfileLabel: String {
-        selectedWorkspaceStatus?.profile ?? "default"
-    }
-
-    public var currentHealthLabel: String {
-        selectedWorkspaceHealth?.overallStatus ?? "Pending"
-    }
-
-    public var currentBaseURLLabel: String {
-        selectedConfigurationSummary?.provider.baseURL
-            ?? selectedModelsStatus?.baseURL
-            ?? selectedWorkspaceStatus?.provider?.baseURL
-            ?? onboardingBaseURL
-    }
-
-    public var currentProviderKindLabel: String {
-        selectedConfigurationSummary?.provider.kind
-            ?? selectedWorkspaceStatus?.provider?.kind
-            ?? "openai_compatible"
-    }
-
-    public var currentProviderLabel: String {
-        providerLabel(forBaseURL: currentBaseURLLabel, fallbackKind: currentProviderKindLabel)
-    }
-
-    public var currentAPIKeyEnvLabel: String {
-        selectedConfigurationSummary?.provider.apiKeyEnv
-            ?? selectedModelsStatus?.apiKeyEnv
-            ?? selectedWorkspaceStatus?.provider?.apiKeyEnv
-            ?? onboardingAPIKeyEnv
-    }
-
-    public var canInitializeWorkspace: Bool {
-        selectedWorkspace != nil
-            && !selectedWorkspaceConfigured
-            && !isPreparingWorkspace
-            && !isInitializingWorkspace
-            && !onboardingRequiresAzureResourceHost
-            && !onboardingBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !onboardingModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !onboardingAPIKeyEnv.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    }
-
-    public var canOpenWorkspace: Bool {
-        selectedWorkspaceConfigured && !isPreparingWorkspace && !isInitializingWorkspace
-    }
-
-    public func selectOnboardingModel(_ modelID: String) {
-        onboardingModel = modelID
-    }
-
-    public func selectRuntimeModel(_ modelID: String) {
-        runtimeDraftModel = modelID
-    }
-
-    public var onboardingRequiresAzureResourceHost: Bool {
-        let normalized = onboardingBaseURL.lowercased()
-        return normalized.contains("your_resource_name") || normalized.contains("<resource>")
-    }
-
-    public var runtimeDraftRequiresAzureResourceHost: Bool {
-        let normalized = runtimeDraftBaseURL.lowercased()
-        return normalized.contains("your_resource_name") || normalized.contains("<resource>")
-    }
-
-    public var onboardingProviderLabel: String {
-        providerLabel(forBaseURL: onboardingBaseURL, fallbackKind: "openai_compatible")
-    }
-
-    public var runtimeDraftProviderLabel: String {
-        providerLabel(forBaseURL: runtimeDraftBaseURL, fallbackKind: currentProviderKindLabel)
-    }
-
-    public var onboardingUsesAzurePreset: Bool {
-        baseURLUsesAzure(onboardingBaseURL)
-    }
-
-    public var runtimeDraftUsesAzurePreset: Bool {
-        baseURLUsesAzure(runtimeDraftBaseURL)
-    }
-
-    public var onboardingAzureResourceName: String {
-        get { azureResourceName(from: onboardingBaseURL) ?? "" }
-        set { onboardingBaseURL = buildAzureBaseURL(resourceName: newValue) }
-    }
-
-    public var runtimeDraftAzureResourceName: String {
-        get { azureResourceName(from: runtimeDraftBaseURL) ?? "" }
-        set { runtimeDraftBaseURL = buildAzureBaseURL(resourceName: newValue) }
-    }
-
-    public func applyAzurePreset() {
-        onboardingBaseURL = OnboardingDefaults.azureBaseURL
-        onboardingModel = OnboardingDefaults.azureModel
-        onboardingAPIKeyEnv = OnboardingDefaults.azureAPIKeyEnv
-    }
-
-    public func applyLocalPreset() {
-        onboardingBaseURL = OnboardingDefaults.localBaseURL
-        onboardingAPIKeyEnv = OnboardingDefaults.localAPIKeyEnv
-    }
-
-    public func applyAzureRuntimePreset() {
-        runtimeDraftBaseURL = OnboardingDefaults.azureBaseURL
-        runtimeDraftModel = OnboardingDefaults.azureModel
-        runtimeDraftAPIKeyEnv = OnboardingDefaults.azureAPIKeyEnv
-    }
-
-    public func applyLocalRuntimePreset() {
-        runtimeDraftBaseURL = OnboardingDefaults.localBaseURL
-        runtimeDraftAPIKeyEnv = OnboardingDefaults.localAPIKeyEnv
-    }
-
-    public var runtimeDraftHasChanges: Bool {
-        runtimeDraftBaseURL.trimmingCharacters(in: .whitespacesAndNewlines) != currentBaseURLLabel
-            || runtimeDraftModel.trimmingCharacters(in: .whitespacesAndNewlines) != currentModelLabel
-            || runtimeDraftAPIKeyEnv.trimmingCharacters(in: .whitespacesAndNewlines) != currentAPIKeyEnvLabel
-    }
-
-    public var canSaveRuntimeSettings: Bool {
-        selectedWorkspaceConfigured
-            && !isPreparingWorkspace
-            && !isInitializingWorkspace
-            && !isSavingRuntimeSettings
-            && !isApplyingQuickModel
-            && !runtimeDraftRequiresAzureResourceHost
-            && runtimeDraftHasChanges
-    }
-
-    public var canQuickSwitchModels: Bool {
-        selectedWorkspaceConfigured
-            && !isPreparingWorkspace
-            && !isInitializingWorkspace
-            && !isSavingRuntimeSettings
-            && !isApplyingQuickModel
-    }
-
-    public func resetRuntimeDraft() {
-        runtimeDraftBaseURL = currentBaseURLLabel
-        runtimeDraftModel = currentModelLabel
-        runtimeDraftAPIKeyEnv = currentAPIKeyEnvLabel
-    }
-
-    public func saveRuntimeSettings() async {
-        guard let workspace = selectedWorkspace, selectedWorkspaceConfigured else { return }
-
-        let trimmedBaseURL = runtimeDraftBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedModel = runtimeDraftModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedAPIKeyEnv = runtimeDraftAPIKeyEnv.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !trimmedBaseURL.isEmpty, !trimmedModel.isEmpty, !trimmedAPIKeyEnv.isEmpty else {
-            globalError = "Base URL, model, and API key env must not be empty."
-            return
-        }
-        guard !runtimeDraftRequiresAzureResourceHost else {
-            globalError = "Replace the Azure resource placeholder in the base URL before saving runtime settings."
-            return
-        }
-
-        isSavingRuntimeSettings = true
-        defer { isSavingRuntimeSettings = false }
-
+    private func persistArchive() async {
         do {
-            if trimmedBaseURL != currentBaseURLLabel {
-                try await runtimeClient.configureSet(
-                    workspace: workspace,
-                    key: .providerBaseURL,
-                    value: trimmedBaseURL
-                )
-            }
-
-            if trimmedAPIKeyEnv != currentAPIKeyEnvLabel {
-                try await runtimeClient.configureSet(
-                    workspace: workspace,
-                    key: .providerAPIKeyEnv,
-                    value: trimmedAPIKeyEnv
-                )
-            }
-
-            if trimmedModel != currentModelLabel {
-                _ = try await runtimeClient.setModel(workspace: workspace, model: trimmedModel)
-            }
-
-            await prepareWorkspace(workspace, openWorkbenchIfConfigured: screen == .workbench)
-            await recordCommandAction("save-runtime")
+            try await persistenceStore.saveArchive(archive)
         } catch {
             globalError = error.localizedDescription
         }
     }
 
-    public func quickSwitchModel(_ modelID: String) async {
-        guard let workspace = selectedWorkspace, selectedWorkspaceConfigured else { return }
-        let trimmedModel = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedModel.isEmpty, trimmedModel != currentModelLabel else { return }
-
-        isApplyingQuickModel = true
-        defer { isApplyingQuickModel = false }
-
-        do {
-            _ = try await runtimeClient.setModel(workspace: workspace, model: trimmedModel)
-            await prepareWorkspace(workspace, openWorkbenchIfConfigured: screen == .workbench)
-        } catch {
-            globalError = error.localizedDescription
+    private func resolveSelectedProject() -> Project? {
+        if let selectedProjectID = archive.selectedProjectID,
+           let project = archive.projects.first(where: { $0.project.id == selectedProjectID })?.project {
+            return project
         }
+        return archive.projects.first?.project
     }
 
-    private func prepareWorkspace(_ workspace: WorkspaceReference, openWorkbenchIfConfigured: Bool) async {
-        selectedWorkspace = workspace
-        recentWorkspaces = await workspaceStore.recentWorkspaces()
-        isPreparingWorkspace = true
-        defer { isPreparingWorkspace = false }
-        do {
-            let status = try await loadWorkspaceSummary(workspace: workspace)
+    private func importLegacyWorkspacesIfNeeded(into archive: DesktopArchive) async -> DesktopArchive {
+        guard archive.projects.isEmpty else { return archive }
+        let workspaces = await workspaceStore.recentWorkspaces()
+        guard !workspaces.isEmpty else { return archive }
 
-            if status.configured && openWorkbenchIfConfigured {
-                if workbench?.workspaceReference.id != workspace.id {
-                    workbench = WorkbenchViewModel(
-                        workspace: workspace,
-                        recentWorkspaces: recentWorkspaces,
-                        runtimeClient: runtimeClient,
-                        pinnedSessionsStore: pinnedSessionsStore
-                    )
-                }
-                screen = .workbench
-                await workbench?.refresh()
-            } else {
-                workbench = nil
-                screen = .setupHub
-            }
-        } catch {
-            selectedWorkspaceStatus = nil
-            selectedWorkspaceHealth = nil
-            selectedModelsStatus = nil
-            selectedConfigurationSummary = nil
-            availableModels = []
-            workbench = nil
-            screen = .setupHub
-            globalError = error.localizedDescription
+        var updated = archive
+        updated.projects = workspaces.map {
+            ProjectArchive(
+                project: Project(workspace: $0, preferredProfile: archive.settings.defaultProfile)
+            )
         }
-    }
-
-    private func loadWorkspaceSummary(workspace: WorkspaceReference) async throws -> RuntimeStatusSummary {
-        let status = try await runtimeClient.status(workspace: workspace)
-        selectedWorkspaceStatus = status
-        if status.configured {
-            selectedModelsStatus = try? await runtimeClient.modelsStatus(workspace: workspace)
-            selectedWorkspaceHealth = try? await runtimeClient.health(workspace: workspace)
-            selectedConfigurationSummary = try? await runtimeClient.configureShow(workspace: workspace)
-            availableModels = (try? await runtimeClient.modelsList(workspace: workspace)) ?? []
-
-            if let configured = selectedConfigurationSummary {
-                onboardingBaseURL = configured.provider.baseURL
-                onboardingModel = configured.provider.model
-                onboardingAPIKeyEnv = configured.provider.apiKeyEnv
-            } else if let modelsStatus = selectedModelsStatus {
-                onboardingBaseURL = modelsStatus.baseURL
-                onboardingModel = modelsStatus.effectiveModel
-                onboardingAPIKeyEnv = modelsStatus.apiKeyEnv
-            }
-
-            runtimeDraftBaseURL = currentBaseURLLabel
-            runtimeDraftModel = currentModelLabel
-            runtimeDraftAPIKeyEnv = currentAPIKeyEnvLabel
-        } else {
-            selectedModelsStatus = nil
-            selectedWorkspaceHealth = nil
-            selectedConfigurationSummary = nil
-            availableModels = []
-            runtimeDraftBaseURL = onboardingBaseURL
-            runtimeDraftModel = onboardingModel
-            runtimeDraftAPIKeyEnv = onboardingAPIKeyEnv
-        }
-        return status
-    }
-
-    private func providerLabel(forBaseURL baseURL: String, fallbackKind: String) -> String {
-        if baseURLUsesAzure(baseURL) {
-            return "Azure OpenAI"
-        }
-        if baseURLUsesLocalRuntime(baseURL) {
-            return "Local Server"
-        }
-        switch fallbackKind.lowercased() {
-        case "openai_compatible":
-            return "OpenAI-Compatible"
-        default:
-            return fallbackKind.replacingOccurrences(of: "_", with: " ").capitalized
-        }
-    }
-
-    private func baseURLUsesAzure(_ baseURL: String) -> Bool {
-        let normalized = baseURL.lowercased()
-        return normalized.contains(".openai.azure.com")
-            || normalized.contains("your_resource_name")
-            || normalized.contains("<resource>")
-    }
-
-    private func baseURLUsesLocalRuntime(_ baseURL: String) -> Bool {
-        let normalized = baseURL.lowercased()
-        return normalized.contains("localhost") || normalized.contains("127.0.0.1")
-    }
-
-    private func azureResourceName(from baseURL: String) -> String? {
-        let normalized = baseURL
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-
-        guard normalized.contains(".openai.azure.com") || normalized.contains("your_resource_name") else {
-            return nil
-        }
-
-        let strippedScheme = normalized
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-        let host = strippedScheme.components(separatedBy: "/").first ?? strippedScheme
-        let resource = host.replacingOccurrences(of: ".openai.azure.com", with: "")
-        return resource == "your_resource_name" ? "" : resource
-    }
-
-    private func buildAzureBaseURL(resourceName: String) -> String {
-        var normalized = resourceName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-
-        normalized = normalized.components(separatedBy: "/").first ?? normalized
-        normalized = normalized.replacingOccurrences(of: ".openai.azure.com", with: "")
-        if normalized.isEmpty {
-            normalized = "YOUR_RESOURCE_NAME"
-        }
-
-        return "https://\(normalized).openai.azure.com/openai/v1"
+        updated.selectedProjectID = updated.projects.first?.project.id
+        return updated
     }
 }

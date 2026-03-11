@@ -247,6 +247,8 @@ struct ChatArgs {
     script: Option<String>,
     #[arg(long)]
     agent: Option<String>,
+    #[arg(long)]
+    emit_events: bool,
 }
 
 #[derive(Args, Debug, Clone)]

@@ -114,4 +114,108 @@ public enum PreviewFixtures {
         agentID: "writer",
         turns: 4
     )
+
+    public static let project = Project(
+        id: workspace.id,
+        name: workspace.name,
+        workspacePath: workspace.path,
+        lastOpenedAt: workspace.lastOpenedAt ?? .now,
+        preferredProfile: "default",
+        recentProfiles: ["default", "review"]
+    )
+
+    public static let session = Session(
+        id: "thread-1",
+        projectID: project.id,
+        title: "Audit the macOS app structure",
+        summary: "Focus on the shell, streaming runtime, and inspector.",
+        createdAt: Date(timeIntervalSince1970: 1_741_592_800),
+        updatedAt: Date(timeIntervalSince1970: 1_741_593_200),
+        messageCount: 4,
+        taskCount: 1,
+        state: .done,
+        isPinned: true
+    )
+
+    public static let messageList: [Message] = [
+        Message(
+            sessionID: session.id,
+            role: .user,
+            body: "Can you audit this migration and highlight risks?",
+            createdAt: Date(timeIntervalSince1970: 1_741_592_801)
+        ),
+        Message(
+            sessionID: session.id,
+            role: .assistant,
+            body: "The migration is viable. The sharp edges are binary distribution, CLI bundle lookup, and session-state ownership.",
+            createdAt: Date(timeIntervalSince1970: 1_741_592_802)
+        ),
+    ]
+
+    public static let task = AgentTask(
+        sessionID: session.id,
+        title: "Execute · Audit the macOS app structure",
+        prompt: "Audit the macOS app structure and highlight risks.",
+        summary: "Three high-risk areas surfaced in the shell and runtime adapter.",
+        status: .done,
+        createdAt: Date(timeIntervalSince1970: 1_741_592_900),
+        startedAt: Date(timeIntervalSince1970: 1_741_592_900),
+        finishedAt: Date(timeIntervalSince1970: 1_741_592_940),
+        responseText: "Three high-risk areas surfaced in the shell and runtime adapter.",
+        commands: [
+            CommandInvocation(
+                displayCommand: "mosaic --profile default --project-state chat --emit-events --prompt 'Audit the app'",
+                executablePath: "/usr/local/bin/mosaic",
+                arguments: ["--profile", "default"],
+                workingDirectory: project.workspacePath,
+                startedAt: Date(timeIntervalSince1970: 1_741_592_900),
+                finishedAt: Date(timeIntervalSince1970: 1_741_592_940),
+                exitCode: 0,
+                status: .done
+            )
+        ],
+        timeline: [
+            TimelineEntry(title: "Started", detail: "Mock task launched"),
+            TimelineEntry(title: "Completed", detail: "Mock task completed", level: .success),
+        ],
+        cliEvents: [
+            CLIEvent(taskID: UUID(uuidString: "33333333-3333-3333-3333-333333333333")!, stream: .stdout, text: "mock log"),
+        ],
+        fileChanges: [
+            FileChange(path: "apps/macos/Sources/UI/App/WorkbenchView.swift", status: .modified, additions: 42, deletions: 12, diff: "@@ -1,1 +1,1 @@"),
+        ],
+        metadata: [
+            MetadataItem(key: "workspace", value: project.workspacePath),
+            MetadataItem(key: "profile", value: "default"),
+        ],
+        exitCode: 0
+    )
+
+    public static let projectArchive = ProjectArchive(
+        project: project,
+        sessions: [session],
+        messages: messageList + [
+            Message(
+                sessionID: session.id,
+                role: .system,
+                kind: .task,
+                body: task.title,
+                createdAt: Date(timeIntervalSince1970: 1_741_592_905),
+                relatedTaskID: task.id
+            ),
+        ],
+        tasks: [task],
+        selectedSessionID: session.id,
+        composerDraft: "Continue the refactor."
+    )
+
+    public static let projectSnapshot = ProjectSnapshot(
+        status: statusSummary,
+        health: healthSummary,
+        configuration: configurationSummary,
+        modelsStatus: modelsStatusSummary,
+        availableModels: modelList,
+        sessions: sessions,
+        transcript: transcript
+    )
 }

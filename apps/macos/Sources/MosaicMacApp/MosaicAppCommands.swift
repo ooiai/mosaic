@@ -17,7 +17,7 @@ struct MosaicAppCommands: Commands {
             .keyboardShortcut("o", modifiers: [.command, .shift])
 
             Button("Refresh Workspace") {
-                Task { await viewModel.refreshActiveWorkspace() }
+                Task { await viewModel.refreshActiveProject() }
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
 
@@ -36,8 +36,8 @@ struct MosaicAppCommands: Commands {
             }
             .keyboardShortcut(.return, modifiers: [.command])
 
-            Button("Clear Selected Thread") {
-                Task { await viewModel.clearCurrentThread() }
+            Button("Stop Active Task") {
+                Task { await viewModel.cancelActiveTask() }
             }
             .keyboardShortcut(.delete, modifiers: [.command])
         }

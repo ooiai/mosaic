@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use mosaic_agent::AgentRunOptions;
+use mosaic_agent::{AgentEvent, AgentRunOptions};
 use mosaic_core::config::{ConfigFile, ConfigManager, ProfileConfig, RunGuardMode, StateConfig};
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::models::ModelRoutingStore;
@@ -14,7 +15,7 @@ use super::{
     ChatArgs, Cli, ConfigureArgs, ConfigureCommand, ConfigurePatchArgs, ConfigureTemplateArgs,
     ConfigureTemplateFormatArg, ModelAliasesCommand, ModelFallbacksCommand, ModelsArgs,
     ModelsCommand, PROJECT_STATE_DIR, SessionArgs, SessionCommand, SetupArgs, build_runtime,
-    print_json, resolve_effective_model, resolve_state_paths,
+    print_json, print_json_line, resolve_effective_model, resolve_state_paths,
 };
 
 pub(super) fn handle_setup(cli: &Cli, args: SetupArgs) -> Result<()> {
@@ -1445,6 +1446,17 @@ pub(super) async fn handle_ask(cli: &Cli, args: super::AskArgs) -> Result<()> {
 }
 
 pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
+    if args.emit_events && cli.json {
+        return Err(MosaicError::Validation(
+            "--emit-events cannot be combined with --json".to_string(),
+        ));
+    }
+    if args.emit_events && args.script.is_some() {
+        return Err(MosaicError::Validation(
+            "--emit-events currently supports a single prompt only".to_string(),
+        ));
+    }
+
     let mut runtime = build_runtime(
         cli,
         args.agent.as_deref(),
@@ -1454,6 +1466,64 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
     let mut session_metadata = runtime.session_metadata();
     let mut session_id = args.session;
     let initial_prompt = resolve_prompt_source_optional(args.prompt, args.prompt_file)?;
+
+    if args.emit_events {
+        let prompt = initial_prompt.ok_or_else(|| {
+            MosaicError::Validation(
+                "chat with --emit-events requires one of --prompt or --prompt-file".to_string(),
+            )
+        })?;
+        let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
+        print_json_line(&json!({
+            "type": "run_started",
+            "profile": runtime.active_profile_name.clone(),
+            "agent_id": runtime.active_agent_id.clone(),
+            "session_id": session_id.clone(),
+            "cwd": cwd.display().to_string(),
+        }));
+        let callback = Arc::new(move |event: AgentEvent| {
+            if let Ok(value) = serde_json::to_value(event) {
+                print_json_line(&value);
+            }
+        });
+        let result = runtime
+            .agent
+            .ask(
+                &prompt,
+                AgentRunOptions {
+                    session_id: session_id.clone(),
+                    session_metadata: session_metadata.clone(),
+                    cwd,
+                    yes: cli.yes,
+                    interactive: true,
+                    event_callback: Some(callback),
+                },
+            )
+            .await;
+
+        match result {
+        Ok(result) => {
+            print_json_line(&json!({
+                "type": "run_finished",
+                "session_id": result.session_id,
+                "response": result.response,
+                "turns": result.turns,
+                "agent_id": runtime.active_agent_id.clone(),
+                "profile": runtime.active_profile_name.clone(),
+            }));
+            return Ok(());
+        }
+        Err(error) => {
+            print_json_line(&json!({
+                "type": "run_failed",
+                "message": error.to_string(),
+                "code": error.code(),
+                "exit_code": error.exit_code(),
+            }));
+            return Err(error);
+        }
+        }
+    }
 
     if let Some(script_path) = args.script {
         let prompts = resolve_script_prompts(script_path)?;
@@ -1954,6 +2024,7 @@ pub(super) async fn handle_session(cli: &Cli, args: SessionArgs) -> Result<()> {
                     prompt_file: None,
                     script: None,
                     agent: None,
+                    emit_events: false,
                 },
             )
             .await?;

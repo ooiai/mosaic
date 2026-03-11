@@ -2,7 +2,7 @@ import Domain
 import Foundation
 
 public final class MosaicCLIClient: MosaicRuntimeClient, @unchecked Sendable {
-    private let executableURL: URL
+    public let executableURL: URL
     private let runner: CLIProcessRunner
     private let decoder: JSONDecoder
 
@@ -135,6 +135,13 @@ public final class MosaicCLIClient: MosaicRuntimeClient, @unchecked Sendable {
         }
     }
 
+    public static func resolveExecutableURL(overridePath: String? = nil) -> URL {
+        if let overridePath, !overridePath.isEmpty {
+            return URL(fileURLWithPath: overridePath)
+        }
+        return resolveDefaultExecutableURL()
+    }
+
     private static func resolveDefaultExecutableURL() -> URL {
         if let override = ProcessInfo.processInfo.environment["MOSAIC_CLI_PATH"], !override.isEmpty {
             return URL(fileURLWithPath: override)
@@ -159,10 +166,17 @@ public final class MosaicCLIClient: MosaicRuntimeClient, @unchecked Sendable {
         }
 
         let repoLocal = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appendingPathComponent("../../cli/target/release/mosaic")
+            .appendingPathComponent("../../cli/target/debug/mosaic")
             .standardizedFileURL
         if FileManager.default.fileExists(atPath: repoLocal.path) {
             return repoLocal
+        }
+
+        let repoRelease = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("../../cli/target/release/mosaic")
+            .standardizedFileURL
+        if FileManager.default.fileExists(atPath: repoRelease.path) {
+            return repoRelease
         }
 
         return URL(fileURLWithPath: "/usr/local/bin/mosaic")

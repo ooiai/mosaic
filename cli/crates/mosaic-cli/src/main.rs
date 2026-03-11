@@ -95,7 +95,8 @@ use tts_voicecall_command::{handle_tts, handle_voicecall};
 use tui_command::handle_tui;
 use utils::{
     binary_in_path, load_json_file_opt, normalize_non_empty_list, parse_json_input, preview_text,
-    print_json, remove_matching, resolve_baseline_path, resolve_output_path, save_json_file,
+    print_json, print_json_line, remove_matching, resolve_baseline_path, resolve_output_path,
+    save_json_file,
 };
 
 const PROJECT_STATE_DIR: &str = ".mosaic";
@@ -212,6 +213,7 @@ async fn run(cli: Cli) -> Result<()> {
                         prompt_file,
                         script,
                         agent,
+                        emit_events: false,
                     },
                 )
                 .await
