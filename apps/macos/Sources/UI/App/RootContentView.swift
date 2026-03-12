@@ -66,7 +66,6 @@ public struct RootContentView: View {
 private struct CommandPaletteOverlay: View {
     @Bindable var viewModel: AppViewModel
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
@@ -92,7 +91,7 @@ private struct CommandPaletteOverlay: View {
                     viewModel.dismissCommandPalette()
                 }
                 Button("Open Settings") {
-                    openSettings()
+                    viewModel.showSettings()
                     viewModel.dismissCommandPalette()
                 }
             }

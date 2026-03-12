@@ -11,6 +11,9 @@ public final class AppViewModel {
     public private(set) var workbench: WorkbenchViewModel?
     public private(set) var projects: [Project] = []
     public var settings: AppSettings = .init()
+    public var destination: WorkbenchDestination = .thread
+    public var settingsSection: SettingsSection = .general
+    public var isConsoleDrawerVisible = false
     public var isCommandPalettePresented = false
     public var globalError: String?
 
@@ -75,6 +78,7 @@ public final class AppViewModel {
             await self?.persist(projectArchive: projectArchive)
         }
         self.workbench = workbench
+        destination = .thread
         screen = .workbench
         await workbench.bootstrap()
     }
@@ -103,6 +107,24 @@ public final class AppViewModel {
         screen = .setupHub
     }
 
+    public func navigate(to destination: WorkbenchDestination) {
+        self.destination = destination
+    }
+
+    public func showSettings(section: SettingsSection = .general) {
+        settingsSection = section
+        destination = .settings
+    }
+
+    public func selectSettingsSection(_ section: SettingsSection) {
+        settingsSection = section
+        destination = .settings
+    }
+
+    public func toggleConsoleDrawer() {
+        isConsoleDrawerVisible.toggle()
+    }
+
     public func presentCommandPalette() {
         isCommandPalettePresented = true
     }
@@ -116,7 +138,21 @@ public final class AppViewModel {
     }
 
     public func createNewThread() {
+        destination = .thread
         workbench?.newThread()
+    }
+
+    public func openSession(_ sessionID: String) {
+        destination = .thread
+        workbench?.selectSession(sessionID)
+    }
+
+    public func seedComposer(with prompt: String, startNewThread: Bool = false) {
+        destination = .thread
+        if startNewThread {
+            workbench?.newThread()
+        }
+        workbench?.composerText = prompt
     }
 
     public func sendCurrentPrompt() async {

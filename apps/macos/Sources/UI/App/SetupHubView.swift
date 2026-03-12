@@ -13,41 +13,47 @@ public struct SetupHubView: View {
     public var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        HStack(spacing: 24) {
-            EmptyStateCard(
-                eyebrow: "AI Agent Desktop",
-                title: "Start with a workspace, not a blank chat.",
-                detail: "Attach a local project folder, then Mosaic will manage sessions, tasks, logs, diffs, and runtime metadata around that workspace.",
-                actionTitle: "Choose Workspace…"
-            ) {
-                let panel = NSOpenPanel()
-                panel.canChooseDirectories = true
-                panel.canChooseFiles = false
-                panel.allowsMultipleSelection = false
-                if panel.runModal() == .OK, let url = panel.url {
-                    Task { await viewModel.registerWorkspace(url: url) }
+        VStack(spacing: 28) {
+            VStack(spacing: 16) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(tokens.primaryText)
+                    .frame(width: 54, height: 54)
+                    .background(tokens.panelBackground, in: Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(tokens.border, lineWidth: 1)
+                    )
+
+                VStack(spacing: 6) {
+                    Text("Start with a workspace")
+                        .font(.system(size: 30, weight: .semibold))
+                        .foregroundStyle(tokens.primaryText)
+                    Text("Attach a local project folder, then Mosaic will manage threads, tasks, logs, diffs, and runtime metadata around that workspace.")
+                        .font(.system(size: 15))
+                        .foregroundStyle(tokens.secondaryText)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 620)
                 }
             }
-            .frame(maxWidth: 520, alignment: .leading)
 
-            PanelCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    SectionHeader("Recent Projects", trailing: "\(viewModel.recentProjects.count)")
-                    if viewModel.recentProjects.isEmpty {
-                        Text("No recent projects yet.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(tokens.secondaryText)
-                    } else {
-                        ForEach(viewModel.recentProjects.prefix(10)) { project in
+            Button("Choose Workspace…", action: chooseWorkspace)
+                .buttonStyle(.borderedProminent)
+
+            if !viewModel.recentProjects.isEmpty {
+                PanelCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        SectionHeader("Recent Projects", trailing: "\(viewModel.recentProjects.count)")
+                        ForEach(viewModel.recentProjects.prefix(8)) { project in
                             Button {
                                 Task { await viewModel.openProject(project.id) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(project.name)
-                                        .font(.system(size: 13, weight: .semibold))
+                                        .font(.system(size: 14, weight: .semibold))
                                         .foregroundStyle(tokens.primaryText)
                                     Text(project.workspacePath)
-                                        .font(.system(size: 11))
+                                        .font(.system(size: 12))
                                         .foregroundStyle(tokens.secondaryText)
                                         .lineLimit(2)
                                 }
@@ -58,11 +64,21 @@ public struct SetupHubView: View {
                         }
                     }
                 }
+                .frame(maxWidth: 520)
             }
-            .frame(maxWidth: 380)
         }
-        .padding(36)
+        .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(tokens.windowBackground)
+    }
+
+    private func chooseWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            Task { await viewModel.registerWorkspace(url: url) }
+        }
     }
 }
