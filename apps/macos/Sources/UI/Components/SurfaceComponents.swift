@@ -14,12 +14,13 @@ struct PanelCard<Content: View>: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         content
-            .padding(14)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(16)
+            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
+            .shadow(color: colorScheme == .light ? Color.black.opacity(0.03) : .clear, radius: 18, y: 8)
     }
 }
 
@@ -93,13 +94,15 @@ struct MetricChip: View {
             Circle()
                 .fill(accent)
                 .frame(width: 5, height: 5)
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(tokens.tertiaryText)
             Text(value)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(tokens.primaryText)
                 .lineLimit(1)
+            if !title.isEmpty {
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -123,10 +126,10 @@ struct ToolbarActionButton: View {
         Image(systemName: systemImage)
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(accent ?? tokens.primaryText)
-            .frame(width: 30, height: 28)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(width: 32, height: 30)
+            .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
     }
@@ -162,5 +165,93 @@ struct EmptyStateCard: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(tokens.border, lineWidth: 1)
         )
+    }
+}
+
+struct SidebarNavButton: View {
+    let title: String
+    let systemImage: String
+    let isSelected: Bool
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 16)
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                Spacer()
+            }
+            .foregroundStyle(isSelected ? tokens.primaryText : tokens.secondaryText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                (isSelected ? tokens.selection : Color.clear),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct SuggestionPromptCard: View {
+    let title: String
+    let symbolName: String
+    let tint: Color
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 14) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 24, height: 24)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(tokens.primaryText)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(3)
+
+                Spacer(minLength: 0)
+            }
+            .frame(width: 230, height: 118, alignment: .topLeading)
+            .padding(16)
+            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(tokens.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct FooterPill: View {
+    let title: String
+    let systemImage: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+            Text(title)
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(tokens.secondaryText)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
     }
 }
