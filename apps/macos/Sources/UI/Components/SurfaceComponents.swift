@@ -2,6 +2,14 @@ import Domain
 import Features
 import SwiftUI
 
+enum WorkbenchChromeMetrics {
+    static let threadContentWidth: CGFloat = 760
+    static let composerWidth: CGFloat = 760
+    static let assistantMessageWidth: CGFloat = 720
+    static let userMessageWidth: CGFloat = 676
+    static let systemMessageWidth: CGFloat = 724
+}
+
 struct PanelCard<Content: View>: View {
     let content: Content
     @Environment(\.colorScheme) private var colorScheme
@@ -14,10 +22,10 @@ struct PanelCard<Content: View>: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         content
-            .padding(16)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(18)
+            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
             .shadow(color: colorScheme == .light ? Color.black.opacity(0.03) : .clear, radius: 18, y: 8)
@@ -48,6 +56,19 @@ struct SectionHeader: View {
                     .foregroundStyle(tokens.tertiaryText)
             }
         }
+    }
+}
+
+struct PaneSectionTitle: View {
+    let title: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Text(title)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(tokens.primaryText)
     }
 }
 
@@ -113,25 +134,33 @@ struct MetricChip: View {
 struct ToolbarActionButton: View {
     let systemImage: String
     let accent: Color?
+    let isEnabled: Bool
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
 
-    init(systemImage: String, accent: Color? = nil) {
+    init(systemImage: String, accent: Color? = nil, isEnabled: Bool = true) {
         self.systemImage = systemImage
         self.accent = accent
+        self.isEnabled = isEnabled
     }
 
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         Image(systemName: systemImage)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(accent ?? tokens.primaryText)
-            .frame(width: 32, height: 30)
-            .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(isEnabled ? (accent ?? tokens.primaryText) : tokens.tertiaryText)
+            .frame(width: 28, height: 28)
+            .background(
+                (isHovered && isEnabled ? tokens.panelBackground : tokens.elevatedBackground),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
+            .opacity(isEnabled ? 1 : 0.62)
+            .onHover { isHovered = $0 }
     }
 }
 
@@ -168,12 +197,195 @@ struct EmptyStateCard: View {
     }
 }
 
+struct WorkbenchPageHeader<Trailing: View>: View {
+    let title: String
+    let subtitle: String
+    let badge: String?
+    let trailing: Trailing
+    @Environment(\.colorScheme) private var colorScheme
+
+    init(title: String, subtitle: String, badge: String? = nil, @ViewBuilder trailing: () -> Trailing) {
+        self.title = title
+        self.subtitle = subtitle
+        self.badge = badge
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        HStack(alignment: .top, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Text(title)
+                        .font(.system(size: 29, weight: .semibold))
+                        .foregroundStyle(tokens.primaryText)
+
+                    if let badge {
+                        Text(badge)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(tokens.secondaryText)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(tokens.elevatedBackground, in: Capsule())
+                    }
+                }
+
+                Text(subtitle)
+                    .font(.system(size: 14))
+                    .foregroundStyle(tokens.secondaryText)
+            }
+
+            Spacer(minLength: 24)
+
+            trailing
+        }
+    }
+}
+
+struct PageHeaderSecondaryButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                Text(title)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(tokens.secondaryText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background((isHovered ? tokens.panelBackground : Color.clear), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+struct PageHeaderPrimaryButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                Text(title)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(tokens.windowBackground)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background((isHovered ? tokens.primaryText.opacity(0.88) : tokens.primaryText), in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+struct PageSearchField: View {
+    let placeholder: String
+    @Binding var text: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(tokens.tertiaryText)
+
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(tokens.primaryText)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(width: 188)
+        .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(tokens.border, lineWidth: 1)
+        )
+    }
+}
+
+struct CatalogSurfaceCard<Content: View>: View {
+    let minHeight: CGFloat?
+    let content: Content
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    init(minHeight: CGFloat? = nil, @ViewBuilder content: () -> Content) {
+        self.minHeight = minHeight
+        self.content = content()
+    }
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        content
+            .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
+            .padding(14)
+            .background((isHovered ? tokens.elevatedBackground : tokens.panelBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(tokens.border, lineWidth: 1)
+            )
+            .onHover { isHovered = $0 }
+    }
+}
+
+struct CatalogIconBadge: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 38, height: 38)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+struct CatalogPlusButton: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Image(systemName: "plus")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tokens.secondaryText)
+            .frame(width: 24, height: 24)
+            .background((isHovered ? tokens.panelBackground : tokens.elevatedBackground), in: Circle())
+            .onHover { isHovered = $0 }
+    }
+}
+
 struct SidebarNavButton: View {
     let title: String
     let systemImage: String
     let isSelected: Bool
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
 
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
@@ -189,13 +401,14 @@ struct SidebarNavButton: View {
             }
             .foregroundStyle(isSelected ? tokens.primaryText : tokens.secondaryText)
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
             .background(
-                (isSelected ? tokens.selection : Color.clear),
+                (isSelected ? tokens.selection : (isHovered ? tokens.panelBackground.opacity(0.72) : Color.clear)),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -205,35 +418,52 @@ struct SuggestionPromptCard: View {
     let tint: Color
     let action: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+    @State private var isPressed = false
 
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 Image(systemName: symbolName)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
                     .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(tokens.primaryText)
                     .multilineTextAlignment(.leading)
                     .lineLimit(3)
 
                 Spacer(minLength: 0)
             }
-            .frame(width: 230, height: 118, alignment: .topLeading)
-            .padding(16)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .frame(width: 214, height: 104, alignment: .topLeading)
+            .padding(14)
+            .background(background(tokens: tokens), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(tokens.border, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isHovered ? tokens.accent.opacity(0.16) : tokens.border, lineWidth: 1)
             )
+            .scaleEffect(isPressed ? 0.992 : 1)
+            .shadow(color: isHovered && colorScheme == .light ? Color.black.opacity(0.04) : .clear, radius: 14, y: 6)
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+    }
+
+    private func background(tokens: ThemeTokens) -> Color {
+        if isPressed {
+            return tokens.elevatedBackground
+        }
+        return isHovered ? tokens.elevatedBackground : tokens.panelBackground
     }
 }
 
@@ -249,9 +479,10 @@ struct FooterPill: View {
             Image(systemName: systemImage)
             Text(title)
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(.system(size: 10, weight: .medium))
         .foregroundStyle(tokens.secondaryText)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(tokens.elevatedBackground.opacity(0.72), in: Capsule())
     }
 }

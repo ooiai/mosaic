@@ -3,6 +3,7 @@ import Foundation
 
 public final class MockWorkbenchRuntime: AgentWorkbenchRuntime, @unchecked Sendable {
     public var snapshotHandler: ((Project, String?) async throws -> ProjectSnapshot)?
+    public var setModelHandler: ((Project, String) async throws -> ModelSelectionSummary)?
     public var startTaskHandler: ((AgentTaskRequest) async throws -> RuntimeExecution)?
     public var cancelTaskHandler: ((UUID) async -> Void)?
 
@@ -13,6 +14,17 @@ public final class MockWorkbenchRuntime: AgentWorkbenchRuntime, @unchecked Senda
             return try await snapshotHandler(project, selectedSessionID)
         }
         return PreviewFixtures.projectSnapshot
+    }
+
+    public func setModel(project: Project, model: String) async throws -> ModelSelectionSummary {
+        if let setModelHandler {
+            return try await setModelHandler(project, model)
+        }
+        return ModelSelectionSummary(
+            requestedModel: model,
+            effectiveModel: model,
+            previousModel: PreviewFixtures.modelsStatusSummary.currentModel
+        )
     }
 
     public func startTask(_ request: AgentTaskRequest) async throws -> RuntimeExecution {

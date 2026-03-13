@@ -29,6 +29,8 @@ public enum RuntimeEvent: Sendable {
     case command(CommandInvocation)
     case timeline(TimelineEntry)
     case cliEvent(CLIEvent)
+    case toolCall(name: String, detail: String)
+    case toolResult(name: String, detail: String)
     case sessionStarted(String)
     case messageDelta(String)
     case fileChanges([FileChange])
@@ -55,6 +57,7 @@ public struct RuntimeExecution: Sendable {
 
 public protocol AgentWorkbenchRuntime: Sendable {
     func loadSnapshot(project: Project, selectedSessionID: String?) async throws -> ProjectSnapshot
+    func setModel(project: Project, model: String) async throws -> ModelSelectionSummary
     func startTask(_ request: AgentTaskRequest) async throws -> RuntimeExecution
     func cancelTask(id: UUID) async
 }
