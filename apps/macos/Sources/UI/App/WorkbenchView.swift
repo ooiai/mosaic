@@ -62,23 +62,40 @@ public struct WorkbenchView: View {
                     }
                     .buttonStyle(.plain)
 
-                    if appViewModel.destination == .thread {
+                    if appViewModel.destination == .thread, viewModel.canCancelTask {
                         Button {
-                            if viewModel.canCancelTask {
-                                Task { await appViewModel.cancelActiveTask() }
-                            } else {
-                                Task { await appViewModel.retrySelectedTask() }
-                            }
+                            Task { await appViewModel.cancelActiveTask() }
                         } label: {
                             ToolbarCapsuleLabel(
-                                title: viewModel.canCancelTask ? "Stop" : "Retry",
-                                systemImage: viewModel.canCancelTask ? "stop.fill" : "arrow.clockwise",
-                                accent: viewModel.canCancelTask ? tokens.failure : nil,
-                                isEnabled: viewModel.canCancelTask || viewModel.selectedTask != nil
+                                title: "Stop",
+                                systemImage: "stop.fill",
+                                accent: tokens.failure,
+                                isEnabled: true
                             )
                         }
                         .buttonStyle(.plain)
-                        .disabled(!viewModel.canCancelTask && viewModel.selectedTask == nil)
+                    }
+
+                    if appViewModel.destination == .thread {
+                        Button {} label: {
+                            ToolbarCapsuleLabel(
+                                title: "Handoff",
+                                systemImage: "arrow.left.arrow.right",
+                                isEnabled: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(true)
+
+                        Button {} label: {
+                            ToolbarCapsuleLabel(
+                                title: "Commit",
+                                systemImage: "circle.dashed",
+                                isEnabled: false
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(true)
                     }
 
                     ToolbarSeparatorView()
@@ -167,32 +184,32 @@ public struct WorkbenchView: View {
     @ViewBuilder
     private func toolbarPrincipal(tokens: ThemeTokens) -> some View {
         if appViewModel.destination == .thread {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 Text(toolbarTitle)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(tokens.primaryText)
                     .lineLimit(1)
 
                 Text(toolbarSubtitle)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(tokens.secondaryText)
                     .lineLimit(1)
 
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(tokens.tertiaryText)
+                    .font(.system(size: 9.5, weight: .bold))
+                    .foregroundStyle(tokens.tertiaryText.opacity(0.9))
             }
-            .frame(minWidth: 320, alignment: .leading)
+            .frame(minWidth: 292, alignment: .leading)
         } else {
             VStack(alignment: .leading, spacing: 2) {
                 Text(toolbarTitle)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(tokens.primaryText)
                 Text(toolbarSubtitle)
-                    .font(.system(size: 11))
+                    .font(.system(size: 10.5))
                     .foregroundStyle(tokens.secondaryText)
             }
-            .frame(minWidth: 280, alignment: .leading)
+            .frame(minWidth: 264, alignment: .leading)
         }
     }
 
@@ -279,16 +296,16 @@ private struct ToolbarCapsuleLabel: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        HStack(spacing: 8) {
+        HStack(spacing: 7) {
             Image(systemName: systemImage)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
             Text(title)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
         }
         .foregroundStyle(isEnabled ? (accent ?? tokens.primaryText) : tokens.tertiaryText)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background((isHovered && isEnabled ? tokens.panelBackground : tokens.elevatedBackground), in: Capsule())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3.5)
+        .background((isHovered && isEnabled ? tokens.panelBackground.opacity(0.92) : tokens.elevatedBackground.opacity(0.96)), in: Capsule())
         .overlay(
             Capsule()
                 .stroke(tokens.border, lineWidth: 1)
@@ -306,9 +323,9 @@ private struct ToolbarSeparatorView: View {
 
         Rectangle()
             .fill(tokens.border)
-            .frame(width: 1, height: 16)
-            .opacity(0.9)
-            .padding(.horizontal, 2)
+            .frame(width: 1, height: 14)
+            .opacity(0.72)
+            .padding(.horizontal, 1)
     }
 }
 

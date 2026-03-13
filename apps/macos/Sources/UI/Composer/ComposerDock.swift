@@ -22,11 +22,11 @@ struct ComposerDock: View {
 
         VStack(spacing: 12) {
             if showsSuggestions {
-                VStack(spacing: 10) {
+                VStack(spacing: 8) {
                     HStack {
                         Spacer()
                         Text("Explore more")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(tokens.secondaryText)
                         Button {
                             suggestionsDismissed = true
@@ -39,7 +39,7 @@ struct ComposerDock: View {
                     }
 
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 10) {
                             ForEach(WorkbenchReferenceContent.composerSuggestions) { suggestion in
                                 SuggestionPromptCard(
                                     title: suggestion.title,
@@ -152,12 +152,12 @@ struct ComposerDock: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .frame(maxWidth: WorkbenchChromeMetrics.composerWidth)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
-            .shadow(color: colorScheme == .light ? Color.black.opacity(0.04) : .clear, radius: 18, y: 10)
+            .shadow(color: colorScheme == .light ? Color.black.opacity(0.03) : .clear, radius: 14, y: 8)
 
             HStack(spacing: 12) {
                 Menu {
@@ -186,7 +186,7 @@ struct ComposerDock: View {
                 } label: {
                     FooterBarMenuLabel(
                         title: profileFooterTitle,
-                        systemImage: "checkmark.shield"
+                        systemImage: "slider.horizontal.3"
                     )
                 }
                 .menuStyle(.borderlessButton)
@@ -218,7 +218,7 @@ struct ComposerDock: View {
 
     private var profileFooterTitle: String {
         let profile = viewModel.selectedProfile
-        return profile == "default" ? "Default profile" : profile
+        return profile == "default" ? "Default permissions" : "\(profile) permissions"
     }
 
     private func chooseWorkspace() {
@@ -245,13 +245,13 @@ private struct ComposerMenuLabel: View {
             Image(systemName: systemImage)
             Text(title)
             Image(systemName: "chevron.down")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
         }
-        .font(.system(size: 12, weight: .medium))
+        .font(.system(size: 11, weight: .medium))
         .foregroundStyle(tokens.secondaryText)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background((isHovered ? tokens.elevatedBackground : Color.clear), in: Capsule())
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3.5)
+        .background((isHovered ? tokens.elevatedBackground.opacity(0.92) : Color.clear), in: Capsule())
         .onHover { isHovered = $0 }
     }
 }
@@ -270,16 +270,16 @@ private struct FooterBarMenuLabel: View {
             Text(title)
                 .lineLimit(1)
             Image(systemName: "chevron.down")
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 8.5, weight: .semibold))
         }
-        .font(.system(size: 11, weight: .medium))
+        .font(.system(size: 10, weight: .medium))
         .foregroundStyle(tokens.secondaryText)
-        .padding(.horizontal, 2)
-        .padding(.vertical, 2)
-        .background((isHovered ? tokens.elevatedBackground.opacity(0.72) : Color.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 2.5)
+        .padding(.vertical, 1.5)
+        .background((isHovered ? tokens.elevatedBackground.opacity(0.78) : Color.clear), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isHovered ? tokens.border : .clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .stroke(isHovered ? tokens.border.opacity(0.9) : .clear, lineWidth: 1)
         )
         .onHover { isHovered = $0 }
     }
@@ -322,7 +322,7 @@ private struct ComposerIconButton: View {
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(tokens.secondaryText)
             .frame(width: 22, height: 22)
-            .background((isHovered ? tokens.elevatedBackground : Color.clear), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .background((isHovered ? tokens.elevatedBackground.opacity(0.95) : Color.clear), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             .onHover { isHovered = $0 }
     }
 }
@@ -355,12 +355,13 @@ private struct ComposerRoundButton<Label: View>: View {
 
         Button(action: action) {
             label
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(foreground)
-                .frame(width: 32, height: 32)
+                .frame(width: 30, height: 30)
                 .background((isHovered ? hoverBackground(tokens: tokens) : background), in: Circle())
         }
         .buttonStyle(.plain)
+        .opacity(usesFilledBackground ? 1 : (isHovered ? 1 : 0.9))
         .onHover { isHovered = $0 }
     }
 

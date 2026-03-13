@@ -150,9 +150,9 @@ struct ToolbarActionButton: View {
         Image(systemName: systemImage)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(isEnabled ? (accent ?? tokens.primaryText) : tokens.tertiaryText)
-            .frame(width: 28, height: 28)
+            .frame(width: 26, height: 26)
             .background(
-                (isHovered && isEnabled ? tokens.panelBackground : tokens.elevatedBackground),
+                (isHovered && isEnabled ? tokens.panelBackground.opacity(0.96) : tokens.elevatedBackground),
                 in: RoundedRectangle(cornerRadius: 9, style: .continuous)
             )
             .overlay(
@@ -215,24 +215,24 @@ struct WorkbenchPageHeader<Trailing: View>: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         HStack(alignment: .top, spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
                     Text(title)
-                        .font(.system(size: 29, weight: .semibold))
+                        .font(.system(size: 24, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
 
                     if let badge {
                         Text(badge)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(tokens.secondaryText)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
                             .background(tokens.elevatedBackground, in: Capsule())
                     }
                 }
 
                 Text(subtitle)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundStyle(tokens.secondaryText)
             }
 
@@ -258,10 +258,10 @@ struct PageHeaderSecondaryButton: View {
                 Image(systemName: systemImage)
                 Text(title)
             }
-            .font(.system(size: 12, weight: .medium))
+            .font(.system(size: 11.5, weight: .medium))
             .foregroundStyle(tokens.secondaryText)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
             .background((isHovered ? tokens.panelBackground : Color.clear), in: Capsule())
         }
         .buttonStyle(.plain)
@@ -284,10 +284,10 @@ struct PageHeaderPrimaryButton: View {
                 Image(systemName: systemImage)
                 Text(title)
             }
-            .font(.system(size: 12, weight: .semibold))
+            .font(.system(size: 11.5, weight: .semibold))
             .foregroundStyle(tokens.windowBackground)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 7)
             .background((isHovered ? tokens.primaryText.opacity(0.88) : tokens.primaryText), in: Capsule())
         }
         .buttonStyle(.plain)
@@ -313,9 +313,9 @@ struct PageSearchField: View {
                 .font(.system(size: 13))
                 .foregroundStyle(tokens.primaryText)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .frame(width: 188)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .frame(width: 180)
         .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -393,15 +393,15 @@ struct SidebarNavButton: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                     .frame(width: 16)
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13.5, weight: .medium))
                 Spacer()
             }
             .foregroundStyle(isSelected ? tokens.primaryText : tokens.secondaryText)
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 6)
             .background(
                 (isSelected ? tokens.selection : (isHovered ? tokens.panelBackground.opacity(0.72) : Color.clear)),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -425,30 +425,30 @@ struct SuggestionPromptCard: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 Image(systemName: symbolName)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 22, height: 22)
-                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .frame(width: 20, height: 20)
+                    .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(tokens.primaryText)
                     .multilineTextAlignment(.leading)
                     .lineLimit(3)
 
                 Spacer(minLength: 0)
             }
-            .frame(width: 214, height: 104, alignment: .topLeading)
-            .padding(14)
-            .background(background(tokens: tokens), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .frame(width: 204, height: 96, alignment: .topLeading)
+            .padding(13)
+            .background(background(tokens: tokens), in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .stroke(isHovered ? tokens.accent.opacity(0.16) : tokens.border, lineWidth: 1)
             )
             .scaleEffect(isPressed ? 0.992 : 1)
-            .shadow(color: isHovered && colorScheme == .light ? Color.black.opacity(0.04) : .clear, radius: 14, y: 6)
+            .shadow(color: isHovered && colorScheme == .light ? Color.black.opacity(0.035) : .clear, radius: 12, y: 5)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

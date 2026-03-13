@@ -38,7 +38,7 @@ public struct SettingsView: View {
 
     private func settingsContent(tokens: ThemeTokens) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: 24) {
                 WorkbenchPageHeader(
                     title: viewModel.settingsSection.title,
                     subtitle: description(for: viewModel.settingsSection),
@@ -60,9 +60,9 @@ public struct SettingsView: View {
                     debugSection(tokens: tokens)
                 }
             }
-            .padding(.horizontal, 36)
-            .padding(.vertical, 26)
-            .frame(maxWidth: 720, alignment: .leading)
+            .padding(.horizontal, 34)
+            .padding(.vertical, 22)
+            .frame(maxWidth: 680, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }

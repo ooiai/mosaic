@@ -104,11 +104,11 @@ private struct EmptyThreadHero: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Image(systemName: "sparkles")
-                .font(.system(size: 24, weight: .medium))
+                .font(.system(size: 21, weight: .medium))
                 .foregroundStyle(tokens.primaryText)
-                .frame(width: 48, height: 48)
+                .frame(width: 42, height: 42)
                 .background(tokens.elevatedBackground, in: Circle())
                 .overlay(
                     Circle()
@@ -117,19 +117,19 @@ private struct EmptyThreadHero: View {
 
             VStack(spacing: 2) {
                 Text("Let's build")
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(tokens.primaryText)
                 HStack(spacing: 4) {
                     Text(projectName)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                 }
-                .font(.system(size: 18, weight: .medium))
+                .font(.system(size: 16.5, weight: .medium))
                 .foregroundStyle(tokens.secondaryText)
             }
         }
         .frame(maxHeight: .infinity, alignment: .center)
-        .padding(.top, 8)
+        .padding(.top, 6)
     }
 }
 
@@ -141,29 +141,87 @@ private struct ThreadSummaryRibbon: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(alignment: .leading, spacing: 10) {
-            if !session.summary.isEmpty {
-                Text(session.summary)
-                    .font(.system(size: 13))
-                    .foregroundStyle(tokens.secondaryText)
-                    .lineLimit(2)
-            }
-
-            HStack(spacing: 8) {
-                MetricChip(title: "Provider", value: viewModel.currentProviderLabel, accent: tokens.accent)
-                MetricChip(title: "Model", value: viewModel.currentModelLabel, accent: tokens.success)
-                if let selectedTask = viewModel.selectedTask {
-                    StatusChip(title: selectedTask.status.rawValue.uppercased(), state: selectedTask.status)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                if !session.summary.isEmpty {
+                    Text(session.summary)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(tokens.secondaryText)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Text(session.updatedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(tokens.tertiaryText)
+            }
+
+            HStack(spacing: 6) {
+                ThreadMetaChip(title: viewModel.currentProviderLabel, accent: tokens.accent)
+                ThreadMetaChip(title: viewModel.currentModelLabel, accent: tokens.success)
+                if let selectedTask = viewModel.selectedTask {
+                    ThreadStateChip(state: selectedTask.status)
+                }
             }
 
             Divider()
         }
-        .padding(.bottom, 2)
+        .padding(.bottom, 1)
+    }
+}
+
+private struct ThreadMetaChip: View {
+    let title: String
+    let accent: Color
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        HStack(spacing: 6) {
+            Circle()
+                .fill(accent)
+                .frame(width: 4, height: 4)
+            Text(title)
+                .lineLimit(1)
+        }
+        .font(.system(size: 10.5, weight: .medium))
+        .foregroundStyle(tokens.secondaryText)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(tokens.elevatedBackground.opacity(0.82), in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(tokens.border, lineWidth: 1)
+        )
+    }
+}
+
+private struct ThreadStateChip: View {
+    let state: SessionState
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+        let accent: Color = switch state {
+        case .idle: tokens.tertiaryText
+        case .waiting: tokens.warning
+        case .running: tokens.accent
+        case .failed: tokens.failure
+        case .cancelled: tokens.warning
+        case .done: tokens.success
+        }
+
+        HStack(spacing: 6) {
+            Circle()
+                .fill(accent)
+                .frame(width: 4, height: 4)
+            Text(state.rawValue.capitalized)
+        }
+        .font(.system(size: 10.5, weight: .medium))
+        .foregroundStyle(accent)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(accent.opacity(0.11), in: Capsule())
     }
 }
 
@@ -194,7 +252,7 @@ private struct MessageRow: View {
         let isSelected = viewModel.selectedMessageID == message.id
         let isHighlighted = viewModel.highlightedMessageID == message.id
 
-        VStack(alignment: .leading, spacing: usesCard ? 10 : 8) {
+        VStack(alignment: .leading, spacing: usesCard ? 8 : 8) {
             if showsMetaHeader {
                 HStack {
                     Text(message.role.title.uppercased())
@@ -224,7 +282,7 @@ private struct MessageRow: View {
                 MarkdownRenderer(text: message.body, settings: settings)
             }
         }
-        .padding(usesCard ? 13 : 0)
+        .padding(cardPadding)
         .frame(maxWidth: maxWidth, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
@@ -261,6 +319,17 @@ private struct MessageRow: View {
 
     private var cornerRadius: CGFloat {
         message.role == .user ? 16 : 14
+    }
+
+    private var cardPadding: CGFloat {
+        switch message.kind {
+        case .activity:
+            return 11
+        case .task:
+            return 12
+        default:
+            return usesCard ? 13 : 0
+        }
     }
 
     private func background(tokens: ThemeTokens, isSelected: Bool, isHighlighted: Bool) -> Color {
@@ -318,28 +387,28 @@ private struct ActivityMessageCard: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         let accent = accentColor(tokens: tokens)
 
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 9) {
                 Image(systemName: iconName)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(accent)
-                    .frame(width: 28, height: 28)
-                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .frame(width: 24, height: 24)
+                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
                         Text(payload.phase.title.uppercased())
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundStyle(tokens.tertiaryText)
                         Text(timestamp.formatted(date: .omitted, time: .shortened))
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
                             .foregroundStyle(tokens.tertiaryText)
                     }
                     Text(payload.name)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
                     Text(payload.summary)
-                        .font(.system(size: 12.5))
+                        .font(.system(size: 12))
                         .foregroundStyle(summaryColor(tokens: tokens))
                         .lineLimit(isExpanded ? nil : 2)
                 }
@@ -347,44 +416,44 @@ private struct ActivityMessageCard: View {
             }
 
             if let previewText = payload.previewText, !previewText.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text((payload.previewTitle ?? "Output").uppercased())
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tokens.tertiaryText)
                     Text(previewText)
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(previewForeground(tokens: tokens))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(previewBackground(tokens: tokens), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .background(previewBackground(tokens: tokens), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .stroke(previewBorder(tokens: tokens), lineWidth: 1)
                 )
             }
 
             if !payload.fields.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     ForEach(payload.fields, id: \.self) { field in
                         HStack(alignment: .top, spacing: 10) {
                             Text(field.label.uppercased())
                                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(tokens.tertiaryText)
-                                .frame(width: 70, alignment: .leading)
+                                .frame(width: 64, alignment: .leading)
                             Text(field.value)
-                                .font(.system(size: 11.5, design: field.label == "Command" ? .monospaced : .default))
+                                .font(.system(size: 11, design: field.label == "Command" ? .monospaced : .default))
                                 .foregroundStyle(tokens.primaryText)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 7)
+                .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
 
             if let detail = payload.detail, !detail.isEmpty {
@@ -394,22 +463,22 @@ private struct ActivityMessageCard: View {
                     HStack(spacing: 6) {
                         Text(isExpanded ? "Hide payload" : "Show payload")
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                     }
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(tokens.accent)
                 }
                 .buttonStyle(.plain)
 
                 if isExpanded {
                     Text(detail)
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(tokens.secondaryText)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
             }
 
@@ -420,7 +489,7 @@ private struct ActivityMessageCard: View {
                         viewModel.inspectMessage(messageID)
                     }
                     .buttonStyle(.borderless)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(tokens.accent)
                 }
             }
@@ -529,37 +598,37 @@ private struct TaskMessageCard: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(task.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
                     Text(task.summary.isEmpty ? task.prompt : task.summary)
-                        .font(.system(size: 13))
+                        .font(.system(size: 12))
                         .foregroundStyle(tokens.secondaryText)
                         .lineLimit(3)
                 }
                 Spacer()
-                StatusChip(title: task.status.rawValue.uppercased(), state: task.status)
+                ThreadStateChip(state: task.status)
             }
 
             if let latest = task.timeline.last {
                 Text("\(latest.title) · \(latest.detail)")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(tokens.secondaryText)
             }
 
-            HStack(spacing: 8) {
-                MetricChip(title: "Logs", value: "\(task.cliEvents.count)", accent: tokens.accent)
-                MetricChip(title: "Commands", value: "\(task.commands.count)", accent: tokens.warning)
-                MetricChip(title: "Files", value: "\(task.fileChanges.count)", accent: tokens.success)
+            HStack(spacing: 6) {
+                ThreadMetaChip(title: "\(task.cliEvents.count) logs", accent: tokens.accent)
+                ThreadMetaChip(title: "\(task.commands.count) commands", accent: tokens.warning)
+                ThreadMetaChip(title: "\(task.fileChanges.count) files", accent: tokens.success)
                 Spacer()
                 Button("Inspect") {
                     viewModel.inspectMessage(messageID)
                 }
                 .buttonStyle(.borderless)
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(tokens.accent)
             }
         }
@@ -584,15 +653,15 @@ private struct ConsoleDrawer: View {
             HStack {
                 HStack(spacing: 8) {
                     Text("Terminal")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
                     Text(shellName)
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundStyle(tokens.tertiaryText)
                 }
                 Spacer()
                 if let command = viewModel.selectedTask?.commands.last {
-                    TerminalActionButton(title: "Copy") {
+                    TerminalActionButton(title: "Copy cmd") {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(command.displayCommand, forType: .string)
                     }
@@ -601,88 +670,96 @@ private struct ConsoleDrawer: View {
                     appViewModel.toggleConsoleDrawer()
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 9)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 7)
 
             Divider()
-                .padding(.bottom, 8)
+                .padding(.bottom, 7)
 
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 8) {
                 if let command = viewModel.selectedTask?.commands.last {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("LAST COMMAND")
                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundStyle(tokens.tertiaryText)
                         Text("$ \(command.displayCommand)")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 10.5, design: .monospaced))
                             .foregroundStyle(tokens.primaryText)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(tokens.border.opacity(0.85), lineWidth: 1)
+                    )
                 }
 
                 if logs.isEmpty {
                     Text("No CLI output yet.")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 10.5, design: .monospaced))
                         .foregroundStyle(tokens.secondaryText)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 7)
+                        .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 5) {
                             ForEach(logs) { event in
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack {
                                         Text(event.stream.rawValue.uppercased())
-                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                            .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                                             .foregroundStyle(streamColor(event, tokens: tokens))
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 3)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2.5)
                                             .background(tokens.elevatedBackground, in: Capsule())
                                         Spacer()
                                         Text(event.timestamp.formatted(date: .omitted, time: .standard))
-                                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
                                             .foregroundStyle(tokens.tertiaryText)
                                     }
 
                                     Text(event.text)
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .font(.system(size: 10.5, design: .monospaced))
                                         .foregroundStyle(streamColor(event, tokens: tokens))
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .textSelection(.enabled)
                                 }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 7)
+                                .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .stroke(tokens.border.opacity(0.82), lineWidth: 1)
+                                )
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 11)
 
             Divider()
 
             HStack(spacing: 10) {
                 Text("\(shellPromptPrefix) $")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(tokens.secondaryText)
                 Spacer()
                 Text(viewModel.selectedSession?.state.rawValue.capitalized ?? "Idle")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(tokens.tertiaryText)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(tokens.elevatedBackground.opacity(0.78))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(tokens.elevatedBackground.opacity(0.76))
         }
         .background(tokens.panelBackground)
     }
@@ -733,16 +810,16 @@ private struct TerminalActionButton: View {
             Group {
                 if let title {
                     Text(title)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9.5, weight: .semibold))
                 } else if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9.5, weight: .semibold))
                 }
             }
             .foregroundStyle(tokens.secondaryText)
-            .padding(.horizontal, title == nil ? 7 : 8)
-            .padding(.vertical, 5)
-            .background((isHovered ? tokens.panelBackground : tokens.elevatedBackground), in: Capsule())
+            .padding(.horizontal, title == nil ? 6.5 : 7.5)
+            .padding(.vertical, 4.5)
+            .background((isHovered ? tokens.panelBackground.opacity(0.96) : tokens.elevatedBackground), in: Capsule())
             .overlay(
                 Capsule()
                     .stroke(tokens.border, lineWidth: 1)
@@ -762,11 +839,11 @@ private struct ConsoleDrawerResizeHandle: View {
 
         Rectangle()
             .fill(isHovering ? tokens.accent.opacity(0.18) : Color.clear)
-            .frame(height: 7)
+            .frame(height: 6)
             .overlay(
                 Capsule()
                     .fill(isHovering ? tokens.accent.opacity(0.6) : tokens.border)
-                    .frame(width: 74, height: 4)
+                    .frame(width: 66, height: 3)
             )
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }

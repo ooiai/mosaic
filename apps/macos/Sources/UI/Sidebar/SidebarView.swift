@@ -25,7 +25,7 @@ struct SidebarView: View {
     private func globalSidebar(tokens: ThemeTokens) -> some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 18) {
                     VStack(spacing: 3) {
                         SidebarNavButton(
                             title: "New thread",
@@ -52,21 +52,17 @@ struct SidebarView: View {
                         }
                     }
 
-                    sidebarSectionHeader("Workspaces", tokens: tokens) {
-                        SidebarHeaderIconButton(systemImage: "folder.badge.plus", tokens: tokens, action: chooseWorkspace)
-                    }
+                    sidebarSectionHeader("Workspace", tokens: tokens)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(appViewModel.recentProjects.prefix(6)) { project in
-                            ProjectRow(
-                                project: project,
-                                isSelected: project.id == viewModel.project.id,
-                                tokens: tokens
-                            ) {
-                                Task { await appViewModel.openProject(project.id) }
-                            }
+                    WorkspaceSwitcherRow(
+                        project: viewModel.project,
+                        recentProjects: appViewModel.recentProjects,
+                        tokens: tokens,
+                        chooseWorkspace: chooseWorkspace,
+                        openProject: { projectID in
+                            Task { await appViewModel.openProject(projectID) }
                         }
-                    }
+                    )
 
                     sidebarSectionHeader("Threads", tokens: tokens) {
                         HStack(spacing: 10) {
@@ -113,8 +109,9 @@ struct SidebarView: View {
                         }
                     }
                 }
-                .padding(10)
+                .padding(.horizontal, 10)
                 .padding(.top, 8)
+                .padding(.bottom, 12)
             }
 
             Divider()
@@ -231,6 +228,67 @@ struct SidebarView: View {
     }
 }
 
+private struct WorkspaceSwitcherRow: View {
+    let project: Project
+    let recentProjects: [Project]
+    let tokens: ThemeTokens
+    let chooseWorkspace: () -> Void
+    let openProject: (UUID) -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Menu {
+            Button("Choose Workspace…", action: chooseWorkspace)
+            Button("Reveal in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.workspacePath)])
+            }
+            if !recentProjects.isEmpty {
+                Divider()
+                ForEach(recentProjects.prefix(6)) { recentProject in
+                    Button(recentProject.name) {
+                        openProject(recentProject.id)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "folder")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(tokens.secondaryText)
+                    .frame(width: 28, height: 28)
+                    .background(tokens.panelBackground.opacity(0.66), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(project.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(tokens.primaryText)
+                        .lineLimit(1)
+                    Text(project.displayPath)
+                        .font(.system(size: 11))
+                        .foregroundStyle(tokens.tertiaryText)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tokens.tertiaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background((isHovered ? tokens.panelBackground.opacity(0.88) : tokens.panelBackground.opacity(0.52)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(tokens.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .onHover { isHovered = $0 }
+    }
+}
+
 private struct ProjectRow: View {
     let project: Project
     let isSelected: Bool
@@ -264,7 +322,7 @@ private struct ProjectRow: View {
 
     private var background: Color {
         if isSelected { return tokens.selection }
-        if isHovered { return tokens.panelBackground.opacity(0.75) }
+        if isHovered { return tokens.panelBackground.opacity(0.9) }
         return .clear
     }
 }
@@ -283,57 +341,50 @@ private struct ThreadRow: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         let additions = latestTask?.fileChanges.reduce(0) { $0 + $1.additions } ?? 0
         let deletions = latestTask?.fileChanges.reduce(0) { $0 + $1.deletions } ?? 0
+        let shouldShowMetrics = additions > 0 || deletions > 0
 
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: shouldShowMetrics ? 4 : 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(session.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(tokens.primaryText)
                         .lineLimit(1)
                     if session.isPinned {
                         Image(systemName: "pin.fill")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: 8.5, weight: .semibold))
                             .foregroundStyle(tokens.warning)
                     }
                     Spacer()
                     Text(relativeDate(session.updatedAt))
-                        .font(.system(size: 10))
+                        .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(tokens.tertiaryText)
                 }
 
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Circle()
-                        .fill(accentColor)
-                        .frame(width: 4, height: 4)
-                    Text(session.summary.isEmpty ? "No summary yet" : session.summary)
-                        .font(.system(size: 11))
-                        .foregroundStyle(tokens.secondaryText)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    if additions > 0 {
-                        Text("+\(additions)")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(tokens.success)
-                    }
-                    if deletions > 0 {
-                        Text("-\(deletions)")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(tokens.failure)
-                    }
-                    if additions == 0 && deletions == 0 {
-                        Text("\(session.messageCount) msgs")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(tokens.tertiaryText)
-                    } else {
+                if shouldShowMetrics {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Circle()
+                            .fill(accentColor)
+                            .frame(width: 4, height: 4)
+                        if additions > 0 {
+                            Text("+\(additions)")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(tokens.success)
+                        }
+                        if deletions > 0 {
+                            Text("-\(deletions)")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(tokens.failure)
+                        }
+                        Spacer(minLength: 8)
                         Text("\(session.taskCount)t")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 9.5, weight: .medium))
                             .foregroundStyle(tokens.tertiaryText)
                     }
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, shouldShowMetrics ? 6 : 5)
             .background(background(tokens: tokens), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -351,7 +402,7 @@ private struct ThreadRow: View {
 
     private func background(tokens: ThemeTokens) -> Color {
         if isSelected { return tokens.selection }
-        if isHovered { return tokens.panelBackground.opacity(0.75) }
+        if isHovered { return tokens.panelBackground.opacity(0.9) }
         return .clear
     }
 
@@ -392,7 +443,7 @@ private struct RecentTaskRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(
-                (isHovered ? tokens.panelBackground : tokens.panelBackground.opacity(0.6)),
+                (isHovered ? tokens.panelBackground.opacity(0.96) : tokens.panelBackground.opacity(0.68)),
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
             )
         }
@@ -421,29 +472,30 @@ private struct RuntimeSettingsPopover: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 11) {
                 Image(systemName: "person.crop.circle.fill")
-                    .font(.system(size: 22))
+                    .font(.system(size: 20))
                     .foregroundStyle(tokens.secondaryText)
-                    .frame(width: 42, height: 42)
+                    .frame(width: 38, height: 38)
                     .background(tokens.elevatedBackground, in: Circle())
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(viewModel.selectedProfile)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
                     Text(viewModel.currentModelLabel)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundStyle(tokens.secondaryText)
                 }
 
                 Spacer()
             }
-            .padding(14)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 13)
+            .padding(.vertical, 12)
+            .background(tokens.panelBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
 
@@ -464,7 +516,7 @@ private struct RuntimeSettingsPopover: View {
                 .buttonStyle(.plain)
 
                 Divider()
-                    .padding(.leading, 38)
+                    .padding(.leading, 34)
 
                 RuntimePopoverStaticRow(
                     title: "Runtime health",
@@ -473,7 +525,7 @@ private struct RuntimeSettingsPopover: View {
                 )
 
                 Divider()
-                    .padding(.leading, 38)
+                    .padding(.leading, 34)
 
                 RuntimePopoverStaticRow(
                     title: "Branch",
@@ -482,7 +534,7 @@ private struct RuntimeSettingsPopover: View {
                 )
 
                 Divider()
-                    .padding(.leading, 38)
+                    .padding(.leading, 34)
 
                 Button {
                     isPresented = false
@@ -495,14 +547,14 @@ private struct RuntimeSettingsPopover: View {
                 }
                 .buttonStyle(.plain)
             }
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(tokens.panelBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
         }
-        .padding(14)
-        .frame(width: 288)
+        .padding(12)
+        .frame(width: 276)
         .background(tokens.windowBackground)
     }
 }
@@ -528,16 +580,16 @@ private struct RuntimePopoverRow: View {
                     .lineLimit(1)
             }
             Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(tokens.tertiaryText)
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: 12.5, weight: .medium))
         .foregroundStyle(tokens.primaryText)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background((isHovered ? tokens.elevatedBackground : Color.clear), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
+        .background((isHovered ? tokens.elevatedBackground.opacity(0.94) : Color.clear), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .stroke(isHovered ? tokens.border : .clear, lineWidth: 1)
         )
         .contentShape(Rectangle())
@@ -563,10 +615,10 @@ private struct RuntimePopoverStaticRow: View {
                 .foregroundStyle(tokens.secondaryText)
                 .lineLimit(1)
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: 12.5, weight: .medium))
         .foregroundStyle(tokens.primaryText)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 9)
     }
 }
 
@@ -579,20 +631,24 @@ private struct SidebarFooterSettingsButton: View {
 
         HStack(spacing: 10) {
             Image(systemName: "gearshape")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(tokens.secondaryText)
-                .frame(width: 24, height: 24)
-                .background(tokens.elevatedBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(width: 20, height: 20)
+                .background(tokens.panelBackground.opacity(0.62), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
 
             Text("Settings")
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(tokens.primaryText)
 
             Spacer()
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 9)
-        .background((isHovered ? tokens.panelBackground.opacity(0.82) : Color.clear), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 7)
+        .background((isHovered ? tokens.panelBackground.opacity(0.74) : Color.clear), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(isHovered ? tokens.border.opacity(0.85) : .clear, lineWidth: 1)
+        )
         .onHover { isHovered = $0 }
     }
 }
@@ -632,8 +688,8 @@ private struct SidebarSearchField: View {
                 .foregroundStyle(tokens.primaryText)
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(tokens.panelBackground.opacity(0.82), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.vertical, 7)
+        .background(tokens.panelBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(tokens.border, lineWidth: 1)

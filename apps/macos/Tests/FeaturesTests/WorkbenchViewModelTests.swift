@@ -515,4 +515,91 @@ final class WorkbenchViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.inspectorPanel, .changes)
         XCTAssertEqual(viewModel.selectedFileChangeID, task.fileChanges.first?.id)
     }
+
+    func testRefreshRetainsTranscriptTaskLinksAndDeduplicatesActivityMessages() async throws {
+        let runtime = MockWorkbenchRuntime()
+        let preservedActivity = Message(
+            sessionID: PreviewFixtures.session.id,
+            role: .system,
+            kind: .activity,
+            body: ActivityMessagePayload(
+                phase: .toolCall,
+                name: "read_file",
+                summary: "README.md",
+                fields: [ActivityMessageField(label: "Path", value: "README.md")],
+                detail: "{\n  \"path\" : \"README.md\"\n}"
+            ).encodedString(),
+            relatedTaskID: PreviewFixtures.task.id
+        )
+        let archive = ProjectArchive(
+            project: PreviewFixtures.project,
+            sessions: [PreviewFixtures.session],
+            messages: PreviewFixtures.projectArchive.messages + [preservedActivity],
+            tasks: [PreviewFixtures.task],
+            selectedSessionID: PreviewFixtures.session.id
+        )
+        runtime.snapshotHandler = { _, _ in
+            ProjectSnapshot(
+                status: PreviewFixtures.statusSummary,
+                health: PreviewFixtures.healthSummary,
+                configuration: PreviewFixtures.configurationSummary,
+                modelsStatus: PreviewFixtures.modelsStatusSummary,
+                availableModels: PreviewFixtures.modelList,
+                sessions: PreviewFixtures.sessions,
+                transcript: SessionTranscript(
+                    sessionID: PreviewFixtures.session.id,
+                    events: [
+                        SessionEvent(
+                            id: "refresh-user",
+                            sessionID: PreviewFixtures.session.id,
+                            type: .user,
+                            timestamp: "2026-03-10T09:18:00Z",
+                            text: PreviewFixtures.task.prompt
+                        ),
+                        SessionEvent(
+                            id: "refresh-tool",
+                            sessionID: PreviewFixtures.session.id,
+                            type: .toolCall,
+                            timestamp: "2026-03-10T09:18:01Z",
+                            text: "{\n  \"name\": \"read_file\",\n  \"args\": {\n    \"path\": \"README.md\"\n  }\n}"
+                        ),
+                        SessionEvent(
+                            id: "refresh-assistant",
+                            sessionID: PreviewFixtures.session.id,
+                            type: .assistant,
+                            timestamp: "2026-03-10T09:18:02Z",
+                            text: PreviewFixtures.task.responseText
+                        ),
+                    ]
+                )
+            )
+        }
+        let viewModel = WorkbenchViewModel(
+            project: PreviewFixtures.project,
+            archive: archive,
+            runtime: runtime,
+            pinnedSessionsStore: InMemoryPinnedSessionStore()
+        ) { _ in }
+
+        await viewModel.bootstrap()
+
+        let assistantMessage = try XCTUnwrap(viewModel.selectedMessages.first(where: {
+            $0.role == .assistant && $0.body == PreviewFixtures.task.responseText
+        }))
+        XCTAssertEqual(assistantMessage.relatedTaskID, PreviewFixtures.task.id)
+
+        let readFileActivities = viewModel.selectedMessages.filter { message in
+            guard message.kind == .activity,
+                  let payload = ActivityMessagePayload.decode(from: message.body)
+            else {
+                return false
+            }
+            return payload.phase == .toolCall && payload.name == "read_file"
+        }
+        XCTAssertEqual(readFileActivities.count, 1)
+
+        viewModel.inspectMessage(assistantMessage.id)
+        XCTAssertEqual(viewModel.selectedTask?.id, PreviewFixtures.task.id)
+        XCTAssertEqual(viewModel.inspectorPanel, .overview)
+    }
 }
