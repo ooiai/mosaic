@@ -16,39 +16,33 @@ struct InspectorView: View {
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             if let selectedTask = viewModel.selectedTask {
                 HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Inspector")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(.system(size: 13.5, weight: .semibold))
                             .foregroundStyle(tokens.primaryText)
                         Text(selectedTask.title)
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                             .foregroundStyle(tokens.secondaryText)
-                            .lineLimit(2)
+                            .lineLimit(1)
                     }
                     Spacer()
-                    StatusChip(title: selectedTask.status.rawValue.uppercased(), state: selectedTask.status)
+                    InspectorStateChip(state: selectedTask.status)
                 }
             } else {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("Inspector")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
                     Text("Select a task to inspect timeline, logs, commands, and changed files.")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundStyle(tokens.secondaryText)
                 }
             }
 
-            Picker("Inspector", selection: $viewModel.inspectorPanel) {
-                ForEach(InspectorPanel.allCases) { panel in
-                    Text(panel.title).tag(panel)
-                }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
+            InspectorPanelSwitcher(selection: $viewModel.inspectorPanel)
 
             if viewModel.selectedTask == nil {
                 ContentUnavailableView(
@@ -87,9 +81,9 @@ struct InspectorView: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 11)
+        .padding(.top, 9)
+        .padding(.bottom, 9)
         .background(tokens.sidebarBackground)
     }
 
@@ -370,11 +364,80 @@ struct InspectorView: View {
     }
 
     private func selectionBackground(isSelected: Bool, tokens: ThemeTokens) -> Color {
-        isSelected ? tokens.selection : tokens.elevatedBackground
+        isSelected ? tokens.selection.opacity(0.92) : tokens.elevatedBackground.opacity(0.88)
     }
 
     private func selectionBorder(isSelected: Bool, tokens: ThemeTokens) -> Color {
-        isSelected ? tokens.accent.opacity(0.3) : tokens.border
+        isSelected ? tokens.accent.opacity(0.24) : tokens.border.opacity(0.92)
+    }
+}
+
+private struct InspectorPanelSwitcher: View {
+    @Binding var selection: InspectorPanel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 5) {
+                ForEach(InspectorPanel.allCases) { panel in
+                    Button {
+                        selection = panel
+                    } label: {
+                        Text(panel.shortTitle)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(selection == panel ? tokens.primaryText : tokens.secondaryText)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4.5)
+                            .background(
+                                (selection == panel ? tokens.selection.opacity(0.94) : tokens.elevatedBackground.opacity(0.72)),
+                                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(selection == panel ? tokens.accent.opacity(0.2) : tokens.border.opacity(0.9), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(3)
+        }
+        .background(tokens.panelBackground.opacity(0.66), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .stroke(tokens.border, lineWidth: 1)
+        )
+    }
+}
+
+private struct InspectorStateChip: View {
+    let state: SessionState
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+        let accent: Color = switch state {
+        case .idle: tokens.tertiaryText
+        case .waiting: tokens.warning
+        case .running: tokens.accent
+        case .failed: tokens.failure
+        case .cancelled: tokens.warning
+        case .done: tokens.success
+        }
+
+        HStack(spacing: 6) {
+            Circle()
+                .fill(accent)
+                .frame(width: 4, height: 4)
+            Text(state.rawValue.capitalized)
+        }
+        .font(.system(size: 9.5, weight: .medium))
+        .foregroundStyle(accent)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3.5)
+        .background(accent.opacity(0.11), in: Capsule())
     }
 }
 
@@ -390,10 +453,10 @@ private struct InspectorSectionCard<Content: View>: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         content
-            .padding(14)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(12)
+            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
     }

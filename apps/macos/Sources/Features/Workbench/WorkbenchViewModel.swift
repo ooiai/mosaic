@@ -23,6 +23,17 @@ public enum InspectorPanel: String, CaseIterable, Identifiable, Sendable {
         case .metadata: "Metadata"
         }
     }
+
+    public var shortTitle: String {
+        switch self {
+        case .overview: "Overview"
+        case .timeline: "Timeline"
+        case .logs: "Logs"
+        case .commands: "Commands"
+        case .changes: "Changes"
+        case .metadata: "Metadata"
+        }
+    }
 }
 
 public enum ComposerMode: String, CaseIterable, Identifiable, Sendable {
@@ -899,7 +910,13 @@ public final class WorkbenchViewModel {
                 && $0.kind != .task
                 && !shouldPreserveRuntimeMessage($0)
         }
-        messages.append(contentsOf: events.map(Self.mapMessage(event:)))
+        let existingSignatures = Set(
+            messages
+                .filter { $0.sessionID == sessionID }
+                .map(Self.messageSignature(_:))
+        )
+        let mappedMessages = events.map { mapTranscriptMessage(event: $0, sessionID: sessionID) }
+        messages.append(contentsOf: mappedMessages.filter { !existingSignatures.contains(Self.messageSignature($0)) })
     }
 
     private func ensureSessionExists(id: String, title: String) {
@@ -1088,10 +1105,11 @@ public final class WorkbenchViewModel {
         "pending-\(UUID().uuidString)"
     }
 
-    private static func mapMessage(event: SessionEvent) -> Message {
+    private func mapTranscriptMessage(event: SessionEvent, sessionID: String) -> Message {
         let role: MessageRole
         let kind: MessageKind
         let body: String
+        let relatedTaskID = inferRelatedTaskID(for: event, sessionID: sessionID)
 
         switch event.type {
         case .user:
@@ -1105,11 +1123,11 @@ public final class WorkbenchViewModel {
         case .toolCall:
             role = .system
             kind = .activity
-            body = activityPayload(for: .toolCall, rawText: event.text).encodedString()
+            body = Self.activityPayload(for: .toolCall, rawText: event.text).encodedString()
         case .toolResult:
             role = .system
             kind = .activity
-            body = activityPayload(for: .toolResult, rawText: event.text).encodedString()
+            body = Self.activityPayload(for: .toolResult, rawText: event.text).encodedString()
         case .system:
             role = .system
             kind = .status
@@ -1125,8 +1143,76 @@ public final class WorkbenchViewModel {
             role: role,
             kind: kind,
             body: body,
-            createdAt: date(from: event.timestamp)
+            createdAt: Self.date(from: event.timestamp),
+            relatedTaskID: relatedTaskID
         )
+    }
+
+    private func inferRelatedTaskID(for event: SessionEvent, sessionID: String) -> UUID? {
+        let sessionTasks = tasks
+            .filter { $0.sessionID == sessionID }
+            .sorted { $0.createdAt < $1.createdAt }
+        guard !sessionTasks.isEmpty else { return nil }
+        if sessionTasks.count == 1 {
+            return sessionTasks[0].id
+        }
+
+        let eventText = Self.normalizedText(event.text)
+        let eventDate = Self.date(from: event.timestamp)
+
+        func score(for task: AgentTask) -> Int {
+            var score = 0
+            let prompt = Self.normalizedText(task.prompt)
+            let summary = Self.normalizedText(task.summary)
+            let response = Self.normalizedText(task.responseText)
+
+            switch event.type {
+            case .user:
+                if !eventText.isEmpty {
+                    if prompt == eventText {
+                        score += 1000
+                    } else if prompt.contains(eventText) || eventText.contains(prompt) {
+                        score += 700
+                    }
+                }
+            case .assistant:
+                if !eventText.isEmpty {
+                    if response == eventText {
+                        score += 1000
+                    } else if response.contains(eventText) || eventText.contains(response) {
+                        score += 700
+                    } else if summary == eventText {
+                        score += 500
+                    } else if !summary.isEmpty, summary.contains(Self.firstLine(of: eventText, fallback: summary)) {
+                        score += 300
+                    }
+                }
+            case .toolCall, .toolResult, .system, .error:
+                score += 200
+            }
+
+            let anchorDate: Date
+            switch event.type {
+            case .assistant:
+                anchorDate = task.finishedAt ?? task.startedAt ?? task.createdAt
+            default:
+                anchorDate = task.startedAt ?? task.createdAt
+            }
+            let delta = abs(anchorDate.timeIntervalSince(eventDate))
+            score += max(0, 240 - Int(delta))
+            return score
+        }
+
+        return sessionTasks.max { lhs, rhs in
+            let lhsScore = score(for: lhs)
+            let rhsScore = score(for: rhs)
+            if lhsScore == rhsScore {
+                let lhsDelta = abs((lhs.finishedAt ?? lhs.startedAt ?? lhs.createdAt).timeIntervalSince(eventDate))
+                let rhsDelta = abs((rhs.finishedAt ?? rhs.startedAt ?? rhs.createdAt).timeIntervalSince(eventDate))
+                return lhsDelta > rhsDelta
+            }
+            return lhsScore < rhsScore
+        }?.id
     }
 
     private static func date(from raw: String) -> Date {
@@ -1669,5 +1755,38 @@ public final class WorkbenchViewModel {
             seen.insert(normalized)
             return true
         }
+    }
+
+    private static func normalizedText(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func messageSignature(_ message: Message) -> String {
+        if message.kind == .activity,
+           let payload = ActivityMessagePayload.decode(from: message.body) {
+            let fields = payload.fields
+                .map { "\($0.label)=\($0.value)" }
+                .joined(separator: "&")
+            return [
+                message.sessionID,
+                message.role.rawValue,
+                message.kind.rawValue,
+                message.relatedTaskID?.uuidString ?? "none",
+                payload.phase.rawValue,
+                payload.name,
+                payload.summary,
+                fields,
+            ].joined(separator: "|")
+        }
+
+        return [
+            message.sessionID,
+            message.role.rawValue,
+            message.kind.rawValue,
+            message.relatedTaskID?.uuidString ?? "none",
+            message.body.trimmingCharacters(in: .whitespacesAndNewlines),
+        ].joined(separator: "|")
     }
 }

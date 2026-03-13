@@ -66,16 +66,16 @@ private struct MarkdownTextBlock: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         if let attributed = try? AttributedString(markdown: text) {
             Text(attributed)
-                .font(.system(size: 14.5))
+                .font(.system(size: 14))
                 .foregroundStyle(tokens.primaryText)
                 .tint(tokens.accent)
-                .lineSpacing(4)
+                .lineSpacing(3)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(text)
-                .font(.system(size: 14.5))
-                .lineSpacing(4)
+                .font(.system(size: 14))
+                .lineSpacing(3)
                 .foregroundStyle(tokens.primaryText)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,7 +97,7 @@ private struct CodeBlockView: View {
         let displayedLines = collapse ? Array(lines.prefix(24)) : lines
         let displayed = displayedLines.joined(separator: "\n")
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Text((language ?? "code").uppercased())
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -126,26 +126,26 @@ private struct CodeBlockView: View {
                 }
             }
         }
-        .padding(12)
-        .background(tokens.codeBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(11)
+        .background(tokens.codeBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .stroke(tokens.border, lineWidth: 1)
         )
     }
 
     private func codeBody(displayedLines: [String], displayed: String, tokens: ThemeTokens) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
             if settings.markdown.showLineNumbers {
                 Text(lineNumbers(count: displayedLines.count))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(tokens.tertiaryText)
                     .multilineTextAlignment(.trailing)
             }
 
             Text(CodeSyntaxHighlighter.highlight(displayed, language: language, tokens: tokens))
-                .font(.system(size: 12, design: .monospaced))
-                .lineSpacing(2)
+                .font(.system(size: 11.5, design: .monospaced))
+                .lineSpacing(1.5)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -165,7 +165,7 @@ private struct LogBlockView: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Text("LOG")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -191,26 +191,26 @@ private struct LogBlockView: View {
                 }
             }
         }
-        .padding(12)
-        .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(11)
+        .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .stroke(tokens.border, lineWidth: 1)
         )
     }
 
     private func logBody(lines: [String], tokens: ThemeTokens) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
             if settings.markdown.showLineNumbers {
                 Text((1...max(lines.count, 1)).map(String.init).joined(separator: "\n"))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(tokens.tertiaryText)
                     .multilineTextAlignment(.trailing)
             }
 
             Text(text)
-                .font(.system(size: 12, design: .monospaced))
-                .lineSpacing(2)
+                .font(.system(size: 11.5, design: .monospaced))
+                .lineSpacing(1.5)
                 .foregroundStyle(tokens.secondaryText)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,16 +232,16 @@ private struct StatusBlockView: View {
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(tokens.tertiaryText)
                 Text(text)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12.5))
                     .foregroundStyle(tokens.primaryText)
                     .textSelection(.enabled)
             }
         }
-        .padding(12)
+        .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tokens.accentMuted.opacity(colorScheme == .dark ? 0.55 : 0.75), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(tokens.accentMuted.opacity(colorScheme == .dark ? 0.5 : 0.7), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
                 .stroke(tokens.accent.opacity(0.18), lineWidth: 1)
         )
     }
@@ -298,10 +298,10 @@ private struct BlockHeaderAction: View {
             Text(title)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(accent)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
                 .background(
-                    (isHovered ? tokens.panelBackground.opacity(0.9) : tokens.panelBackground.opacity(0.55)),
+                    (isHovered ? tokens.panelBackground.opacity(0.95) : tokens.panelBackground.opacity(0.62)),
                     in: Capsule()
                 )
         }

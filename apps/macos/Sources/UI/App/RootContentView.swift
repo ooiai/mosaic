@@ -79,15 +79,15 @@ private struct CommandPaletteOverlay: View {
                     viewModel.dismissCommandPalette()
                 }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(tokens.tertiaryText)
 
                     TextField("Search commands", text: $query)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 15))
+                        .font(.system(size: 14))
                         .foregroundStyle(tokens.primaryText)
                         .focused($isSearchFocused)
                         .onSubmit {
@@ -97,36 +97,36 @@ private struct CommandPaletteOverlay: View {
                     Text("ESC")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tokens.tertiaryText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 3.5)
                         .background(tokens.elevatedBackground, in: Capsule())
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, 13)
+                .padding(.vertical, 10)
+                .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(tokens.border, lineWidth: 1)
                 )
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Command Center")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(tokens.primaryText)
-
-                    Text("Run app actions, switch surfaces, and control the current workspace.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(tokens.secondaryText)
+                HStack {
+                    Text("COMMANDS")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tokens.tertiaryText)
+                    Spacer()
+                    Text("\(filteredCommands.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(tokens.tertiaryText)
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     if filteredCommands.isEmpty {
                         Text("No matching commands")
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
                             .foregroundStyle(tokens.secondaryText)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 12)
-                            .padding(.vertical, 14)
+                            .padding(.vertical, 12)
                     } else {
                         ForEach(filteredCommands) { command in
                             CommandPaletteRow(command: command)
@@ -134,14 +134,14 @@ private struct CommandPaletteOverlay: View {
                     }
                 }
             }
-            .frame(width: 440, alignment: .leading)
-            .padding(16)
-            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .frame(width: 420, alignment: .leading)
+            .padding(14)
+            .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
-            .shadow(color: colorScheme == .light ? Color.black.opacity(0.06) : .clear, radius: 24, y: 12)
+            .shadow(color: colorScheme == .light ? Color.black.opacity(0.05) : .clear, radius: 20, y: 10)
         }
         .onAppear { isSearchFocused = true }
         .onExitCommand {
@@ -267,19 +267,19 @@ private struct CommandPaletteRow: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         Button(action: command.action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 11) {
                 Image(systemName: command.systemImage)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(tokens.secondaryText)
-                    .frame(width: 30, height: 30)
-                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .frame(width: 28, height: 28)
+                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(command.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 12.5, weight: .medium))
                         .foregroundStyle(tokens.primaryText)
                     Text(command.subtitle)
-                        .font(.system(size: 11))
+                        .font(.system(size: 10.5))
                         .foregroundStyle(tokens.secondaryText)
                         .lineLimit(2)
                 }
@@ -288,18 +288,18 @@ private struct CommandPaletteRow: View {
 
                 if let shortcut = command.shortcut {
                     Text("⌘\(shortcut)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(tokens.tertiaryText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 3.5)
                         .background(tokens.elevatedBackground, in: Capsule())
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background((isHovered ? tokens.elevatedBackground : Color.clear), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background((isHovered ? tokens.elevatedBackground.opacity(0.92) : Color.clear), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
                     .stroke(isHovered ? tokens.border : .clear, lineWidth: 1)
             )
         }

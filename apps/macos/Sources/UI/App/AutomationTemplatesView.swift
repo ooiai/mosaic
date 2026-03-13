@@ -13,7 +13,7 @@ struct AutomationTemplatesView: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 22) {
                 WorkbenchPageHeader(
                     title: "Automations",
                     subtitle: "Automate work by setting up scheduled threads and reusable agent workflows.",
@@ -57,9 +57,9 @@ struct AutomationTemplatesView: View {
                     }
                 }
             }
-            .padding(.horizontal, 34)
-            .padding(.vertical, 24)
-            .frame(maxWidth: 1040, alignment: .leading)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 22)
+            .frame(maxWidth: 980, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .background(tokens.windowBackground)

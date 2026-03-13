@@ -9,15 +9,15 @@ struct DiffViewer: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         let lines = DiffParser.parse(change.diff)
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(change.path)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(tokens.primaryText)
                     if let previousPath = change.previousPath {
                         Text("from \(previousPath)")
-                            .font(.system(size: 10))
+                            .font(.system(size: 9.5))
                             .foregroundStyle(tokens.secondaryText)
                     }
                 }
@@ -32,19 +32,19 @@ struct DiffViewer: View {
                     Text(change.status.rawValue.uppercased())
                         .foregroundStyle(tokens.tertiaryText)
                 }
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
             }
 
             if change.isBinary {
                 Text("Binary file change. Diff preview is unavailable.")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(tokens.secondaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
-                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(10)
+                    .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             } else if lines.isEmpty {
                 Text("No diff preview available.")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(tokens.secondaryText)
             } else {
                 ScrollView([.horizontal, .vertical], showsIndicators: true) {
@@ -54,10 +54,10 @@ struct DiffViewer: View {
                         }
                     }
                 }
-                .frame(minHeight: 240, maxHeight: 360)
-                .background(tokens.codeBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(minHeight: 220, maxHeight: 332)
+                .background(tokens.codeBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
                         .stroke(tokens.border, lineWidth: 1)
                 )
             }
@@ -77,23 +77,23 @@ private struct DiffLineRow: View {
             lineNumber(line.newLine, foreground: lineNumberColor(tokens: tokens))
 
             Text(line.text)
-                .font(.system(size: 10.5, design: .monospaced))
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(textColor(tokens: tokens))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 2.5)
         }
         .background(background(tokens: tokens))
     }
 
     private func lineNumber(_ value: Int?, foreground: Color) -> some View {
         Text(value.map(String.init) ?? "")
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundStyle(foreground)
-            .frame(width: 38, alignment: .trailing)
-            .padding(.vertical, 3)
-            .padding(.trailing, 8)
+            .frame(width: 34, alignment: .trailing)
+            .padding(.vertical, 2.5)
+            .padding(.trailing, 7)
     }
 
     private func lineNumberColor(tokens: ThemeTokens) -> Color {
@@ -121,13 +121,13 @@ private struct DiffLineRow: View {
     private func background(tokens: ThemeTokens) -> Color {
         switch line.kind {
         case .added:
-            return tokens.success.opacity(0.14)
+            return tokens.success.opacity(0.11)
         case .removed:
-            return tokens.failure.opacity(0.14)
+            return tokens.failure.opacity(0.11)
         case .hunk:
-            return tokens.accentMuted.opacity(0.28)
+            return tokens.accentMuted.opacity(0.2)
         case .meta:
-            return tokens.elevatedBackground.opacity(0.72)
+            return tokens.elevatedBackground.opacity(0.52)
         case .context:
             return .clear
         }

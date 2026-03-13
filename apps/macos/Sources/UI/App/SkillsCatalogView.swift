@@ -15,14 +15,14 @@ struct SkillsCatalogView: View {
         let tokens = ThemeTokens.current(for: colorScheme)
 
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 22) {
                 header()
                 skillSection(title: "Installed", items: filteredInstalled, tokens: tokens)
                 skillSection(title: "Recommended", items: filteredRecommended, tokens: tokens)
             }
-            .padding(.horizontal, 34)
-            .padding(.vertical, 24)
-            .frame(maxWidth: 1040, alignment: .leading)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 22)
+            .frame(maxWidth: 980, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .background(tokens.windowBackground)

@@ -43,17 +43,17 @@ public struct ThemeTokens: Sendable {
             )
         default:
             ThemeTokens(
-                windowBackground: Color(red: 0.978, green: 0.979, blue: 0.982),
-                sidebarBackground: Color(red: 0.905, green: 0.929, blue: 0.955),
+                windowBackground: Color(red: 0.979, green: 0.980, blue: 0.983),
+                sidebarBackground: Color(red: 0.925, green: 0.939, blue: 0.954),
                 panelBackground: Color.white.opacity(0.94),
-                elevatedBackground: Color(red: 0.965, green: 0.969, blue: 0.976),
-                overlayBackground: Color.black.opacity(0.12),
+                elevatedBackground: Color(red: 0.971, green: 0.975, blue: 0.980),
+                overlayBackground: Color.black.opacity(0.10),
                 codeBackground: Color(red: 0.939, green: 0.947, blue: 0.969),
                 logBackground: Color(red: 0.948, green: 0.952, blue: 0.959),
-                border: Color.black.opacity(0.075),
+                border: Color.black.opacity(0.055),
                 accent: Color(red: 0.14, green: 0.39, blue: 0.78),
                 accentMuted: Color(red: 0.82, green: 0.88, blue: 0.95),
-                selection: Color(red: 0.85, green: 0.90, blue: 0.95),
+                selection: Color(red: 0.869, green: 0.908, blue: 0.946),
                 primaryText: Color.black.opacity(0.90),
                 secondaryText: Color.black.opacity(0.66),
                 tertiaryText: Color.black.opacity(0.44),
