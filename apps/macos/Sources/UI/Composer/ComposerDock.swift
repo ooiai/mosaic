@@ -6,20 +6,10 @@ struct ComposerDock: View {
     @Bindable var appViewModel: AppViewModel
     @Bindable var viewModel: WorkbenchViewModel
     @Environment(\.colorScheme) private var colorScheme
+    @State private var suggestionsDismissed = false
 
     private var showsSuggestions: Bool {
-        viewModel.selectedMessages.isEmpty
-    }
-
-    private var contextChips: [String] {
-        var items = [viewModel.project.name]
-        if let session = viewModel.selectedSession?.title, !session.isEmpty {
-            items.append(session)
-        }
-        if let task = viewModel.selectedTask?.title, !task.isEmpty {
-            items.append(task)
-        }
-        return Array(items.prefix(3))
+        viewModel.selectedMessages.isEmpty && !suggestionsDismissed
     }
 
     private var fileContextChips: [String] {
@@ -32,21 +22,39 @@ struct ComposerDock: View {
 
         VStack(spacing: 12) {
             if showsSuggestions {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(WorkbenchReferenceContent.composerSuggestions) { suggestion in
-                            SuggestionPromptCard(
-                                title: suggestion.title,
-                                symbolName: suggestion.symbolName,
-                                tint: suggestion.tint
-                            ) {
-                                appViewModel.seedComposer(with: suggestion.prompt)
+                VStack(spacing: 10) {
+                    HStack {
+                        Spacer()
+                        Text("Explore more")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(tokens.secondaryText)
+                        Button {
+                            suggestionsDismissed = true
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(tokens.tertiaryText)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(WorkbenchReferenceContent.composerSuggestions) { suggestion in
+                                SuggestionPromptCard(
+                                    title: suggestion.title,
+                                    symbolName: suggestion.symbolName,
+                                    tint: suggestion.tint
+                                ) {
+                                    appViewModel.seedComposer(with: suggestion.prompt)
+                                }
                             }
                         }
+                        .padding(.horizontal, 2)
                     }
-                    .padding(.horizontal, 2)
+                    .frame(maxWidth: WorkbenchChromeMetrics.threadContentWidth)
                 }
-                .frame(maxWidth: 760)
+                .frame(maxWidth: WorkbenchChromeMetrics.threadContentWidth)
             }
 
             if !fileContextChips.isEmpty {
@@ -58,7 +66,7 @@ struct ComposerDock: View {
                     }
                     .padding(.horizontal, 2)
                 }
-                .frame(maxWidth: 760)
+                .frame(maxWidth: WorkbenchChromeMetrics.threadContentWidth)
             }
 
             VStack(alignment: .leading, spacing: 0) {
@@ -71,16 +79,18 @@ struct ComposerDock: View {
                             .padding(.vertical, 8)
                     }
 
-                    TextEditor(text: $viewModel.composerText)
-                        .font(.system(size: appViewModel.settings.interfaceFontSize))
-                        .foregroundStyle(tokens.primaryText)
-                        .frame(minHeight: 112, maxHeight: 180)
-                        .scrollContentBackground(.hidden)
+                    ComposerInputTextView(
+                        text: $viewModel.composerText,
+                        fontSize: appViewModel.settings.interfaceFontSize
+                    ) {
+                        Task { await appViewModel.sendCurrentPrompt() }
+                    }
+                    .frame(minHeight: 96, maxHeight: 168)
                 }
 
                 Divider()
-                    .padding(.top, 10)
-                    .padding(.bottom, 10)
+                    .padding(.top, 7)
+                    .padding(.bottom, 7)
 
                 HStack(spacing: 10) {
                     Menu {
@@ -89,22 +99,19 @@ struct ComposerDock: View {
                             appViewModel.createNewThread()
                         }
                     } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(tokens.secondaryText)
-                            .frame(width: 20, height: 20)
+                        ComposerIconButton(systemImage: "plus")
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
 
                     Menu {
-                        ForEach(viewModel.profileChoices, id: \.self) { profile in
-                            Button(profile) {
-                                Task { await appViewModel.selectProfile(profile) }
+                        ForEach(viewModel.availableModelChoices, id: \.self) { model in
+                            Button(model) {
+                                Task { await viewModel.selectModel(model) }
                             }
                         }
                     } label: {
-                        ComposerMenuLabel(title: viewModel.selectedProfile, systemImage: "person.crop.circle")
+                        ComposerMenuLabel(title: viewModel.currentModelLabel, systemImage: "sparkles")
                     }
 
                     Menu {
@@ -117,65 +124,101 @@ struct ComposerDock: View {
                         ComposerMenuLabel(title: viewModel.composerMode.title, systemImage: "bolt")
                     }
 
-                    Menu {
-                        Button(viewModel.currentModelLabel) {}
-                    } label: {
-                        ComposerMenuLabel(title: viewModel.currentModelLabel, systemImage: "sparkles")
-                    }
-
                     Spacer()
 
                     Text("⌘↩ send")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(tokens.tertiaryText)
 
                     if viewModel.canCancelTask {
-                        Button {
+                        ComposerRoundButton(accent: tokens.failure) {
                             Task { await appViewModel.cancelActiveTask() }
                         } label: {
                             Image(systemName: "stop.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(tokens.failure)
-                                .frame(width: 34, height: 34)
-                                .background(tokens.elevatedBackground, in: Circle())
                         }
-                        .buttonStyle(.plain)
                     }
 
-                    Button {
+                    ComposerRoundButton(
+                        foreground: .white,
+                        background: appViewModel.canSendPrompt ? tokens.primaryText : tokens.tertiaryText
+                    ) {
                         Task { await appViewModel.sendCurrentPrompt() }
                     } label: {
                         Image(systemName: viewModel.canCancelTask ? "ellipsis" : "arrow.up")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(Color.white)
-                            .frame(width: 34, height: 34)
-                            .background(appViewModel.canSendPrompt ? tokens.primaryText : tokens.tertiaryText, in: Circle())
                     }
-                    .buttonStyle(.plain)
                     .disabled(!appViewModel.canSendPrompt)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .frame(maxWidth: 760)
+            .padding(.vertical, 10)
+            .frame(maxWidth: WorkbenchChromeMetrics.composerWidth)
             .background(tokens.panelBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(tokens.border, lineWidth: 1)
             )
+            .shadow(color: colorScheme == .light ? Color.black.opacity(0.04) : .clear, radius: 18, y: 10)
 
-            HStack(spacing: 10) {
-                ForEach(contextChips, id: \.self) { chip in
-                    FooterPill(title: chip, systemImage: chip == viewModel.project.name ? "laptopcomputer" : "text.bubble")
+            HStack(spacing: 12) {
+                Menu {
+                    Button("Choose Workspace…", action: chooseWorkspace)
+                    Button("Reveal in Finder") {
+                        appViewModel.revealSelectedWorkspaceInFinder()
+                    }
+                } label: {
+                    FooterBarMenuLabel(
+                        title: viewModel.currentProviderLabel,
+                        systemImage: viewModel.currentProviderLabel == "Local" ? "laptopcomputer" : "network"
+                    )
                 }
-                FooterPill(title: viewModel.currentProviderLabel, systemImage: "externaldrive.badge.wifi")
-                FooterPill(title: viewModel.selectedProfile, systemImage: "shield.lefthalf.filled")
+                .menuStyle(.borderlessButton)
+
+                Menu {
+                    ForEach(viewModel.profileChoices, id: \.self) { profile in
+                        Button(profile) {
+                            Task { await appViewModel.selectProfile(profile) }
+                        }
+                    }
+                    Divider()
+                    Button("Open Settings") {
+                        appViewModel.showSettings(section: .general)
+                    }
+                } label: {
+                    FooterBarMenuLabel(
+                        title: profileFooterTitle,
+                        systemImage: "checkmark.shield"
+                    )
+                }
+                .menuStyle(.borderlessButton)
+
                 Spacer()
-                FooterPill(title: viewModel.selectedSession?.state.rawValue.capitalized ?? "Idle", systemImage: "point.bottomleft.forward.to.point.topright.scurvepath")
+
+                Menu {
+                    Button("Refresh Workspace") {
+                        Task { await appViewModel.refreshActiveProject() }
+                    }
+                    Button("Reveal in Finder") {
+                        appViewModel.revealSelectedWorkspaceInFinder()
+                    }
+                } label: {
+                    FooterBarMenuLabel(
+                        title: viewModel.currentBranchLabel,
+                        systemImage: "point.bottomleft.forward.to.point.topright.scurvepath"
+                    )
+                }
+                .menuStyle(.borderlessButton)
             }
-            .frame(maxWidth: 760)
+            .frame(maxWidth: WorkbenchChromeMetrics.composerWidth)
         }
         .frame(maxWidth: .infinity)
+        .onChange(of: viewModel.selectedSessionID) {
+            suggestionsDismissed = false
+        }
+    }
+
+    private var profileFooterTitle: String {
+        let profile = viewModel.selectedProfile
+        return profile == "default" ? "Default profile" : profile
     }
 
     private func chooseWorkspace() {
@@ -193,6 +236,7 @@ private struct ComposerMenuLabel: View {
     let title: String
     let systemImage: String
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
 
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
@@ -203,8 +247,41 @@ private struct ComposerMenuLabel: View {
             Image(systemName: "chevron.down")
                 .font(.system(size: 10, weight: .semibold))
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(.system(size: 12, weight: .medium))
         .foregroundStyle(tokens.secondaryText)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background((isHovered ? tokens.elevatedBackground : Color.clear), in: Capsule())
+        .onHover { isHovered = $0 }
+    }
+}
+
+private struct FooterBarMenuLabel: View {
+    let title: String
+    let systemImage: String
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+            Text(title)
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(tokens.secondaryText)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+        .background((isHovered ? tokens.elevatedBackground.opacity(0.72) : Color.clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isHovered ? tokens.border : .clear, lineWidth: 1)
+        )
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -225,10 +302,72 @@ private struct ContextChip: View {
         .foregroundStyle(tokens.secondaryText)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(tokens.panelBackground, in: Capsule())
+        .background(tokens.elevatedBackground, in: Capsule())
         .overlay(
             Capsule()
                 .stroke(tokens.border, lineWidth: 1)
         )
+    }
+}
+
+private struct ComposerIconButton: View {
+    let systemImage: String
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Image(systemName: systemImage)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tokens.secondaryText)
+            .frame(width: 22, height: 22)
+            .background((isHovered ? tokens.elevatedBackground : Color.clear), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .onHover { isHovered = $0 }
+    }
+}
+
+private struct ComposerRoundButton<Label: View>: View {
+    let foreground: Color
+    let background: Color
+    let usesFilledBackground: Bool
+    let action: () -> Void
+    let label: Label
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    init(
+        foreground: Color? = nil,
+        background: Color? = nil,
+        accent: Color? = nil,
+        action: @escaping () -> Void,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.foreground = foreground ?? accent ?? .primary
+        self.background = background ?? Color.clear
+        self.usesFilledBackground = background != nil
+        self.action = action
+        self.label = label()
+    }
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Button(action: action) {
+            label
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(foreground)
+                .frame(width: 32, height: 32)
+                .background((isHovered ? hoverBackground(tokens: tokens) : background), in: Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+
+    private func hoverBackground(tokens: ThemeTokens) -> Color {
+        if !usesFilledBackground {
+            return tokens.elevatedBackground
+        }
+        return background.opacity(0.92)
     }
 }

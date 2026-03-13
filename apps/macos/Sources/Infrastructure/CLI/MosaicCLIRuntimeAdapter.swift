@@ -47,6 +47,11 @@ public actor MosaicCLIRuntimeAdapter: AgentWorkbenchRuntime {
         )
     }
 
+    public func setModel(project: Project, model: String) async throws -> ModelSelectionSummary {
+        let client = makeClient(cliPathOverride: nil)
+        return try await client.setModel(workspace: project.workspaceReference, model: model)
+    }
+
     public func startTask(_ request: AgentTaskRequest) async throws -> RuntimeExecution {
         let executableURL = makeExecutableURL(cliPathOverride: request.cliPathOverride)
         guard FileManager.default.fileExists(atPath: executableURL.path) else {
@@ -277,24 +282,11 @@ public actor MosaicCLIRuntimeAdapter: AgentWorkbenchRuntime {
         case "tool_call":
             let name = object["name"] as? String ?? "tool"
             let rendered = renderJSONFragment(object["args"])
-            return .timeline(
-                TimelineEntry(
-                    title: "Tool call",
-                    detail: rendered.isEmpty ? name : "\(name) · \(rendered)",
-                    level: .info
-                )
-            )
+            return .toolCall(name: name, detail: rendered)
         case "tool_result":
             let name = object["name"] as? String ?? "tool"
             let rendered = renderJSONFragment(object["result"])
-            return .cliEvent(
-                CLIEvent(
-                    taskID: taskID,
-                    stream: .status,
-                    text: rendered.isEmpty ? "Tool result · \(name)" : "Tool result · \(name)\n\(rendered)",
-                    isImportant: true
-                )
-            )
+            return .toolResult(name: name, detail: rendered)
         case "error":
             let message = object["message"] as? String ?? "Unknown runtime error"
             return .failed(message: message, exitCode: nil)

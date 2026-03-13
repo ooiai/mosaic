@@ -38,15 +38,14 @@ public struct SettingsView: View {
 
     private func settingsContent(tokens: ThemeTokens) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(viewModel.settingsSection.title)
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(tokens.primaryText)
-                    Text(description(for: viewModel.settingsSection))
-                        .font(.system(size: 15))
-                        .foregroundStyle(tokens.secondaryText)
-                }
+            VStack(alignment: .leading, spacing: 26) {
+                WorkbenchPageHeader(
+                    title: viewModel.settingsSection.title,
+                    subtitle: description(for: viewModel.settingsSection),
+                    trailing: {
+                        EmptyView()
+                    }
+                )
 
                 switch viewModel.settingsSection {
                 case .general:
@@ -61,9 +60,9 @@ public struct SettingsView: View {
                     debugSection(tokens: tokens)
                 }
             }
-            .padding(.horizontal, 42)
-            .padding(.vertical, 30)
-            .frame(maxWidth: 920, alignment: .leading)
+            .padding(.horizontal, 36)
+            .padding(.vertical, 26)
+            .frame(maxWidth: 720, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
         }
     }
@@ -77,7 +76,7 @@ public struct SettingsView: View {
                 .padding(.vertical, 18)
 
             Divider()
-                .padding(.bottom, 8)
+                .padding(.bottom, 12)
 
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(SettingsSection.allCases) { section in
@@ -92,7 +91,7 @@ public struct SettingsView: View {
                             Spacer()
                         }
                         .foregroundStyle(viewModel.settingsSection == section ? tokens.primaryText : tokens.secondaryText)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(
                             (viewModel.settingsSection == section ? tokens.selection : Color.clear),
@@ -109,32 +108,15 @@ public struct SettingsView: View {
     }
 
     private func generalSection(tokens: ThemeTokens) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsGroupTitle("Defaults")
+
             PanelCard {
                 VStack(alignment: .leading, spacing: 0) {
                     SettingsRow(title: "Default profile", detail: "Profile used when opening new workspaces.") {
                         TextField("default", text: $viewModel.settings.defaultProfile)
                             .textFieldStyle(.roundedBorder)
-                            .frame(width: 220)
-                    }
-
-                    SettingsDivider()
-
-                    SettingsRow(title: "Selected workspace", detail: "Current project bound to the main workbench.") {
-                        VStack(alignment: .trailing, spacing: 6) {
-                            Text(viewModel.selectedProject?.name ?? "No workspace")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(tokens.primaryText)
-                            Text(viewModel.selectedProject?.workspacePath ?? "Choose a workspace to begin.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(tokens.secondaryText)
-                                .lineLimit(2)
-                            Button("Reveal in Finder") {
-                                viewModel.revealSelectedWorkspaceInFinder()
-                            }
-                            .buttonStyle(.link)
-                        }
-                        .frame(width: 280, alignment: .trailing)
+                            .frame(width: 200)
                     }
 
                     SettingsDivider()
@@ -151,11 +133,34 @@ public struct SettingsView: View {
                     }
                 }
             }
+
+            settingsGroupTitle("Workspace")
+
+            PanelCard {
+                SettingsRow(title: "Selected workspace", detail: "Current project bound to the main workbench.") {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Text(viewModel.selectedProject?.name ?? "No workspace")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(tokens.primaryText)
+                        Text(viewModel.selectedProject?.workspacePath ?? "Choose a workspace to begin.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(tokens.secondaryText)
+                            .lineLimit(2)
+                        Button("Reveal in Finder") {
+                            viewModel.revealSelectedWorkspaceInFinder()
+                        }
+                        .buttonStyle(.link)
+                    }
+                    .frame(width: 280, alignment: .trailing)
+                }
+            }
         }
     }
 
     private func configurationSection(tokens: ThemeTokens) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsGroupTitle("Runtime")
+
             PanelCard {
                 VStack(alignment: .leading, spacing: 0) {
                     SettingsRow(title: "CLI path", detail: "Override the `mosaic-cli` executable used by the workbench.") {
@@ -193,7 +198,9 @@ public struct SettingsView: View {
     }
 
     private func personalizationSection(tokens: ThemeTokens) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsGroupTitle("Appearance")
+
             PanelCard {
                 VStack(alignment: .leading, spacing: 0) {
                     SettingsRow(title: "Theme", detail: "Use light, dark, or match your system appearance.") {
@@ -223,7 +230,9 @@ public struct SettingsView: View {
     }
 
     private func markdownSection(tokens: ThemeTokens) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsGroupTitle("Rendering")
+
             PanelCard {
                 VStack(alignment: .leading, spacing: 0) {
                     toggleRow(
@@ -261,7 +270,9 @@ public struct SettingsView: View {
     }
 
     private func debugSection(tokens: ThemeTokens) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 22) {
+            settingsGroupTitle("Diagnostics")
+
             PanelCard {
                 VStack(alignment: .leading, spacing: 0) {
                     toggleRow(
@@ -298,6 +309,10 @@ public struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private func settingsGroupTitle(_ title: String) -> some View {
+        PaneSectionTitle(title: title)
     }
 
     private func toggleRow(title: String, detail: String, isOn: Binding<Bool>) -> some View {
@@ -362,12 +377,13 @@ private struct SettingsRow<Accessory: View>: View {
         HStack(alignment: .top, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(tokens.primaryText)
                 Text(detail)
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
                     .foregroundStyle(tokens.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 300, alignment: .leading)
             }
 
             Spacer(minLength: 18)

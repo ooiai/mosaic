@@ -56,6 +56,18 @@ public actor WorkspaceGitInspector {
         return WorkspaceRepositorySnapshot(entries: entries)
     }
 
+    public func currentBranch(project: Project) async -> String? {
+        let workspaceURL = URL(fileURLWithPath: project.workspacePath, isDirectory: true)
+        let isGitRepo = await canRunGit(in: workspaceURL)
+        guard isGitRepo else { return nil }
+        guard let output = await runGit(["rev-parse", "--abbrev-ref", "HEAD"], in: workspaceURL)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !output.isEmpty else {
+            return nil
+        }
+        return output == "HEAD" ? "detached" : output
+    }
+
     public func changes(
         from before: WorkspaceRepositorySnapshot,
         to after: WorkspaceRepositorySnapshot

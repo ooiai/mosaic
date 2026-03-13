@@ -31,7 +31,7 @@ struct MarkdownRenderer: View {
 
     var body: some View {
         let blocks = MarkdownParser.parse(text)
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(blocks) { block in
                 switch block {
                 case let .markdown(_, markdown):
@@ -41,13 +41,17 @@ struct MarkdownRenderer: View {
                 case let .code(_, language, code):
                     CodeBlockView(language: language, code: code, settings: settings)
                 case let .log(_, log):
-                    LogBlockView(text: log)
+                    LogBlockView(text: log, settings: settings)
                 case let .status(_, status):
                     StatusBlockView(text: status)
                 case let .table(_, headers, rows):
                     MarkdownTableView(headers: headers, rows: rows)
                 case let .image(_, url, alt):
-                    MarkdownImageView(urlString: url, alt: alt)
+                    if settings.markdown.renderImages {
+                        MarkdownImageView(urlString: url, alt: alt)
+                    } else {
+                        MarkdownTextBlock(text: alt ?? url)
+                    }
                 }
             }
         }
@@ -62,11 +66,16 @@ private struct MarkdownTextBlock: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         if let attributed = try? AttributedString(markdown: text) {
             Text(attributed)
+                .font(.system(size: 14.5))
                 .foregroundStyle(tokens.primaryText)
+                .tint(tokens.accent)
+                .lineSpacing(4)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(text)
+                .font(.system(size: 14.5))
+                .lineSpacing(4)
                 .foregroundStyle(tokens.primaryText)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -85,58 +94,127 @@ private struct CodeBlockView: View {
         let tokens = ThemeTokens.current(for: colorScheme)
         let lines = code.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         let collapse = settings.markdown.collapseLongContent && lines.count > 24 && !expanded
-        let displayed = collapse ? Array(lines.prefix(24)).joined(separator: "\n") : code
+        let displayedLines = collapse ? Array(lines.prefix(24)) : lines
+        let displayed = displayedLines.joined(separator: "\n")
 
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text((language ?? "code").uppercased())
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundStyle(tokens.tertiaryText)
+                Text("· \(lines.count) lines")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
                 Spacer()
                 if collapse {
-                    Button("Show More") { expanded = true }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(tokens.accent)
+                    BlockHeaderAction(title: "Show More", accent: tokens.accent) { expanded = true }
                 }
-                Button("Copy") {
+                BlockHeaderAction(title: "Copy", accent: tokens.accent) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(code, forType: .string)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(tokens.accent)
+            }
+
+            Group {
+                if settings.markdown.wrapCode {
+                    codeBody(displayedLines: displayedLines, displayed: displayed, tokens: tokens)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        codeBody(displayedLines: displayedLines, displayed: displayed, tokens: tokens)
+                            .fixedSize(horizontal: true, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(tokens.codeBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tokens.border, lineWidth: 1)
+        )
+    }
+
+    private func codeBody(displayedLines: [String], displayed: String, tokens: ThemeTokens) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            if settings.markdown.showLineNumbers {
+                Text(lineNumbers(count: displayedLines.count))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                    .multilineTextAlignment(.trailing)
             }
 
             Text(CodeSyntaxHighlighter.highlight(displayed, language: language, tokens: tokens))
                 .font(.system(size: 12, design: .monospaced))
+                .lineSpacing(2)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
-        .background(tokens.codeBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(tokens.border, lineWidth: 1)
-        )
+    }
+
+    private func lineNumbers(count: Int) -> String {
+        (1...max(count, 1)).map(String.init).joined(separator: "\n")
     }
 }
 
 private struct LogBlockView: View {
     let text: String
+    let settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let tokens = ThemeTokens.current(for: colorScheme)
-        Text(text)
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundStyle(tokens.secondaryText)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(tokens.border, lineWidth: 1)
-            )
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("LOG")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                Text("· \(lines.count) lines")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                Spacer()
+                BlockHeaderAction(title: "Copy", accent: tokens.accent) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                }
+            }
+
+            Group {
+                if settings.markdown.wrapCode {
+                    logBody(lines: lines, tokens: tokens)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        logBody(lines: lines, tokens: tokens)
+                            .fixedSize(horizontal: true, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(tokens.logBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tokens.border, lineWidth: 1)
+        )
+    }
+
+    private func logBody(lines: [String], tokens: ThemeTokens) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            if settings.markdown.showLineNumbers {
+                Text((1...max(lines.count, 1)).map(String.init).joined(separator: "\n"))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                    .multilineTextAlignment(.trailing)
+            }
+
+            Text(text)
+                .font(.system(size: 12, design: .monospaced))
+                .lineSpacing(2)
+                .foregroundStyle(tokens.secondaryText)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -149,16 +227,22 @@ private struct StatusBlockView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "bolt.circle.fill")
                 .foregroundStyle(tokens.accent)
-            Text(text)
-                .foregroundStyle(tokens.primaryText)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("STATUS")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(tokens.tertiaryText)
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(tokens.primaryText)
+                    .textSelection(.enabled)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tokens.elevatedBackground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(tokens.accentMuted.opacity(colorScheme == .dark ? 0.55 : 0.75), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(tokens.border, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tokens.accent.opacity(0.18), lineWidth: 1)
         )
     }
 }
@@ -197,6 +281,32 @@ private struct MarkdownTableView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(tokens.border, lineWidth: 1)
         )
+    }
+}
+
+private struct BlockHeaderAction: View {
+    let title: String
+    let accent: Color
+    let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isHovered = false
+
+    var body: some View {
+        let tokens = ThemeTokens.current(for: colorScheme)
+
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(accent)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    (isHovered ? tokens.panelBackground.opacity(0.9) : tokens.panelBackground.opacity(0.55)),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 

@@ -102,9 +102,122 @@ public enum MessageRole: String, Codable, Sendable {
 public enum MessageKind: String, Codable, Sendable {
     case markdown
     case task
+    case activity
     case log
     case status
     case error
+}
+
+public enum ActivityMessagePhase: String, Codable, Hashable, Sendable {
+    case toolCall
+    case toolResult
+
+    public var title: String {
+        switch self {
+        case .toolCall: "Tool Call"
+        case .toolResult: "Tool Result"
+        }
+    }
+}
+
+public struct ActivityMessageField: Codable, Hashable, Sendable {
+    public var label: String
+    public var value: String
+
+    public init(label: String, value: String) {
+        self.label = label
+        self.value = value
+    }
+}
+
+public enum ActivityPreviewKind: String, Codable, Hashable, Sendable {
+    case neutral
+    case success
+    case warning
+    case failure
+}
+
+public struct ActivityMessagePayload: Codable, Hashable, Sendable {
+    public var phase: ActivityMessagePhase
+    public var name: String
+    public var summary: String
+    public var fields: [ActivityMessageField]
+    public var previewTitle: String?
+    public var previewText: String?
+    public var previewKind: ActivityPreviewKind?
+    public var detail: String?
+
+    public init(
+        phase: ActivityMessagePhase,
+        name: String,
+        summary: String,
+        fields: [ActivityMessageField] = [],
+        previewTitle: String? = nil,
+        previewText: String? = nil,
+        previewKind: ActivityPreviewKind? = nil,
+        detail: String? = nil
+    ) {
+        self.phase = phase
+        self.name = name
+        self.summary = summary
+        self.fields = fields
+        self.previewTitle = previewTitle
+        self.previewText = previewText
+        self.previewKind = previewKind
+        self.detail = detail
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case phase
+        case name
+        case summary
+        case fields
+        case previewTitle
+        case previewText
+        case previewKind
+        case detail
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        phase = try container.decode(ActivityMessagePhase.self, forKey: .phase)
+        name = try container.decode(String.self, forKey: .name)
+        summary = try container.decode(String.self, forKey: .summary)
+        fields = try container.decodeIfPresent([ActivityMessageField].self, forKey: .fields) ?? []
+        previewTitle = try container.decodeIfPresent(String.self, forKey: .previewTitle)
+        previewText = try container.decodeIfPresent(String.self, forKey: .previewText)
+        previewKind = try container.decodeIfPresent(ActivityPreviewKind.self, forKey: .previewKind)
+        detail = try container.decodeIfPresent(String.self, forKey: .detail)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(phase, forKey: .phase)
+        try container.encode(name, forKey: .name)
+        try container.encode(summary, forKey: .summary)
+        if !fields.isEmpty {
+            try container.encode(fields, forKey: .fields)
+        }
+        try container.encodeIfPresent(previewTitle, forKey: .previewTitle)
+        try container.encodeIfPresent(previewText, forKey: .previewText)
+        try container.encodeIfPresent(previewKind, forKey: .previewKind)
+        try container.encodeIfPresent(detail, forKey: .detail)
+    }
+
+    public func encodedString() -> String {
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(self),
+              let value = String(data: data, encoding: .utf8)
+        else {
+            return summary
+        }
+        return value
+    }
+
+    public static func decode(from string: String) -> ActivityMessagePayload? {
+        guard let data = string.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(ActivityMessagePayload.self, from: data)
+    }
 }
 
 public struct Message: Identifiable, Codable, Hashable, Sendable {
@@ -447,6 +560,25 @@ public struct ProjectSnapshot: Sendable {
     }
 }
 
+public struct ProjectUIState: Codable, Hashable, Sendable {
+    public var sidebarQuery: String
+    public var selectedFileChangeID: UUID?
+    public var isInspectorVisible: Bool
+    public var inspectorPanel: String
+
+    public init(
+        sidebarQuery: String = "",
+        selectedFileChangeID: UUID? = nil,
+        isInspectorVisible: Bool = true,
+        inspectorPanel: String = "overview"
+    ) {
+        self.sidebarQuery = sidebarQuery
+        self.selectedFileChangeID = selectedFileChangeID
+        self.isInspectorVisible = isInspectorVisible
+        self.inspectorPanel = inspectorPanel
+    }
+}
+
 public struct ProjectArchive: Codable, Hashable, Sendable {
     public var project: Project
     public var sessions: [Session]
@@ -454,6 +586,7 @@ public struct ProjectArchive: Codable, Hashable, Sendable {
     public var tasks: [AgentTask]
     public var selectedSessionID: String?
     public var composerDraft: String
+    public var uiState: ProjectUIState?
 
     public init(
         project: Project,
@@ -461,7 +594,8 @@ public struct ProjectArchive: Codable, Hashable, Sendable {
         messages: [Message] = [],
         tasks: [AgentTask] = [],
         selectedSessionID: String? = nil,
-        composerDraft: String = ""
+        composerDraft: String = "",
+        uiState: ProjectUIState? = nil
     ) {
         self.project = project
         self.sessions = sessions
@@ -469,6 +603,32 @@ public struct ProjectArchive: Codable, Hashable, Sendable {
         self.tasks = tasks
         self.selectedSessionID = selectedSessionID
         self.composerDraft = composerDraft
+        self.uiState = uiState
+    }
+}
+
+public struct DesktopUIState: Codable, Hashable, Sendable {
+    public var selectedDestination: String
+    public var skillsSearchQuery: String
+    public var isConsoleDrawerVisible: Bool
+    public var sidebarWidth: Double
+    public var inspectorWidth: Double
+    public var consoleHeight: Double
+
+    public init(
+        selectedDestination: String = "thread",
+        skillsSearchQuery: String = "",
+        isConsoleDrawerVisible: Bool = false,
+        sidebarWidth: Double = 308,
+        inspectorWidth: Double = 340,
+        consoleHeight: Double = 170
+    ) {
+        self.selectedDestination = selectedDestination
+        self.skillsSearchQuery = skillsSearchQuery
+        self.isConsoleDrawerVisible = isConsoleDrawerVisible
+        self.sidebarWidth = sidebarWidth
+        self.inspectorWidth = inspectorWidth
+        self.consoleHeight = consoleHeight
     }
 }
 
@@ -476,15 +636,18 @@ public struct DesktopArchive: Codable, Hashable, Sendable {
     public var projects: [ProjectArchive]
     public var selectedProjectID: UUID?
     public var settings: AppSettings
+    public var uiState: DesktopUIState?
 
     public init(
         projects: [ProjectArchive] = [],
         selectedProjectID: UUID? = nil,
-        settings: AppSettings = .init()
+        settings: AppSettings = .init(),
+        uiState: DesktopUIState? = nil
     ) {
         self.projects = projects
         self.selectedProjectID = selectedProjectID
         self.settings = settings
+        self.uiState = uiState
     }
 }
 
