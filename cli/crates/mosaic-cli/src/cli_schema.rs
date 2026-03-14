@@ -1543,6 +1543,14 @@ struct AgentsArgs {
 #[derive(Subcommand, Debug, Clone)]
 enum AgentsCommand {
     List,
+    Current {
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        route: Option<String>,
+    },
     Add {
         #[arg(long)]
         name: String,

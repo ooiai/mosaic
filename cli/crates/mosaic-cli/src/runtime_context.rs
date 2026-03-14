@@ -25,6 +25,21 @@ pub(super) struct RuntimeContext {
     pub(super) active_profile_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct RuntimeSelector {
+    pub(super) profile: String,
+    pub(super) project_state: bool,
+}
+
+impl From<&Cli> for RuntimeSelector {
+    fn from(value: &Cli) -> Self {
+        Self {
+            profile: value.profile.clone(),
+            project_state: value.project_state,
+        }
+    }
+}
+
 impl RuntimeContext {
     pub(super) fn session_metadata(&self) -> SessionRuntimeMetadata {
         SessionRuntimeMetadata {
@@ -119,7 +134,21 @@ pub(super) fn build_runtime(
     route_hint: Option<&str>,
     session_hint: Option<&str>,
 ) -> Result<RuntimeContext> {
-    let state_paths = resolve_state_paths(cli.project_state)?;
+    build_runtime_from_selector(
+        &RuntimeSelector::from(cli),
+        requested_agent_id,
+        route_hint,
+        session_hint,
+    )
+}
+
+pub(super) fn build_runtime_from_selector(
+    selector: &RuntimeSelector,
+    requested_agent_id: Option<&str>,
+    route_hint: Option<&str>,
+    session_hint: Option<&str>,
+) -> Result<RuntimeContext> {
+    let state_paths = resolve_state_paths(selector.project_state)?;
     state_paths.ensure_dirs()?;
     let manager = ConfigManager::new(state_paths.config_path.clone());
     let config = manager.load()?;
@@ -138,7 +167,7 @@ pub(super) fn build_runtime(
     };
     let mut resolved = agent_store.resolve_effective_profile(
         &config,
-        &cli.profile,
+        &selector.profile,
         requested_agent_id.or(session_agent_id.as_deref()),
         route_hint,
     )?;

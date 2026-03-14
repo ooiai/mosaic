@@ -37,6 +37,8 @@ pub struct SessionSummary {
     pub session_id: String,
     pub event_count: usize,
     pub last_updated: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<SessionRuntimeMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,10 +106,12 @@ impl SessionStore {
                 .to_string();
             let events = Self::read_events_from_path(&path)?;
             let last_updated = events.last().map(|event| event.ts);
+            let runtime = Self::latest_runtime_metadata_from_events(&events);
             sessions.push(SessionSummary {
                 session_id,
                 event_count: events.len(),
                 last_updated,
+                runtime,
             });
         }
         sessions.sort_by_key(|summary| Reverse(summary.last_updated));
@@ -310,6 +314,40 @@ mod tests {
             runtime,
             Some(SessionRuntimeMetadata {
                 agent_id: Some("editor".to_string()),
+                profile_name: "default".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn list_sessions_includes_runtime_summary() {
+        let temp = tempdir().unwrap();
+        let store = SessionStore::new(temp.path().join("sessions"));
+        let sid = store.create_session_id();
+        store
+            .append_event(&SessionStore::build_runtime_metadata_event(
+                &sid,
+                &SessionRuntimeMetadata {
+                    agent_id: Some("writer".to_string()),
+                    profile_name: "default".to_string(),
+                },
+            ))
+            .unwrap();
+        store
+            .append_event(&SessionStore::build_event(
+                &sid,
+                EventKind::Assistant,
+                json!({ "text": "done" }),
+            ))
+            .unwrap();
+
+        let sessions = store.list_sessions().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, sid);
+        assert_eq!(
+            sessions[0].runtime,
+            Some(SessionRuntimeMetadata {
+                agent_id: Some("writer".to_string()),
                 profile_name: "default".to_string(),
             })
         );

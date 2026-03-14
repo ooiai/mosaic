@@ -241,6 +241,10 @@
         {
           "event_count": "number",
           "last_updated": "string",
+          "runtime": {
+            "agent_id": "null",
+            "profile_name": "string"
+          },
           "session_id": "string"
         }
       ],

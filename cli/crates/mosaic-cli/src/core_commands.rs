@@ -6,6 +6,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use mosaic_agent::{AgentEvent, AgentRunOptions};
+use mosaic_agents::{AgentStore, agent_routes_path, agents_file_path};
 use mosaic_core::config::{ConfigFile, ConfigManager, ProfileConfig, RunGuardMode, StateConfig};
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::models::ModelRoutingStore;
@@ -1502,26 +1503,26 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
             .await;
 
         match result {
-        Ok(result) => {
-            print_json_line(&json!({
-                "type": "run_finished",
-                "session_id": result.session_id,
-                "response": result.response,
-                "turns": result.turns,
-                "agent_id": runtime.active_agent_id.clone(),
-                "profile": runtime.active_profile_name.clone(),
-            }));
-            return Ok(());
-        }
-        Err(error) => {
-            print_json_line(&json!({
-                "type": "run_failed",
-                "message": error.to_string(),
-                "code": error.code(),
-                "exit_code": error.exit_code(),
-            }));
-            return Err(error);
-        }
+            Ok(result) => {
+                print_json_line(&json!({
+                    "type": "run_finished",
+                    "session_id": result.session_id,
+                    "response": result.response,
+                    "turns": result.turns,
+                    "agent_id": runtime.active_agent_id.clone(),
+                    "profile": runtime.active_profile_name.clone(),
+                }));
+                return Ok(());
+            }
+            Err(error) => {
+                print_json_line(&json!({
+                    "type": "run_failed",
+                    "message": error.to_string(),
+                    "code": error.code(),
+                    "exit_code": error.exit_code(),
+                }));
+                return Err(error);
+            }
         }
     }
 
@@ -1655,6 +1656,7 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                 println!("/status   Show profile/agent/session");
                 println!("/agent    Show active agent");
                 println!("/agent ID Switch active agent");
+                println!("/agents   List configured agents");
                 println!("/session  Show current session id");
                 println!("/new      Start a new chat session");
                 println!("/exit     Exit chat");
@@ -1686,6 +1688,17 @@ pub(super) async fn handle_chat(cli: &Cli, args: ChatArgs) -> Result<()> {
                     "agent: {}",
                     format_chat_agent(runtime.active_agent_id.as_deref())
                 );
+                continue;
+            }
+            ChatReplCommand::Agents => {
+                match chat_agent_inventory(cli.project_state, runtime.active_agent_id.as_deref()) {
+                    Ok(lines) => {
+                        for line in lines {
+                            println!("{line}");
+                        }
+                    }
+                    Err(err) => println!("error: {err}"),
+                }
                 continue;
             }
             ChatReplCommand::AgentSet(agent_id) => {
@@ -1749,6 +1762,7 @@ enum ChatReplCommand<'a> {
     New,
     Status,
     Agent,
+    Agents,
     AgentSet(&'a str),
     Prompt(&'a str),
 }
@@ -1772,6 +1786,7 @@ fn parse_chat_repl_command(prompt: &str) -> ChatReplCommand<'_> {
         "/session" => ChatReplCommand::Session,
         "/new" => ChatReplCommand::New,
         "/status" => ChatReplCommand::Status,
+        "/agents" => ChatReplCommand::Agents,
         _ => ChatReplCommand::Prompt(prompt),
     }
 }
@@ -1786,6 +1801,55 @@ fn format_chat_agent(agent_id: Option<&str>) -> String {
     agent_id
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| "<none>".to_string())
+}
+
+fn chat_agent_inventory(project_state: bool, active_agent_id: Option<&str>) -> Result<Vec<String>> {
+    let state_paths = resolve_state_paths(project_state)?;
+    let store = AgentStore::new(
+        agents_file_path(&state_paths.data_dir),
+        agent_routes_path(&state_paths.data_dir),
+    );
+    let agents = store.list()?;
+    if agents.is_empty() {
+        return Ok(vec!["agents: <none>".to_string()]);
+    }
+    let routes = store.load_routes()?;
+    let mut lines = vec!["agents:".to_string()];
+    for agent in agents {
+        let route_keys = routes
+            .routes
+            .iter()
+            .filter_map(|(route, id)| {
+                if id == &agent.id {
+                    Some(route.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut tags = Vec::new();
+        if routes.default_agent_id.as_deref() == Some(agent.id.as_str()) {
+            tags.push("default".to_string());
+        }
+        if !route_keys.is_empty() {
+            tags.push(format!("routes={}", route_keys.join(",")));
+        }
+        let marker = if active_agent_id == Some(agent.id.as_str()) {
+            "*"
+        } else {
+            "-"
+        };
+        let tags = if tags.is_empty() {
+            String::new()
+        } else {
+            format!(" tags={}", tags.join(" "))
+        };
+        lines.push(format!(
+            "{marker} {} ({}) profile={}{}",
+            agent.id, agent.name, agent.profile, tags
+        ));
+    }
+    Ok(lines)
 }
 
 fn normalize_models_query(query: Option<String>) -> Result<Option<String>> {
@@ -1935,6 +1999,10 @@ mod repl_tests {
             ChatReplCommand::Agent
         ));
         assert!(matches!(
+            parse_chat_repl_command("/agents"),
+            ChatReplCommand::Agents
+        ));
+        assert!(matches!(
             parse_chat_repl_command("/agent writer"),
             ChatReplCommand::AgentSet("writer")
         ));
@@ -1978,9 +2046,19 @@ pub(super) async fn handle_session(cli: &Cli, args: SessionArgs) -> Result<()> {
                         .last_updated
                         .map(|value| value.to_rfc3339())
                         .unwrap_or_else(|| "-".to_string());
+                    let runtime = session.runtime.as_ref().map_or_else(
+                        || "profile=<unknown> agent=<none>".to_string(),
+                        |runtime| {
+                            format!(
+                                "profile={} agent={}",
+                                runtime.profile_name,
+                                runtime.agent_id.as_deref().unwrap_or("<none>")
+                            )
+                        },
+                    );
                     println!(
-                        "{} events={} last={}",
-                        session.session_id, session.event_count, last
+                        "{} events={} last={} {}",
+                        session.session_id, session.event_count, last, runtime
                     );
                 }
             }

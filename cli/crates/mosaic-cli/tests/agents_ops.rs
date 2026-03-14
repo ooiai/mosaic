@@ -99,6 +99,20 @@ fn agents_add_route_and_ask_flow() {
             .iter()
             .any(|item| item["id"].as_str() == Some("writer"))
     );
+    let listed_writer = list_json["agents"]
+        .as_array()
+        .expect("agents array")
+        .iter()
+        .find(|item| item["id"].as_str() == Some("writer"))
+        .expect("writer in agents list");
+    assert_eq!(listed_writer["is_default"], true);
+    assert_eq!(
+        listed_writer["route_keys"]
+            .as_array()
+            .expect("route_keys")
+            .len(),
+        2
+    );
 
     let resolve_output = Command::cargo_bin("mosaic")
         .expect("binary")
@@ -170,6 +184,235 @@ fn agents_add_route_and_ask_flow() {
     let remove_json: Value = serde_json::from_slice(&remove_output).expect("remove json");
     assert_eq!(remove_json["ok"], true);
     assert_eq!(remove_json["removed"], true);
+}
+
+#[test]
+#[allow(deprecated)]
+fn agents_list_text_includes_default_and_route_tags() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--model",
+            "mock-model",
+            "--set-default",
+            "--route",
+            "ask",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "route",
+            "set",
+            "chat",
+            "writer",
+        ])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "agents", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output).expect("utf8");
+    assert!(stdout.contains("default"));
+    assert!(stdout.contains("routes=ask,chat") || stdout.contains("routes=chat,ask"));
+}
+
+#[test]
+#[allow(deprecated)]
+fn agents_current_explains_runtime_resolution_precedence() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "reviewer",
+            "--name",
+            "Reviewer",
+            "--model",
+            "mock-model",
+            "--set-default",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "route",
+            "set",
+            "chat",
+            "writer",
+        ])
+        .assert()
+        .success();
+
+    let seeded = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .env("MOSAIC_MOCK_CHAT_RESPONSE", "seed reviewer")
+        .args([
+            "--project-state",
+            "--json",
+            "chat",
+            "--agent",
+            "reviewer",
+            "--prompt",
+            "seed reviewer session",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let seeded_json: Value = serde_json::from_slice(&seeded).expect("seeded json");
+    let session_id = seeded_json["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    let session_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "agents",
+            "current",
+            "--route",
+            "chat",
+            "--session",
+            &session_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let session_json: Value = serde_json::from_slice(&session_output).expect("session current");
+    assert_eq!(session_json["resolution_source"], "session_runtime");
+    assert_eq!(session_json["session_agent_id"], "reviewer");
+    assert_eq!(session_json["route_agent_id"], "writer");
+    assert_eq!(session_json["default_agent_id"], "reviewer");
+    assert_eq!(session_json["resolved_agent_id"], "reviewer");
+
+    let route_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "agents",
+            "current",
+            "--route",
+            "chat",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let route_json: Value = serde_json::from_slice(&route_output).expect("route current");
+    assert_eq!(route_json["resolution_source"], "route_binding");
+    assert_eq!(route_json["resolved_agent_id"], "writer");
+
+    let explicit_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "--json",
+            "agents",
+            "current",
+            "--agent",
+            "writer",
+            "--route",
+            "chat",
+            "--session",
+            &session_id,
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let explicit_json: Value = serde_json::from_slice(&explicit_output).expect("explicit current");
+    assert_eq!(explicit_json["resolution_source"], "explicit_agent");
+    assert_eq!(explicit_json["resolved_agent_id"], "writer");
 }
 
 #[test]

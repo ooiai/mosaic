@@ -24,9 +24,40 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
             let agents = store.list()?;
             let routes = store.load_routes()?;
             if cli.json {
+                let agent_rows = agents
+                    .iter()
+                    .map(|agent| {
+                        let route_keys = routes
+                            .routes
+                            .iter()
+                            .filter_map(|(route, id)| {
+                                if id == &agent.id {
+                                    Some(route.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        json!({
+                            "id": &agent.id,
+                            "name": &agent.name,
+                            "profile": &agent.profile,
+                            "skills": &agent.skills,
+                            "model": &agent.model,
+                            "temperature": &agent.temperature,
+                            "max_turns": &agent.max_turns,
+                            "tools_enabled": &agent.tools_enabled,
+                            "guard_mode": &agent.guard_mode,
+                            "created_at": &agent.created_at,
+                            "updated_at": &agent.updated_at,
+                            "is_default": routes.default_agent_id.as_deref() == Some(agent.id.as_str()),
+                            "route_keys": route_keys,
+                        })
+                    })
+                    .collect::<Vec<_>>();
                 print_json(&json!({
                     "ok": true,
-                    "agents": agents,
+                    "agents": agent_rows,
                     "routes": routes,
                 }));
             } else if agents.is_empty() {
@@ -37,17 +68,43 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
                     println!("default agent: {default_agent_id}");
                 }
                 for agent in agents {
+                    let route_keys = routes
+                        .routes
+                        .iter()
+                        .filter_map(|(route, id)| {
+                            if id == &agent.id {
+                                Some(route.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>();
                     let skills = if agent.skills.is_empty() {
                         "-".to_string()
                     } else {
                         agent.skills.join(",")
                     };
+                    let tags = {
+                        let mut tags = Vec::new();
+                        if routes.default_agent_id.as_deref() == Some(agent.id.as_str()) {
+                            tags.push("default".to_string());
+                        }
+                        if !route_keys.is_empty() {
+                            tags.push(format!("routes={}", route_keys.join(",")));
+                        }
+                        if tags.is_empty() {
+                            "-".to_string()
+                        } else {
+                            tags.join(" ")
+                        }
+                    };
                     println!(
-                        "- {} ({}) profile={} skills={} model={} temperature={} max_turns={}",
+                        "- {} ({}) profile={} skills={} tags={} model={} temperature={} max_turns={}",
                         agent.id,
                         agent.name,
                         agent.profile,
                         skills,
+                        tags,
                         agent.model.unwrap_or_else(|| "-".to_string()),
                         agent
                             .temperature
@@ -59,6 +116,90 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
                             .unwrap_or_else(|| "-".to_string())
                     );
                 }
+            }
+        }
+        AgentsCommand::Current {
+            agent,
+            session,
+            route,
+        } => {
+            if !manager.exists() {
+                return Err(MosaicError::Config(
+                    "config file not found. run `mosaic setup` first".to_string(),
+                ));
+            }
+            let config = manager.load()?;
+            let routes = store.load_routes()?;
+            let normalized_route = route.as_deref().map(normalize_route_key).transpose()?;
+            let session_store = mosaic_core::session::SessionStore::new(paths.sessions_dir.clone());
+            let session_runtime = match session.as_deref() {
+                Some(session_id) => session_store.latest_runtime_metadata(session_id)?,
+                None => None,
+            };
+            let session_agent_id = if agent.is_none() {
+                session_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.agent_id.clone())
+            } else {
+                None
+            };
+            let route_agent_id = normalized_route
+                .as_ref()
+                .and_then(|route_key| routes.routes.get(route_key).cloned());
+            let resolved = store.resolve_effective_profile(
+                &config,
+                &cli.profile,
+                agent.as_deref().or(session_agent_id.as_deref()),
+                normalized_route.as_deref(),
+            )?;
+            let resolution_source = if agent.is_some() {
+                "explicit_agent"
+            } else if session_agent_id.is_some() {
+                "session_runtime"
+            } else if route_agent_id.is_some() {
+                "route_binding"
+            } else if routes.default_agent_id.is_some() {
+                "default_agent"
+            } else {
+                "cli_profile"
+            };
+            if cli.json {
+                print_json(&json!({
+                    "ok": true,
+                    "resolution_source": resolution_source,
+                    "explicit_agent_id": agent,
+                    "session_id": session,
+                    "session_agent_id": session_agent_id,
+                    "session_profile_name": session_runtime.as_ref().map(|runtime| runtime.profile_name.clone()),
+                    "route_key": normalized_route,
+                    "route_agent_id": route_agent_id,
+                    "default_agent_id": routes.default_agent_id,
+                    "resolved_agent_id": resolved.agent_id,
+                    "resolved_profile_name": resolved.profile_name,
+                    "profile": resolved.profile,
+                }));
+            } else {
+                println!("resolution source: {resolution_source}");
+                println!(
+                    "resolved agent: {}",
+                    resolved.agent_id.as_deref().unwrap_or("<none>")
+                );
+                println!("resolved profile: {}", resolved.profile_name);
+                println!("explicit agent: {}", agent.as_deref().unwrap_or("<none>"));
+                println!("session: {}", session.as_deref().unwrap_or("<none>"));
+                println!(
+                    "session agent: {}",
+                    session_agent_id.as_deref().unwrap_or("<none>")
+                );
+                println!("route: {}", normalized_route.as_deref().unwrap_or("<none>"));
+                println!(
+                    "route agent: {}",
+                    route_agent_id.as_deref().unwrap_or("<none>")
+                );
+                println!(
+                    "default agent: {}",
+                    routes.default_agent_id.as_deref().unwrap_or("<none>")
+                );
             }
         }
         AgentsCommand::Add {
@@ -387,6 +528,16 @@ pub(super) fn handle_agents(cli: &Cli, args: AgentsArgs) -> Result<()> {
         },
     }
     Ok(())
+}
+
+fn normalize_route_key(raw: &str) -> Result<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(MosaicError::Validation(
+            "route key cannot be empty".to_string(),
+        ));
+    }
+    Ok(value.to_string())
 }
 
 fn resolve_skill_ids(state_root: &std::path::Path, skills: Vec<String>) -> Result<Vec<String>> {

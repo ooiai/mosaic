@@ -1140,12 +1140,32 @@ fn json_agents_module_schema_matches_snapshot() {
     );
     assert_success_envelope(&route_resolve);
 
+    let current = parse_stdout_json(
+        &Command::cargo_bin("mosaic")
+            .expect("binary")
+            .current_dir(temp.path())
+            .args([
+                "--project-state",
+                "--json",
+                "agents",
+                "current",
+                "--route",
+                "ask",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout,
+    );
+    assert_success_envelope(&current);
+
     let actual_schema = json!({
         "list_before": schema_of(&list_before),
         "add": schema_of(&add),
         "list_after": schema_of(&list_after),
         "show": schema_of(&show),
         "route_resolve": schema_of(&route_resolve),
+        "current": schema_of(&current),
     });
     let expected_schema: Value =
         serde_json::from_str(include_str!("snapshots/json_module_agents_schema.json"))

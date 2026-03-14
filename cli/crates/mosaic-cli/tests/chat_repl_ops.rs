@@ -26,7 +26,7 @@ fn chat_repl_supports_status_agent_session_commands() {
         .current_dir(temp.path())
         .env("MOSAIC_MOCK_CHAT_RESPONSE", "chat-repl-ok")
         .args(["--project-state", "chat"])
-        .write_stdin("/status\nhello from repl\n/agent\n/session\n/exit\n")
+        .write_stdin("/status\n/agents\nhello from repl\n/agent\n/session\n/exit\n")
         .assert()
         .success()
         .get_output()
@@ -36,6 +36,7 @@ fn chat_repl_supports_status_agent_session_commands() {
     assert!(stdout.contains("Entering chat mode"));
     assert!(stdout.contains("profile: default"));
     assert!(stdout.contains("agent:"));
+    assert!(stdout.contains("agents:"));
     assert!(stdout.contains("session: <new session>"));
     assert!(stdout.contains("assistant> chat-repl-ok"));
     assert!(stdout.contains("Bye."));
@@ -74,7 +75,78 @@ fn chat_repl_help_includes_extended_commands() {
     assert!(stdout.contains("/status   Show profile/agent/session"));
     assert!(stdout.contains("/agent    Show active agent"));
     assert!(stdout.contains("/agent ID Switch active agent"));
+    assert!(stdout.contains("/agents   List configured agents"));
     assert!(stdout.contains("/new      Start a new chat session"));
+}
+
+#[test]
+#[allow(deprecated)]
+fn chat_repl_agents_lists_default_and_route_metadata() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "add",
+            "--id",
+            "writer",
+            "--name",
+            "Writer",
+            "--model",
+            "mock-model",
+            "--set-default",
+            "--route",
+            "ask",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "agents",
+            "route",
+            "set",
+            "chat",
+            "writer",
+        ])
+        .assert()
+        .success();
+
+    let output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "chat"])
+        .write_stdin("/agents\n/exit\n")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(output).expect("stdout utf8");
+    assert!(stdout.contains("agents:"));
+    assert!(stdout.contains("* writer (Writer) profile=default"));
+    assert!(stdout.contains("default"));
+    assert!(stdout.contains("routes=ask,chat") || stdout.contains("routes=chat,ask"));
 }
 
 #[test]

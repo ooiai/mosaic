@@ -184,8 +184,19 @@ TUI shortcuts:
 - `Ctrl+N`: new session
 - `Ctrl+R`: refresh sessions
 - `Ctrl+I`: toggle inspector
+- `Ctrl+A`: open the agent picker
+- `Ctrl+S`: open the session picker
+- selecting a session from the left pane: reloads that session, shows its bound profile/agent in the list, and rebinds the active runtime to that session's bound agent
+- `/agent <id>` in the input box: switch active agent; if the current TUI chat already has a session, Mosaic starts a new session before switching
+- `/agents` in the input box: open the same agent picker without leaving the keyboard flow
+- `/session <id>` in the input box: resume a session directly by id
+- `/new` in the input box: start a fresh session without leaving the current runtime
+- `/status` in the input box: print the active runtime summary into the status line
 - `?`: help overlay
 - `q` / `Ctrl+C`: quit
+
+The bottom status line now always includes the active detail plus `profile / agent / session / policy`, so runtime context stays visible while you move between sessions and agents. `Ctrl+A` opens an in-TUI agent picker for direct keyboard selection when you do not want to type `/agent <id>`, and `Ctrl+S` does the same for session resume when the left pane is not the active focus.
+`agents list` now also marks default/route bindings directly in its output, and the TUI agent picker mirrors that metadata so you can see which agents back `ask/chat` routes before switching.
 
 ### QR / Clawbot
 
@@ -309,7 +320,7 @@ REPL commands:
 - `/new`: reset chat and start a new session
 - `/exit`: quit chat
 
-`session show --json` now includes a `runtime` object with the last persisted `profile_name` and `agent_id`.
+`session list --json` now includes per-session `runtime` summaries, and `session show --json` includes a `runtime` object with the last persisted `profile_name` and `agent_id`.
 
 ### Gateway Runtime
 
@@ -750,9 +761,14 @@ cargo run -p mosaic-cli --bin mosaic -- --project-state --json session show <ses
 cargo run -p mosaic-cli --bin mosaic -- --project-state chat
 # inside the REPL:
 /agent writer
+cargo run -p mosaic-cli --bin mosaic -- --project-state tui
+# inside the TUI input:
+/agent writer
 ```
 
-If you resume a session with `ask/chat/tui --session <id>` and do not pass `--agent`, Mosaic now reuses the session's last bound agent before considering route/default-agent fallback. Inside `chat`, `/agent <id>` switches the active agent, and if the current conversation already has a session Mosaic resets to a new session before applying the new binding.
+If you resume a session with `ask/chat/tui --session <id>` and do not pass `--agent`, Mosaic now reuses the session's last bound agent before considering route/default-agent fallback. Inside `chat` and interactive `tui`, `/agent <id>` switches the active agent, `/agents` shows the available inventory inline or opens the picker, and if the current conversation already has a session Mosaic resets to a new session before applying the new binding. Interactive `tui` also supports `/session <id>`, `/new`, `/status`, and `Ctrl+S` for direct session control from the input flow.
+
+For CLI-side diagnosis, `mosaic --project-state agents current [--agent <id>] [--session <id>] [--route ask|chat|tui]` now explains which layer wins: explicit agent, session runtime, route binding, default agent, or plain profile fallback.
 
 ### Plugins and Skills Runtime
 
