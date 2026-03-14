@@ -22,6 +22,10 @@ WEB_PATH := ./apps/web
 	web-build \
 	web-lint \
 	web-typecheck \
+	cli-build \
+	cli-build-release \
+	cli-run \
+	cli-install \
 	cli-test \
 	cli-quality \
 	cli-json-contract \
@@ -136,6 +140,30 @@ web-lint:
 web-typecheck:
 	@echo "===> Web typecheck."
 	$(CD) $(WEB_PATH) && $(PNPM) typecheck
+
+# Rust CLI debug build.
+# Usage: make cli-build
+cli-build:
+	@echo "===> Rust CLI debug build."
+	cd cli && cargo build -p mosaic-cli
+
+# Rust CLI release build.
+# Usage: make cli-build-release
+cli-build-release:
+	@echo "===> Rust CLI release build."
+	cd cli && cargo build --release -p mosaic-cli
+
+# Rust CLI run current source.
+# Usage: make cli-run [args='--help']
+cli-run:
+	@echo "===> Rust CLI run current source."
+	cd cli && cargo run -p mosaic-cli -- $(if $(args),$(args),--help)
+
+# Rust CLI install current source to Cargo bin.
+# Usage: make cli-install
+cli-install:
+	@echo "===> Rust CLI install current source."
+	cd cli && cargo install --path crates/mosaic-cli --force
 
 # Rust CLI workspace tests.
 # Usage: make cli-test
@@ -296,6 +324,10 @@ help:
 	@echo "  make web-build        # Build the web app"
 	@echo "  make web-lint         # Lint the web app"
 	@echo "  make web-typecheck    # Typecheck the web app"
+	@echo "  make cli-build        # Build the Rust CLI in debug mode"
+	@echo "  make cli-build-release # Build the Rust CLI in release mode"
+	@echo "  make cli-run          # Run the current Rust CLI source (default: --help)"
+	@echo "  make cli-install      # Install the current Rust CLI source to Cargo bin"
 	@echo "  make cli-test         # Run Rust CLI workspace tests"
 	@echo "  make cli-quality      # Run Rust CLI quality gates"
 	@echo "  make cli-json-contract # Run Rust CLI JSON contract tests"
