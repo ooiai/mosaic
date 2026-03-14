@@ -375,8 +375,14 @@ impl AgentRunner {
 
 const SYSTEM_PROMPT: &str = r#"
 You are Mosaic CLI agent.
-When you need a local tool, respond with EXACT JSON:
-{"tool_call":{"name":"read_file|write_file|search_text|run_cmd","args":{...}}}
+When you need a local tool, respond with EXACT JSON only:
+{"tool_call":{"name":"read_file","args":{"path":"README.md"}}}
+Tool argument schemas:
+- read_file: {"path":"relative/or/absolute/path"}
+- write_file: {"path":"relative/or/absolute/path","content":"full file contents"}
+- search_text: {"query":"text or regex","path":"optional/path","max_results":50}
+- run_cmd: {"command":"shell command to execute"}
+Prefer read_file and search_text for repository inspection. Use run_cmd only when file tools are insufficient.
 If no tool is needed, answer directly with plain text.
 "#;
 
@@ -579,5 +585,34 @@ mod tests {
         let audit = std::fs::read_to_string(temp.path().join("audit/commands.jsonl"))
             .expect("audit file should exist");
         assert!(audit.contains("touch allowed.txt"));
+    }
+
+    #[tokio::test]
+    async fn run_cmd_accepts_cmd_alias_in_agent_flow() {
+        let temp = tempdir().expect("tempdir");
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![
+            r#"{"tool_call":{"name":"run_cmd","args":{"cmd":"touch alias.txt"}}}"#.to_string(),
+            "done".to_string(),
+        ]));
+        let runner = build_runner(provider, &temp, RunGuardMode::ConfirmDangerous);
+        let result = runner
+            .ask(
+                "create a file",
+                AgentRunOptions {
+                    session_id: None,
+                    session_metadata: SessionRuntimeMetadata {
+                        agent_id: None,
+                        profile_name: "default".to_string(),
+                    },
+                    cwd: temp.path().to_path_buf(),
+                    yes: true,
+                    interactive: false,
+                    event_callback: None,
+                },
+            )
+            .await
+            .expect("ask should pass");
+        assert_eq!(result.response, "done");
+        assert!(temp.path().join("alias.txt").exists());
     }
 }

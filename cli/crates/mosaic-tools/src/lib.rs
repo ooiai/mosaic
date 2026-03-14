@@ -192,7 +192,7 @@ impl ToolExecutor {
     }
 
     fn run_cmd(&self, args: Value, context: &ToolContext) -> Result<Value> {
-        let parsed: RunCommandArgs = serde_json::from_value(args)?;
+        let parsed = parse_run_command_args(args)?;
         let decision = self.classify_command(&parsed.command);
         let mut confirmation_reasons = Vec::new();
         let mut auto_approved_by: Option<String> = None;
@@ -345,6 +345,38 @@ impl ToolExecutor {
         ensure_within(cwd, &absolute)?;
         Ok(absolute)
     }
+}
+
+fn parse_run_command_args(args: Value) -> Result<RunCommandArgs> {
+    match args {
+        Value::String(command) => normalize_run_command_arg("command", &command),
+        Value::Object(map) => {
+            for field_name in ["command", "cmd", "shell_command"] {
+                if let Some(value) = map.get(field_name).and_then(Value::as_str) {
+                    return normalize_run_command_arg(field_name, value);
+                }
+            }
+            Err(MosaicError::Validation(
+                "run_cmd args must include `command` as a string (accepted aliases: `cmd`, `shell_command`)"
+                    .to_string(),
+            ))
+        }
+        _ => Err(MosaicError::Validation(
+            "run_cmd args must be a JSON object or string".to_string(),
+        )),
+    }
+}
+
+fn normalize_run_command_arg(field_name: &str, value: &str) -> Result<RunCommandArgs> {
+    let command = value.trim();
+    if command.is_empty() {
+        return Err(MosaicError::Validation(format!(
+            "run_cmd field `{field_name}` cannot be empty"
+        )));
+    }
+    Ok(RunCommandArgs {
+        command: command.to_string(),
+    })
 }
 
 fn should_skip(path: &Path) -> bool {
@@ -737,6 +769,48 @@ mod tests {
                 .as_str()
                 .unwrap_or_default()
                 .contains("cli-test")
+        );
+    }
+
+    #[test]
+    fn run_command_accepts_cmd_alias() {
+        let temp = tempdir().unwrap();
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: true,
+            interactive: false,
+        };
+
+        let result = executor
+            .execute("run_cmd", json!({"cmd":"echo cli-alias"}), &ctx)
+            .unwrap();
+        assert_eq!(result["exit_code"], 0);
+        assert_eq!(result["command"], "echo cli-alias");
+        assert!(
+            result["stdout"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("cli-alias")
+        );
+    }
+
+    #[test]
+    fn run_command_reports_expected_args_when_command_is_missing() {
+        let temp = tempdir().unwrap();
+        let executor = ToolExecutor::new(RunGuardMode::ConfirmDangerous, None);
+        let ctx = ToolContext {
+            cwd: temp.path().to_path_buf(),
+            yes: true,
+            interactive: false,
+        };
+
+        let err = executor.execute("run_cmd", json!({}), &ctx).unwrap_err();
+        assert!(matches!(err, MosaicError::Validation(_)));
+        assert!(
+            err.to_string()
+                .contains("run_cmd args must include `command` as a string"),
+            "unexpected error: {err}"
         );
     }
 
