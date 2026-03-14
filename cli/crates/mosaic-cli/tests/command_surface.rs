@@ -640,7 +640,7 @@ fn voicecall_help_includes_start_status_send_history_stop_commands() {
 fn agents_help_includes_management_commands() {
     let help = run_help(&["agents", "--help"]);
     let expected = [
-        "list", "add", "update", "show", "remove", "default", "route",
+        "list", "current", "add", "update", "show", "remove", "default", "route",
     ];
 
     for name in expected {
@@ -665,6 +665,14 @@ fn agents_help_includes_management_commands() {
         update_help.contains("--clear-skills"),
         "agents update --help missing expected option --clear-skills:\n{update_help}"
     );
+
+    let current_help = run_help(&["agents", "current", "--help"]);
+    for option in ["--agent", "--session", "--route"] {
+        assert!(
+            current_help.contains(option),
+            "agents current --help missing expected option {option}:\n{current_help}"
+        );
+    }
 }
 
 #[test]

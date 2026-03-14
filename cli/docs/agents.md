@@ -7,6 +7,9 @@ This module adds multi-agent configuration and lightweight route bindings for CL
 ```bash
 # Inspect agents
 mosaic --project-state agents list
+mosaic --project-state agents current --route chat
+mosaic --project-state agents current --route chat --session <session_id>
+mosaic --project-state agents current --agent writer --route chat
 mosaic --project-state agents show <agent_id>
 
 # Create/remove agents
@@ -38,9 +41,28 @@ mosaic --project-state agents route resolve --route ask
 4. Default agent (`agents default <id>`)
 5. Fallback to CLI `--profile` configuration
 
+Use `agents current` to inspect that precedence without running a model turn. The command reports:
+
+- explicit agent input
+- session-bound agent/profile metadata
+- route-bound agent
+- default agent
+- final resolved agent/profile
+- resolution source (`explicit_agent`, `session_runtime`, `route_binding`, `default_agent`, `cli_profile`)
+
 When a session is first created, Mosaic persists runtime metadata in the session stream. Later `ask/chat/tui --session <id>` resumes the same agent automatically unless you explicitly override it with `--agent`.
 
-Inside `mosaic chat`, you can also switch agents mid-REPL with `/agent <agent_id>`. If the current chat already has a session, Mosaic resets to a new session before applying the new agent so conversation history never changes agent in place.
+Inside `mosaic chat` and interactive `mosaic tui`, you can also switch agents mid-conversation with `/agent <agent_id>`. `/agents` now exposes the configured inventory directly inside the conversation loop: `chat` prints the list inline and `tui` opens the overlay picker. If the current conversation already has a session, Mosaic resets to a new session before applying the new agent so conversation history never changes agent in place.
+
+Inside interactive `mosaic tui`, selecting a different session from the left pane also rebinds the active runtime to that session's persisted agent/profile metadata before the next turn runs, and the sessions pane now shows each session's bound `profile / agent` summary.
+
+The interactive TUI status line also keeps the active runtime visible at all times: current detail, `profile`, `agent`, `session`, and `policy`.
+
+Interactive `mosaic tui` also supports `Ctrl+A` to open an agent picker, so you can switch agents without typing `/agent <id>`. The picker uses the same safety rule as slash-command switching: if the current conversation already has history, Mosaic starts a new session before applying the new agent.
+
+Interactive `mosaic tui` now also supports `Ctrl+S` for an overlay-based session picker plus `/session <id>`, `/new`, and `/status` inside the input pane. That gives the TUI the same session-control path even when the sessions pane is not focused or not visible because the terminal is narrow.
+
+`agents list` and the TUI agent picker now also surface default/route metadata inline, so the operator can see whether an agent is the default and which routes (`ask`, `chat`, and so on) point at it before switching.
 
 ## Session Runtime Metadata
 
@@ -52,12 +74,17 @@ mosaic --project-state session resume <session_id>
 mosaic --project-state chat
 # inside REPL:
 /agent writer
+mosaic --project-state tui
+# inside TUI input:
+/agent writer
 ```
 
 `session show --json` now includes:
 
 - `runtime.profile_name`
 - `runtime.agent_id`
+
+`session list --json` now also includes a `runtime` object per session summary when runtime metadata is available.
 
 The metadata is stored as a `system` event inside the session JSONL stream and does not get injected back into the model conversation history.
 

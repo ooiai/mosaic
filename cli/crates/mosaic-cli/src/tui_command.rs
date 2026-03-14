@@ -1,13 +1,15 @@
 use std::io::{self, IsTerminal, Read};
+use std::sync::Arc;
 
 use mosaic_agent::AgentRunOptions;
+use mosaic_agents::{AgentStore, agent_routes_path, agents_file_path};
 use mosaic_core::config::RunGuardMode;
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::session::SessionStore;
-use mosaic_tui::{TuiFocus, TuiOptions, TuiRuntime, run_tui};
+use mosaic_tui::{SwitchedTuiRuntime, TuiAgentOption, TuiFocus, TuiOptions, TuiRuntime, run_tui};
 use serde_json::json;
 
-use crate::runtime_context::build_runtime;
+use crate::runtime_context::{RuntimeSelector, build_runtime, build_runtime_from_selector};
 use crate::utils::print_json;
 use crate::{Cli, TuiArgs, TuiFocusArg, resolve_state_paths};
 
@@ -25,31 +27,14 @@ pub(super) async fn handle_tui(cli: &Cli, args: TuiArgs) -> Result<()> {
             ));
         }
 
-        let runtime = build_runtime(
-            cli,
-            args.agent.as_deref(),
-            Some("tui"),
-            initial_session_id.as_deref(),
-        )?;
-        let session_metadata = runtime.session_metadata();
-        let policy_summary = format!(
-            "tools={} guard={}",
-            if runtime.agent.profile().tools.enabled {
-                "on"
-            } else {
-                "off"
-            },
-            guard_mode_label(&runtime.agent.profile().tools.run.guard_mode)
-        );
+        let selector = RuntimeSelector::from(cli);
         let cwd = std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?;
         run_tui(
-            TuiRuntime {
-                agent: runtime.agent,
-                profile_name: runtime.active_profile_name,
-                agent_id: runtime.active_agent_id,
-                session_metadata,
-                policy_summary,
-            },
+            build_tui_runtime(
+                &selector,
+                args.agent.as_deref(),
+                initial_session_id.as_deref(),
+            )?,
             TuiOptions {
                 initial_session_id,
                 initial_focus: map_focus(args.focus),
@@ -109,6 +94,107 @@ pub(super) async fn handle_tui(cli: &Cli, args: TuiArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn build_tui_runtime(
+    selector: &RuntimeSelector,
+    requested_agent_id: Option<&str>,
+    session_hint: Option<&str>,
+) -> Result<TuiRuntime> {
+    let runtime =
+        build_runtime_from_selector(selector, requested_agent_id, Some("tui"), session_hint)?;
+    let policy_summary = format!(
+        "tools={} guard={}",
+        if runtime.agent.profile().tools.enabled {
+            "on"
+        } else {
+            "off"
+        },
+        guard_mode_label(&runtime.agent.profile().tools.run.guard_mode)
+    );
+    let switch_selector = selector.clone();
+    let switch_agent = Arc::new(move |agent_id: &str| -> Result<SwitchedTuiRuntime> {
+        let runtime =
+            build_runtime_from_selector(&switch_selector, Some(agent_id), Some("tui"), None)?;
+        Ok(SwitchedTuiRuntime {
+            session_metadata: runtime.session_metadata(),
+            policy_summary: format!(
+                "tools={} guard={}",
+                if runtime.agent.profile().tools.enabled {
+                    "on"
+                } else {
+                    "off"
+                },
+                guard_mode_label(&runtime.agent.profile().tools.run.guard_mode)
+            ),
+            agent: runtime.agent,
+            profile_name: runtime.active_profile_name,
+            agent_id: runtime.active_agent_id,
+        })
+    });
+    let session_selector = selector.clone();
+    let load_session_runtime = Arc::new(
+        move |session_id: Option<&str>| -> Result<SwitchedTuiRuntime> {
+            let runtime =
+                build_runtime_from_selector(&session_selector, None, Some("tui"), session_id)?;
+            Ok(SwitchedTuiRuntime {
+                session_metadata: runtime.session_metadata(),
+                policy_summary: format!(
+                    "tools={} guard={}",
+                    if runtime.agent.profile().tools.enabled {
+                        "on"
+                    } else {
+                        "off"
+                    },
+                    guard_mode_label(&runtime.agent.profile().tools.run.guard_mode)
+                ),
+                agent: runtime.agent,
+                profile_name: runtime.active_profile_name,
+                agent_id: runtime.active_agent_id,
+            })
+        },
+    );
+    let list_selector = selector.clone();
+    let list_agents = Arc::new(move || -> Result<Vec<TuiAgentOption>> {
+        let state_paths = resolve_state_paths(list_selector.project_state)?;
+        let store = AgentStore::new(
+            agents_file_path(&state_paths.data_dir),
+            agent_routes_path(&state_paths.data_dir),
+        );
+        let routes = store.load_routes()?;
+        Ok(store
+            .list()?
+            .into_iter()
+            .map(|agent| TuiAgentOption {
+                is_default: routes.default_agent_id.as_deref() == Some(agent.id.as_str()),
+                route_keys: routes
+                    .routes
+                    .iter()
+                    .filter_map(|(route, agent_id)| {
+                        if agent_id == &agent.id {
+                            Some(route.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+                id: agent.id,
+                name: agent.name,
+                profile_name: agent.profile,
+            })
+            .collect())
+    });
+
+    Ok(TuiRuntime {
+        session_metadata: runtime.session_metadata(),
+        agent: runtime.agent,
+        profile_name: runtime.active_profile_name,
+        agent_id: runtime.active_agent_id,
+        policy_summary,
+        switch_agent,
+        load_session_runtime,
+        list_agents,
+    })
 }
 
 fn resolve_tui_prompt(prompt: Option<String>) -> Result<Option<String>> {
