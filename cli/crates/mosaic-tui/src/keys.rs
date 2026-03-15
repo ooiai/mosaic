@@ -98,10 +98,16 @@ pub(crate) async fn handle_key(
     }
     if key.code == KeyCode::BackTab {
         state.focus = state.focus.prev(state.show_inspector);
+        if state.focus != TuiFocus::Input {
+            state.dismiss_startup_surface();
+        }
         return Ok(false);
     }
     if key.code == KeyCode::Tab {
         state.reduce(TuiAction::CycleFocus);
+        if state.focus != TuiFocus::Input {
+            state.dismiss_startup_surface();
+        }
         return Ok(false);
     }
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('n') {
@@ -148,6 +154,7 @@ pub(crate) async fn handle_key(
                         if let Some(command) = parse_input_command(&prompt) {
                             handle_input_command(state, session_store, runtime, command)?;
                         } else {
+                            state.dismiss_startup_surface();
                             state.running = true;
                             state.status = "running".to_string();
                             crate::spawn_agent_task(state, runtime, options, app_tx, prompt);

@@ -29,6 +29,7 @@ pub enum TuiAction {
 #[derive(Debug, Clone)]
 pub struct TuiState {
     pub(crate) focus: TuiFocus,
+    pub(crate) startup_visible: bool,
     pub(crate) show_inspector: bool,
     pub(crate) show_help: bool,
     pub(crate) show_agent_picker: bool,
@@ -65,6 +66,7 @@ impl TuiState {
             .unwrap_or(0);
         Self {
             focus,
+            startup_visible: true,
             show_inspector,
             show_help: false,
             show_agent_picker: false,
@@ -100,6 +102,7 @@ impl TuiState {
                 self.active_session_id = None;
                 self.messages.clear();
                 self.inspector.clear();
+                self.startup_visible = true;
                 self.status = "new session".to_string();
             }
             TuiAction::SelectNextSession => {
@@ -158,6 +161,14 @@ impl TuiState {
         Ok(())
     }
 
+    pub(crate) fn dismiss_startup_surface(&mut self) {
+        self.startup_visible = false;
+    }
+
+    pub(crate) fn show_startup_surface(&self) -> bool {
+        self.startup_visible && self.focus == TuiFocus::Input
+    }
+
     fn apply_persisted_events(&mut self, events: &[SessionEvent]) {
         self.messages.clear();
         self.inspector.clear();
@@ -213,6 +224,7 @@ impl TuiState {
     }
 
     pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) {
+        self.startup_visible = false;
         match event {
             AgentEvent::User { session_id, text } => {
                 self.active_session_id = Some(session_id.clone());

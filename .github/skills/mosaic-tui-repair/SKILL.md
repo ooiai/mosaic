@@ -10,17 +10,18 @@ Use this skill for fullscreen TUI bugs, refactors, or UX changes.
 ## Files to read first
 
 1. `AGENT.md`
-2. `cli/crates/mosaic-cli/src/tui_command.rs`
-3. `cli/crates/mosaic-tui/src/lib.rs`
-4. `cli/crates/mosaic-tui/src/commands.rs`
-5. `cli/crates/mosaic-tui/src/events.rs`
-6. `cli/crates/mosaic-tui/src/keys.rs`
-7. `cli/crates/mosaic-tui/src/render.rs`
-8. `cli/crates/mosaic-tui/src/state.rs`
-9. `cli/crates/mosaic-tui/src/pickers.rs`
-10. `cli/crates/mosaic-cli/src/runtime_context.rs`
-11. `cli/crates/mosaic-core/src/session.rs`
-12. `cli/crates/mosaic-core/src/state.rs`
+2. `specs/cli/assets/copolit_startup.png` (for startup-screen alignment work)
+3. `cli/crates/mosaic-cli/src/tui_command.rs`
+4. `cli/crates/mosaic-tui/src/lib.rs`
+5. `cli/crates/mosaic-tui/src/commands.rs`
+6. `cli/crates/mosaic-tui/src/events.rs`
+7. `cli/crates/mosaic-tui/src/keys.rs`
+8. `cli/crates/mosaic-tui/src/render.rs`
+9. `cli/crates/mosaic-tui/src/state.rs`
+10. `cli/crates/mosaic-tui/src/pickers.rs`
+11. `cli/crates/mosaic-cli/src/runtime_context.rs`
+12. `cli/crates/mosaic-core/src/session.rs`
+13. `cli/crates/mosaic-core/src/state.rs`
 
 ## Current architecture
 
@@ -31,7 +32,7 @@ Use this skill for fullscreen TUI bugs, refactors, or UX changes.
 - `mosaic-tui/src/commands.rs` owns slash-command parsing.
 - `mosaic-tui/src/keys.rs` owns raw keyboard dispatch and shortcut routing.
 - `mosaic-tui/src/render.rs` owns layout, overlays, inspector/session/agent picker rendering, and status-line composition.
-- `mosaic-tui/src/render.rs` also owns the single-canvas Copilot-style layout, welcome card/onboarding view, bottom composer/footer, slash-command suggestion popup, and modal pickers/overlays.
+- `mosaic-tui/src/render.rs` also owns the single-canvas Copilot-style layout, the startup screen aligned to `specs/cli/assets/copolit_startup.png`, the bottom composer/footer, slash-command suggestion popup, and modal pickers/overlays.
 - `mosaic-tui/src/state.rs` owns `TuiState`, reducers, session replay, and agent-event application.
 - `mosaic-tui/src/pickers.rs` owns input-command handling plus session/agent picker and switching helpers.
 - Runtime/session rebinding should continue to flow through `build_runtime_from_selector`.
@@ -42,6 +43,7 @@ Use this skill for fullscreen TUI bugs, refactors, or UX changes.
 - `--json` is only valid for non-interactive TUI mode.
 - `--project-state` must continue reading/writing `.mosaic/`.
 - Session resume must preserve session-bound runtime metadata.
+- Startup-screen work may still resume the latest session under the hood, but the initial fullscreen surface can intentionally stay on the startup view until the user switches focus or starts a turn.
 - Agent switching currently resets the session when there is existing history.
 - The status line should continue surfacing profile, agent, session, and policy context.
 
