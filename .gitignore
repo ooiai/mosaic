@@ -57,3 +57,8 @@ config.yml
 # regression artifacts
 cli/reports/
 #cli/scripts/run-command.sh
+
+**/assets/**
+.github/agents
+.github/skills
+specs/

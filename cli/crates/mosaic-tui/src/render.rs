@@ -1,12 +1,14 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::state::TuiState;
-use crate::{TuiFocus, short_id};
+use crate::{TuiFocus, TuiStartupContext, short_id};
 
 const MOSAIC_TUI_TITLE: &str = concat!("Mosaic CLI v", env!("CARGO_PKG_VERSION"));
+const STARTUP_PLACEHOLDER: &str =
+    "Type @ to mention files, # for issues/PRs, / for commands, or ? for shortcuts";
 
 pub(crate) fn render(
     frame: &mut ratatui::Frame,
@@ -15,6 +17,7 @@ pub(crate) fn render(
     profile_name: &str,
     policy_summary: &str,
     cwd: &str,
+    startup_context: &TuiStartupContext,
 ) {
     let area = frame.area();
     let compact = area.width < 90;
@@ -23,36 +26,50 @@ pub(crate) fn render(
     } else {
         3
     };
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(1),
-            Constraint::Length(input_height),
-            Constraint::Length(1),
-        ])
-        .split(area);
+    let startup_surface = state.show_startup_surface();
+    let input_area = if startup_surface {
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(input_height),
+                Constraint::Length(1),
+            ])
+            .split(area);
 
-    render_main_canvas(
-        frame,
-        state,
-        layout[0],
-        compact,
-        agent_id,
-        profile_name,
-        policy_summary,
-    );
-    render_context_strip(
-        frame,
-        state,
-        layout[1],
-        cwd,
-        profile_name,
-        agent_id,
-        policy_summary,
-    );
-    render_input(frame, state, layout[2]);
-    render_footer_chrome(frame, layout[3], compact, state.focus, state.show_inspector);
+        render_startup_main_canvas(frame, state, layout[0], compact);
+        render_startup_environment(frame, layout[1], startup_context);
+        render_startup_location(frame, layout[2], cwd, startup_context.git_branch.as_deref());
+        render_input(frame, state, layout[3], true);
+        render_startup_footer(frame, layout[4], startup_context.pending_requests);
+        layout[3]
+    } else {
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(input_height),
+                Constraint::Length(1),
+            ])
+            .split(area);
+
+        render_standard_main_canvas(frame, state, layout[0]);
+        render_context_strip(
+            frame,
+            state,
+            layout[1],
+            cwd,
+            profile_name,
+            agent_id,
+            policy_summary,
+        );
+        render_input(frame, state, layout[2], false);
+        render_footer_chrome(frame, layout[3], compact, state.focus, state.show_inspector);
+        layout[2]
+    };
 
     if state.show_help {
         render_help_overlay(frame, area);
@@ -67,57 +84,42 @@ pub(crate) fn render(
     }
 
     if should_show_command_palette(state) {
-        render_command_palette(frame, state, area, layout[2]);
+        render_command_palette(frame, state, area, input_area);
     }
 
     if state.focus == TuiFocus::Input {
-        frame.set_cursor_position(input_cursor(layout[2], &state.input));
+        frame.set_cursor_position(input_cursor(input_area, &state.input));
     }
 }
 
-fn render_main_canvas(
-    frame: &mut ratatui::Frame,
-    state: &TuiState,
-    area: Rect,
-    compact: bool,
-    agent_id: Option<&str>,
-    profile_name: &str,
-    policy_summary: &str,
-) {
-    // Keep the default screen as a single main canvas like Copilot/Codex.
-    // Sessions and inspector still exist, but they temporarily take over this canvas
-    // instead of permanently living in side panels.
+fn render_standard_main_canvas(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
     match state.focus {
         TuiFocus::Sessions => render_sessions(frame, state, area),
         TuiFocus::Inspector if state.show_inspector => render_inspector(frame, state, area),
-        _ if state.messages.is_empty() => render_welcome(
-            frame,
-            state,
-            area,
-            compact,
-            agent_id,
-            profile_name,
-            policy_summary,
-        ),
         _ => render_messages(frame, state, area),
     }
 }
 
-fn render_welcome(
+fn render_startup_main_canvas(
     frame: &mut ratatui::Frame,
     state: &TuiState,
     area: Rect,
     compact: bool,
-    agent_id: Option<&str>,
-    profile_name: &str,
-    policy_summary: &str,
 ) {
+    match state.focus {
+        TuiFocus::Sessions => render_sessions(frame, state, area),
+        TuiFocus::Inspector if state.show_inspector => render_inspector(frame, state, area),
+        _ => render_welcome(frame, area, compact),
+    }
+}
+
+fn render_welcome(frame: &mut ratatui::Frame, area: Rect, compact: bool) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),
+            Constraint::Length(if compact { 9 } else { 8 }),
             Constraint::Length(1),
-            Constraint::Length(5),
+            Constraint::Length(2),
             Constraint::Min(1),
         ])
         .margin(1)
@@ -125,7 +127,7 @@ fn render_welcome(
 
     let card_width = sections[0]
         .width
-        .min(if compact { sections[0].width } else { 76 });
+        .min(if compact { sections[0].width } else { 94 });
     let card_area = Rect {
         x: sections[0].x,
         y: sections[0].y,
@@ -133,42 +135,47 @@ fn render_welcome(
         height: sections[0].height,
     };
     render_welcome_card(frame, card_area);
-    render_welcome_notes(
-        frame,
-        state,
-        sections[2],
-        compact,
-        agent_id,
-        profile_name,
-        policy_summary,
-    );
+    render_startup_notice(frame, sections[2]);
 }
 
 fn render_welcome_card(frame: &mut ratatui::Frame, area: Rect) {
-    let lines = vec![
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let sections = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(6), Constraint::Min(1)])
+        .margin(1)
+        .split(inner);
+
+    let icon = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled(" .-.  ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                MOSAIC_TUI_TITLE,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("[]", Style::default().fg(Color::Cyan)),
+            Span::raw(" "),
+            Span::styled("[]", Style::default().fg(Color::Cyan)),
         ]),
         Line::from(vec![
-            Span::styled("(o o) ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                "Describe a task to get started.",
-                Style::default().fg(Color::Gray),
-            ),
+            Span::styled("[", Style::default().fg(Color::Magenta)),
+            Span::styled("::", Style::default().fg(Color::LightGreen)),
+            Span::styled("]", Style::default().fg(Color::Magenta)),
         ]),
-        Line::from(vec![
-            Span::styled(" |M|  ", Style::default().fg(Color::Magenta)),
-            Span::styled(
-                "Use the input bar below to chat with Mosaic.",
-                Style::default().fg(Color::Gray),
-            ),
-        ]),
+    ]);
+    frame.render_widget(icon, sections[0]);
+
+    let content = vec![
+        Line::styled(
+            MOSAIC_TUI_TITLE,
+            Style::default()
+                .fg(Color::LightMagenta)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::styled(
+            "Describe a task to get started.",
+            Style::default().fg(Color::Gray),
+        ),
         Line::raw(""),
         Line::from(vec![
             Span::styled("Tip: ", Style::default().fg(Color::Gray)),
@@ -178,64 +185,30 @@ fn render_welcome_card(frame: &mut ratatui::Frame, area: Rect) {
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(" switch active agent, "),
-            Span::styled(
-                "/status",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" inspect runtime."),
+            Span::raw(" switch the active agent before sending your first prompt."),
         ]),
         Line::styled(
-            "Mosaic can make mistakes, so always review important changes.",
-            Style::default().fg(Color::DarkGray),
+            "Mosaic uses AI, so always check for mistakes.",
+            Style::default().fg(Color::Gray),
         ),
     ];
-
-    let widget = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Magenta)),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
+    frame.render_widget(
+        Paragraph::new(content).wrap(Wrap { trim: false }),
+        sections[1],
+    );
 }
 
-fn render_welcome_notes(
-    frame: &mut ratatui::Frame,
-    state: &TuiState,
-    area: Rect,
-    compact: bool,
-    agent_id: Option<&str>,
-    profile_name: &str,
-    policy_summary: &str,
-) {
-    let runtime = compose_status_line(
-        &state.status,
-        profile_name,
-        agent_id,
-        state.active_session_id.as_deref(),
-        policy_summary,
-    );
-    let environment = format!(
-        "Environment loaded: {} saved session(s), slash commands, agent picker, and session picker.",
-        state.sessions.len()
-    );
-    let quick_actions =
-        compose_header_line(compact, state.focus, profile_name, agent_id, policy_summary);
-    let notes = vec![
-        bullet_line(format!("Runtime ready: {runtime}")),
-        bullet_line(environment),
-        bullet_line(
-            "Press Enter to send, Ctrl+J for newline, / for commands, and ? for shortcuts."
-                .to_string(),
+fn render_startup_notice(frame: &mut ratatui::Frame, area: Rect) {
+    let notice = Paragraph::new(vec![Line::from(vec![
+        Span::styled("• ", Style::default().fg(Color::LightBlue)),
+        Span::styled("experimental mode", Style::default().fg(Color::LightGreen)),
+        Span::styled(
+            " is enabled. These features are not stable, may have bugs, and may be removed in the future.",
+            Style::default().fg(Color::Gray),
         ),
-        Line::raw(""),
-        Line::styled(quick_actions, Style::default().fg(Color::DarkGray)),
-    ];
-    frame.render_widget(Paragraph::new(notes).wrap(Wrap { trim: false }), area);
+    ])])
+    .wrap(Wrap { trim: false });
+    frame.render_widget(notice, area);
 }
 
 fn render_messages(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
@@ -339,19 +312,23 @@ fn render_sessions(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
     frame.render_stateful_widget(list, area, &mut list_state);
 }
 
-fn render_input(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
+fn render_input(frame: &mut ratatui::Frame, state: &TuiState, area: Rect, startup_surface: bool) {
     let prompt_style = Style::default()
         .fg(if state.running {
             Color::Yellow
         } else {
-            Color::Cyan
+            if startup_surface {
+                Color::White
+            } else {
+                Color::Cyan
+            }
         })
         .add_modifier(Modifier::BOLD);
     let lines = if state.input.is_empty() {
         vec![Line::from(vec![
-            Span::styled("> ", prompt_style),
+            Span::styled(if startup_surface { "❯ " } else { "> " }, prompt_style),
             Span::styled(
-                compose_input_placeholder(state.running),
+                compose_input_placeholder(startup_surface, state.running),
                 Style::default().fg(Color::Gray),
             ),
         ])]
@@ -362,7 +339,14 @@ fn render_input(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
             .enumerate()
             .map(|(index, line)| {
                 Line::from(vec![
-                    Span::styled(if index == 0 { "> " } else { "  " }, prompt_style),
+                    Span::styled(
+                        if index == 0 {
+                            if startup_surface { "❯ " } else { "> " }
+                        } else {
+                            "  "
+                        },
+                        prompt_style,
+                    ),
                     Span::raw(line.to_string()),
                 ])
             })
@@ -377,6 +361,37 @@ fn render_input(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(widget, area);
+}
+
+fn render_startup_environment(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    startup_context: &TuiStartupContext,
+) {
+    let line = Line::from(vec![
+        Span::styled("◎ ", Style::default().fg(Color::LightMagenta)),
+        Span::styled(
+            compose_startup_environment_line(
+                startup_context.custom_instruction_count,
+                startup_context.skill_count,
+            ),
+            Style::default().fg(Color::LightMagenta),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(line), area);
+}
+
+fn render_startup_location(
+    frame: &mut ratatui::Frame,
+    area: Rect,
+    cwd: &str,
+    branch: Option<&str>,
+) {
+    let line = compose_startup_location_line(cwd, branch);
+    frame.render_widget(
+        Paragraph::new(line).style(Style::default().fg(Color::Gray)),
+        area,
+    );
 }
 
 fn render_context_strip(
@@ -420,6 +435,28 @@ pub(crate) fn compose_status_line(
     )
 }
 
+pub(crate) fn compose_startup_environment_line(
+    custom_instruction_count: usize,
+    skill_count: usize,
+) -> String {
+    format!(
+        "Loading environment: {} custom instruction{}, {} skill{}",
+        custom_instruction_count,
+        plural_suffix(custom_instruction_count),
+        skill_count,
+        plural_suffix(skill_count)
+    )
+}
+
+pub(crate) fn compose_startup_location_line(cwd: &str, branch: Option<&str>) -> String {
+    let cwd = display_cwd(cwd);
+    match branch {
+        Some(branch) if !branch.is_empty() => format!("{cwd} [{branch}]"),
+        _ => cwd,
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn compose_header_line(
     compact: bool,
     focus: TuiFocus,
@@ -481,6 +518,27 @@ fn render_footer_chrome(
     let footer = Paragraph::new(compose_split_line(area.width, &left, &right))
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, area);
+}
+
+fn render_startup_footer(frame: &mut ratatui::Frame, area: Rect, pending_requests: usize) {
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1), Constraint::Length(8)])
+        .split(area);
+    let left = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "shift+tab",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" switch mode", Style::default().fg(Color::Gray)),
+    ]));
+    let right = Paragraph::new(format!("{pending_requests} reqs."))
+        .style(Style::default().fg(Color::Gray))
+        .alignment(Alignment::Right);
+    frame.render_widget(left, columns[0]);
+    frame.render_widget(right, columns[1]);
 }
 
 fn should_show_command_palette(state: &TuiState) -> bool {
@@ -758,28 +816,27 @@ fn input_cursor(area: Rect, input: &str) -> (u16, u16) {
     (x, y)
 }
 
-fn compose_input_placeholder(running: bool) -> &'static str {
+pub(crate) fn compose_input_placeholder(startup_surface: bool, running: bool) -> &'static str {
     if running {
         "Waiting for the current run to finish..."
+    } else if startup_surface {
+        STARTUP_PLACEHOLDER
     } else {
         "Type / for commands, Ctrl+A for agents, Ctrl+S for sessions, or ? for shortcuts"
     }
 }
 
-fn bullet_line(text: String) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("* ", Style::default().fg(Color::Cyan)),
-        Span::raw(text),
-    ])
-}
-
-fn display_cwd(cwd: &str) -> String {
+pub(crate) fn display_cwd(cwd: &str) -> String {
     if let Ok(home) = std::env::var("HOME") {
         if cwd.starts_with(&home) {
             return cwd.replacen(&home, "~", 1);
         }
     }
     cwd.to_string()
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
 }
 
 fn compose_split_line(width: u16, left: &str, right: &str) -> String {

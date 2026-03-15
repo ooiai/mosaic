@@ -7,8 +7,12 @@ CD := cd
 
 MACOS_PATH := ./apps/macos
 WEB_PATH := ./apps/web
+CLI_PATH := ./cli
+SERVER_PATH := ./server
 
 .PHONY: \
+	clean \
+	cli-clean \
 	git-run \
 	git-commit \
 	help \
@@ -73,10 +77,20 @@ git-run:
 git-commit:
 	$(call git_commit_if_needed)
 
-# backend watch commands
-# clean:
-# 	@echo "Cleaning backend in $(BACKEND_PATH)..."
-# 	cd $(BACKEND_PATH) && $(CARGO) clean
+# Mosaic clean (Rust/Cargo + macOS/Swift + web/Node).
+# Usage: make clean
+clean:
+	@echo "Cleaning build artifacts..."
+	rm -rf node_modules
+	cd $(SERVER_PATH) && cargo clean
+	cd $(CLI_PATH) && cargo clean
+	cd $(CLI_PATH) && rm -rf dist
+	cd $(MACOS_PATH) && swift package clean
+	cd $(MACOS_PATH) && rm -rf dist
+	cd $(MACOS_PATH) && rm -rf .build
+	cd $(WEB_PATH) && rm -rf dist
+	cd $(WEB_PATH) && rm -rf node_modules
+
 
 # Desktop start dev server.
 # Usage: make desktop
@@ -141,6 +155,12 @@ web-typecheck:
 	@echo "===> Web typecheck."
 	$(CD) $(WEB_PATH) && $(PNPM) typecheck
 
+# Rust CLI clean
+# Usage: make cli-clean
+cli-clean:
+	@echo "===> Rust CLI clean."
+	cd cli && cargo clean -p mosaic-cli
+
 # Rust CLI debug build.
 # Usage: make cli-build
 cli-build:
@@ -163,6 +183,11 @@ cli-run:
 # Usage: make cli-install
 cli-install:
 	@echo "===> Rust CLI install current source."
+	@BIN_PATH="$${CARGO_HOME:-$$HOME/.cargo}/bin/mosaic"; \
+	if [ -e "$$BIN_PATH" ]; then \
+		echo "===> Removing existing CLI at $$BIN_PATH"; \
+		rm -f "$$BIN_PATH"; \
+	fi
 	cd cli && cargo install --path crates/mosaic-cli --force
 
 # Rust CLI workspace tests.

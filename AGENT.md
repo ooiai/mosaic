@@ -243,9 +243,12 @@ This is a substantial improvement over the original monolith. `lib.rs` now mainl
 The current TUI supports:
 
 - a single main canvas instead of a permanently visible three-column workspace
-- a Copilot-style welcome card plus onboarding bullets for fresh or reset sessions
-- a context strip above the composer with cwd plus runtime/session/policy summary
+- an empty-session startup surface aligned to `specs/cli/assets/copolit_startup.png`
+- the startup surface now appears on initial launch even when a prior session is resumed in the background; focusing `messages` reveals the restored conversation
+- a Copilot-style welcome card plus experimental notice for fresh or reset sessions
+- startup-only environment and cwd/git rows above the composer
 - a bordered bottom composer and footer shortcut bar inspired by Codex/Copilot TUI
+- startup placeholder affordances for `@`, `#`, `shift+tab switch mode`, and request count
 - a slash-command suggestion popup anchored above the composer when input begins with `/`
 - focus cycling between messages/input/sessions/inspector
 - session and inspector views that take over the main canvas when focused

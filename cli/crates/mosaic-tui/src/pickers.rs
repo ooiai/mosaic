@@ -25,6 +25,7 @@ pub(crate) fn load_selected_session(
     };
     apply_switched_runtime(runtime, switched);
     state.load_session(session_store, Some(session_id.to_string()))?;
+    state.dismiss_startup_surface();
     let active_agent = runtime.agent_id.as_deref().unwrap_or("<none>");
     state.status = format!("resumed session={session_id} | agent={active_agent}");
     Ok(())

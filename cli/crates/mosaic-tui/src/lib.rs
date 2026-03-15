@@ -1,5 +1,5 @@
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -96,6 +96,14 @@ pub struct TuiOptions {
     pub cwd: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TuiStartupContext {
+    pub custom_instruction_count: usize,
+    pub skill_count: usize,
+    pub git_branch: Option<String>,
+    pub pending_requests: usize,
+}
+
 pub async fn run_tui(runtime: TuiRuntime, options: TuiOptions) -> Result<()> {
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).map_err(map_io)?;
@@ -142,6 +150,7 @@ async fn run_app(
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel::<AppEvent>();
     let cwd_display = options.cwd.display().to_string();
+    let startup_context = build_startup_context(&options.cwd);
 
     let mut should_exit = false;
     while !should_exit {
@@ -179,6 +188,7 @@ async fn run_app(
                     &runtime.profile_name,
                     &runtime.policy_summary,
                     &cwd_display,
+                    &startup_context,
                 )
             })
             .map_err(map_io)?;
@@ -261,6 +271,69 @@ fn summarize_json(value: Option<&Value>) -> String {
     format!("{}...", &rendered[..120])
 }
 
+fn build_startup_context(cwd: &Path) -> TuiStartupContext {
+    let repo_root = find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    TuiStartupContext {
+        custom_instruction_count: usize::from(
+            repo_root.join(".github/copilot-instructions.md").is_file(),
+        ),
+        skill_count: count_child_directories(&repo_root.join(".github/skills")),
+        git_branch: read_git_branch(&repo_root),
+        pending_requests: 0,
+    }
+}
+
+fn find_repo_root(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|path| path.join(".git").exists())
+        .map(Path::to_path_buf)
+}
+
+fn count_child_directories(path: &Path) -> usize {
+    std::fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .count()
+}
+
+fn read_git_branch(repo_root: &Path) -> Option<String> {
+    let git_dir = resolve_git_dir(repo_root)?;
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    parse_git_branch(&head)
+}
+
+fn resolve_git_dir(repo_root: &Path) -> Option<PathBuf> {
+    let dot_git = repo_root.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    if !dot_git.is_file() {
+        return None;
+    }
+    let pointer = std::fs::read_to_string(dot_git).ok()?;
+    let git_dir = pointer.strip_prefix("gitdir: ")?.trim();
+    let git_dir = PathBuf::from(git_dir);
+    if git_dir.is_absolute() {
+        Some(git_dir)
+    } else {
+        Some(repo_root.join(git_dir))
+    }
+}
+
+fn parse_git_branch(head: &str) -> Option<String> {
+    let trimmed = head.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(reference) = trimmed.strip_prefix("ref: ") {
+        return reference.rsplit('/').next().map(str::to_string);
+    }
+    Some(trimmed.chars().take(7).collect())
+}
+
 fn map_io(err: impl std::fmt::Display) -> MosaicError {
     MosaicError::Io(err.to_string())
 }
@@ -270,7 +343,9 @@ mod tests {
     use super::*;
     use crate::commands::{TuiInputCommand, parse_input_command};
     use crate::render::{
-        command_palette_items, compose_header_line, compose_shortcuts_line, compose_status_line,
+        command_palette_items, compose_header_line, compose_input_placeholder,
+        compose_shortcuts_line, compose_startup_environment_line, compose_startup_location_line,
+        compose_status_line,
     };
     use crate::state::TuiAction;
     use mosaic_core::session::SessionSummary;
@@ -440,6 +515,61 @@ mod tests {
             status_only,
             vec![("/status", "print the active runtime summary")]
         );
+    }
+
+    #[test]
+    fn startup_environment_line_pluralizes_counts() {
+        assert_eq!(
+            compose_startup_environment_line(1, 3),
+            "Loading environment: 1 custom instruction, 3 skills"
+        );
+        assert_eq!(
+            compose_startup_environment_line(2, 1),
+            "Loading environment: 2 custom instructions, 1 skill"
+        );
+    }
+
+    #[test]
+    fn startup_location_line_includes_branch_when_present() {
+        let rendered = compose_startup_location_line("/tmp/project", Some("main"));
+        assert_eq!(rendered, "/tmp/project [main]");
+    }
+
+    #[test]
+    fn startup_placeholder_mentions_copilot_style_affordances() {
+        let rendered = compose_input_placeholder(true, false);
+        assert!(rendered.contains("@ to mention files"));
+        assert!(rendered.contains("# for issues/PRs"));
+        assert!(rendered.contains("/ for commands"));
+    }
+
+    #[test]
+    fn parse_git_branch_handles_ref_and_detached_head() {
+        assert_eq!(
+            parse_git_branch("ref: refs/heads/main\n"),
+            Some("main".to_string())
+        );
+        assert_eq!(
+            parse_git_branch("0123456789abcdef"),
+            Some("0123456".to_string())
+        );
+    }
+
+    #[test]
+    fn startup_surface_is_visible_on_launch_even_with_session_history() {
+        let mut state = state_with_sessions(true);
+        state.focus = TuiFocus::Input;
+        assert!(state.show_startup_surface());
+    }
+
+    #[test]
+    fn agent_events_hide_startup_surface() {
+        let mut state = state_with_sessions(true);
+        state.apply_agent_event(AgentEvent::Assistant {
+            session_id: "session-a".to_string(),
+            text: "done".to_string(),
+        });
+        assert!(!state.show_startup_surface());
     }
 
     #[test]
