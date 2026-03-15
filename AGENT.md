@@ -203,45 +203,52 @@ This is the correct reuse point. If a future session needs to fix TUI runtime bu
 
 ### TUI implementation shape
 
-The actual TUI lives almost entirely in one file:
+The TUI is no longer a pure single-file implementation, but `lib.rs` still owns the main loop and much of the mutable interaction state.
+
+Current `mosaic-tui` layout:
 
 - `cli/crates/mosaic-tui/src/lib.rs`
+  - `TuiFocus`
+  - `TuiRuntime`
+  - `run_tui`
+  - `run_app`
+  - `spawn_agent_task`
+- `cli/crates/mosaic-tui/src/events.rs`
+  - `AppEvent`
+- `cli/crates/mosaic-tui/src/commands.rs`
+  - `TuiInputCommand`
+  - `parse_input_command`
+- `cli/crates/mosaic-tui/src/keys.rs`
+  - `handle_key`
+  - raw keyboard dispatch and shortcut routing
+- `cli/crates/mosaic-tui/src/render.rs`
+  - `render`
+  - wide/compact layout helpers
+  - status line, overlays, picker rendering, cursor placement
+- `cli/crates/mosaic-tui/src/state.rs`
+  - `TuiAction`
+  - `TuiState`
+  - reducer/state refresh/session replay helpers
+  - agent-event application
+- `cli/crates/mosaic-tui/src/pickers.rs`
+  - input-command handling
+  - session loading
+  - agent/session picker toggles
+  - active-agent switching
 
-At the time of writing it is about 1558 lines long, which is the main structural smell.
-
-Key pieces inside that file:
-
-- `TuiFocus`
-- `TuiRuntime`
-- `TuiState`
-- `AppEvent`
-- `run_tui`
-- `run_app`
-- `handle_key`
-- `load_selected_session`
-- `parse_input_command`
-- `handle_input_command`
-- `toggle_agent_picker`
-- `toggle_session_picker`
-- `switch_active_agent`
-- `spawn_agent_task`
-- `render`
-- `render_compact`
-- `render_wide`
-- `render_sessions`
-- `render_messages`
-- `render_input`
-- `render_status`
-- overlay/picker render helpers
+This is a substantial improvement over the original monolith. `lib.rs` now mainly owns the event loop and task spawning, while keyboard dispatch, state, commands, pickers, events, and rendering have dedicated modules.
 
 ### Current interaction model
 
 The current TUI supports:
 
+- a single main canvas instead of a permanently visible three-column workspace
+- a Copilot-style welcome card plus onboarding bullets for fresh or reset sessions
+- a context strip above the composer with cwd plus runtime/session/policy summary
+- a bordered bottom composer and footer shortcut bar inspired by Codex/Copilot TUI
+- a slash-command suggestion popup anchored above the composer when input begins with `/`
 - focus cycling between messages/input/sessions/inspector
-- session list on the left
-- message pane in the center
-- optional inspector pane on the right
+- session and inspector views that take over the main canvas when focused
 - agent picker and session picker overlays
 - slash-style input commands:
   - `/agent`
@@ -259,20 +266,21 @@ The current TUI supports:
   - `Ctrl+A`
   - `Ctrl+S`
   - `?`
-  - `q`
+- `q`
+- empty-state guidance in the message and session panes for first-run usage
 
 ### TUI event flow
 
 The event model is simple:
 
-1. `handle_key` decides whether input is navigation, slash command, or prompt submit.
+1. `keys::handle_key` decides whether input is navigation, slash command, or prompt submit.
 2. Prompt submit calls `spawn_agent_task`.
 3. `spawn_agent_task` runs `AgentRunner::ask(...)` on a `tokio::spawn`.
 4. Agent events are pushed through a `tokio::sync::mpsc::UnboundedSender<AppEvent>`.
 5. `run_app` drains that channel and updates `TuiState`.
 6. `render(...)` redraws the full screen every loop tick.
 
-This works, but state/event/render/input responsibilities are still tightly coupled in a single file.
+This works, and event/render/command parsing plus state/picker logic and raw key dispatch are now isolated. The main remaining orchestration pieces in `lib.rs` are the event loop and task spawning.
 
 ## 6. TUI hotspots and likely pain points
 
@@ -284,16 +292,24 @@ If you are fixing or refactoring TUI behavior, check these first:
    - runtime/session bootstrap
 
 2. `cli/crates/mosaic-tui/src/lib.rs`
-   - almost all behavior lives here
-   - any UI fix usually touches `handle_key`, `TuiState`, and one of the `render_*` functions
+   - still owns the main loop and task spawning
+   - cross-cutting TUI fixes still touch the event-loop integration here
 
-3. `cli/crates/mosaic-core/src/session.rs`
+3. `cli/crates/mosaic-tui/src/state.rs`, `pickers.rs`, `commands.rs`, `events.rs`, `keys.rs`, `render.rs`
+   - state reducers and session replay
+   - picker/session/agent switching helpers
+   - slash-command parsing
+   - agent-to-app event bridge
+   - raw keyboard dispatch
+   - fullscreen layout, overlays, inspector, and status rendering
+
+4. `cli/crates/mosaic-core/src/session.rs`
    - session resumption depends on JSONL event shape
 
-4. `cli/crates/mosaic-cli/src/runtime_context.rs`
+5. `cli/crates/mosaic-cli/src/runtime_context.rs`
    - agent/profile/session rebinding logic
 
-5. `cli/crates/mosaic-agents/src/lib.rs`
+6. `cli/crates/mosaic-agents/src/lib.rs`
    - agent route/default resolution
 
 Important behavior to preserve:
@@ -351,33 +367,46 @@ For Mosaic, the highest-value ideas to borrow are structural, not cosmetic:
 5. Add reusable render/test helpers instead of asserting everything through one giant integration surface.
 6. Keep the library side free of casual stdout/stderr output.
 
+Mosaic has already completed the first three extraction steps for `events.rs`, `commands.rs`, `render.rs`, `state.rs`, `pickers.rs`, and `keys.rs`. The next improvements should build on that structure rather than collapsing logic back into `lib.rs`.
+
 Codex is much broader in scope, so do not copy feature-for-feature. Use it as a modularization reference.
 
 ## 8. Recommended next step for TUI repair
 
 If the next session is specifically about "fix the TUI with Codex as reference", the safest sequence is:
 
-### Phase 1: extract without changing behavior
+### Phase 1: preserve the current extraction
 
-Create small modules under `cli/crates/mosaic-tui/src/` such as:
+These modules already exist and should remain the home for their responsibilities:
 
-- `app.rs` or `state.rs`
 - `events.rs`
 - `commands.rs`
-- `pickers.rs`
+- `keys.rs`
 - `render.rs`
-- `widgets.rs`
 
-Start by moving code, not redesigning behavior.
+Do not move that logic back into `lib.rs`.
 
-### Phase 2: isolate responsibilities
+### Phase 2: preserve the current split
 
-Move these out of `lib.rs` first:
+These modules already exist and should remain the home for their responsibilities:
 
-- `AppEvent`
-- `parse_input_command`
-- `handle_input_command`
-- picker toggles/switching helpers
+- `state.rs`
+- `pickers.rs`
+- `events.rs`
+- `commands.rs`
+- `keys.rs`
+- `render.rs`
+
+### Phase 3: optional UI work
+
+Only after the structural split is stable:
+
+- extract reusable widgets/helpers from `render.rs`
+- extract task-spawn helpers only if the event-loop wiring remains readable
+- change layouts
+- redesign overlays
+- add scrolling/search improvements
+- revisit keybindings
 - render helpers
 
 ### Phase 3: add focused tests

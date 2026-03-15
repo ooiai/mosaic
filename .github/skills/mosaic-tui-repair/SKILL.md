@@ -12,15 +12,28 @@ Use this skill for fullscreen TUI bugs, refactors, or UX changes.
 1. `AGENT.md`
 2. `cli/crates/mosaic-cli/src/tui_command.rs`
 3. `cli/crates/mosaic-tui/src/lib.rs`
-4. `cli/crates/mosaic-cli/src/runtime_context.rs`
-5. `cli/crates/mosaic-core/src/session.rs`
-6. `cli/crates/mosaic-core/src/state.rs`
+4. `cli/crates/mosaic-tui/src/commands.rs`
+5. `cli/crates/mosaic-tui/src/events.rs`
+6. `cli/crates/mosaic-tui/src/keys.rs`
+7. `cli/crates/mosaic-tui/src/render.rs`
+8. `cli/crates/mosaic-tui/src/state.rs`
+9. `cli/crates/mosaic-tui/src/pickers.rs`
+10. `cli/crates/mosaic-cli/src/runtime_context.rs`
+11. `cli/crates/mosaic-core/src/session.rs`
+12. `cli/crates/mosaic-core/src/state.rs`
 
 ## Current architecture
 
 - `mosaic-cli` owns TUI command parsing and mode selection.
 - `handle_tui` splits interactive fullscreen mode from non-interactive `--prompt` mode.
-- `mosaic-tui/src/lib.rs` currently contains most state, input handling, async event flow, and rendering in a single file.
+- `mosaic-tui/src/lib.rs` still owns the main loop and task spawning.
+- `mosaic-tui/src/events.rs` owns the app-event bridge.
+- `mosaic-tui/src/commands.rs` owns slash-command parsing.
+- `mosaic-tui/src/keys.rs` owns raw keyboard dispatch and shortcut routing.
+- `mosaic-tui/src/render.rs` owns layout, overlays, inspector/session/agent picker rendering, and status-line composition.
+- `mosaic-tui/src/render.rs` also owns the single-canvas Copilot-style layout, welcome card/onboarding view, bottom composer/footer, slash-command suggestion popup, and modal pickers/overlays.
+- `mosaic-tui/src/state.rs` owns `TuiState`, reducers, session replay, and agent-event application.
+- `mosaic-tui/src/pickers.rs` owns input-command handling plus session/agent picker and switching helpers.
 - Runtime/session rebinding should continue to flow through `build_runtime_from_selector`.
 
 ## Behavior that must stay intact
@@ -36,17 +49,16 @@ Use this skill for fullscreen TUI bugs, refactors, or UX changes.
 
 If the task is structural, prefer extraction before UX changes:
 
-1. Split state/events/commands/rendering out of `cli/crates/mosaic-tui/src/lib.rs`.
-2. Keep behavior stable while moving code.
-3. Only after extraction, change layouts, overlays, scrolling, or keybindings.
+1. Keep `events.rs`, `commands.rs`, `keys.rs`, and `render.rs` as their dedicated homes.
+2. Keep `state.rs` and `pickers.rs` as their dedicated homes too.
+3. Keep behavior stable while moving code.
+4. Only after extraction, change layouts, overlays, scrolling, or keybindings.
 
-Good initial split candidates:
+Good next split candidates:
 
-- `events.rs`
-- `commands.rs`
-- `pickers.rs`
-- `render.rs`
-- `state.rs`
+- `widgets.rs`
+- render-only helpers shared across overlays/widgets
+- task-spawn helpers if `lib.rs` grows again
 
 ## Codex reference
 

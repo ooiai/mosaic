@@ -3,23 +3,29 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use mosaic_agent::{AgentEvent, AgentRunOptions, AgentRunner};
 use mosaic_core::error::{MosaicError, Result};
-use mosaic_core::session::{
-    EventKind, SessionEvent, SessionRuntimeMetadata, SessionStore, SessionSummary,
-};
+use mosaic_core::session::SessionRuntimeMetadata;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
+
+mod commands;
+mod events;
+mod keys;
+mod pickers;
+mod render;
+mod state;
+
+use events::AppEvent;
+use keys::handle_key;
+use render::render;
+use state::{InspectorLine, TuiState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -38,6 +44,16 @@ impl TuiFocus {
             (Self::Sessions, true) => Self::Inspector,
             (Self::Sessions, false) => Self::Messages,
             (Self::Inspector, _) => Self::Messages,
+        }
+    }
+
+    fn prev(self, inspector_visible: bool) -> Self {
+        match (self, inspector_visible) {
+            (Self::Messages, true) => Self::Inspector,
+            (Self::Messages, false) => Self::Sessions,
+            (Self::Input, _) => Self::Messages,
+            (Self::Sessions, _) => Self::Input,
+            (Self::Inspector, _) => Self::Sessions,
         }
     }
 }
@@ -78,287 +94,6 @@ pub struct TuiOptions {
     pub show_inspector: bool,
     pub yes: bool,
     pub cwd: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TuiAction {
-    CycleFocus,
-    ToggleInspector,
-    ToggleHelp,
-    NewSession,
-    SelectNextSession,
-    SelectPrevSession,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ChatLine {
-    role: String,
-    text: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InspectorLine {
-    kind: String,
-    detail: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct TuiState {
-    focus: TuiFocus,
-    show_inspector: bool,
-    show_help: bool,
-    show_agent_picker: bool,
-    show_session_picker: bool,
-    input: String,
-    running: bool,
-    status: String,
-    sessions: Vec<SessionSummary>,
-    selected_session: usize,
-    agents: Vec<TuiAgentOption>,
-    selected_agent: usize,
-    active_session_id: Option<String>,
-    messages: Vec<ChatLine>,
-    inspector: Vec<InspectorLine>,
-}
-
-impl TuiState {
-    fn new(
-        focus: TuiFocus,
-        show_inspector: bool,
-        sessions: Vec<SessionSummary>,
-        active_session_id: Option<String>,
-        _profile_name: &str,
-        _agent_id: Option<&str>,
-        _policy_summary: &str,
-    ) -> Self {
-        let selected_session = active_session_id
-            .as_ref()
-            .and_then(|session_id| {
-                sessions
-                    .iter()
-                    .position(|entry| entry.session_id == *session_id)
-            })
-            .unwrap_or(0);
-        Self {
-            focus,
-            show_inspector,
-            show_help: false,
-            show_agent_picker: false,
-            show_session_picker: false,
-            input: String::new(),
-            running: false,
-            status: "idle".to_string(),
-            sessions,
-            selected_session,
-            agents: Vec::new(),
-            selected_agent: 0,
-            active_session_id,
-            messages: Vec::new(),
-            inspector: Vec::new(),
-        }
-    }
-
-    fn reduce(&mut self, action: TuiAction) {
-        match action {
-            TuiAction::CycleFocus => {
-                self.focus = self.focus.next(self.show_inspector);
-            }
-            TuiAction::ToggleInspector => {
-                self.show_inspector = !self.show_inspector;
-                if !self.show_inspector && self.focus == TuiFocus::Inspector {
-                    self.focus = TuiFocus::Messages;
-                }
-            }
-            TuiAction::ToggleHelp => {
-                self.show_help = !self.show_help;
-            }
-            TuiAction::NewSession => {
-                self.active_session_id = None;
-                self.messages.clear();
-                self.inspector.clear();
-                self.status = "new session".to_string();
-            }
-            TuiAction::SelectNextSession => {
-                if self.sessions.is_empty() {
-                    return;
-                }
-                self.selected_session = (self.selected_session + 1) % self.sessions.len();
-            }
-            TuiAction::SelectPrevSession => {
-                if self.sessions.is_empty() {
-                    return;
-                }
-                if self.selected_session == 0 {
-                    self.selected_session = self.sessions.len() - 1;
-                } else {
-                    self.selected_session -= 1;
-                }
-            }
-        }
-    }
-
-    fn refresh_sessions(&mut self, store: &SessionStore) -> Result<()> {
-        self.sessions = store.list_sessions()?;
-        if self.sessions.is_empty() {
-            self.selected_session = 0;
-            return Ok(());
-        }
-        let selected = self
-            .active_session_id
-            .as_ref()
-            .and_then(|session_id| {
-                self.sessions
-                    .iter()
-                    .position(|entry| entry.session_id == *session_id)
-            })
-            .unwrap_or(0);
-        self.selected_session = selected;
-        Ok(())
-    }
-
-    fn load_session(&mut self, store: &SessionStore, session_id: Option<String>) -> Result<()> {
-        self.active_session_id = session_id;
-        self.messages.clear();
-        self.inspector.clear();
-        if let Some(id) = self.active_session_id.clone() {
-            let events = store.read_events(&id)?;
-            self.apply_persisted_events(&events);
-            self.status = format!("resumed session={id}");
-        } else {
-            self.status = "new session".to_string();
-        }
-        Ok(())
-    }
-
-    fn apply_persisted_events(&mut self, events: &[SessionEvent]) {
-        self.messages.clear();
-        self.inspector.clear();
-        for event in events {
-            match event.kind {
-                EventKind::User => {
-                    if let Some(text) = event.payload.get("text").and_then(|value| value.as_str()) {
-                        self.messages.push(ChatLine {
-                            role: "user".to_string(),
-                            text: text.to_string(),
-                        });
-                    }
-                }
-                EventKind::Assistant => {
-                    if let Some(text) = event.payload.get("text").and_then(|value| value.as_str()) {
-                        self.messages.push(ChatLine {
-                            role: "assistant".to_string(),
-                            text: text.to_string(),
-                        });
-                    }
-                }
-                EventKind::ToolCall => {
-                    let name = event
-                        .payload
-                        .get("name")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("tool");
-                    self.inspector.push(InspectorLine {
-                        kind: "tool_call".to_string(),
-                        detail: format!("{name} {}", summarize_json(event.payload.get("args"))),
-                    });
-                }
-                EventKind::ToolResult => {
-                    let name = event
-                        .payload
-                        .get("name")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("tool");
-                    self.inspector.push(InspectorLine {
-                        kind: "tool_result".to_string(),
-                        detail: format!("{name} {}", summarize_json(event.payload.get("result"))),
-                    });
-                }
-                EventKind::Error => {
-                    self.inspector.push(InspectorLine {
-                        kind: "error".to_string(),
-                        detail: summarize_json(event.payload.get("message")),
-                    });
-                }
-                EventKind::System => {}
-            }
-        }
-    }
-
-    fn apply_agent_event(&mut self, event: AgentEvent) {
-        match event {
-            AgentEvent::User { session_id, text } => {
-                self.active_session_id = Some(session_id.clone());
-                self.messages.push(ChatLine {
-                    role: "user".to_string(),
-                    text,
-                });
-                self.status = format!("running session={session_id}");
-            }
-            AgentEvent::Assistant { session_id, text } => {
-                self.active_session_id = Some(session_id.clone());
-                self.messages.push(ChatLine {
-                    role: "assistant".to_string(),
-                    text,
-                });
-                self.status = format!("assistant replied session={session_id}");
-            }
-            AgentEvent::ToolCall {
-                session_id,
-                name,
-                args,
-            } => {
-                self.active_session_id = Some(session_id.clone());
-                self.inspector.push(InspectorLine {
-                    kind: "tool_call".to_string(),
-                    detail: format!(
-                        "[{}] {name} {}",
-                        short_id(&session_id),
-                        summarize_json(Some(&args))
-                    ),
-                });
-                self.status = format!("running tool={name}");
-            }
-            AgentEvent::ToolResult {
-                session_id,
-                name,
-                result,
-            } => {
-                self.active_session_id = Some(session_id);
-                self.inspector.push(InspectorLine {
-                    kind: "tool_result".to_string(),
-                    detail: format!(
-                        "[{}] {name} {}",
-                        short_id(self.active_session_id.as_deref().unwrap_or_default()),
-                        summarize_json(Some(&result))
-                    ),
-                });
-            }
-            AgentEvent::Error {
-                session_id,
-                message,
-            } => {
-                self.active_session_id = Some(session_id);
-                self.inspector.push(InspectorLine {
-                    kind: "error".to_string(),
-                    detail: format!(
-                        "[{}] {message}",
-                        short_id(self.active_session_id.as_deref().unwrap_or_default())
-                    ),
-                });
-            }
-        }
-        const MAX_INSPECTOR: usize = 200;
-        if self.inspector.len() > MAX_INSPECTOR {
-            let overflow = self.inspector.len() - MAX_INSPECTOR;
-            self.inspector.drain(0..overflow);
-        }
-    }
-}
-
-#[derive(Debug)]
-enum AppEvent {
-    Agent(AgentEvent),
-    AskDone(Result<mosaic_agent::AgentRunResult>),
 }
 
 pub async fn run_tui(runtime: TuiRuntime, options: TuiOptions) -> Result<()> {
@@ -406,6 +141,7 @@ async fn run_app(
     }
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel::<AppEvent>();
+    let cwd_display = options.cwd.display().to_string();
 
     let mut should_exit = false;
     while !should_exit {
@@ -442,6 +178,7 @@ async fn run_app(
                     runtime.agent_id.as_deref(),
                     &runtime.profile_name,
                     &runtime.policy_summary,
+                    &cwd_display,
                 )
             })
             .map_err(map_io)?;
@@ -465,364 +202,6 @@ async fn run_app(
         }
     }
 
-    Ok(())
-}
-
-async fn handle_key(
-    state: &mut TuiState,
-    session_store: &SessionStore,
-    key: KeyEvent,
-    runtime: &mut TuiRuntime,
-    options: &TuiOptions,
-    app_tx: &mpsc::UnboundedSender<AppEvent>,
-) -> Result<bool> {
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        return Ok(true);
-    }
-
-    if state.show_help {
-        if key.code == KeyCode::Esc || key.code == KeyCode::Char('?') {
-            state.reduce(TuiAction::ToggleHelp);
-        }
-        return Ok(false);
-    }
-
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('a') {
-        toggle_agent_picker(state, runtime)?;
-        return Ok(false);
-    }
-
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
-        toggle_session_picker(state, session_store)?;
-        return Ok(false);
-    }
-
-    if state.show_agent_picker {
-        match key.code {
-            KeyCode::Esc => {
-                state.show_agent_picker = false;
-            }
-            KeyCode::Down => {
-                if !state.agents.is_empty() {
-                    state.selected_agent = (state.selected_agent + 1) % state.agents.len();
-                }
-            }
-            KeyCode::Up => {
-                if !state.agents.is_empty() {
-                    if state.selected_agent == 0 {
-                        state.selected_agent = state.agents.len() - 1;
-                    } else {
-                        state.selected_agent -= 1;
-                    }
-                }
-            }
-            KeyCode::Enter => {
-                if let Some(agent) = state.agents.get(state.selected_agent).cloned() {
-                    state.show_agent_picker = false;
-                    switch_active_agent(state, runtime, &agent.id)?;
-                }
-            }
-            _ => {}
-        }
-        return Ok(false);
-    }
-
-    if state.show_session_picker {
-        match key.code {
-            KeyCode::Esc => {
-                state.show_session_picker = false;
-            }
-            KeyCode::Down => state.reduce(TuiAction::SelectNextSession),
-            KeyCode::Up => state.reduce(TuiAction::SelectPrevSession),
-            KeyCode::Enter => {
-                if let Some(entry) = state.sessions.get(state.selected_session) {
-                    let session_id = entry.session_id.clone();
-                    state.show_session_picker = false;
-                    load_selected_session(state, session_store, runtime, &session_id)?;
-                }
-            }
-            _ => {}
-        }
-        return Ok(false);
-    }
-
-    if (key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('i'))
-        || (key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Tab)
-    {
-        state.reduce(TuiAction::ToggleInspector);
-        return Ok(false);
-    }
-    if key.code == KeyCode::Tab {
-        state.reduce(TuiAction::CycleFocus);
-        return Ok(false);
-    }
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('n') {
-        state.reduce(TuiAction::NewSession);
-        return Ok(false);
-    }
-    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
-        state.refresh_sessions(session_store)?;
-        state.status = "session list refreshed".to_string();
-        return Ok(false);
-    }
-    if key.code == KeyCode::Char('?') {
-        state.reduce(TuiAction::ToggleHelp);
-        return Ok(false);
-    }
-    if key.code == KeyCode::Char('q') && key.modifiers.is_empty() {
-        return Ok(true);
-    }
-
-    match state.focus {
-        TuiFocus::Sessions => match key.code {
-            KeyCode::Down => state.reduce(TuiAction::SelectNextSession),
-            KeyCode::Up => state.reduce(TuiAction::SelectPrevSession),
-            KeyCode::Enter => {
-                if let Some(entry) = state.sessions.get(state.selected_session) {
-                    let session_id = entry.session_id.clone();
-                    load_selected_session(state, session_store, runtime, &session_id)?;
-                }
-            }
-            _ => {}
-        },
-        TuiFocus::Input => match key.code {
-            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.input.push('\n');
-            }
-            KeyCode::Backspace => {
-                state.input.pop();
-            }
-            KeyCode::Enter => {
-                if !state.running {
-                    let prompt = state.input.trim().to_string();
-                    if !prompt.is_empty() {
-                        state.input.clear();
-                        if let Some(command) = parse_input_command(&prompt) {
-                            handle_input_command(state, session_store, runtime, command)?;
-                        } else {
-                            state.running = true;
-                            state.status = "running".to_string();
-                            spawn_agent_task(state, runtime, options, app_tx, prompt);
-                        }
-                    }
-                }
-            }
-            KeyCode::Char(ch) => {
-                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
-                    state.input.push(ch);
-                }
-            }
-            _ => {}
-        },
-        TuiFocus::Messages | TuiFocus::Inspector => {}
-    }
-
-    Ok(false)
-}
-
-fn load_selected_session(
-    state: &mut TuiState,
-    session_store: &SessionStore,
-    runtime: &mut TuiRuntime,
-    session_id: &str,
-) -> Result<()> {
-    let switched = match (runtime.load_session_runtime)(Some(session_id)) {
-        Ok(switched) => switched,
-        Err(err) => {
-            state.status = format!("error: {err}");
-            state.inspector.push(InspectorLine {
-                kind: "error".to_string(),
-                detail: err.to_string(),
-            });
-            return Ok(());
-        }
-    };
-    runtime.agent = switched.agent;
-    runtime.profile_name = switched.profile_name;
-    runtime.agent_id = switched.agent_id;
-    runtime.session_metadata = switched.session_metadata;
-    runtime.policy_summary = switched.policy_summary;
-    state.load_session(session_store, Some(session_id.to_string()))?;
-    let active_agent = runtime.agent_id.as_deref().unwrap_or("<none>");
-    state.status = format!("resumed session={session_id} | agent={active_agent}");
-    Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TuiInputCommand<'a> {
-    Agent,
-    Agents,
-    AgentSet(&'a str),
-    Session,
-    SessionSet(&'a str),
-    NewSession,
-    Status,
-}
-
-fn parse_input_command(input: &str) -> Option<TuiInputCommand<'_>> {
-    if let Some(rest) = input.strip_prefix("/agent") {
-        if rest.is_empty() {
-            return Some(TuiInputCommand::Agent);
-        }
-        if rest.chars().next().is_some_and(char::is_whitespace) {
-            let requested = rest.trim();
-            if requested.is_empty() {
-                return Some(TuiInputCommand::Agent);
-            }
-            return Some(TuiInputCommand::AgentSet(requested));
-        }
-    }
-    if input == "/agents" {
-        return Some(TuiInputCommand::Agents);
-    }
-    if let Some(rest) = input.strip_prefix("/session") {
-        if rest.is_empty() {
-            return Some(TuiInputCommand::Session);
-        }
-        if rest.chars().next().is_some_and(char::is_whitespace) {
-            let requested = rest.trim();
-            if requested.is_empty() {
-                return Some(TuiInputCommand::Session);
-            }
-            return Some(TuiInputCommand::SessionSet(requested));
-        }
-    }
-    if input == "/new" {
-        return Some(TuiInputCommand::NewSession);
-    }
-    if input == "/status" {
-        return Some(TuiInputCommand::Status);
-    }
-    None
-}
-
-fn handle_input_command(
-    state: &mut TuiState,
-    session_store: &SessionStore,
-    runtime: &mut TuiRuntime,
-    command: TuiInputCommand<'_>,
-) -> Result<()> {
-    match command {
-        TuiInputCommand::Agent => {
-            state.status = format!("agent={}", runtime.agent_id.as_deref().unwrap_or("<none>"));
-        }
-        TuiInputCommand::Agents => {
-            toggle_agent_picker(state, runtime)?;
-        }
-        TuiInputCommand::AgentSet(agent_id) => {
-            switch_active_agent(state, runtime, agent_id)?;
-        }
-        TuiInputCommand::Session => {
-            state.status = format!(
-                "session={}",
-                state.active_session_id.as_deref().unwrap_or("<new>")
-            );
-        }
-        TuiInputCommand::SessionSet(session_id) => {
-            load_selected_session(state, session_store, runtime, session_id)?;
-        }
-        TuiInputCommand::NewSession => {
-            state.reduce(TuiAction::NewSession);
-        }
-        TuiInputCommand::Status => {
-            state.status = compose_status_line(
-                "runtime",
-                &runtime.profile_name,
-                runtime.agent_id.as_deref(),
-                state.active_session_id.as_deref(),
-                &runtime.policy_summary,
-            );
-        }
-    }
-    Ok(())
-}
-
-fn toggle_agent_picker(state: &mut TuiState, runtime: &TuiRuntime) -> Result<()> {
-    if state.show_agent_picker {
-        state.show_agent_picker = false;
-        return Ok(());
-    }
-
-    let agents = (runtime.list_agents)()?;
-    if agents.is_empty() {
-        state.status = "no configured agents".to_string();
-        return Ok(());
-    }
-    state.selected_agent = runtime
-        .agent_id
-        .as_ref()
-        .and_then(|active| agents.iter().position(|entry| &entry.id == active))
-        .unwrap_or(0);
-    state.agents = agents;
-    state.show_session_picker = false;
-    state.show_agent_picker = true;
-    state.status = "agent picker".to_string();
-    Ok(())
-}
-
-fn toggle_session_picker(state: &mut TuiState, session_store: &SessionStore) -> Result<()> {
-    if state.show_session_picker {
-        state.show_session_picker = false;
-        return Ok(());
-    }
-
-    state.refresh_sessions(session_store)?;
-    if state.sessions.is_empty() {
-        state.status = "no sessions".to_string();
-        return Ok(());
-    }
-    state.show_agent_picker = false;
-    state.show_session_picker = true;
-    state.status = "session picker".to_string();
-    Ok(())
-}
-
-fn switch_active_agent(
-    state: &mut TuiState,
-    runtime: &mut TuiRuntime,
-    agent_id: &str,
-) -> Result<()> {
-    if runtime.agent_id.as_deref() == Some(agent_id) {
-        state.status = format!("agent unchanged={agent_id}");
-        return Ok(());
-    }
-
-    let switched = match (runtime.switch_agent)(agent_id) {
-        Ok(switched) => switched,
-        Err(err) => {
-            state.status = format!("error: {err}");
-            state.inspector.push(InspectorLine {
-                kind: "error".to_string(),
-                detail: err.to_string(),
-            });
-            return Ok(());
-        }
-    };
-
-    let had_session = state.active_session_id.is_some();
-    if had_session {
-        state.reduce(TuiAction::NewSession);
-    }
-    runtime.agent = switched.agent;
-    runtime.profile_name = switched.profile_name;
-    runtime.agent_id = switched.agent_id;
-    runtime.session_metadata = switched.session_metadata;
-    runtime.policy_summary = switched.policy_summary;
-
-    let active_agent = runtime.agent_id.as_deref().unwrap_or("<none>");
-    state.status = if had_session {
-        format!("agent switched={active_agent} | session reset")
-    } else {
-        format!("agent switched={active_agent}")
-    };
-    state.inspector.push(InspectorLine {
-        kind: "agent".to_string(),
-        detail: if had_session {
-            format!("switched to {active_agent}; new session started")
-        } else {
-            format!("switched to {active_agent}")
-        },
-    });
     Ok(())
 }
 
@@ -861,514 +240,6 @@ fn spawn_agent_task(
     });
 }
 
-fn render(
-    frame: &mut ratatui::Frame,
-    state: &TuiState,
-    agent_id: Option<&str>,
-    profile_name: &str,
-    policy_summary: &str,
-) {
-    let area = frame.area();
-    let show_inspector = state.show_inspector && area.width >= 120;
-    let compact = area.width < 80;
-
-    if compact {
-        render_compact(frame, state, area, agent_id, profile_name, policy_summary);
-    } else {
-        render_wide(
-            frame,
-            state,
-            area,
-            show_inspector,
-            agent_id,
-            profile_name,
-            policy_summary,
-        );
-    }
-
-    if state.show_help {
-        render_help_overlay(frame, area);
-    }
-
-    if state.show_agent_picker {
-        render_agent_picker(frame, state, area);
-    }
-
-    if state.show_session_picker {
-        render_session_picker(frame, state, area);
-    }
-
-    if state.focus == TuiFocus::Input {
-        let cursor = input_cursor(
-            area,
-            compact,
-            state.show_inspector && area.width >= 120,
-            &state.input,
-        );
-        frame.set_cursor_position(cursor);
-    }
-}
-
-fn render_compact(
-    frame: &mut ratatui::Frame,
-    state: &TuiState,
-    area: Rect,
-    agent_id: Option<&str>,
-    profile_name: &str,
-    policy_summary: &str,
-) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(6),
-            Constraint::Length(4),
-            Constraint::Length(1),
-        ])
-        .split(area);
-
-    let agent = agent_id.unwrap_or("<none>");
-    let session = state.active_session_id.as_deref().unwrap_or("<new>");
-    let header = Paragraph::new(format!(
-        "profile={profile_name} | agent={agent} | policy={policy_summary} | session={session}"
-    ))
-    .style(Style::default().fg(Color::Cyan));
-    frame.render_widget(header, chunks[0]);
-
-    render_messages(frame, state, chunks[1], true);
-    render_input(frame, state, chunks[2], true);
-    render_status(
-        frame,
-        state,
-        chunks[3],
-        profile_name,
-        agent_id,
-        policy_summary,
-    );
-}
-
-fn render_wide(
-    frame: &mut ratatui::Frame,
-    state: &TuiState,
-    area: Rect,
-    show_inspector: bool,
-    agent_id: Option<&str>,
-    profile_name: &str,
-    policy_summary: &str,
-) {
-    let columns = if show_inspector {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(28),
-                Constraint::Min(50),
-                Constraint::Length(34),
-            ])
-            .split(area)
-    } else {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Length(28), Constraint::Min(50)])
-            .split(area)
-    };
-
-    render_sessions(
-        frame,
-        state,
-        columns[0],
-        agent_id,
-        profile_name,
-        policy_summary,
-    );
-
-    let center = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(6),
-            Constraint::Length(4),
-            Constraint::Length(1),
-        ])
-        .split(columns[1]);
-    render_messages(frame, state, center[0], false);
-    render_input(frame, state, center[1], false);
-    render_status(
-        frame,
-        state,
-        center[2],
-        profile_name,
-        agent_id,
-        policy_summary,
-    );
-
-    if show_inspector {
-        render_inspector(frame, state, columns[2]);
-    }
-}
-
-fn render_sessions(
-    frame: &mut ratatui::Frame,
-    state: &TuiState,
-    area: Rect,
-    agent_id: Option<&str>,
-    profile_name: &str,
-    policy_summary: &str,
-) {
-    let title = format!(
-        "sessions | profile={} | agent={} | policy={}",
-        profile_name,
-        agent_id.unwrap_or("<none>"),
-        policy_summary,
-    );
-    let items = if state.sessions.is_empty() {
-        vec![ListItem::new("<no sessions>")]
-    } else {
-        state
-            .sessions
-            .iter()
-            .map(|entry| {
-                let marker = if state
-                    .active_session_id
-                    .as_ref()
-                    .is_some_and(|active| active == &entry.session_id)
-                {
-                    "*"
-                } else {
-                    " "
-                };
-                let runtime = entry.runtime.as_ref().map_or_else(
-                    || "<unknown> / <none>".to_string(),
-                    |runtime| {
-                        format!(
-                            "{} / {}",
-                            runtime.profile_name,
-                            runtime.agent_id.as_deref().unwrap_or("<none>")
-                        )
-                    },
-                );
-                ListItem::new(vec![
-                    Line::raw(format!(
-                        "{marker} {} ({})",
-                        short_id(&entry.session_id),
-                        entry.event_count
-                    )),
-                    Line::styled(format!("  {runtime}"), Style::default().fg(Color::Gray)),
-                ])
-            })
-            .collect::<Vec<_>>()
-    };
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(border_style(state.focus == TuiFocus::Sessions));
-    let list = List::new(items).block(block).highlight_style(
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    );
-    let mut list_state = ListState::default();
-    if !state.sessions.is_empty() {
-        list_state.select(Some(state.selected_session.min(state.sessions.len() - 1)));
-    }
-    frame.render_stateful_widget(list, area, &mut list_state);
-}
-
-fn render_messages(frame: &mut ratatui::Frame, state: &TuiState, area: Rect, compact: bool) {
-    let mut lines = Vec::new();
-    for entry in &state.messages {
-        let role_style = match entry.role.as_str() {
-            "user" => Style::default().fg(Color::LightBlue),
-            "assistant" => Style::default().fg(Color::LightGreen),
-            _ => Style::default().fg(Color::Gray),
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("{}> ", entry.role), role_style),
-            Span::raw(entry.text.clone()),
-        ]));
-        lines.push(Line::raw(""));
-    }
-    if lines.is_empty() {
-        lines.push(Line::raw(
-            "No messages yet. Press Tab to focus input and hit Enter to send.",
-        ));
-    }
-
-    let title = if compact {
-        "messages"
-    } else {
-        "message stream"
-    };
-    let paragraph = Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(border_style(state.focus == TuiFocus::Messages)),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(paragraph, area);
-}
-
-fn render_input(frame: &mut ratatui::Frame, state: &TuiState, area: Rect, compact: bool) {
-    let title = if state.running {
-        "input (running...)"
-    } else if compact {
-        "input"
-    } else {
-        "input (Enter send, Ctrl+J newline)"
-    };
-    let input = Paragraph::new(state.input.as_str())
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(border_style(state.focus == TuiFocus::Input)),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(input, area);
-}
-
-fn render_status(
-    frame: &mut ratatui::Frame,
-    state: &TuiState,
-    area: Rect,
-    profile_name: &str,
-    agent_id: Option<&str>,
-    policy_summary: &str,
-) {
-    let status = Paragraph::new(compose_status_line(
-        &state.status,
-        profile_name,
-        agent_id,
-        state.active_session_id.as_deref(),
-        policy_summary,
-    ))
-    .style(Style::default().fg(Color::Gray));
-    frame.render_widget(status, area);
-}
-
-fn compose_status_line(
-    detail: &str,
-    profile_name: &str,
-    agent_id: Option<&str>,
-    session_id: Option<&str>,
-    policy_summary: &str,
-) -> String {
-    format!(
-        "{} | profile={} | agent={} | session={} | policy={}",
-        detail,
-        profile_name,
-        agent_id.unwrap_or("<none>"),
-        session_id.unwrap_or("<new>"),
-        policy_summary
-    )
-}
-
-fn render_inspector(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
-    let items = if state.inspector.is_empty() {
-        vec![ListItem::new("No tool events.")]
-    } else {
-        state
-            .inspector
-            .iter()
-            .rev()
-            .take(40)
-            .map(|entry| ListItem::new(format!("{}: {}", entry.kind, entry.detail)))
-            .collect::<Vec<_>>()
-    };
-
-    let block = Block::default()
-        .title("inspector")
-        .borders(Borders::ALL)
-        .border_style(border_style(state.focus == TuiFocus::Inspector));
-    let list = List::new(items).block(block);
-    frame.render_widget(list, area);
-}
-
-fn render_help_overlay(frame: &mut ratatui::Frame, area: Rect) {
-    let popup = centered_rect(75, 70, area);
-    let help = vec![
-        Line::from("Keyboard shortcuts"),
-        Line::from(""),
-        Line::from("Enter        send message"),
-        Line::from("Ctrl+J       insert newline"),
-        Line::from("Ctrl+A       open agent picker"),
-        Line::from("Ctrl+S       open session picker"),
-        Line::from("Tab          switch focus"),
-        Line::from("Ctrl+N       new session"),
-        Line::from("Ctrl+R       refresh sessions"),
-        Line::from("Ctrl+I       toggle inspector"),
-        Line::from("/agents      open agent picker in input"),
-        Line::from("/agent ID    switch active agent in input"),
-        Line::from("/session ID  resume a session by id"),
-        Line::from("/new         start a fresh session"),
-        Line::from("/status      print active runtime summary"),
-        Line::from("?            toggle this help"),
-        Line::from("q / Ctrl+C   quit"),
-        Line::from(""),
-        Line::from("When terminal is narrow, inspector is automatically hidden."),
-    ];
-
-    frame.render_widget(Clear, popup);
-    let widget = Paragraph::new(help)
-        .block(
-            Block::default()
-                .title("help")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)),
-        )
-        .wrap(Wrap { trim: false });
-    frame.render_widget(widget, popup);
-}
-
-fn render_agent_picker(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
-    let popup = centered_rect(55, 55, area);
-    let items = state
-        .agents
-        .iter()
-        .map(|entry| {
-            let mut details = vec![format!("profile={}", entry.profile_name)];
-            if entry.is_default {
-                details.push("default".to_string());
-            }
-            if !entry.route_keys.is_empty() {
-                details.push(format!("routes={}", entry.route_keys.join(",")));
-            }
-            ListItem::new(vec![
-                Line::raw(format!("{} ({})", entry.id, entry.name)),
-                Line::styled(
-                    format!("  {}", details.join(" | ")),
-                    Style::default().fg(Color::Gray),
-                ),
-            ])
-        })
-        .collect::<Vec<_>>();
-
-    frame.render_widget(Clear, popup);
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title("agent picker")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)),
-        )
-        .highlight_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-    let mut stateful = ListState::default();
-    if !state.agents.is_empty() {
-        stateful.select(Some(state.selected_agent.min(state.agents.len() - 1)));
-    }
-    frame.render_stateful_widget(list, popup, &mut stateful);
-}
-
-fn render_session_picker(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
-    let popup = centered_rect(62, 60, area);
-    let items = if state.sessions.is_empty() {
-        vec![ListItem::new("<no sessions>")]
-    } else {
-        state
-            .sessions
-            .iter()
-            .map(|entry| {
-                let runtime = entry.runtime.as_ref().map_or_else(
-                    || "<unknown> / <none>".to_string(),
-                    |runtime| {
-                        format!(
-                            "{} / {}",
-                            runtime.profile_name,
-                            runtime.agent_id.as_deref().unwrap_or("<none>")
-                        )
-                    },
-                );
-                ListItem::new(vec![
-                    Line::raw(format!(
-                        "{} ({})",
-                        short_id(&entry.session_id),
-                        entry.event_count
-                    )),
-                    Line::styled(format!("  {runtime}"), Style::default().fg(Color::Gray)),
-                ])
-            })
-            .collect::<Vec<_>>()
-    };
-
-    frame.render_widget(Clear, popup);
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title("session picker")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)),
-        )
-        .highlight_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-    let mut stateful = ListState::default();
-    if !state.sessions.is_empty() {
-        stateful.select(Some(state.selected_session.min(state.sessions.len() - 1)));
-    }
-    frame.render_stateful_widget(list, popup, &mut stateful);
-}
-
-fn centered_rect(width_percent: u16, height_percent: u16, area: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - height_percent) / 2),
-            Constraint::Percentage(height_percent),
-            Constraint::Percentage((100 - height_percent) / 2),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - width_percent) / 2),
-            Constraint::Percentage(width_percent),
-            Constraint::Percentage((100 - width_percent) / 2),
-        ])
-        .split(vertical[1])[1]
-}
-
-fn border_style(active: bool) -> Style {
-    if active {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    }
-}
-
-fn input_cursor(area: Rect, compact: bool, show_inspector: bool, input: &str) -> (u16, u16) {
-    let base_x = if compact { area.x + 1 } else { area.x + 29 + 1 };
-    let base_y = if compact {
-        area.y + area.height - 3
-    } else {
-        area.y + area.height - 2
-    };
-
-    let rows = input.lines().collect::<Vec<_>>();
-    let row_offset = rows.len().saturating_sub(1) as u16;
-    let col_offset = rows
-        .last()
-        .map(|line| line.chars().count() as u16)
-        .unwrap_or(0);
-
-    let max_x = if compact {
-        area.x + area.width.saturating_sub(2)
-    } else if show_inspector {
-        area.x + area.width.saturating_sub(36)
-    } else {
-        area.x + area.width.saturating_sub(2)
-    };
-    let x = base_x.saturating_add(col_offset).min(max_x);
-    let y = base_y.saturating_add(row_offset);
-    (x, y)
-}
-
 fn short_id(session_id: &str) -> String {
     if session_id.len() <= 8 {
         return session_id.to_string();
@@ -1397,6 +268,12 @@ fn map_io(err: impl std::fmt::Display) -> MosaicError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::{TuiInputCommand, parse_input_command};
+    use crate::render::{
+        command_palette_items, compose_header_line, compose_shortcuts_line, compose_status_line,
+    };
+    use crate::state::TuiAction;
+    use mosaic_core::session::SessionSummary;
 
     fn state_with_sessions(show_inspector: bool) -> TuiState {
         TuiState::new(
@@ -1520,6 +397,49 @@ mod tests {
         assert!(rendered.contains("policy=confirm_dangerous"));
         assert!(rendered.contains("agent=writer"));
         assert!(rendered.contains("session=session-a"));
+    }
+
+    #[test]
+    fn header_line_mentions_quick_actions() {
+        let rendered = compose_header_line(
+            false,
+            TuiFocus::Input,
+            "default",
+            Some("writer"),
+            "confirm_dangerous",
+        );
+        assert!(rendered.contains("Mosaic CLI"));
+        assert!(rendered.contains("/agent"));
+        assert!(rendered.contains("focus=input"));
+    }
+
+    #[test]
+    fn shortcuts_line_mentions_core_shortcuts() {
+        let rendered = compose_shortcuts_line(false, true);
+        assert!(rendered.contains("Ctrl+A"));
+        assert!(rendered.contains("Ctrl+S"));
+        assert!(rendered.contains("Shift+Tab"));
+        assert!(rendered.contains("q quit"));
+    }
+
+    #[test]
+    fn command_palette_filters_slash_commands() {
+        let all = command_palette_items("/");
+        assert!(!all.is_empty());
+
+        let agent_only = command_palette_items("/agent writer");
+        assert!(
+            agent_only
+                .iter()
+                .any(|(command, _)| *command == "/agent <id>")
+        );
+        assert!(agent_only.iter().any(|(command, _)| *command == "/agents"));
+
+        let status_only = command_palette_items("/status");
+        assert_eq!(
+            status_only,
+            vec![("/status", "print the active runtime summary")]
+        );
     }
 
     #[test]
