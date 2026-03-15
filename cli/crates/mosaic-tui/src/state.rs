@@ -35,6 +35,7 @@ pub struct TuiState {
     pub(crate) show_agent_picker: bool,
     pub(crate) show_session_picker: bool,
     pub(crate) input: String,
+    pub(crate) command_palette_index: usize,
     pub(crate) running: bool,
     pub(crate) status: String,
     pub(crate) sessions: Vec<SessionSummary>,
@@ -72,6 +73,7 @@ impl TuiState {
             show_agent_picker: false,
             show_session_picker: false,
             input: String::new(),
+            command_palette_index: 0,
             running: false,
             status: "idle".to_string(),
             sessions,
@@ -103,6 +105,7 @@ impl TuiState {
                 self.messages.clear();
                 self.inspector.clear();
                 self.startup_visible = true;
+                self.command_palette_index = 0;
                 self.status = "new session".to_string();
             }
             TuiAction::SelectNextSession => {
@@ -151,6 +154,7 @@ impl TuiState {
         self.active_session_id = session_id;
         self.messages.clear();
         self.inspector.clear();
+        self.command_palette_index = 0;
         if let Some(id) = self.active_session_id.clone() {
             let events = store.read_events(&id)?;
             self.apply_persisted_events(&events);
@@ -167,6 +171,30 @@ impl TuiState {
 
     pub(crate) fn show_startup_surface(&self) -> bool {
         self.startup_visible && self.focus == TuiFocus::Input
+    }
+
+    pub(crate) fn reset_command_palette_selection(&mut self) {
+        self.command_palette_index = 0;
+    }
+
+    pub(crate) fn select_next_command(&mut self, item_count: usize) {
+        if item_count == 0 {
+            self.command_palette_index = 0;
+            return;
+        }
+        self.command_palette_index = (self.command_palette_index + 1) % item_count;
+    }
+
+    pub(crate) fn select_prev_command(&mut self, item_count: usize) {
+        if item_count == 0 {
+            self.command_palette_index = 0;
+            return;
+        }
+        if self.command_palette_index == 0 {
+            self.command_palette_index = item_count - 1;
+        } else {
+            self.command_palette_index -= 1;
+        }
     }
 
     fn apply_persisted_events(&mut self, events: &[SessionEvent]) {
@@ -225,6 +253,7 @@ impl TuiState {
 
     pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) {
         self.startup_visible = false;
+        self.command_palette_index = 0;
         match event {
             AgentEvent::User { session_id, text } => {
                 self.active_session_id = Some(session_id.clone());

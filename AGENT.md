@@ -246,19 +246,24 @@ The current TUI supports:
 - an empty-session startup surface aligned to `specs/cli/assets/copolit_startup.png`
 - the startup surface now appears on initial launch even when a prior session is resumed in the background; focusing `messages` reveals the restored conversation
 - a Copilot-style welcome card plus experimental notice for fresh or reset sessions
-- startup-only environment and cwd/git rows above the composer
+- startup environment and cwd/git rows above the composer, with agent/skill counts derived from repo assets and runtime listings
 - a bordered bottom composer and footer shortcut bar inspired by Codex/Copilot TUI
 - startup placeholder affordances for `@`, `#`, `shift+tab switch mode`, and request count
-- a slash-command suggestion popup anchored above the composer when input begins with `/`
+- a full-width slash-command sheet aligned to `specs/cli/assets/copolit_command.png` and `specs/cli/assets/copolit_command2.png`
+- command autocomplete with `Up` / `Down` selection and `Tab` completion when input begins with `/`
+- unsupported slash commands now stay local to the TUI and report `not implemented` instead of being forwarded to the agent
+- a spinner-style waiting animation in the composer, runtime badge, and message canvas while a turn is running
 - focus cycling between messages/input/sessions/inspector
 - session and inspector views that take over the main canvas when focused
-- agent picker and session picker overlays
+- a full-screen resume surface aligned to `specs/cli/assets/copolit_resume.png` for session browsing and picker mode
+- agent picker overlay plus full-screen session picker
 - slash-style input commands:
   - `/agent`
   - `/agents`
   - `/agent <id>`
   - `/session`
   - `/session <id>`
+  - `/clear`
   - `/new`
   - `/status`
 - keyboard shortcuts:
@@ -276,7 +281,7 @@ The current TUI supports:
 
 The event model is simple:
 
-1. `keys::handle_key` decides whether input is navigation, slash command, or prompt submit.
+1. `keys::handle_key` decides whether input is navigation, command-sheet selection/autocomplete, slash command, or prompt submit.
 2. Prompt submit calls `spawn_agent_task`.
 3. `spawn_agent_task` runs `AgentRunner::ask(...)` on a `tokio::spawn`.
 4. Agent events are pushed through a `tokio::sync::mpsc::UnboundedSender<AppEvent>`.

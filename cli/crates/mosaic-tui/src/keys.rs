@@ -3,7 +3,7 @@ use mosaic_core::error::Result;
 use mosaic_core::session::SessionStore;
 use tokio::sync::mpsc;
 
-use crate::commands::parse_input_command;
+use crate::commands::{command_palette_items, parse_input_command, selected_command_palette_item};
 use crate::events::AppEvent;
 use crate::pickers::{
     handle_input_command, load_selected_session, switch_active_agent, toggle_agent_picker,
@@ -103,6 +103,17 @@ pub(crate) async fn handle_key(
         }
         return Ok(false);
     }
+    if key.code == KeyCode::Tab
+        && state.focus == TuiFocus::Input
+        && state.input.trim_start().starts_with('/')
+    {
+        if let Some(item) = selected_command_palette_item(&state.input, state.command_palette_index)
+        {
+            state.input = item.insert_text.to_string();
+            state.reset_command_palette_selection();
+        }
+        return Ok(false);
+    }
     if key.code == KeyCode::Tab {
         state.reduce(TuiAction::CycleFocus);
         if state.focus != TuiFocus::Input {
@@ -142,18 +153,44 @@ pub(crate) async fn handle_key(
         TuiFocus::Input => match key.code {
             KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 state.input.push('\n');
+                state.reset_command_palette_selection();
             }
             KeyCode::Backspace => {
                 state.input.pop();
+                state.reset_command_palette_selection();
+            }
+            KeyCode::Down if state.input.trim_start().starts_with('/') => {
+                state.select_next_command(command_palette_items(&state.input).len());
+            }
+            KeyCode::Up if state.input.trim_start().starts_with('/') => {
+                state.select_prev_command(command_palette_items(&state.input).len());
             }
             KeyCode::Enter => {
                 if !state.running {
                     let prompt = state.input.trim().to_string();
                     if !prompt.is_empty() {
-                        state.input.clear();
                         if let Some(command) = parse_input_command(&prompt) {
+                            state.input.clear();
+                            state.reset_command_palette_selection();
                             handle_input_command(state, session_store, runtime, command)?;
+                        } else if prompt.starts_with('/') {
+                            if let Some(item) =
+                                selected_command_palette_item(&prompt, state.command_palette_index)
+                            {
+                                state.status = if item.implemented {
+                                    format!("complete command arguments for {}", item.insert_text)
+                                } else {
+                                    format!(
+                                        "command not implemented in mosaic tui yet: {}",
+                                        item.insert_text.trim_end()
+                                    )
+                                };
+                            } else {
+                                state.status = format!("unknown slash command: {prompt}");
+                            }
                         } else {
+                            state.input.clear();
+                            state.reset_command_palette_selection();
                             state.dismiss_startup_surface();
                             state.running = true;
                             state.status = "running".to_string();
@@ -165,6 +202,7 @@ pub(crate) async fn handle_key(
             KeyCode::Char(ch) => {
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT {
                     state.input.push(ch);
+                    state.reset_command_palette_selection();
                 }
             }
             _ => {}

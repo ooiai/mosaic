@@ -100,6 +100,7 @@ pub struct TuiOptions {
 pub struct TuiStartupContext {
     pub custom_instruction_count: usize,
     pub skill_count: usize,
+    pub agent_count: usize,
     pub git_branch: Option<String>,
     pub pending_requests: usize,
 }
@@ -150,7 +151,12 @@ async fn run_app(
 
     let (app_tx, mut app_rx) = mpsc::unbounded_channel::<AppEvent>();
     let cwd_display = options.cwd.display().to_string();
-    let startup_context = build_startup_context(&options.cwd);
+    let startup_context = build_startup_context(
+        &options.cwd,
+        (runtime.list_agents)()
+            .map(|agents| agents.len())
+            .unwrap_or(0),
+    );
 
     let mut should_exit = false;
     while !should_exit {
@@ -271,13 +277,17 @@ fn summarize_json(value: Option<&Value>) -> String {
     format!("{}...", &rendered[..120])
 }
 
-fn build_startup_context(cwd: &Path) -> TuiStartupContext {
+fn build_startup_context(cwd: &Path, agent_count: usize) -> TuiStartupContext {
     let repo_root = find_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     TuiStartupContext {
         custom_instruction_count: usize::from(
             repo_root.join(".github/copilot-instructions.md").is_file(),
         ),
         skill_count: count_child_directories(&repo_root.join(".github/skills")),
+        agent_count: agent_count.max(count_matching_files(
+            &repo_root.join(".github/agents"),
+            ".agent.md",
+        )),
         git_branch: read_git_branch(&repo_root),
         pending_requests: 0,
     }
@@ -296,6 +306,21 @@ fn count_child_directories(path: &Path) -> usize {
         .into_iter()
         .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
         .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .count()
+}
+
+fn count_matching_files(path: &Path, suffix: &str) -> usize {
+    std::fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_file()))
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|file_name| file_name.ends_with(suffix))
+        })
         .count()
 }
 
@@ -341,11 +366,10 @@ fn map_io(err: impl std::fmt::Display) -> MosaicError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{TuiInputCommand, parse_input_command};
+    use crate::commands::{TuiInputCommand, command_palette_items, parse_input_command};
     use crate::render::{
-        command_palette_items, compose_header_line, compose_input_placeholder,
-        compose_shortcuts_line, compose_startup_environment_line, compose_startup_location_line,
-        compose_status_line,
+        compose_header_line, compose_input_placeholder, compose_shortcuts_line,
+        compose_startup_environment_line, compose_startup_location_line, compose_status_line,
     };
     use crate::state::TuiAction;
     use mosaic_core::session::SessionSummary;
@@ -506,26 +530,28 @@ mod tests {
         assert!(
             agent_only
                 .iter()
-                .any(|(command, _)| *command == "/agent <id>")
+                .any(|command| command.insert_text == "/agent ")
         );
-        assert!(agent_only.iter().any(|(command, _)| *command == "/agents"));
+        assert!(
+            agent_only
+                .iter()
+                .any(|command| command.label == "/agent [id]")
+        );
 
         let status_only = command_palette_items("/status");
-        assert_eq!(
-            status_only,
-            vec![("/status", "print the active runtime summary")]
-        );
+        assert_eq!(status_only.len(), 1);
+        assert_eq!(status_only[0].insert_text, "/status");
     }
 
     #[test]
     fn startup_environment_line_pluralizes_counts() {
         assert_eq!(
-            compose_startup_environment_line(1, 3),
-            "Loading environment: 1 custom instruction, 3 skills"
+            compose_startup_environment_line(1, 3, 2),
+            "Environment loaded: 1 custom instruction, 3 skills, 2 agents"
         );
         assert_eq!(
-            compose_startup_environment_line(2, 1),
-            "Loading environment: 2 custom instructions, 1 skill"
+            compose_startup_environment_line(2, 1, 1),
+            "Environment loaded: 2 custom instructions, 1 skill, 1 agent"
         );
     }
 
@@ -597,6 +623,10 @@ mod tests {
         );
         assert_eq!(
             parse_input_command("/new"),
+            Some(TuiInputCommand::NewSession)
+        );
+        assert_eq!(
+            parse_input_command("/clear"),
             Some(TuiInputCommand::NewSession)
         );
         assert_eq!(
