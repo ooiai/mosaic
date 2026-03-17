@@ -239,13 +239,15 @@
     "sessions": {
       "items": [
         {
+          "created_at": "string",
           "event_count": "number",
           "last_updated": "string",
           "runtime": {
             "agent_id": "null",
             "profile_name": "string"
           },
-          "session_id": "string"
+          "session_id": "string",
+          "title": "string"
         }
       ],
       "type": "array"

@@ -242,6 +242,7 @@ This is a substantial improvement over the original monolith. `lib.rs` now mainl
 
 The current TUI supports:
 
+- `mosaic` with no subcommand now routes to the interactive fullscreen TUI by default; explicit `mosaic tui` still works
 - a single main canvas instead of a permanently visible three-column workspace
 - an empty-session startup surface aligned to `specs/cli/assets/copolit_startup.png`
 - the startup surface now appears on initial launch even when a prior session is resumed in the background; focusing `messages` reveals the restored conversation
@@ -251,13 +252,18 @@ The current TUI supports:
 - startup placeholder affordances for `@`, `#`, `shift+tab switch mode`, and request count
 - a full-width slash-command sheet aligned to `specs/cli/assets/copolit_command.png` and `specs/cli/assets/copolit_command2.png`
 - command autocomplete with `Up` / `Down` selection and `Tab` completion when input begins with `/`
+- contextual command assistant suggestions for `/agent ...` and `/session ...`, including configured-agent matches, recent-session matches, and next-step fallback hints when there is no exact match
+- the command assistant now distinguishes `local`, `agent`, `session`, and `shell` suggestion sources so mixed suggestion lists stay readable
 - unsupported slash commands now stay local to the TUI and report `not implemented` instead of being forwarded to the agent
 - a spinner-style waiting animation in the composer, runtime badge, and message canvas while a turn is running
+- animated waiting copy and a bottom activity rail now surface tool activity and assistant progress more like Codex/Copilot conversation views
+- while a turn is running, the conversation pane also renders an in-flight `Mosaic` turn placeholder instead of showing progress only outside the transcript
 - focus cycling between messages/input/sessions/inspector
 - session and inspector views that take over the main canvas when focused
 - a full-screen resume surface aligned to `specs/cli/assets/copolit_resume.png` for session browsing and picker mode
 - agent picker overlay plus full-screen session picker
 - slash-style input commands:
+  - `/help`
   - `/agent`
   - `/agents`
   - `/agent <id>`
@@ -266,6 +272,15 @@ The current TUI supports:
   - `/clear`
   - `/new`
   - `/status`
+  - `/models`
+  - `/skills`
+  - `/docs`
+  - `/logs`
+  - `/doctor`
+- a first-pass alignment between top-level CLI capabilities and the TUI command sheet:
+  - local TUI commands for `help`, `agents`, `agent`, `session`, `clear/new`, `status`, `models`, `skills`, `docs`, `logs`, and `doctor`
+  - shell-first discovery entries for `memory`, `knowledge`, and `plugins`
+- local discovery commands now render into the transcript as local `System` responses without creating a new agent turn or persisted chat session
 - keyboard shortcuts:
   - `Tab`
   - `Ctrl+N`
@@ -286,7 +301,7 @@ The event model is simple:
 3. `spawn_agent_task` runs `AgentRunner::ask(...)` on a `tokio::spawn`.
 4. Agent events are pushed through a `tokio::sync::mpsc::UnboundedSender<AppEvent>`.
 5. `run_app` drains that channel and updates `TuiState`.
-6. `render(...)` redraws the full screen every loop tick.
+6. `render(...)` redraws the full screen every loop tick, including animated waiting copy, the activity rail, and the command assistant surface.
 
 This works, and event/render/command parsing plus state/picker logic and raw key dispatch are now isolated. The main remaining orchestration pieces in `lib.rs` are the event loop and task spawning.
 

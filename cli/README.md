@@ -166,7 +166,10 @@ cargo run -p mosaic-cli --bin mosaic -- --json dns resolve localhost --port 443
 ### TUI
 
 ```bash
-# interactive fullscreen TUI
+# interactive fullscreen TUI (default when no subcommand is provided)
+cargo run -p mosaic-cli --bin mosaic -- --project-state
+
+# explicit TUI entry still works
 cargo run -p mosaic-cli --bin mosaic -- --project-state tui
 
 # customize initial focus and inspector visibility
@@ -188,6 +191,13 @@ TUI shortcuts:
 - `Ctrl+S`: open the session picker
 - selecting a session from the left pane: reloads that session, shows its bound profile/agent in the list, and rebinds the active runtime to that session's bound agent
 - `/agent <id>` in the input box: switch active agent; if the current TUI chat already has a session, Mosaic starts a new session before switching
+- `/help`, `/agents`, `/agent`, `/session`, `/clear`, and `/status` are first-class local TUI slash commands
+- `/models`, `/skills`, `/docs`, `/logs`, and `/doctor` now run as local TUI discovery/inspection commands and render results directly into the transcript
+- `/agent ...` and `/session ...` now autocomplete against configured agents and recent sessions before falling back to generic command rows
+- the command assistant labels suggestions by source (`local`, `agent`, `session`, `shell`) and shows follow-up hints for the selected row
+- `/memory`, `/knowledge`, and `/plugins` are still surfaced as shell-first command hints in the command sheet
+- running turns now show animated waiting copy plus a bottom activity rail for recent tool/runtime events
+- while a turn is in flight, the conversation pane also shows an active `Mosaic` turn placeholder so progress remains visible inside the transcript
 - `/agents` in the input box: open the same agent picker without leaving the keyboard flow
 - `/session <id>` in the input box: resume a session directly by id
 - `/new` in the input box: start a fresh session without leaving the current runtime

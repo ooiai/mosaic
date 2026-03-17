@@ -38,6 +38,10 @@ pub struct SessionSummary {
     pub event_count: usize,
     pub last_updated: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime: Option<SessionRuntimeMetadata>,
 }
 
@@ -106,11 +110,15 @@ impl SessionStore {
                 .to_string();
             let events = Self::read_events_from_path(&path)?;
             let last_updated = events.last().map(|event| event.ts);
+            let created_at = events.first().map(|event| event.ts);
+            let title = Self::extract_session_title(&events);
             let runtime = Self::latest_runtime_metadata_from_events(&events);
             sessions.push(SessionSummary {
                 session_id,
                 event_count: events.len(),
                 last_updated,
+                created_at,
+                title,
                 runtime,
             });
         }
@@ -188,6 +196,22 @@ impl SessionStore {
         events: &[SessionEvent],
     ) -> Option<SessionRuntimeMetadata> {
         events.iter().rev().find_map(Self::parse_runtime_metadata)
+    }
+
+    fn extract_session_title(events: &[SessionEvent]) -> Option<String> {
+        events
+            .iter()
+            .find(|event| event.kind == EventKind::User)
+            .and_then(|event| event.payload.get("text")?.as_str().map(str::to_string))
+            .map(|text| {
+                let single_line = text.lines().next().unwrap_or("").trim().to_string();
+                if single_line.chars().count() > 60 {
+                    format!("{}…", single_line.chars().take(60).collect::<String>())
+                } else {
+                    single_line
+                }
+            })
+            .filter(|s| !s.is_empty())
     }
 
     fn read_events_from_path(path: &Path) -> Result<Vec<SessionEvent>> {

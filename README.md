@@ -84,6 +84,9 @@ mosaic --project-state ask "summarize this repository"
 mosaic --project-state chat
 
 # 4b) chat-first terminal UI
+mosaic --project-state
+
+# 4c) explicit TUI entry still works
 mosaic --project-state tui
 ```
 

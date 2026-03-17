@@ -6,7 +6,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
-use crate::commands::command_palette_items;
+use crate::commands::{CommandSuggestion, CommandSuggestionSource, command_suggestions};
 use crate::state::TuiState;
 use crate::{TuiFocus, TuiStartupContext};
 
@@ -19,6 +19,7 @@ pub(crate) fn render(
     state: &TuiState,
     agent_id: Option<&str>,
     profile_name: &str,
+    model_name: &str,
     policy_summary: &str,
     cwd: &str,
     startup_context: &TuiStartupContext,
@@ -32,7 +33,21 @@ pub(crate) fn render(
     };
     let startup_surface = state.show_startup_surface();
     let command_palette_visible = should_show_command_palette(state);
-    let palette_height = command_palette_height(area.height, state.input.lines().count() as u16);
+    let palette_items = if command_palette_visible {
+        command_suggestions(
+            &state.input,
+            &state.agents,
+            &state.sessions,
+            state.active_session_id.as_deref(),
+        )
+    } else {
+        Vec::new()
+    };
+    let palette_height = command_palette_height(
+        area.height,
+        state.input.lines().count() as u16,
+        palette_items.len() as u16,
+    );
 
     let input_area = if startup_surface {
         let layout = Layout::default()
@@ -65,11 +80,12 @@ pub(crate) fn render(
             startup_context.git_branch.as_deref(),
             profile_name,
             agent_id,
+            model_name,
             state.running,
         );
         render_input(frame, state, layout[3], true);
         if command_palette_visible {
-            render_command_palette(frame, state, layout[4]);
+            render_command_palette(frame, state, &palette_items, layout[4]);
         } else {
             render_startup_footer(frame, layout[4], startup_context.pending_requests);
         }
@@ -102,11 +118,12 @@ pub(crate) fn render(
             cwd,
             profile_name,
             agent_id,
+            model_name,
             policy_summary,
         );
         render_input(frame, state, layout[2], false);
         if command_palette_visible {
-            render_command_palette(frame, state, layout[3]);
+            render_command_palette(frame, state, &palette_items, layout[3]);
         } else {
             render_footer_chrome(frame, layout[3], compact, state.focus, state.show_inspector);
         }
@@ -373,7 +390,13 @@ fn render_session_group(
         .split(area);
     frame.render_widget(
         Paragraph::new(Line::styled(
-            format!("── {title}"),
+            {
+                let prefix = format!("── {} ", title);
+                let dashes = area
+                    .width
+                    .saturating_sub(prefix.chars().count() as u16) as usize;
+                format!("{prefix}{}", "─".repeat(dashes))
+            },
             Style::default()
                 .fg(Color::LightMagenta)
                 .add_modifier(Modifier::BOLD),
@@ -424,24 +447,27 @@ fn compose_session_row_line(
     row_number: usize,
     entry: &mosaic_core::session::SessionSummary,
 ) -> Line<'static> {
-    let summary = entry.runtime.as_ref().map_or_else(
-        || format!("{} events", entry.event_count),
-        |runtime| {
-            format!(
-                "{} {}",
-                runtime.profile_name,
-                runtime.agent_id.as_deref().unwrap_or("<none>")
-            )
-        },
-    );
+    let summary = entry.title.clone().unwrap_or_else(|| {
+        entry.runtime.as_ref().map_or_else(
+            || format!("{} events", entry.event_count),
+            |runtime| {
+                format!(
+                    "{} {}",
+                    runtime.profile_name,
+                    runtime.agent_id.as_deref().unwrap_or("<none>")
+                )
+            },
+        )
+    });
     let age = format_relative_timestamp(entry.last_updated);
+    let created = format_relative_timestamp(entry.created_at);
     let row = compose_fixed_columns(
         width as usize,
         &[
             (&format!("{row_number}."), 4),
             ("Local", 8),
             (&age, 12),
-            (&age, 12),
+            (&created, 12),
             (&summary, usize::MAX),
         ],
     );
@@ -449,75 +475,131 @@ fn compose_session_row_line(
 }
 
 fn render_messages(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
+    let activity_height = if state.running || !state.inspector.is_empty() {
+        let desired = (state.inspector.len().min(4) as u16)
+            .saturating_add(if state.running { 3 } else { 2 })
+            .max(4);
+        desired.min(area.height.saturating_sub(3).max(1))
+    } else {
+        0
+    };
     let sections = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .constraints(if activity_height > 0 {
+            vec![
+                Constraint::Length(1),
+                Constraint::Min(1),
+                Constraint::Length(activity_height),
+            ]
+        } else {
+            vec![Constraint::Length(1), Constraint::Min(1)]
+        })
         .margin(1)
         .split(area);
 
-    let heading = if state.running {
-        Line::from(vec![
-            Span::styled(spinner_frame(), Style::default().fg(Color::LightGreen)),
-            Span::raw(" "),
-            Span::styled(
-                format!(
-                    "Working in session {}",
-                    state.active_session_id.as_deref().unwrap_or("<new>")
-                ),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ])
+    let heading_left = if state.running {
+        format!("{} {}", spinner_frame(), animated_waiting_copy())
     } else {
-        Line::styled(
-            format!(
-                "conversation | session={}",
-                state.active_session_id.as_deref().unwrap_or("<new>")
-            ),
-            Style::default().fg(Color::DarkGray),
-        )
+        "Conversation".to_string()
     };
-    frame.render_widget(Paragraph::new(heading), sections[0]);
+    let heading_right = format!(
+        "session={}",
+        state.active_session_id.as_deref().unwrap_or("<new>")
+    );
+    frame.render_widget(
+        Paragraph::new(compose_split_line(
+            sections[0].width,
+            &heading_left,
+            &heading_right,
+        ))
+        .style(Style::default().fg(Color::DarkGray)),
+        sections[0],
+    );
 
     let mut lines = Vec::new();
     for entry in &state.messages {
-        let role_style = match entry.role.as_str() {
-            "user" => Style::default().fg(Color::Cyan),
-            "assistant" => Style::default().fg(Color::LightGreen),
-            _ => Style::default().fg(Color::Gray),
-        };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{} ", entry.role),
-                role_style.add_modifier(Modifier::BOLD),
+        let (role_label, role_style, detail_style) = match entry.role.as_str() {
+            "user" => (
+                "You",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::White),
             ),
-            Span::raw(entry.text.clone()),
-        ]));
+            "assistant" => (
+                "Mosaic",
+                Style::default()
+                    .fg(Color::LightGreen)
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::White),
+            ),
+            _ => (
+                "System",
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Gray),
+            ),
+        };
+        lines.push(Line::styled(role_label, role_style));
+        for chunk in entry.text.split('\n') {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(chunk.to_string(), detail_style),
+            ]));
+        }
         lines.push(Line::raw(""));
     }
 
     if lines.is_empty() {
-        lines.push(Line::styled(
-            "No messages yet. Type a prompt below or use / for command autocomplete.",
-            Style::default().fg(Color::Gray),
-        ));
+        lines.extend([
+            Line::styled(
+                "No conversation yet.",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Line::styled(
+                "Type a prompt below, or use / to open the command assistant.",
+                Style::default().fg(Color::Gray),
+            ),
+        ]);
     }
 
     if state.running {
         lines.push(Line::raw(""));
+        lines.push(Line::styled(
+            "Mosaic",
+            Style::default()
+                .fg(Color::LightGreen)
+                .add_modifier(Modifier::BOLD),
+        ));
         lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
             Span::styled(spinner_frame(), Style::default().fg(Color::LightGreen)),
             Span::raw(" "),
-            Span::styled(
-                "Mosaic is waiting for the current run to finish...",
-                Style::default().fg(Color::Gray),
-            ),
+            Span::styled(animated_waiting_copy(), Style::default().fg(Color::Gray)),
         ]));
+        if let Some(entry) = state.inspector.last() {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("recent activity: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    truncate_text(&entry.detail, sections[1].width as usize),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
     }
 
     frame.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }),
         sections[1],
     );
+
+    if activity_height > 0 {
+        render_activity_panel(frame, state, sections[2]);
+    }
 }
 
 fn render_input(frame: &mut ratatui::Frame, state: &TuiState, area: Rect, startup_surface: bool) {
@@ -531,13 +613,15 @@ fn render_input(frame: &mut ratatui::Frame, state: &TuiState, area: Rect, startu
         })
         .add_modifier(Modifier::BOLD);
     let prompt = prompt_prefix(startup_surface, state.running);
+    let input_hint = if state.running {
+        animated_waiting_copy()
+    } else {
+        compose_input_placeholder(startup_surface, false).to_string()
+    };
     let lines = if state.input.is_empty() {
         vec![Line::from(vec![
             Span::styled(prompt.clone(), prompt_style),
-            Span::styled(
-                compose_input_placeholder(startup_surface, state.running),
-                Style::default().fg(Color::Gray),
-            ),
+            Span::styled(input_hint, Style::default().fg(Color::Gray)),
         ])]
     } else {
         state
@@ -578,11 +662,11 @@ fn render_startup_environment(
     startup_context: &TuiStartupContext,
 ) {
     let line = Line::from(vec![
-        Span::styled("• ", Style::default().fg(Color::LightBlue)),
-        Span::styled("🧪 ", Style::default().fg(Color::LightGreen)),
+        Span::styled("• ", Style::default().fg(Color::White)),
         Span::styled(
             compose_startup_environment_line(
                 startup_context.custom_instruction_count,
+                startup_context.mcp_server_count,
                 startup_context.skill_count,
                 startup_context.agent_count,
             ),
@@ -599,10 +683,11 @@ fn render_startup_location(
     branch: Option<&str>,
     profile_name: &str,
     agent_id: Option<&str>,
+    model_name: &str,
     running: bool,
 ) {
     let left = compose_startup_location_line(cwd, branch);
-    let right = compose_runtime_badge(profile_name, agent_id, running);
+    let right = compose_runtime_badge(model_name, profile_name, agent_id, running);
     frame.render_widget(
         Paragraph::new(compose_split_line(area.width, &left, &right))
             .style(Style::default().fg(Color::Gray)),
@@ -617,14 +702,63 @@ fn render_context_strip(
     cwd: &str,
     profile_name: &str,
     agent_id: Option<&str>,
+    model_name: &str,
     _policy_summary: &str,
 ) {
     let left = display_cwd(cwd);
-    let right = compose_runtime_badge(profile_name, agent_id, state.running);
+    let right = compose_runtime_badge(model_name, profile_name, agent_id, state.running);
     frame.render_widget(
         Paragraph::new(compose_split_line(area.width, &left, &right))
             .style(Style::default().fg(Color::Gray)),
         area,
+    );
+}
+
+fn render_activity_panel(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            "activity",
+            Style::default()
+                .fg(Color::LightMagenta)
+                .add_modifier(Modifier::BOLD),
+        )),
+        sections[0],
+    );
+
+    let mut lines = Vec::new();
+    if state.running {
+        lines.push(Line::from(vec![
+            Span::styled(spinner_frame(), Style::default().fg(Color::LightGreen)),
+            Span::raw(" "),
+            Span::styled(animated_waiting_copy(), Style::default().fg(Color::Gray)),
+        ]));
+    }
+    for entry in state.inspector.iter().rev().take(4).rev() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", activity_icon(&entry.kind)),
+                Style::default().fg(activity_color(&entry.kind)),
+            ),
+            Span::styled(
+                format!("{}:", entry.kind),
+                Style::default()
+                    .fg(activity_color(&entry.kind))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                truncate_text(&entry.detail, area.width as usize),
+                Style::default().fg(Color::Gray),
+            ),
+        ]));
+    }
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        sections[1],
     );
 }
 
@@ -647,18 +781,33 @@ pub(crate) fn compose_status_line(
 
 pub(crate) fn compose_startup_environment_line(
     custom_instruction_count: usize,
+    mcp_server_count: usize,
     skill_count: usize,
     agent_count: usize,
 ) -> String {
-    format!(
-        "Environment loaded: {} custom instruction{}, {} skill{}, {} agent{}",
+    let mut parts = vec![format!(
+        "{} custom instruction{}",
         custom_instruction_count,
-        plural_suffix(custom_instruction_count),
+        plural_suffix(custom_instruction_count)
+    )];
+    if mcp_server_count > 0 {
+        parts.push(format!(
+            "{} MCP server{}",
+            mcp_server_count,
+            plural_suffix(mcp_server_count)
+        ));
+    }
+    parts.push(format!(
+        "{} skill{}",
         skill_count,
-        plural_suffix(skill_count),
+        plural_suffix(skill_count)
+    ));
+    parts.push(format!(
+        "{} agent{}",
         agent_count,
         plural_suffix(agent_count)
-    )
+    ));
+    format!("Environment loaded: {}", parts.join(", "))
 }
 
 pub(crate) fn compose_startup_location_line(cwd: &str, branch: Option<&str>) -> String {
@@ -678,10 +827,10 @@ pub(crate) fn compose_header_line(
     _policy_summary: &str,
 ) -> String {
     if compact {
-        format!("{MOSAIC_TUI_TITLE} | /agent /clear /status")
+        format!("{MOSAIC_TUI_TITLE} | /help /agent /status")
     } else {
         format!(
-            "{MOSAIC_TUI_TITLE} | focus={} | /agent /clear /session /status",
+            "{MOSAIC_TUI_TITLE} | focus={} | /help /agent /session /status",
             focus_label(focus)
         )
     }
@@ -747,28 +896,22 @@ fn should_show_command_palette(state: &TuiState) -> bool {
         && state.input.trim_start().starts_with('/')
 }
 
-fn render_command_palette(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
-    let items = command_palette_items(&state.input);
+fn render_command_palette(
+    frame: &mut ratatui::Frame,
+    state: &TuiState,
+    items: &[CommandSuggestion],
+    area: Rect,
+) {
     let width = area.width.saturating_sub(4);
     let rows = if items.is_empty() {
-        vec![ListItem::new(vec![
-            Line::raw("No matching slash commands."),
-            Line::styled(
-                "Try /agent, /clear, /session, or /status",
-                Style::default().fg(Color::Gray),
-            ),
-        ])]
+        vec![ListItem::new(Line::styled(
+            "No matching slash commands. Try /help, /status, /models, /skills, /session, or /agents",
+            Style::default().fg(Color::Gray),
+        ))]
     } else {
         items
             .iter()
-            .map(|item| {
-                ListItem::new(command_palette_row(
-                    width,
-                    item.label,
-                    item.description,
-                    item.implemented,
-                ))
-            })
+            .map(|item| ListItem::new(command_palette_item_lines(width, item)))
             .collect::<Vec<_>>()
     };
 
@@ -776,18 +919,37 @@ fn render_command_palette(frame: &mut ratatui::Frame, state: &TuiState, area: Re
     if !items.is_empty() {
         list_state.select(Some(state.command_palette_index.min(items.len() - 1)));
     }
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .title("command assistant")
+        .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
     let list = List::new(rows)
-        .block(
-            Block::default()
-                .borders(Borders::TOP | Borders::LEFT)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
+        .highlight_symbol("› ")
         .highlight_style(
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         );
-    frame.render_stateful_widget(list, area, &mut list_state);
+    frame.render_stateful_widget(list, sections[0], &mut list_state);
+    frame.render_widget(
+        Paragraph::new(command_assistant_footer(
+            sections[1].width,
+            items.get(
+                state
+                    .command_palette_index
+                    .min(items.len().saturating_sub(1)),
+            ),
+        ))
+        .style(Style::default().fg(Color::DarkGray)),
+        sections[1],
+    );
 }
 
 fn render_inspector(frame: &mut ratatui::Frame, state: &TuiState, area: Rect) {
@@ -819,6 +981,7 @@ fn render_help_overlay(frame: &mut ratatui::Frame, area: Rect) {
     let help = vec![
         Line::from("Keyboard shortcuts"),
         Line::from(""),
+        Line::from("Plain input             ask/chat directly in the current session"),
         Line::from("Enter                  send message / execute local command"),
         Line::from("Ctrl+J                 insert newline"),
         Line::from("Tab / Shift+Tab        switch focus"),
@@ -829,11 +992,16 @@ fn render_help_overlay(frame: &mut ratatui::Frame, area: Rect) {
         Line::from("Ctrl+N                 new session"),
         Line::from("Ctrl+R                 refresh sessions"),
         Line::from("Ctrl+I                 toggle inspector"),
+        Line::from("/help                  open the fullscreen help overlay"),
         Line::from("/agents                open agent picker in input"),
         Line::from("/agent ID              switch active agent in input"),
         Line::from("/session ID            resume a session by id"),
         Line::from("/clear, /new           start a fresh session"),
         Line::from("/status                print active runtime summary"),
+        Line::from("/models /skills /docs  inspect local config, skills, and docs"),
+        Line::from("/logs /doctor          show logs and run diagnostics in place"),
+        Line::from("/memory /knowledge     inspect memory and knowledge state locally"),
+        Line::from("/plugins               inspect installed plugins locally"),
         Line::from("?                      toggle this help"),
         Line::from("q / Ctrl+C             quit"),
         Line::from(""),
@@ -1034,48 +1202,94 @@ fn truncate_text(text: &str, max_width: usize) -> String {
     format!("{prefix}...")
 }
 
-fn command_palette_height(area_height: u16, input_lines: u16) -> u16 {
-    let desired = (input_lines + 9).clamp(8, 14);
+fn command_palette_height(area_height: u16, input_lines: u16, item_count: u16) -> u16 {
+    let rows = item_count.clamp(3, 8);
+    let desired = (input_lines + rows + 4).clamp(6, 14);
     let max_height = area_height.saturating_sub(3).max(1);
     desired.min(max_height).max(1)
 }
 
-fn command_palette_row(
-    width: u16,
-    label: &str,
-    description: &str,
-    implemented: bool,
-) -> Line<'static> {
+fn command_palette_item_lines(width: u16, item: &CommandSuggestion) -> Vec<Line<'static>> {
     let available = width as usize;
-    let label = truncate_text(label, available / 3);
-    let description_budget = available.saturating_sub(label.chars().count() + 2);
-    let description = truncate_text(description, description_budget);
-    let gap =
-        " ".repeat(available.saturating_sub(label.chars().count() + description.chars().count()));
-    Line::from(vec![
-        Span::styled(
-            label,
-            Style::default().fg(if implemented {
-                Color::Cyan
-            } else {
-                Color::LightBlue
-            }),
-        ),
-        Span::raw(gap),
-        Span::styled(description, Style::default().fg(Color::Gray)),
-    ])
+    // Split available width: ~40% for the command name, ~60% for description
+    let label_width = (available * 2 / 5).max(16);
+    let desc_width = available.saturating_sub(label_width + 2);
+
+    let label_cell = truncate_text(&item.label, label_width);
+    let label_padded = format!(
+        "{:<width$}",
+        label_cell,
+        width = label_width
+    );
+    let desc_cell = truncate_text(&item.description, desc_width);
+
+    let line_text = format!("{label_padded}  {desc_cell}");
+    vec![Line::from(vec![Span::styled(
+        line_text,
+        Style::default().fg(command_suggestion_color(&item.source)),
+    )])]
 }
 
-fn compose_runtime_badge(profile_name: &str, agent_id: Option<&str>, running: bool) -> String {
-    let mut label = profile_name.replace('_', "-");
-    if let Some(agent_id) = agent_id.filter(|agent_id| !agent_id.is_empty()) {
-        label = format!("{label} ({agent_id})");
+fn command_assistant_footer(width: u16, selected: Option<&CommandSuggestion>) -> String {
+    let default = "↑↓ navigate • Tab complete • Enter accept".to_string();
+    let Some(selected) = selected else {
+        return default;
+    };
+    if let Some(shell_hint) = &selected.shell_hint {
+        return compose_split_line(
+            width,
+            "↑↓ navigate • Tab complete",
+            &format!("shell: {shell_hint}"),
+        );
     }
-    if running {
-        format!("{} {}", spinner_frame(), label)
+    let helper = match selected.source {
+        CommandSuggestionSource::Agent => "Enter to switch agent",
+        CommandSuggestionSource::Session => "Enter to resume session",
+        CommandSuggestionSource::Local => "Enter to use command",
+        CommandSuggestionSource::Shell => "Run from shell",
+    };
+    format!("↑↓ navigate • Tab complete • {helper}")
+}
+
+fn command_suggestion_badge(source: &CommandSuggestionSource) -> &'static str {
+    match source {
+        CommandSuggestionSource::Local => "local",
+        CommandSuggestionSource::Shell => "shell",
+        CommandSuggestionSource::Agent => "agent",
+        CommandSuggestionSource::Session => "session",
+    }
+}
+
+fn command_suggestion_color(source: &CommandSuggestionSource) -> Color {
+    match source {
+        CommandSuggestionSource::Local => Color::Cyan,
+        CommandSuggestionSource::Shell => Color::LightBlue,
+        CommandSuggestionSource::Agent => Color::LightGreen,
+        CommandSuggestionSource::Session => Color::LightMagenta,
+    }
+}
+
+fn compose_runtime_badge(
+    model_name: &str,
+    profile_name: &str,
+    agent_id: Option<&str>,
+    running: bool,
+) -> String {
+    // Show model name when available; fall back to profile name
+    let base = if !model_name.is_empty() {
+        model_name.to_string()
     } else {
-        label
+        profile_name.replace('_', "-")
+    };
+    let mut label = if let Some(agent_id) = agent_id.filter(|a| !a.is_empty()) {
+        format!("{base} ({agent_id})")
+    } else {
+        base
+    };
+    if running {
+        label = format!("{} {}{}", spinner_frame(), label, animated_ellipsis());
     }
+    label
 }
 
 fn prompt_prefix(startup_surface: bool, running: bool) -> String {
@@ -1095,6 +1309,56 @@ fn spinner_frame() -> &'static str {
         .unwrap_or(Duration::from_millis(0));
     let frame = ((elapsed.as_millis() / 120) as usize) % FRAMES.len();
     FRAMES[frame]
+}
+
+fn animated_ellipsis() -> &'static str {
+    match animation_phase(4) {
+        0 => "",
+        1 => ".",
+        2 => "..",
+        _ => "...",
+    }
+}
+
+fn animated_waiting_copy() -> String {
+    const PHRASES: [&str; 4] = [
+        "Mosaic is thinking",
+        "Mosaic is planning",
+        "Mosaic is checking context",
+        "Mosaic is preparing a reply",
+    ];
+    format!(
+        "{}{}",
+        PHRASES[animation_phase(PHRASES.len())],
+        animated_ellipsis()
+    )
+}
+
+fn activity_icon(kind: &str) -> &'static str {
+    match kind {
+        "tool_call" => "→",
+        "tool_result" => "✓",
+        "error" => "!",
+        "agent" => "●",
+        _ => "•",
+    }
+}
+
+fn activity_color(kind: &str) -> Color {
+    match kind {
+        "tool_call" => Color::LightBlue,
+        "tool_result" => Color::LightGreen,
+        "error" => Color::LightRed,
+        "agent" => Color::Cyan,
+        _ => Color::Gray,
+    }
+}
+
+fn animation_phase(frame_count: usize) -> usize {
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::from_millis(0));
+    ((elapsed.as_millis() / 240) as usize) % frame_count.max(1)
 }
 
 fn resume_surface_height(session_count: usize, available_height: u16) -> u16 {
@@ -1140,6 +1404,8 @@ fn format_relative_timestamp(timestamp: Option<DateTime<Utc>>) -> String {
         format!("{}h ago", delta.num_hours())
     } else if delta.num_days() < 7 {
         format!("{}d ago", delta.num_days())
+    } else if delta.num_weeks() < 4 {
+        format!("{}w ago", delta.num_weeks())
     } else {
         timestamp.format("%Y-%m-%d").to_string()
     }

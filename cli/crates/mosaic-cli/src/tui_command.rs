@@ -1,4 +1,5 @@
 use std::io::{self, IsTerminal, Read};
+use std::process::Command;
 use std::sync::Arc;
 
 use mosaic_agent::AgentRunOptions;
@@ -6,7 +7,10 @@ use mosaic_agents::{AgentStore, agent_routes_path, agents_file_path};
 use mosaic_core::config::RunGuardMode;
 use mosaic_core::error::{MosaicError, Result};
 use mosaic_core::session::SessionStore;
-use mosaic_tui::{SwitchedTuiRuntime, TuiAgentOption, TuiFocus, TuiOptions, TuiRuntime, run_tui};
+use mosaic_tui::{
+    SwitchedTuiRuntime, TuiAgentOption, TuiFocus, TuiLocalCommand, TuiLocalCommandFuture,
+    TuiLocalCommandOutput, TuiOptions, TuiRuntime, run_tui,
+};
 use serde_json::json;
 
 use crate::runtime_context::{RuntimeSelector, build_runtime, build_runtime_from_selector};
@@ -112,6 +116,7 @@ fn build_tui_runtime(
         },
         guard_mode_label(&runtime.agent.profile().tools.run.guard_mode)
     );
+    let model_name = runtime.agent.profile().provider.model.clone();
     let switch_selector = selector.clone();
     let switch_agent = Arc::new(move |agent_id: &str| -> Result<SwitchedTuiRuntime> {
         let runtime =
@@ -127,6 +132,7 @@ fn build_tui_runtime(
                 },
                 guard_mode_label(&runtime.agent.profile().tools.run.guard_mode)
             ),
+            model_name: runtime.agent.profile().provider.model.clone(),
             agent: runtime.agent,
             profile_name: runtime.active_profile_name,
             agent_id: runtime.active_agent_id,
@@ -148,6 +154,7 @@ fn build_tui_runtime(
                     },
                     guard_mode_label(&runtime.agent.profile().tools.run.guard_mode)
                 ),
+                model_name: runtime.agent.profile().provider.model.clone(),
                 agent: runtime.agent,
                 profile_name: runtime.active_profile_name,
                 agent_id: runtime.active_agent_id,
@@ -184,17 +191,130 @@ fn build_tui_runtime(
             })
             .collect())
     });
+    let command_selector = selector.clone();
+    let run_local_command = Arc::new(move |command: TuiLocalCommand| -> TuiLocalCommandFuture {
+        let selector = command_selector.clone();
+        Box::pin(async move {
+            let executable =
+                std::env::current_exe().map_err(|err| MosaicError::Io(err.to_string()))?;
+            tokio::task::spawn_blocking(move || {
+                run_nested_cli_command(executable, selector, command)
+            })
+            .await
+            .map_err(|err| MosaicError::Io(err.to_string()))?
+        })
+    });
 
     Ok(TuiRuntime {
         session_metadata: runtime.session_metadata(),
         agent: runtime.agent,
         profile_name: runtime.active_profile_name,
         agent_id: runtime.active_agent_id,
+        model_name,
         policy_summary,
         switch_agent,
         load_session_runtime,
         list_agents,
+        run_local_command,
     })
+}
+
+fn run_nested_cli_command(
+    executable: std::path::PathBuf,
+    selector: RuntimeSelector,
+    command: TuiLocalCommand,
+) -> Result<TuiLocalCommandOutput> {
+    let mut args = vec!["--profile".to_string(), selector.profile];
+    if selector.project_state {
+        args.push("--project-state".to_string());
+    }
+    match command {
+        TuiLocalCommand::Models => {
+            args.extend(["models", "status"].into_iter().map(str::to_string));
+        }
+        TuiLocalCommand::Skills => {
+            args.extend(["skills", "list"].into_iter().map(str::to_string));
+        }
+        TuiLocalCommand::Docs => {
+            args.push("docs".to_string());
+        }
+        TuiLocalCommand::Logs => {
+            args.extend(["logs", "--tail", "12"].into_iter().map(str::to_string));
+        }
+        TuiLocalCommand::Doctor => {
+            args.push("doctor".to_string());
+        }
+        TuiLocalCommand::Memory => {
+            args.extend(
+                ["memory", "status", "--all-namespaces"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
+        TuiLocalCommand::Knowledge => {
+            args.extend(
+                ["knowledge", "datasets", "list"]
+                    .into_iter()
+                    .map(str::to_string),
+            );
+        }
+        TuiLocalCommand::Plugins => {
+            args.extend(["plugins", "list"].into_iter().map(str::to_string));
+        }
+    }
+
+    let output = Command::new(executable)
+        .current_dir(std::env::current_dir().map_err(|err| MosaicError::Io(err.to_string()))?)
+        .args(&args)
+        .output()
+        .map_err(|err| MosaicError::Io(err.to_string()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if !output.status.success() {
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("command exited with status {}", output.status)
+        };
+        return Err(MosaicError::Tool(format!(
+            "{} failed: {}",
+            command.slash_name(),
+            detail
+        )));
+    }
+
+    let body = if stdout.is_empty() {
+        "No output returned.".to_string()
+    } else {
+        stdout
+    };
+    let summary = first_non_empty_line(&body).unwrap_or("completed");
+    Ok(TuiLocalCommandOutput {
+        title: local_command_title(command).to_string(),
+        status: format!("loaded {}", command.slash_name()),
+        inspector_detail: format!("{} -> {}", command.slash_name(), summary),
+        body,
+    })
+}
+
+fn local_command_title(command: TuiLocalCommand) -> &'static str {
+    match command {
+        TuiLocalCommand::Models => "Model routing summary",
+        TuiLocalCommand::Skills => "Installed skills",
+        TuiLocalCommand::Docs => "Docs topics",
+        TuiLocalCommand::Logs => "Recent logs",
+        TuiLocalCommand::Doctor => "Doctor checks",
+        TuiLocalCommand::Memory => "Memory namespace status",
+        TuiLocalCommand::Knowledge => "Knowledge datasets",
+        TuiLocalCommand::Plugins => "Installed plugins",
+    }
+}
+
+fn first_non_empty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
 }
 
 fn resolve_tui_prompt(prompt: Option<String>) -> Result<Option<String>> {

@@ -4,7 +4,7 @@ use mosaic_core::session::SessionStore;
 use crate::commands::TuiInputCommand;
 use crate::render::compose_status_line;
 use crate::state::{InspectorLine, TuiAction, TuiState};
-use crate::{SwitchedTuiRuntime, TuiRuntime};
+use crate::{SwitchedTuiRuntime, TuiLocalCommand, TuiRuntime};
 
 pub(crate) fn load_selected_session(
     state: &mut TuiState,
@@ -31,13 +31,16 @@ pub(crate) fn load_selected_session(
     Ok(())
 }
 
-pub(crate) fn handle_input_command(
+pub(crate) async fn handle_input_command(
     state: &mut TuiState,
     session_store: &SessionStore,
     runtime: &mut TuiRuntime,
     command: TuiInputCommand<'_>,
 ) -> Result<()> {
     match command {
+        TuiInputCommand::Help => {
+            state.reduce(TuiAction::ToggleHelp);
+        }
         TuiInputCommand::Agent => {
             state.status = format!("agent={}", runtime.agent_id.as_deref().unwrap_or("<none>"));
         }
@@ -68,8 +71,39 @@ pub(crate) fn handle_input_command(
                 &runtime.policy_summary,
             );
         }
+        TuiInputCommand::Models => {
+            run_local_command(state, runtime, TuiLocalCommand::Models).await;
+        }
+        TuiInputCommand::Skills => {
+            run_local_command(state, runtime, TuiLocalCommand::Skills).await;
+        }
+        TuiInputCommand::Docs => {
+            run_local_command(state, runtime, TuiLocalCommand::Docs).await;
+        }
+        TuiInputCommand::Logs => {
+            run_local_command(state, runtime, TuiLocalCommand::Logs).await;
+        }
+        TuiInputCommand::Doctor => {
+            run_local_command(state, runtime, TuiLocalCommand::Doctor).await;
+        }
+        TuiInputCommand::Memory => {
+            run_local_command(state, runtime, TuiLocalCommand::Memory).await;
+        }
+        TuiInputCommand::Knowledge => {
+            run_local_command(state, runtime, TuiLocalCommand::Knowledge).await;
+        }
+        TuiInputCommand::Plugins => {
+            run_local_command(state, runtime, TuiLocalCommand::Plugins).await;
+        }
     }
     Ok(())
+}
+
+async fn run_local_command(state: &mut TuiState, runtime: &TuiRuntime, command: TuiLocalCommand) {
+    match (runtime.run_local_command)(command).await {
+        Ok(output) => state.apply_local_command_output(command, output),
+        Err(err) => state.apply_local_command_error(command, err.to_string()),
+    }
 }
 
 pub(crate) fn toggle_agent_picker(state: &mut TuiState, runtime: &TuiRuntime) -> Result<()> {
@@ -164,6 +198,7 @@ fn apply_switched_runtime(runtime: &mut TuiRuntime, switched: SwitchedTuiRuntime
     runtime.agent = switched.agent;
     runtime.profile_name = switched.profile_name;
     runtime.agent_id = switched.agent_id;
+    runtime.model_name = switched.model_name;
     runtime.session_metadata = switched.session_metadata;
     runtime.policy_summary = switched.policy_summary;
 }

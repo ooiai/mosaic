@@ -1,5 +1,7 @@
+use std::future::Future;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,20 +65,61 @@ pub struct TuiRuntime {
     pub agent: AgentRunner,
     pub profile_name: String,
     pub agent_id: Option<String>,
+    pub model_name: String,
     pub session_metadata: SessionRuntimeMetadata,
     pub policy_summary: String,
     pub switch_agent: Arc<dyn Fn(&str) -> Result<SwitchedTuiRuntime> + Send + Sync>,
     pub load_session_runtime: Arc<dyn Fn(Option<&str>) -> Result<SwitchedTuiRuntime> + Send + Sync>,
     pub list_agents: Arc<dyn Fn() -> Result<Vec<TuiAgentOption>> + Send + Sync>,
+    pub run_local_command: Arc<dyn Fn(TuiLocalCommand) -> TuiLocalCommandFuture + Send + Sync>,
 }
 
 pub struct SwitchedTuiRuntime {
     pub agent: AgentRunner,
     pub profile_name: String,
     pub agent_id: Option<String>,
+    pub model_name: String,
     pub session_metadata: SessionRuntimeMetadata,
     pub policy_summary: String,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TuiLocalCommand {
+    Models,
+    Skills,
+    Docs,
+    Logs,
+    Doctor,
+    Memory,
+    Knowledge,
+    Plugins,
+}
+
+impl TuiLocalCommand {
+    pub fn slash_name(self) -> &'static str {
+        match self {
+            Self::Models => "/models",
+            Self::Skills => "/skills",
+            Self::Docs => "/docs",
+            Self::Logs => "/logs",
+            Self::Doctor => "/doctor",
+            Self::Memory => "/memory",
+            Self::Knowledge => "/knowledge",
+            Self::Plugins => "/plugins",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TuiLocalCommandOutput {
+    pub title: String,
+    pub body: String,
+    pub status: String,
+    pub inspector_detail: String,
+}
+
+pub type TuiLocalCommandFuture =
+    Pin<Box<dyn Future<Output = Result<TuiLocalCommandOutput>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TuiAgentOption {
@@ -99,6 +142,7 @@ pub struct TuiOptions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TuiStartupContext {
     pub custom_instruction_count: usize,
+    pub mcp_server_count: usize,
     pub skill_count: usize,
     pub agent_count: usize,
     pub git_branch: Option<String>,
@@ -144,6 +188,7 @@ async fn run_app(
         runtime.agent_id.as_deref(),
         &runtime.policy_summary,
     );
+    state.agents = (runtime.list_agents)().unwrap_or_default();
 
     if let Some(session_id) = active_session_id {
         state.load_session(&session_store, Some(session_id))?;
@@ -192,6 +237,7 @@ async fn run_app(
                     &state,
                     runtime.agent_id.as_deref(),
                     &runtime.profile_name,
+                    &runtime.model_name,
                     &runtime.policy_summary,
                     &cwd_display,
                     &startup_context,
@@ -283,6 +329,7 @@ fn build_startup_context(cwd: &Path, agent_count: usize) -> TuiStartupContext {
         custom_instruction_count: usize::from(
             repo_root.join(".github/copilot-instructions.md").is_file(),
         ),
+        mcp_server_count: count_mcp_servers(&repo_root),
         skill_count: count_child_directories(&repo_root.join(".github/skills")),
         agent_count: agent_count.max(count_matching_files(
             &repo_root.join(".github/agents"),
@@ -322,6 +369,18 @@ fn count_matching_files(path: &Path, suffix: &str) -> usize {
                 .is_some_and(|file_name| file_name.ends_with(suffix))
         })
         .count()
+}
+
+fn count_mcp_servers(repo_root: &Path) -> usize {
+    // Count MCP server JSON definitions under .github/mcp/
+    let mcp_dir = repo_root.join(".github").join("mcp");
+    let json_count = count_matching_files(&mcp_dir, ".json");
+    if json_count > 0 {
+        return json_count;
+    }
+    // Also try .github/mcp-servers/ directory
+    let alt_dir = repo_root.join(".github").join("mcp-servers");
+    count_matching_files(&alt_dir, ".json")
 }
 
 fn read_git_branch(repo_root: &Path) -> Option<String> {
@@ -366,7 +425,9 @@ fn map_io(err: impl std::fmt::Display) -> MosaicError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{TuiInputCommand, command_palette_items, parse_input_command};
+    use crate::commands::{
+        TuiInputCommand, command_palette_items, command_suggestions, parse_input_command,
+    };
     use crate::render::{
         compose_header_line, compose_input_placeholder, compose_shortcuts_line,
         compose_startup_environment_line, compose_startup_location_line, compose_status_line,
@@ -383,6 +444,8 @@ mod tests {
                     session_id: "session-a".to_string(),
                     event_count: 2,
                     last_updated: None,
+                    created_at: None,
+                    title: None,
                     runtime: Some(SessionRuntimeMetadata {
                         agent_id: Some("writer".to_string()),
                         profile_name: "default".to_string(),
@@ -392,6 +455,8 @@ mod tests {
                     session_id: "session-b".to_string(),
                     event_count: 3,
                     last_updated: None,
+                    created_at: None,
+                    title: None,
                     runtime: Some(SessionRuntimeMetadata {
                         agent_id: Some("reviewer".to_string()),
                         profile_name: "default".to_string(),
@@ -484,6 +549,35 @@ mod tests {
     }
 
     #[test]
+    fn local_command_output_populates_transcript_and_inspector() {
+        let mut state = state_with_sessions(true);
+        state.focus = TuiFocus::Input;
+
+        state.apply_local_command_output(
+            TuiLocalCommand::Models,
+            TuiLocalCommandOutput {
+                title: "Model routing summary".to_string(),
+                body: "current model: mock-model".to_string(),
+                status: "loaded /models".to_string(),
+                inspector_detail: "/models -> current model: mock-model".to_string(),
+            },
+        );
+
+        assert_eq!(state.messages.len(), 2);
+        assert_eq!(state.messages[0].role, "user");
+        assert_eq!(state.messages[0].text, "/models");
+        assert_eq!(state.messages[1].role, "system");
+        assert!(state.messages[1].text.contains("Model routing summary"));
+        assert!(state.messages[1].text.contains("current model: mock-model"));
+        assert_eq!(
+            state.inspector.last().map(|entry| entry.kind.as_str()),
+            Some("local_command")
+        );
+        assert_eq!(state.status, "loaded /models");
+        assert!(!state.show_startup_surface());
+    }
+
+    #[test]
     fn state_status_includes_policy_summary() {
         let state = state_with_sessions(true);
         let rendered = compose_status_line(
@@ -525,6 +619,10 @@ mod tests {
     fn command_palette_filters_slash_commands() {
         let all = command_palette_items("/");
         assert!(!all.is_empty());
+        assert!(all.iter().any(|command| command.insert_text == "/help"));
+        assert!(all.iter().any(|command| command.insert_text == "/models"));
+        assert!(all.iter().any(|command| command.insert_text == "/memory"));
+        assert!(all.iter().any(|command| command.insert_text == "/plugins"));
 
         let agent_only = command_palette_items("/agent writer");
         assert!(
@@ -535,7 +633,7 @@ mod tests {
         assert!(
             agent_only
                 .iter()
-                .any(|command| command.label == "/agent [id]")
+                .any(|command| command.insert_text == "/agents")
         );
 
         let status_only = command_palette_items("/status");
@@ -544,14 +642,63 @@ mod tests {
     }
 
     #[test]
+    fn command_suggestions_include_agent_and_session_context() {
+        let agents = vec![TuiAgentOption {
+            id: "writer".to_string(),
+            name: "Writer".to_string(),
+            profile_name: "default".to_string(),
+            is_default: true,
+            route_keys: vec!["code".to_string()],
+        }];
+        let sessions = vec![SessionSummary {
+            session_id: "session-a-1234".to_string(),
+            event_count: 2,
+            last_updated: None,
+            created_at: None,
+            title: None,
+            runtime: Some(SessionRuntimeMetadata {
+                agent_id: Some("writer".to_string()),
+                profile_name: "default".to_string(),
+            }),
+        }];
+
+        let agent_matches = command_suggestions("/agent wr", &agents, &sessions, None);
+        assert_eq!(agent_matches[0].insert_text, "/agent writer");
+
+        let session_matches = command_suggestions(
+            "/session session-a",
+            &agents,
+            &sessions,
+            Some("session-a-1234"),
+        );
+        assert_eq!(session_matches[0].insert_text, "/session session-a-1234");
+        assert!(session_matches[0].description.contains("active"));
+    }
+
+    #[test]
+    fn command_suggestions_fall_back_when_no_agent_matches_exist() {
+        let suggestions = command_suggestions("/agent reviewer", &[], &[], None);
+        assert!(!suggestions.is_empty());
+        assert!(suggestions.iter().any(|item| item.insert_text == "/agents"));
+        assert!(suggestions.iter().any(|item| {
+            item.shell_hint.as_deref()
+                == Some("mosaic agents add --id <id> --name <name> --model <model>")
+        }));
+    }
+
+    #[test]
     fn startup_environment_line_pluralizes_counts() {
         assert_eq!(
-            compose_startup_environment_line(1, 3, 2),
+            compose_startup_environment_line(1, 0, 3, 2),
             "Environment loaded: 1 custom instruction, 3 skills, 2 agents"
         );
         assert_eq!(
-            compose_startup_environment_line(2, 1, 1),
+            compose_startup_environment_line(2, 0, 1, 1),
             "Environment loaded: 2 custom instructions, 1 skill, 1 agent"
+        );
+        assert_eq!(
+            compose_startup_environment_line(1, 2, 3, 1),
+            "Environment loaded: 1 custom instruction, 2 MCP servers, 3 skills, 1 agent"
         );
     }
 
@@ -600,6 +747,7 @@ mod tests {
 
     #[test]
     fn parse_input_command_recognizes_agent_switch() {
+        assert_eq!(parse_input_command("/help"), Some(TuiInputCommand::Help));
         assert_eq!(parse_input_command("/agent"), Some(TuiInputCommand::Agent));
         assert_eq!(
             parse_input_command("/agents"),
@@ -632,6 +780,32 @@ mod tests {
         assert_eq!(
             parse_input_command("/status"),
             Some(TuiInputCommand::Status)
+        );
+        assert_eq!(
+            parse_input_command("/models"),
+            Some(TuiInputCommand::Models)
+        );
+        assert_eq!(
+            parse_input_command("/skills"),
+            Some(TuiInputCommand::Skills)
+        );
+        assert_eq!(parse_input_command("/docs"), Some(TuiInputCommand::Docs));
+        assert_eq!(parse_input_command("/logs"), Some(TuiInputCommand::Logs));
+        assert_eq!(
+            parse_input_command("/doctor"),
+            Some(TuiInputCommand::Doctor)
+        );
+        assert_eq!(
+            parse_input_command("/memory"),
+            Some(TuiInputCommand::Memory)
+        );
+        assert_eq!(
+            parse_input_command("/knowledge"),
+            Some(TuiInputCommand::Knowledge)
+        );
+        assert_eq!(
+            parse_input_command("/plugins"),
+            Some(TuiInputCommand::Plugins)
         );
         assert_eq!(parse_input_command("hello"), None);
     }

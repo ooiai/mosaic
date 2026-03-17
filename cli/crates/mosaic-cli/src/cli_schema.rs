@@ -9,7 +9,12 @@ use mosaic_core::config::RunGuardMode;
 use mosaic_ops::{ApprovalMode, SandboxProfile, SystemEvent};
 
 #[derive(Parser, Debug)]
-#[command(name = "mosaic", version, about = "Mosaic local agent CLI")]
+#[command(
+    name = "mosaic",
+    version,
+    about = "Mosaic local agent CLI",
+    after_help = "When no subcommand is provided, `mosaic` launches the interactive TUI."
+)]
 struct Cli {
     #[arg(long, default_value = DEFAULT_PROFILE)]
     profile: String,
@@ -22,7 +27,7 @@ struct Cli {
     #[arg(long)]
     debug: bool,
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -1791,6 +1796,18 @@ struct TuiArgs {
     focus: TuiFocusArg,
     #[arg(long)]
     no_inspector: bool,
+}
+
+impl Default for TuiArgs {
+    fn default() -> Self {
+        Self {
+            session: None,
+            prompt: None,
+            agent: None,
+            focus: TuiFocusArg::Input,
+            no_inspector: false,
+        }
+    }
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]

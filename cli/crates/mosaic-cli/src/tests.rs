@@ -43,28 +43,34 @@ impl Provider for StubProvider {
 #[test]
 fn cli_accepts_legacy_aliases() {
     let alias_ask = Cli::try_parse_from(["mosaic", "message", "hello"]).unwrap();
-    assert!(matches!(alias_ask.command, Commands::Ask(_)));
+    assert!(matches!(alias_ask.command, Some(Commands::Ask(_))));
 
     let alias_chat = Cli::try_parse_from(["mosaic", "agent"]).unwrap();
-    assert!(matches!(alias_chat.command, Commands::Chat(_)));
+    assert!(matches!(alias_chat.command, Some(Commands::Chat(_))));
 
     let alias_setup = Cli::try_parse_from(["mosaic", "onboard"]).unwrap();
-    assert!(matches!(alias_setup.command, Commands::Setup(_)));
+    assert!(matches!(alias_setup.command, Some(Commands::Setup(_))));
 
     let alias_config = Cli::try_parse_from(["mosaic", "config", "--show"]).unwrap();
-    assert!(matches!(alias_config.command, Commands::Configure(_)));
+    assert!(matches!(alias_config.command, Some(Commands::Configure(_))));
 
     let alias_sessions = Cli::try_parse_from(["mosaic", "sessions", "list"]).unwrap();
-    assert!(matches!(alias_sessions.command, Commands::Session(_)));
+    assert!(matches!(alias_sessions.command, Some(Commands::Session(_))));
 
     let alias_daemon = Cli::try_parse_from(["mosaic", "daemon", "status"]).unwrap();
-    assert!(matches!(alias_daemon.command, Commands::Gateway(_)));
+    assert!(matches!(alias_daemon.command, Some(Commands::Gateway(_))));
 
     let alias_node = Cli::try_parse_from(["mosaic", "node", "list"]).unwrap();
-    assert!(matches!(alias_node.command, Commands::Nodes(_)));
+    assert!(matches!(alias_node.command, Some(Commands::Nodes(_))));
 
     let alias_acp = Cli::try_parse_from(["mosaic", "acp", "get"]).unwrap();
-    assert!(matches!(alias_acp.command, Commands::Approvals(_)));
+    assert!(matches!(alias_acp.command, Some(Commands::Approvals(_))));
+}
+
+#[test]
+fn cli_without_subcommand_defaults_to_tui_dispatch() {
+    let bare = Cli::try_parse_from(["mosaic"]).unwrap();
+    assert!(bare.command.is_none());
 }
 
 #[test]

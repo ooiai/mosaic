@@ -3,7 +3,7 @@ use mosaic_core::error::Result;
 use mosaic_core::session::SessionStore;
 use tokio::sync::mpsc;
 
-use crate::commands::{command_palette_items, parse_input_command, selected_command_palette_item};
+use crate::commands::{command_suggestions, parse_input_command, selected_command_suggestion};
 use crate::events::AppEvent;
 use crate::pickers::{
     handle_input_command, load_selected_session, switch_active_agent, toggle_agent_picker,
@@ -107,9 +107,15 @@ pub(crate) async fn handle_key(
         && state.focus == TuiFocus::Input
         && state.input.trim_start().starts_with('/')
     {
-        if let Some(item) = selected_command_palette_item(&state.input, state.command_palette_index)
-        {
-            state.input = item.insert_text.to_string();
+        refresh_command_context(state, runtime)?;
+        if let Some(item) = selected_command_suggestion(
+            &state.input,
+            &state.agents,
+            &state.sessions,
+            state.active_session_id.as_deref(),
+            state.command_palette_index,
+        ) {
+            state.input = item.insert_text;
             state.reset_command_palette_selection();
         }
         return Ok(false);
@@ -127,6 +133,7 @@ pub(crate) async fn handle_key(
     }
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
         state.refresh_sessions(session_store)?;
+        refresh_command_context(state, runtime)?;
         state.status = "session list refreshed".to_string();
         return Ok(false);
     }
@@ -160,25 +167,63 @@ pub(crate) async fn handle_key(
                 state.reset_command_palette_selection();
             }
             KeyCode::Down if state.input.trim_start().starts_with('/') => {
-                state.select_next_command(command_palette_items(&state.input).len());
+                refresh_command_context(state, runtime)?;
+                state.select_next_command(
+                    command_suggestions(
+                        &state.input,
+                        &state.agents,
+                        &state.sessions,
+                        state.active_session_id.as_deref(),
+                    )
+                    .len(),
+                );
             }
             KeyCode::Up if state.input.trim_start().starts_with('/') => {
-                state.select_prev_command(command_palette_items(&state.input).len());
+                refresh_command_context(state, runtime)?;
+                state.select_prev_command(
+                    command_suggestions(
+                        &state.input,
+                        &state.agents,
+                        &state.sessions,
+                        state.active_session_id.as_deref(),
+                    )
+                    .len(),
+                );
             }
             KeyCode::Enter => {
                 if !state.running {
                     let prompt = state.input.trim().to_string();
                     if !prompt.is_empty() {
+                        refresh_command_context(state, runtime)?;
+                        if let Some(suggestion) = selected_command_suggestion(
+                            &state.input,
+                            &state.agents,
+                            &state.sessions,
+                            state.active_session_id.as_deref(),
+                            state.command_palette_index,
+                        ) {
+                            if suggestion.insert_text.trim() != prompt {
+                                state.input = suggestion.insert_text;
+                                state.reset_command_palette_selection();
+                                return Ok(false);
+                            }
+                        }
                         if let Some(command) = parse_input_command(&prompt) {
                             state.input.clear();
                             state.reset_command_palette_selection();
-                            handle_input_command(state, session_store, runtime, command)?;
+                            handle_input_command(state, session_store, runtime, command).await?;
                         } else if prompt.starts_with('/') {
-                            if let Some(item) =
-                                selected_command_palette_item(&prompt, state.command_palette_index)
-                            {
+                            if let Some(item) = selected_command_suggestion(
+                                &prompt,
+                                &state.agents,
+                                &state.sessions,
+                                state.active_session_id.as_deref(),
+                                state.command_palette_index,
+                            ) {
                                 state.status = if item.implemented {
                                     format!("complete command arguments for {}", item.insert_text)
+                                } else if let Some(shell_hint) = item.shell_hint {
+                                    format!("available from shell: {shell_hint}")
                                 } else {
                                     format!(
                                         "command not implemented in mosaic tui yet: {}",
@@ -211,4 +256,11 @@ pub(crate) async fn handle_key(
     }
 
     Ok(false)
+}
+
+fn refresh_command_context(state: &mut TuiState, runtime: &TuiRuntime) -> Result<()> {
+    if state.input.trim_start().starts_with("/agent") || state.agents.is_empty() {
+        state.agents = (runtime.list_agents)()?;
+    }
+    Ok(())
 }

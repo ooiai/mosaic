@@ -114,6 +114,291 @@ fn tui_interactive_supports_send_new_session_and_exit() {
 
 #[test]
 #[allow(deprecated)]
+fn bare_mosaic_defaults_to_interactive_tui() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    let bin = assert_cmd::cargo::cargo_bin("mosaic");
+    let pty = native_pty_system();
+    let pair = pty
+        .openpty(PtySize {
+            rows: 40,
+            cols: 140,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("open pty");
+
+    let mut cmd = CommandBuilder::new(bin);
+    cmd.cwd(temp.path());
+    cmd.env("MOSAIC_MOCK_CHAT_RESPONSE", "bare-tui-ok");
+    cmd.arg("--project-state");
+
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn bare mosaic");
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().expect("clone reader");
+    let mut writer = pair.master.take_writer().expect("writer");
+    let drain = std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    });
+
+    std::thread::sleep(Duration::from_millis(300));
+    writer
+        .write_all(b"hello from bare mosaic")
+        .expect("write prompt");
+    writer.write_all(b"\r").expect("send enter");
+    writer.flush().expect("flush prompt");
+
+    let sessions_dir = temp.path().join(".mosaic/data/sessions");
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(6) {
+        let found = std::fs::read_dir(&sessions_dir)
+            .ok()
+            .map(|entries| {
+                entries.flatten().any(|entry| {
+                    std::fs::read_to_string(entry.path())
+                        .map(|content| content.contains("bare-tui-ok"))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        if found {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(120));
+    }
+
+    writer.write_all(b"q").expect("send q");
+    writer.flush().expect("flush q");
+
+    let status = wait_with_timeout(child.as_mut(), Duration::from_secs(8));
+    drop(writer);
+    let _ = drain.join();
+    assert_eq!(status.exit_code(), 0, "unexpected exit status: {status:?}");
+
+    let found = std::fs::read_dir(&sessions_dir)
+        .expect("sessions dir")
+        .flatten()
+        .any(|entry| {
+            std::fs::read_to_string(entry.path())
+                .map(|content| content.contains("bare-tui-ok"))
+                .unwrap_or(false)
+        });
+    assert!(
+        found,
+        "expected persisted assistant reply from bare mosaic TUI run"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn tui_interactive_docs_command_stays_local() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    let bin = assert_cmd::cargo::cargo_bin("mosaic");
+    let pty = native_pty_system();
+    let pair = pty
+        .openpty(PtySize {
+            rows: 40,
+            cols: 140,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("open pty");
+
+    let mut cmd = CommandBuilder::new(bin);
+    cmd.cwd(temp.path());
+    cmd.arg("--project-state");
+    cmd.arg("tui");
+
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn tui");
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().expect("clone reader");
+    let mut writer = pair.master.take_writer().expect("writer");
+    let drain = std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut output = Vec::new();
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(count) => output.extend_from_slice(&buf[..count]),
+                Err(_) => break,
+            }
+        }
+        output
+    });
+
+    std::thread::sleep(Duration::from_millis(300));
+    writer.write_all(b"/docs").expect("write docs command");
+    writer.write_all(b"\r").expect("send docs command");
+    writer.flush().expect("flush docs command");
+
+    std::thread::sleep(Duration::from_millis(700));
+    writer.write_all(b"q").expect("send q");
+    writer.flush().expect("flush q");
+
+    let status = wait_with_timeout(child.as_mut(), Duration::from_secs(8));
+    drop(writer);
+    let output = drain.join().expect("join drain");
+    assert_eq!(status.exit_code(), 0, "unexpected exit status: {status:?}");
+
+    let transcript = String::from_utf8_lossy(&output);
+    assert!(
+        transcript.contains("Docs topics") || transcript.contains("cli/README.md"),
+        "expected local docs output in transcript, got: {transcript}"
+    );
+
+    let sessions_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "session", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let sessions_json: serde_json::Value =
+        serde_json::from_slice(&sessions_output).expect("session list json");
+    assert_eq!(
+        sessions_json["sessions"]
+            .as_array()
+            .map(|sessions| sessions.len())
+            .unwrap_or_default(),
+        0,
+        "expected /docs to stay local and avoid creating a chat session"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
+fn tui_interactive_memory_command_stays_local() {
+    let temp = tempdir().expect("tempdir");
+
+    Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args([
+            "--project-state",
+            "setup",
+            "--base-url",
+            "mock://mock-model",
+            "--model",
+            "mock-model",
+        ])
+        .assert()
+        .success();
+
+    let bin = assert_cmd::cargo::cargo_bin("mosaic");
+    let pty = native_pty_system();
+    let pair = pty
+        .openpty(PtySize {
+            rows: 40,
+            cols: 140,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .expect("open pty");
+
+    let mut cmd = CommandBuilder::new(bin);
+    cmd.cwd(temp.path());
+    cmd.arg("--project-state");
+    cmd.arg("tui");
+
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn tui");
+    drop(pair.slave);
+    let mut reader = pair.master.try_clone_reader().expect("clone reader");
+    let mut writer = pair.master.take_writer().expect("writer");
+    let drain = std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut output = Vec::new();
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(count) => output.extend_from_slice(&buf[..count]),
+                Err(_) => break,
+            }
+        }
+        output
+    });
+
+    std::thread::sleep(Duration::from_millis(300));
+    writer.write_all(b"/memory").expect("write memory command");
+    writer.write_all(b"\r").expect("send memory command");
+    writer.flush().expect("flush memory command");
+
+    std::thread::sleep(Duration::from_millis(700));
+    writer.write_all(b"q").expect("send q");
+    writer.flush().expect("flush q");
+
+    let status = wait_with_timeout(child.as_mut(), Duration::from_secs(8));
+    drop(writer);
+    let output = drain.join().expect("join drain");
+    assert_eq!(status.exit_code(), 0, "unexpected exit status: {status:?}");
+
+    let transcript = String::from_utf8_lossy(&output);
+    assert!(
+        transcript.contains("Memory namespace status")
+            || transcript.contains("No memory namespaces."),
+        "expected local memory output in transcript, got: {transcript}"
+    );
+
+    let sessions_output = Command::cargo_bin("mosaic")
+        .expect("binary")
+        .current_dir(temp.path())
+        .args(["--project-state", "--json", "session", "list"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let sessions_json: serde_json::Value =
+        serde_json::from_slice(&sessions_output).expect("session list json");
+    assert_eq!(
+        sessions_json["sessions"]
+            .as_array()
+            .map(|sessions| sessions.len())
+            .unwrap_or_default(),
+        0,
+        "expected /memory to stay local and avoid creating a chat session"
+    );
+}
+
+#[test]
+#[allow(deprecated)]
 fn tui_interactive_json_mode_returns_validation_error() {
     let temp = tempdir().expect("tempdir");
 

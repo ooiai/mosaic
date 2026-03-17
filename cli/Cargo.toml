@@ -19,7 +19,7 @@ members = [
 default-members = ["crates/mosaic-cli"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-dev"
 edition = "2024"
 license = "MIT"
 

@@ -1,6 +1,6 @@
 Mosaic local agent CLI
 
-Usage: mosaic [OPTIONS] <COMMAND>
+Usage: mosaic [OPTIONS] [COMMAND]
 
 Commands:
   setup          [aliases: onboard]
@@ -57,3 +57,5 @@ Options:
       --debug              
   -h, --help               Print help
   -V, --version            Print version
+
+When no subcommand is provided, `mosaic` launches the interactive TUI.

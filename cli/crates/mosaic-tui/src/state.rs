@@ -2,7 +2,9 @@ use mosaic_agent::AgentEvent;
 use mosaic_core::error::Result;
 use mosaic_core::session::{EventKind, SessionEvent, SessionStore, SessionSummary};
 
-use crate::{TuiAgentOption, TuiFocus, short_id, summarize_json};
+use crate::{
+    TuiAgentOption, TuiFocus, TuiLocalCommand, TuiLocalCommandOutput, short_id, summarize_json,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChatLine {
@@ -197,6 +199,62 @@ impl TuiState {
         }
     }
 
+    pub(crate) fn apply_local_command_output(
+        &mut self,
+        command: TuiLocalCommand,
+        output: TuiLocalCommandOutput,
+    ) {
+        self.dismiss_startup_surface();
+        self.messages.push(ChatLine {
+            role: "user".to_string(),
+            text: command.slash_name().to_string(),
+        });
+        self.messages.push(ChatLine {
+            role: "system".to_string(),
+            text: if output.body.trim().is_empty() {
+                output.title
+            } else {
+                format!("{}\n{}", output.title, output.body)
+            },
+        });
+        self.push_inspector_line("local_command", output.inspector_detail);
+        self.status = output.status;
+    }
+
+    pub(crate) fn apply_local_command_error(
+        &mut self,
+        command: TuiLocalCommand,
+        error: impl Into<String>,
+    ) {
+        let error = error.into();
+        self.dismiss_startup_surface();
+        self.messages.push(ChatLine {
+            role: "user".to_string(),
+            text: command.slash_name().to_string(),
+        });
+        self.messages.push(ChatLine {
+            role: "system".to_string(),
+            text: format!("{} failed\n{}", command.slash_name(), error),
+        });
+        self.push_inspector_line(
+            "error",
+            format!("local command {} failed: {}", command.slash_name(), error),
+        );
+        self.status = format!("error: {error}");
+    }
+
+    pub(crate) fn push_inspector_line(
+        &mut self,
+        kind: impl Into<String>,
+        detail: impl Into<String>,
+    ) {
+        self.inspector.push(InspectorLine {
+            kind: kind.into(),
+            detail: detail.into(),
+        });
+        self.trim_inspector();
+    }
+
     fn apply_persisted_events(&mut self, events: &[SessionEvent]) {
         self.messages.clear();
         self.inspector.clear();
@@ -224,10 +282,10 @@ impl TuiState {
                         .get("name")
                         .and_then(|value| value.as_str())
                         .unwrap_or("tool");
-                    self.inspector.push(InspectorLine {
-                        kind: "tool_call".to_string(),
-                        detail: format!("{name} {}", summarize_json(event.payload.get("args"))),
-                    });
+                    self.push_inspector_line(
+                        "tool_call",
+                        format!("{name} {}", summarize_json(event.payload.get("args"))),
+                    );
                 }
                 EventKind::ToolResult => {
                     let name = event
@@ -235,16 +293,13 @@ impl TuiState {
                         .get("name")
                         .and_then(|value| value.as_str())
                         .unwrap_or("tool");
-                    self.inspector.push(InspectorLine {
-                        kind: "tool_result".to_string(),
-                        detail: format!("{name} {}", summarize_json(event.payload.get("result"))),
-                    });
+                    self.push_inspector_line(
+                        "tool_result",
+                        format!("{name} {}", summarize_json(event.payload.get("result"))),
+                    );
                 }
                 EventKind::Error => {
-                    self.inspector.push(InspectorLine {
-                        kind: "error".to_string(),
-                        detail: summarize_json(event.payload.get("message")),
-                    });
+                    self.push_inspector_line("error", summarize_json(event.payload.get("message")));
                 }
                 EventKind::System => {}
             }
@@ -277,14 +332,14 @@ impl TuiState {
                 args,
             } => {
                 self.active_session_id = Some(session_id.clone());
-                self.inspector.push(InspectorLine {
-                    kind: "tool_call".to_string(),
-                    detail: format!(
+                self.push_inspector_line(
+                    "tool_call",
+                    format!(
                         "[{}] {name} {}",
                         short_id(&session_id),
                         summarize_json(Some(&args))
                     ),
-                });
+                );
                 self.status = format!("running tool={name}");
             }
             AgentEvent::ToolResult {
@@ -293,29 +348,32 @@ impl TuiState {
                 result,
             } => {
                 self.active_session_id = Some(session_id);
-                self.inspector.push(InspectorLine {
-                    kind: "tool_result".to_string(),
-                    detail: format!(
+                self.push_inspector_line(
+                    "tool_result",
+                    format!(
                         "[{}] {name} {}",
                         short_id(self.active_session_id.as_deref().unwrap_or_default()),
                         summarize_json(Some(&result))
                     ),
-                });
+                );
             }
             AgentEvent::Error {
                 session_id,
                 message,
             } => {
                 self.active_session_id = Some(session_id);
-                self.inspector.push(InspectorLine {
-                    kind: "error".to_string(),
-                    detail: format!(
+                self.push_inspector_line(
+                    "error",
+                    format!(
                         "[{}] {message}",
                         short_id(self.active_session_id.as_deref().unwrap_or_default())
                     ),
-                });
+                );
             }
         }
+    }
+
+    fn trim_inspector(&mut self) {
         const MAX_INSPECTOR: usize = 200;
         if self.inspector.len() > MAX_INSPECTOR {
             let overflow = self.inspector.len() - MAX_INSPECTOR;
