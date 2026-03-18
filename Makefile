@@ -190,6 +190,16 @@ cli-install:
 	fi
 	cd cli && cargo install --path crates/mosaic-cli --force
 
+# Rust CLI uninstall from Cargo bin.
+# Usage: make cli-uninstall
+cli-uninstall:
+	@echo "===> Rust CLI uninstall current source."
+	@BIN_PATH="$${CARGO_HOME:-$$HOME/.cargo}/bin/mosaic"; \
+	if [ -e "$$BIN_PATH" ]; then \
+		echo "===> Removing existing CLI at $$BIN_PATH"; \
+		rm -f "$$BIN_PATH"; \
+	fi
+
 # Rust CLI workspace tests.
 # Usage: make cli-test
 cli-test:

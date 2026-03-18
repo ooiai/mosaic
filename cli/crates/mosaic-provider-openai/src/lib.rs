@@ -15,31 +15,31 @@ pub struct OpenAiCompatibleProvider {
     client: Option<Client>,
     base_url: String,
     api_key: String,
+    api_key_env: String,
     mock_mode: bool,
 }
 
 impl OpenAiCompatibleProvider {
+    /// Creates a provider from a profile, deferring auth errors to request time.
+    /// This allows the TUI to launch even before an API key is configured.
     pub fn from_profile(profile: &ProfileConfig) -> Result<Self> {
         let base_url = profile.provider.base_url.clone();
+        let api_key_env = profile.provider.api_key_env.clone();
         let api_key = if base_url.starts_with("mock://") {
             "mock-key".to_string()
         } else {
-            std::env::var(&profile.provider.api_key_env).map_err(|_| {
-                MosaicError::Auth(format!(
-                    "environment variable {} is required",
-                    profile.provider.api_key_env
-                ))
-            })?
+            std::env::var(&api_key_env).unwrap_or_default()
         };
-        Self::new(base_url, api_key)
+        Self::new_with_env(base_url, api_key, api_key_env)
     }
 
     pub fn new(base_url: String, api_key: String) -> Result<Self> {
+        Self::new_with_env(base_url, api_key, String::new())
+    }
+
+    fn new_with_env(base_url: String, api_key: String, api_key_env: String) -> Result<Self> {
         let normalized = base_url.trim_end_matches('/').to_string();
         let mock_mode = normalized.starts_with("mock://");
-        if api_key.trim().is_empty() && !mock_mode {
-            return Err(MosaicError::Auth("API key cannot be empty".to_string()));
-        }
         let client = if mock_mode {
             None
         } else {
@@ -56,8 +56,21 @@ impl OpenAiCompatibleProvider {
             client,
             base_url: normalized,
             api_key,
+            api_key_env,
             mock_mode,
         })
+    }
+
+    fn check_auth(&self) -> Result<()> {
+        if !self.mock_mode && self.api_key.trim().is_empty() {
+            let env = if self.api_key_env.is_empty() {
+                "an API key environment variable".to_string()
+            } else {
+                format!("environment variable {}", self.api_key_env)
+            };
+            return Err(MosaicError::Auth(format!("{env} is required")));
+        }
+        Ok(())
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -118,6 +131,7 @@ impl Provider for OpenAiCompatibleProvider {
                 owned_by: Some("mock".to_string()),
             }]);
         }
+        self.check_auth()?;
         let endpoint = self.endpoint("/v1/models");
         let req = self
             .client
@@ -144,6 +158,7 @@ impl Provider for OpenAiCompatibleProvider {
                 .unwrap_or_else(|_| "mock-answer".to_string());
             return Ok(ChatResponse { content });
         }
+        self.check_auth()?;
         let endpoint = self.endpoint("/v1/chat/completions");
         let messages = request
             .messages
@@ -300,6 +315,7 @@ mod tests {
             client: None,
             base_url: "https://example.openai.azure.com/openai/v1".to_string(),
             api_key: "mock".to_string(),
+            api_key_env: String::new(),
             mock_mode: false,
         };
         assert_eq!(
@@ -318,6 +334,7 @@ mod tests {
             client: None,
             base_url: "https://api.openai.com".to_string(),
             api_key: "mock".to_string(),
+            api_key_env: String::new(),
             mock_mode: false,
         };
         assert_eq!(
