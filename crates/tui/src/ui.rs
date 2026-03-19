@@ -74,7 +74,7 @@ fn render_status_bar(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Span::raw(&app.workspace_path),
         Span::raw("  "),
         Span::styled("keys ", Style::default().fg(Color::DarkGray)),
-        Span::raw("Tab cycle  i compose  Ctrl+L logs  q quit"),
+        Span::raw("Tab cycle  i compose  Ctrl+L logs  /help commands  q quit"),
     ]);
 
     let widget = Paragraph::new(vec![status, footer]).block(
@@ -117,17 +117,26 @@ fn render_sessions(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 ]),
             ];
 
-            if session.unread > 0 {
-                lines.push(Line::from(Span::styled(
-                    format!("{} new events", session.unread),
-                    Style::default().fg(Color::Cyan),
-                )));
+            let unread_style = if session.unread > 0 {
+                Style::default().fg(Color::Cyan)
             } else {
-                lines.push(Line::from(Span::styled(
-                    "0 new events",
-                    Style::default().fg(Color::DarkGray),
-                )));
+                Style::default().fg(Color::DarkGray)
+            };
+
+            let mut status_line = vec![Span::styled(
+                format!("{} new events", session.unread),
+                unread_style,
+            )];
+
+            if !session.draft.is_empty() {
+                status_line.push(Span::raw("  "));
+                status_line.push(Span::styled(
+                    "draft saved",
+                    Style::default().fg(Color::Yellow),
+                ));
             }
+
+            lines.push(Line::from(status_line));
 
             let item_style = if selected {
                 Style::default().bg(Color::DarkGray)
@@ -183,7 +192,7 @@ fn render_main_panel(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Span::raw(session.state.label()),
             Span::raw("  "),
             Span::styled("timeline ", Style::default().fg(Color::DarkGray)),
-            Span::raw("mocked for stage 1"),
+            Span::raw("local mock control"),
         ]),
     ])
     .block(
@@ -256,10 +265,10 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let lines = vec![
         Line::from(vec![
             Span::styled("> ", Style::default().fg(Color::Cyan)),
-            Span::raw(app.composer.as_str()),
+            Span::raw(app.active_draft()),
         ]),
         Line::from(Span::styled(
-            "Use the composer for operator instructions; future stages will route commands to the Gateway runtime.",
+            "Type an operator instruction or /help for local control commands.",
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -280,7 +289,7 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         let cursor_x = area
             .x
             .saturating_add(3)
-            .saturating_add(app.composer.chars().count() as u16)
+            .saturating_add(app.active_draft().chars().count() as u16)
             .min(max_cursor_x);
         let cursor_y = area.y.saturating_add(1);
         frame.set_cursor_position((cursor_x, cursor_y));

@@ -102,6 +102,7 @@ pub struct SessionRecord {
     pub model: String,
     pub state: SessionState,
     pub unread: usize,
+    pub draft: String,
     pub timeline: Vec<TimelineEntry>,
 }
 
@@ -120,7 +121,6 @@ pub struct App {
     pub activity: Vec<ActivityEntry>,
     pub selected_session: usize,
     pub focus: Focus,
-    pub composer: String,
     pub show_observability: bool,
     pub timeline_scroll: u16,
     pub observability_scroll: u16,
@@ -145,7 +145,6 @@ impl App {
             activity: mock::activity_feed(),
             selected_session: 0,
             focus: Focus::Sessions,
-            composer: String::new(),
             show_observability: true,
             timeline_scroll: 0,
             observability_scroll: 0,
@@ -229,6 +228,10 @@ impl App {
         &self.active_session().id
     }
 
+    pub fn active_draft(&self) -> &str {
+        &self.active_session().draft
+    }
+
     fn handle_focus_key(&mut self, key: KeyEvent) {
         match self.focus {
             Focus::Sessions => self.handle_sessions_key(key.code),
@@ -298,40 +301,49 @@ impl App {
         match key.code {
             KeyCode::Enter => self.submit_composer(),
             KeyCode::Backspace => {
-                self.composer.pop();
+                self.active_session_mut().draft.pop();
             }
             KeyCode::Char(character)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
-                self.composer.push(character);
+                self.active_session_mut().draft.push(character);
             }
             _ => {}
         }
     }
 
     fn submit_composer(&mut self) {
-        let message = self.composer.trim().to_owned();
+        let message = self.active_draft().trim().to_owned();
         if message.is_empty() {
             return;
         }
+
+        if let Some(command) = message.strip_prefix('/') {
+            self.route_command(command.trim());
+        } else {
+            self.queue_operator_instruction(&message);
+        }
+
+        self.active_session_mut().draft.clear();
+        self.timeline_scroll = 0;
+    }
+
+    fn queue_operator_instruction(&mut self, message: &str) {
+        let session_label = self.session_label().to_owned();
 
         self.active_session_mut().timeline.push(TimelineEntry {
             timestamp: "now".to_owned(),
             kind: TimelineKind::Operator,
             actor: "operator".to_owned(),
             title: "Queued operator instruction".to_owned(),
-            body: message.clone(),
+            body: message.to_owned(),
         });
 
-        self.activity.push(ActivityEntry {
-            timestamp: "now".to_owned(),
-            scope: "composer".to_owned(),
-            message: format!("Buffered command for {}", self.session_label()),
-        });
-
-        self.composer.clear();
-        self.timeline_scroll = 0;
+        self.push_activity(
+            "composer",
+            format!("Buffered command for {}", session_label),
+        );
     }
 
     fn select_next_session(&mut self) {
@@ -379,11 +391,153 @@ impl App {
             previous
         }
     }
+
+    fn route_command(&mut self, command: &str) {
+        let mut parts = command.split_whitespace();
+        let Some(name) = parts.next() else {
+            self.push_command_error("Usage: /help");
+            return;
+        };
+
+        match name {
+            "help" => self.push_help(),
+            "logs" => self.toggle_logs(),
+            "gateway" => self.route_gateway_command(parts.next()),
+            "runtime" => {
+                let status = parts.collect::<Vec<_>>().join(" ");
+                self.set_runtime_status(status.trim());
+            }
+            "session" => self.route_session_command(parts.collect()),
+            _ => self.push_command_error(format!("Unknown command: /{name}")),
+        }
+    }
+
+    fn route_gateway_command(&mut self, action: Option<&str>) {
+        match action {
+            Some("connect") => {
+                self.gateway_connected = true;
+                self.push_activity("gateway", "Gateway marked connected in the local TUI.");
+                self.push_system_entry(
+                    "Gateway link updated",
+                    "Local mock transport was marked connected by operator command.",
+                );
+            }
+            Some("disconnect") => {
+                self.gateway_connected = false;
+                self.push_activity("gateway", "Gateway marked disconnected in the local TUI.");
+                self.push_system_entry(
+                    "Gateway link updated",
+                    "Local mock transport was marked disconnected by operator command.",
+                );
+            }
+            _ => self.push_command_error("Usage: /gateway connect|disconnect"),
+        }
+    }
+
+    fn set_runtime_status(&mut self, status: &str) {
+        if status.is_empty() {
+            self.push_command_error("Usage: /runtime <status>");
+            return;
+        }
+
+        self.runtime_status = status.to_owned();
+        self.push_activity("runtime", format!("Runtime status set to {status}."));
+        self.push_system_entry(
+            "Runtime status updated",
+            format!("Control-plane runtime status is now {status}."),
+        );
+    }
+
+    fn route_session_command(&mut self, args: Vec<&str>) {
+        match args.as_slice() {
+            ["state", "active"] => self.set_session_state(SessionState::Active),
+            ["state", "waiting"] => self.set_session_state(SessionState::Waiting),
+            ["state", "degraded"] => self.set_session_state(SessionState::Degraded),
+            ["model", rest @ ..] if !rest.is_empty() => self.set_session_model(&rest.join(" ")),
+            _ => self.push_command_error(
+                "Usage: /session state <active|waiting|degraded> | /session model <name>",
+            ),
+        }
+    }
+
+    fn set_session_state(&mut self, state: SessionState) {
+        self.active_session_mut().state = state;
+        self.push_activity(
+            "session",
+            format!("{} state set to {}.", self.session_label(), state.label()),
+        );
+        self.push_system_entry(
+            "Session state updated",
+            format!("Selected session is now {}.", state.label()),
+        );
+    }
+
+    fn set_session_model(&mut self, model: &str) {
+        self.active_session_mut().model = model.to_owned();
+        self.push_activity(
+            "session",
+            format!("{} model set to {model}.", self.session_label()),
+        );
+        self.push_system_entry(
+            "Session model updated",
+            format!("Selected session now targets {model}."),
+        );
+    }
+
+    fn toggle_logs(&mut self) {
+        self.show_observability = !self.show_observability;
+        if !self.show_observability && self.focus == Focus::Observability {
+            self.focus = Focus::Sessions;
+        }
+
+        let visibility = if self.show_observability {
+            "visible"
+        } else {
+            "hidden"
+        };
+        self.push_activity("ui", format!("Observability panel is now {visibility}."));
+        self.push_system_entry(
+            "Observability visibility updated",
+            format!("Right-side observability panel is now {visibility}."),
+        );
+    }
+
+    fn push_help(&mut self) {
+        self.push_activity("command", "Displayed local control command reference.");
+        self.push_system_entry(
+            "Local command reference",
+            "Available commands:\n/help\n/logs\n/gateway connect\n/gateway disconnect\n/runtime <status>\n/session state <active|waiting|degraded>\n/session model <name>",
+        );
+    }
+
+    fn push_command_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.push_activity("command", format!("Rejected command: {message}"));
+        self.push_system_entry("Command rejected", message);
+    }
+
+    fn push_system_entry(&mut self, title: impl Into<String>, body: impl Into<String>) {
+        self.active_session_mut().timeline.push(TimelineEntry {
+            timestamp: "now".to_owned(),
+            kind: TimelineKind::System,
+            actor: "control-plane".to_owned(),
+            title: title.into(),
+            body: body.into(),
+        });
+    }
+
+    fn push_activity(&mut self, scope: impl Into<String>, message: impl Into<String>) {
+        self.activity.push(ActivityEntry {
+            timestamp: "now".to_owned(),
+            scope: scope.into(),
+            message: message.into(),
+        });
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{App, Focus, TimelineKind};
+    use super::{App, Focus, SessionState, TimelineKind};
 
     #[test]
     fn tab_skips_hidden_observability_panel() {
@@ -412,15 +566,54 @@ mod tests {
     fn submitting_composer_appends_operator_entry() {
         let mut app = App::new("/tmp/mosaic".into());
         let initial_len = app.active_session().timeline.len();
-        app.composer = "Trace gateway route".to_owned();
+        app.active_session_mut().draft = "Trace gateway route".to_owned();
 
         app.submit_composer();
 
-        assert_eq!(app.composer, "");
+        assert_eq!(app.active_draft(), "");
         assert_eq!(app.active_session().timeline.len(), initial_len + 1);
         assert_eq!(
             app.active_session().timeline.last().map(|entry| entry.kind),
             Some(TimelineKind::Operator)
         );
+    }
+
+    #[test]
+    fn drafts_are_session_scoped() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "gateway command".to_owned();
+
+        app.select_session(1);
+        app.active_session_mut().draft = "release note".to_owned();
+
+        app.select_session(0);
+        assert_eq!(app.active_draft(), "gateway command");
+
+        app.select_session(1);
+        assert_eq!(app.active_draft(), "release note");
+    }
+
+    #[test]
+    fn gateway_command_updates_connection_state() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/gateway disconnect".to_owned();
+
+        app.submit_composer();
+
+        assert!(!app.gateway_connected);
+        assert_eq!(
+            app.active_session().timeline.last().map(|entry| entry.kind),
+            Some(TimelineKind::System)
+        );
+    }
+
+    #[test]
+    fn session_state_command_updates_selected_session() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/session state degraded".to_owned();
+
+        app.submit_composer();
+
+        assert_eq!(app.active_session().state, SessionState::Degraded);
     }
 }

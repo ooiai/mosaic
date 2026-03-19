@@ -11,6 +11,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             model: "gpt-5.4-control".to_owned(),
             state: SessionState::Active,
             unread: 2,
+            draft: String::new(),
             timeline: vec![
                 entry(
                     "15:02",
@@ -44,6 +45,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             model: "gpt-5.4-mini".to_owned(),
             state: SessionState::Waiting,
             unread: 1,
+            draft: String::new(),
             timeline: vec![
                 entry(
                     "14:51",
@@ -77,6 +79,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             model: "gpt-5.4-control".to_owned(),
             state: SessionState::Degraded,
             unread: 0,
+            draft: String::new(),
             timeline: vec![
                 entry(
                     "14:24",
@@ -119,6 +122,11 @@ pub fn activity_feed() -> Vec<ActivityEntry> {
             timestamp: "15:06".to_owned(),
             scope: "nodes".to_owned(),
             message: "Device-node stream is placeholder-only in stage 1.".to_owned(),
+        },
+        ActivityEntry {
+            timestamp: "15:07".to_owned(),
+            scope: "command".to_owned(),
+            message: "Use /help in the composer for local control commands.".to_owned(),
         },
     ]
 }

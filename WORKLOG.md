@@ -30,3 +30,22 @@
 - `make check`
 - `cargo test --workspace`
 - `cargo run` launched successfully and was manually exited
+
+### Stage 2 Local Control Commands
+
+- Added session-scoped composer drafts so switching between sessions no longer shares one global in-progress instruction.
+- Added local slash-command handling in the TUI for mock control-plane actions:
+  - `/help`
+  - `/logs`
+  - `/gateway connect`
+  - `/gateway disconnect`
+  - `/runtime <status>`
+  - `/session state <active|waiting|degraded>`
+  - `/session model <name>`
+- Updated the session list and composer copy so saved drafts and command availability are visible in the interface.
+- Added focused unit coverage for per-session drafts and command-driven state changes.
+
+### Verification
+
+- `cargo test -p mosaic-tui`
+- `cargo check --workspace`

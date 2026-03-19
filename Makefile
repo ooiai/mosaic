@@ -1,34 +1,22 @@
-# Variables
-GIT := git
-PNPM := pnpm
-CARGO := cargo
-DOCKER := docker
-CD := cd
+SHELL := /bin/sh
+.DEFAULT_GOAL := help
 
-CLI_PATH := ./cli
+# Notes: Toolchain and workspace entrypoint variables. Override from the command line if needed.
+GIT ?= git
+CARGO ?= cargo
+CLI_PATH ?= cli
+CLI_PACKAGE ?= mosaic-cli
+CLI_BIN ?= mosaic
+INSTALL_ROOT ?=
+INSTALL_FLAGS ?= --locked
 
-.PHONY: \
-	build \
-	check \
-	clean \
-	git-run \
-	git-commit \
-	install \
+ifneq ($(strip $(INSTALL_ROOT)),)
+INSTALL_ROOT_FLAG := --root $(INSTALL_ROOT)
+else
+INSTALL_ROOT_FLAG :=
+endif
 
-
-install:
-	$(CARGO) install --path cli
-
-build:
-	$(CARGO) build -p mosaic-cli
-
-clean:
-	$(CARGO) clean
-
-check:
-	$(CARGO) check --workspace
-
-# Function to check if there are changes to commit
+# Notes: Add, commit, and push only when the worktree has changes.
 define git_push_if_needed
 	@if [ -n "$$($(GIT) status --porcelain)" ]; then \
 		$(GIT) add .; \
@@ -39,6 +27,7 @@ define git_push_if_needed
 	fi
 endef
 
+# Notes: Add and commit only when the worktree has changes.
 define git_commit_if_needed
 	@if [ -n "$$($(GIT) status --porcelain)" ]; then \
 		$(GIT) add .; \
@@ -48,17 +37,104 @@ define git_commit_if_needed
 	fi
 endef
 
-# Git run: add, commit, push if there are changes
-# Usage: make git-run m="Your commit message"
-git-run:
+# Notes: Fail early when a required variable is missing.
+define require_arg
+	@if [ -z "$(strip $($(1)))" ]; then \
+		echo "Missing required variable: $(1)"; \
+		echo "Usage: make $(2) $(1)=<value>"; \
+		exit 1; \
+	fi
+endef
+
+.PHONY: \
+	help \
+	install \
+	uninstall \
+	run \
+	build \
+	clean \
+	check \
+	test \
+	verify \
+	git-run \
+	git-commit \
+	git-rm-cache
+
+help: ## Show available Make targets.
+	@awk 'BEGIN { FS = ":.*## "; print "Available targets:\n" } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf "\nUsage examples:\n"
+	@printf "  make build\n"
+	@printf "  make check\n"
+	@printf "  make test\n"
+	@printf "  make verify\n"
+	@printf "  make run\n"
+	@printf "  make install\n"
+	@printf "  make install INSTALL_ROOT=/tmp/mosaic-test-root\n"
+	@printf "  make uninstall INSTALL_ROOT=/tmp/mosaic-test-root\n"
+	@printf "  make git-commit m=\"docs: update readme\"\n"
+	@printf "  make git-run m=\"feat: improve tui\"\n"
+	@printf "  make git-rm-cache f=path/to/file\n"
+
+# Notes: Install the CLI binary from the workspace root.
+# Usage: make install
+# Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root
+# Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root INSTALL_FLAGS="--offline --locked"
+install: ## Install the CLI binary from the cli crate.
+	$(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG)
+	$(CARGO) install --path $(CLI_PATH) $(INSTALL_ROOT_FLAG) $(INSTALL_FLAGS)
+
+# Notes: Uninstall the CLI package from Cargo's install root.
+# Usage: make uninstall
+# Usage: make uninstall INSTALL_ROOT=/tmp/mosaic-test-root
+uninstall: ## Uninstall the CLI package from Cargo's install root.
+	$(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG)
+
+# Notes: Run the CLI locally without installing it.
+# Usage: make run
+run: ## Run the CLI from the workspace.
+	$(CARGO) run -p $(CLI_PACKAGE) --bin $(CLI_BIN)
+
+# Notes: Build the CLI crate without installing it globally.
+# Usage: make build
+build: ## Build the CLI crate.
+	$(CARGO) build -p $(CLI_PACKAGE)
+
+# Notes: Remove Cargo build artifacts for the whole workspace.
+# Usage: make clean
+clean: ## Clean workspace build artifacts.
+	$(CARGO) clean
+
+# Notes: Run a lightweight workspace validation pass.
+# Usage: make check
+check: ## Run workspace checks.
+	$(CARGO) check --workspace
+
+# Notes: Run the workspace test suite.
+# Usage: make test
+test: ## Run workspace tests.
+	$(CARGO) test --workspace
+
+# Notes: Run the default verification chain before handoff.
+# Usage: make verify
+verify: ## Run build, check, and test in sequence.
+	$(MAKE) build
+	$(MAKE) check
+	$(MAKE) test
+
+# Notes: Add, commit, and push when the worktree has changes.
+# Usage: make git-run m="message"
+git-run: ## Add, commit, and push if the worktree has changes. Usage: make git-run m="message"
+	$(call require_arg,m,git-run)
 	$(call git_push_if_needed)
 
-# Git commit: add and commit if there are changes, but do not push
-# Usage: make git-commit m="Your commit message"
-git-commit:
+# Notes: Add and commit locally when the worktree has changes.
+# Usage: make git-commit m="message"
+git-commit: ## Add and commit if the worktree has changes. Usage: make git-commit m="message"
+	$(call require_arg,m,git-commit)
 	$(call git_commit_if_needed)
 
-# Git rm cache: remove a file from git cache
+# Notes: Remove a file from the git index without deleting the working tree file.
 # Usage: make git-rm-cache f=path/to/file
-git-rm-cache:
+git-rm-cache: ## Remove a file from the git index only. Usage: make git-rm-cache f=path/to/file
+	$(call require_arg,f,git-rm-cache)
 	$(GIT) rm --cached $(f)
