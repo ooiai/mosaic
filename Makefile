@@ -7,8 +7,10 @@ CARGO ?= cargo
 CLI_PATH ?= cli
 CLI_PACKAGE ?= mosaic-cli
 CLI_BIN ?= mosaic
+REAL_CC_BIN ?= /usr/bin/cc
 INSTALL_ROOT ?=
 INSTALL_FLAGS ?= --locked
+CARGO_LINKER_ENV := REAL_CC_BIN=$(REAL_CC_BIN) CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=$(CURDIR)/scripts/cc-linker-wrapper.sh
 
 ifneq ($(strip $(INSTALL_ROOT)),)
 INSTALL_ROOT_FLAG := --root $(INSTALL_ROOT)
@@ -86,7 +88,7 @@ install: ## Install the CLI binary from the cli crate.
 	else \
 		echo "$(CLI_PACKAGE) is not currently installed in the selected Cargo root"; \
 	fi
-	$(CARGO) install --path $(CLI_PATH) --force $(INSTALL_ROOT_FLAG) $(INSTALL_FLAGS)
+	$(CARGO_LINKER_ENV) $(CARGO) install --path $(CLI_PATH) --force $(INSTALL_ROOT_FLAG) $(INSTALL_FLAGS)
 
 # Notes: Uninstall the CLI package from Cargo's install root.
 # Usage: make uninstall
@@ -101,12 +103,12 @@ uninstall: ## Uninstall the CLI package from Cargo's install root.
 # Notes: Run the CLI locally without installing it.
 # Usage: make run
 run: ## Run the CLI from the workspace.
-	$(CARGO) run -p $(CLI_PACKAGE) --bin $(CLI_BIN)
+	$(CARGO_LINKER_ENV) $(CARGO) run -p $(CLI_PACKAGE) --bin $(CLI_BIN)
 
 # Notes: Build the CLI crate without installing it globally.
 # Usage: make build
 build: ## Build the CLI crate.
-	$(CARGO) build -p $(CLI_PACKAGE)
+	$(CARGO_LINKER_ENV) $(CARGO) build -p $(CLI_PACKAGE)
 
 # Notes: Remove Cargo build artifacts for the whole workspace.
 # Usage: make clean
@@ -116,12 +118,12 @@ clean: ## Clean workspace build artifacts.
 # Notes: Run a lightweight workspace validation pass.
 # Usage: make check
 check: ## Run workspace checks.
-	$(CARGO) check --workspace
+	$(CARGO_LINKER_ENV) $(CARGO) check --workspace
 
 # Notes: Run the workspace test suite.
 # Usage: make test
 test: ## Run workspace tests.
-	$(CARGO) test --workspace
+	$(CARGO_LINKER_ENV) $(CARGO) test --workspace
 
 # Notes: Run the default verification chain before handoff.
 # Usage: make verify

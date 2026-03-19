@@ -4,6 +4,21 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::mock;
 
+pub const LOCAL_COMMANDS: [(&str, &str); 6] = [
+    ("/help", "Show local control command reference"),
+    ("/logs", "Toggle activity feed visibility"),
+    ("/gateway connect", "Mark the mock gateway as connected"),
+    (
+        "/gateway disconnect",
+        "Mark the mock gateway as disconnected",
+    ),
+    ("/runtime <status>", "Set the control runtime status label"),
+    (
+        "/session state|model",
+        "Update the selected session state or model label",
+    ),
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppAction {
     Continue,
@@ -64,24 +79,6 @@ impl Focus {
             Self::Timeline => Self::Composer,
             Self::Composer => Self::Observability,
             Self::Observability => Self::Sessions,
-        }
-    }
-
-    pub fn previous(self) -> Self {
-        match self {
-            Self::Sessions => Self::Observability,
-            Self::Timeline => Self::Sessions,
-            Self::Composer => Self::Timeline,
-            Self::Observability => Self::Composer,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Sessions => "sessions",
-            Self::Timeline => "timeline",
-            Self::Composer => "composer",
-            Self::Observability => "observability",
         }
     }
 }
@@ -166,6 +163,8 @@ pub struct App {
     pub resume_scope: ResumeScope,
     pub resume_query: String,
     pub resume_search: bool,
+    pub command_menu_index: usize,
+    pub show_console_history: bool,
     pub focus: Focus,
     pub show_observability: bool,
     pub show_help_overlay: bool,
@@ -201,9 +200,11 @@ impl App {
                 Surface::Console
             },
             selected_session: 0,
-            resume_scope: ResumeScope::All,
+            resume_scope: ResumeScope::Local,
             resume_query: String::new(),
             resume_search: false,
+            command_menu_index: 0,
+            show_console_history: false,
             focus: Focus::Composer,
             show_observability: true,
             show_help_overlay: false,
@@ -264,6 +265,20 @@ impl App {
             return AppAction::Continue;
         }
 
+        if self.command_menu_active() {
+            match key.code {
+                KeyCode::Tab => {
+                    self.select_next_command_match();
+                    return AppAction::Continue;
+                }
+                KeyCode::BackTab => {
+                    self.select_previous_command_match();
+                    return AppAction::Continue;
+                }
+                _ => {}
+            }
+        }
+
         match key.code {
             KeyCode::Char('q') if self.focus != Focus::Composer => AppAction::Quit,
             KeyCode::Char('r') if self.focus != Focus::Composer => {
@@ -275,7 +290,7 @@ impl App {
                 AppAction::Continue
             }
             KeyCode::BackTab => {
-                self.focus = self.rewind_focus();
+                self.open_resume();
                 AppAction::Continue
             }
             KeyCode::Esc => {
@@ -297,11 +312,6 @@ impl App {
         self.heartbeat = self.heartbeat.wrapping_add(1);
     }
 
-    pub fn heartbeat_symbol(&self) -> &'static str {
-        const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
-        FRAMES[self.heartbeat % FRAMES.len()]
-    }
-
     pub fn active_session(&self) -> &SessionRecord {
         &self.sessions[self.selected_session]
     }
@@ -319,7 +329,20 @@ impl App {
     }
 
     pub fn command_query(&self) -> Option<&str> {
-        self.active_draft().strip_prefix('/')
+        let query = self.active_draft().strip_prefix('/')?;
+        let end = query.find(char::is_whitespace).unwrap_or(query.len());
+        Some(&query[..end])
+    }
+
+    pub fn command_matches(&self) -> Vec<(&'static str, &'static str)> {
+        matching_commands(self.command_query().unwrap_or_default())
+    }
+
+    pub fn selected_command_match(&self) -> Option<(&'static str, &'static str)> {
+        let matches = self.command_matches();
+        matches
+            .get(self.command_menu_index.min(matches.len().saturating_sub(1)))
+            .copied()
     }
 
     pub fn visible_session_indices(&self) -> Vec<usize> {
@@ -352,6 +375,7 @@ impl App {
             KeyCode::Char('/') => self.resume_search = true,
             KeyCode::Enter => {
                 self.surface = Surface::Console;
+                self.show_console_history = true;
                 self.focus = Focus::Composer;
             }
             KeyCode::Esc => {
@@ -449,16 +473,40 @@ impl App {
     }
 
     fn handle_composer_key(&mut self, key: KeyEvent) {
+        if self.command_menu_active() {
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.select_next_command_match();
+                    return;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.select_previous_command_match();
+                    return;
+                }
+                KeyCode::Tab => {
+                    self.select_next_command_match();
+                    return;
+                }
+                KeyCode::Enter if self.command_menu_should_complete() => {
+                    self.complete_selected_command();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         match key.code {
             KeyCode::Enter => self.submit_composer(),
             KeyCode::Backspace => {
                 self.active_session_mut().draft.pop();
+                self.command_menu_index = 0;
             }
             KeyCode::Char(character)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
             {
                 self.active_session_mut().draft.push(character);
+                self.command_menu_index = 0;
             }
             _ => {}
         }
@@ -476,6 +524,7 @@ impl App {
             self.queue_operator_instruction(&message);
         }
 
+        self.show_console_history = true;
         self.active_session_mut().draft.clear();
         self.timeline_scroll = 0;
     }
@@ -613,17 +662,51 @@ impl App {
         self.surface = Surface::Resume;
         self.resume_search = false;
         self.resume_query.clear();
-        self.resume_scope = ResumeScope::All;
+        self.resume_scope = ResumeScope::Local;
         self.ensure_selected_session_visible();
     }
 
-    fn rewind_focus(&self) -> Focus {
-        let previous = self.focus.previous();
-        if !self.show_observability && previous == Focus::Observability {
-            previous.previous()
-        } else {
-            previous
+    fn command_menu_active(&self) -> bool {
+        self.focus == Focus::Composer && self.command_query().is_some()
+    }
+
+    fn command_menu_should_complete(&self) -> bool {
+        self.command_menu_active()
+            && self.active_draft().starts_with('/')
+            && !self.active_draft()[1..].chars().any(char::is_whitespace)
+    }
+
+    fn select_next_command_match(&mut self) {
+        let matches = self.command_matches();
+        if matches.is_empty() {
+            self.command_menu_index = 0;
+            return;
         }
+
+        self.command_menu_index = (self.command_menu_index + 1) % matches.len();
+    }
+
+    fn select_previous_command_match(&mut self) {
+        let matches = self.command_matches();
+        if matches.is_empty() {
+            self.command_menu_index = 0;
+            return;
+        }
+
+        self.command_menu_index = if self.command_menu_index == 0 {
+            matches.len() - 1
+        } else {
+            self.command_menu_index - 1
+        };
+    }
+
+    fn complete_selected_command(&mut self) {
+        let Some((command, _)) = self.selected_command_match() else {
+            return;
+        };
+
+        self.active_session_mut().draft = format!("{command} ");
+        self.command_menu_index = 0;
     }
 
     fn route_command(&mut self, command: &str) {
@@ -769,6 +852,24 @@ impl App {
     }
 }
 
+pub fn matching_commands(query: &str) -> Vec<(&'static str, &'static str)> {
+    let trimmed = query.trim().trim_start_matches('/').to_ascii_lowercase();
+    LOCAL_COMMANDS
+        .into_iter()
+        .filter(|(command, _)| {
+            if trimmed.is_empty() {
+                return true;
+            }
+
+            let searchable = command.trim_start_matches('/').to_ascii_lowercase();
+            searchable.starts_with(&trimmed)
+                || searchable
+                    .split_whitespace()
+                    .any(|token| token.starts_with(&trimmed))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -881,6 +982,37 @@ mod tests {
 
         assert_eq!(app.active_draft(), "?");
         assert!(!app.show_help_overlay);
+    }
+
+    #[test]
+    fn command_menu_selection_completes_draft_without_submitting() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.focus = Focus::Composer;
+        app.active_session_mut().draft = "/g".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "/gateway disconnect ");
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Pending capability visibility")
+        );
+    }
+
+    #[test]
+    fn tab_cycles_command_menu_selection() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.focus = Focus::Composer;
+        app.active_session_mut().draft = "/g".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "/gateway disconnect ");
     }
 
     #[test]

@@ -6,22 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::app::{App, ResumeScope, Surface, TimelineEntry, TimelineKind};
-
-const COMMANDS: [(&str, &str); 6] = [
-    ("/help", "Show local control command reference"),
-    ("/logs", "Toggle activity feed visibility"),
-    ("/gateway connect", "Mark the mock gateway as connected"),
-    (
-        "/gateway disconnect",
-        "Mark the mock gateway as disconnected",
-    ),
-    ("/runtime <status>", "Set the control runtime status label"),
-    (
-        "/session state|model",
-        "Update the selected session state or model label",
-    ),
-];
+use crate::app::{App, ResumeScope, Surface, TimelineEntry, TimelineKind, matching_commands};
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     match app.surface {
@@ -38,7 +23,7 @@ fn render_console(frame: &mut Frame<'_>, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),
+            Constraint::Length(11),
             Constraint::Min(8),
             Constraint::Length(1),
             Constraint::Length(3),
@@ -62,6 +47,7 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2),
+            Constraint::Length(5),
             Constraint::Min(10),
             Constraint::Length(1),
         ])
@@ -82,6 +68,17 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(status, outer[0]);
 
     let visible = app.visible_session_indices();
+    let active_resume = visible
+        .iter()
+        .copied()
+        .find(|index| *index == app.selected_session)
+        .or_else(|| visible.first().copied());
+    let other_sessions = visible
+        .iter()
+        .copied()
+        .filter(|index| Some(*index) != active_resume)
+        .collect::<Vec<_>>();
+
     let mut lines = vec![
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -101,63 +98,66 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
         lines.push(Line::from(""));
     }
 
-    lines.push(Line::from(vec![
-        Span::styled("#   ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Type     ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Modified  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Created   ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Summary", Style::default().fg(Color::DarkGray)),
-    ]));
-
     if visible.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "No sessions match the current filter.",
             Style::default().fg(Color::Yellow),
         )]));
     } else {
-        for index in visible {
-            let session = &app.sessions[index];
-            let selected = index == app.selected_session;
-            let prefix = if selected { "> " } else { "  " };
-            let row_style = if selected {
+        if let Some(index) = active_resume {
+            lines.push(Line::from(vec![Span::styled(
+                "This branch",
                 Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+            lines.push(Line::from(vec![Span::styled(
+                "  ------------------------------",
+                Style::default().fg(Color::DarkGray),
+            )]));
+            lines.push(resume_table_header());
+            lines.push(resume_row_line(app, index));
+            lines.push(Line::from(""));
+        }
 
-            lines.push(Line::from(vec![
-                Span::styled(prefix, row_style),
-                Span::styled(
-                    format!("{:<2}  ", index + 1),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(format!("{:<8} ", session.origin), row_style),
-                Span::styled(format!("{:<9} ", session.modified), row_style),
-                Span::styled(format!("{:<9} ", session.created), row_style),
-                Span::styled(session.title.as_str(), row_style),
-            ]));
+        if !other_sessions.is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                "Other sessions",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+            lines.push(Line::from(vec![Span::styled(
+                "  ------------------------------",
+                Style::default().fg(Color::DarkGray),
+            )]));
+            lines.push(resume_table_header());
+            for index in other_sessions {
+                lines.push(resume_row_line(app, index));
+            }
         }
     }
 
+    let spacer = Paragraph::new("");
+    frame.render_widget(spacer, outer[1]);
+
     let widget = Paragraph::new(lines).wrap(Wrap { trim: false });
-    frame.render_widget(widget, outer[1]);
+    frame.render_widget(widget, outer[2]);
 
     let footer = Paragraph::new(Line::from(vec![
-        Span::raw("j/k navigate  "),
-        Span::raw("Enter select  "),
-        Span::raw("Esc cancel  "),
-        Span::raw("/ search"),
+        Span::raw("up/down to navigate · "),
+        Span::raw("Enter to select · "),
+        Span::raw("Esc to cancel · "),
+        Span::raw("/ to search"),
     ]));
-    frame.render_widget(footer, outer[2]);
+    frame.render_widget(footer, outer[3]);
 }
 
 fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),
+            Constraint::Length(7),
             Constraint::Length(2),
             Constraint::Min(1),
         ])
@@ -170,29 +170,35 @@ fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
         width: card_width,
         height: sections[0].height,
     };
-    let session = app.active_session();
     let card = Paragraph::new(vec![
         Line::from(vec![
+            Span::styled("[ ] [ ]", Style::default().fg(Color::Cyan)),
+            Span::raw("  "),
             Span::styled(
-                format!("Mosaic Control Plane · {} ", app.workspace_name),
+                "Mosaic Copilot ".to_owned(),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                env!("CARGO_PKG_VERSION"),
+                format!("v{}", env!("CARGO_PKG_VERSION")),
                 Style::default().fg(Color::DarkGray),
             ),
         ]),
-        Line::from("Describe a task to get started."),
+        Line::from(vec![
+            Span::styled("[_][__]", Style::default().fg(Color::Magenta)),
+            Span::raw("  "),
+            Span::raw("Describe a task to get started."),
+        ]),
         Line::from(""),
         Line::from(vec![
+            Span::styled("[__][__]", Style::default().fg(Color::Magenta)),
+            Span::raw("  "),
             Span::styled("Tip: ", Style::default().fg(Color::DarkGray)),
             Span::styled("/help", Style::default().fg(Color::Cyan)),
-            Span::raw(" commands, "),
-            Span::styled("r", Style::default().fg(Color::Cyan)),
-            Span::raw(" resume browser, "),
-            Span::styled("F1", Style::default().fg(Color::Cyan)),
-            Span::raw(" shortcuts"),
+            Span::raw(" Show local commands and shortcuts."),
         ]),
+        Line::from(vec![Span::raw(
+            "Mosaic uses AI, so always check for mistakes.",
+        )]),
     ])
     .block(
         Block::default()
@@ -204,17 +210,16 @@ fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let details = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled("* ", Style::default().fg(Color::Cyan)),
+            Span::styled("o ", Style::default().fg(Color::Cyan)),
             Span::raw(
-                "Experimental local mode is enabled. Runtime, tool, and node feeds remain mock-driven.",
+                "Experimental mode is enabled. These features are not stable, may have bugs, and may be removed in the future.",
             ),
         ]),
         Line::from(vec![
-            Span::styled("* ", Style::default().fg(Color::Blue)),
+            Span::styled("o ", Style::default().fg(Color::Blue)),
             Span::raw(format!(
-                "Environment loaded: 1 custom instruction, 3 skills, {} sessions, route {}.",
-                app.sessions.len(),
-                session.route
+                "Environment loaded: 1 custom instruction, 1 MCP server, 3 skills, 2 agents in {}.",
+                app.workspace_name
             )),
         ]),
     ]);
@@ -222,7 +227,21 @@ fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_console_stream(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let lines = console_lines(app);
+    let lines = if app.show_console_history {
+        console_lines(app)
+    } else {
+        vec![
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "No active conversation on this route yet.",
+                Style::default().fg(Color::DarkGray),
+            )]),
+            Line::from(vec![Span::styled(
+                "Send a task, open the resume browser, or start with a slash command.",
+                Style::default().fg(Color::DarkGray),
+            )]),
+        ]
+    };
     let widget = Paragraph::new(lines)
         .scroll((app.timeline_scroll, 0))
         .wrap(Wrap { trim: false });
@@ -230,16 +249,12 @@ fn render_console_stream(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let session = app.active_session();
-    let left = format!("{} [{}]", app.workspace_path, session.route);
-    let right = format!(
-        "{} ({})  ctrl:{} {} {}",
-        session.model,
-        session.runtime,
-        app.control_model,
-        app.runtime_status,
-        app.heartbeat_symbol()
+    let left = format!(
+        "{} [/_{}*]",
+        display_workspace_path(&app.workspace_path),
+        app.workspace_name
     );
+    let right = format!("{} ({}) (1x)", app.control_model, app.runtime_status);
 
     let widget = Paragraph::new(Line::from(vec![
         Span::raw(&left),
@@ -251,7 +266,8 @@ fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
 fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let draft = app.active_draft();
-    let placeholder = "Type @ for files, / for commands, or ? for shortcuts";
+    let placeholder =
+        "Type @ to mention files, # for issues/PRs, / for commands, or ? for shortcuts";
     let input = if draft.is_empty() { placeholder } else { draft };
     let input_style = if draft.is_empty() {
         Style::default().fg(Color::DarkGray)
@@ -289,13 +305,13 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let hints = "Tab focus  r resume  F1 help  Ctrl+L activity";
-    let summary = format!(
-        "{} events  focus:{}  gateway:{}",
-        app.activity.len(),
-        app.focus.label(),
-        if app.gateway_connected { "up" } else { "down" }
-    );
+    let hints = "shift+tab switch mode";
+    let request_count = if app.show_console_history {
+        app.active_session().unread
+    } else {
+        0
+    };
+    let summary = format!("{request_count} reqs.");
     let widget = Paragraph::new(Line::from(vec![
         Span::styled(hints, Style::default().fg(Color::DarkGray)),
         Span::raw(pad_between(area.width, hints.len(), summary.len())),
@@ -306,7 +322,7 @@ fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
 fn render_command_palette(frame: &mut Frame<'_>, app: &App, composer_area: Rect) {
     let commands = matching_commands(app.command_query().unwrap_or_default());
-    let height = commands.len().min(7) as u16 + 2;
+    let height = commands.len().min(8) as u16 + 2;
     let area = Rect {
         x: composer_area.x,
         y: composer_area.y.saturating_sub(height),
@@ -322,7 +338,8 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, composer_area: Rect)
         )]));
     } else {
         for (index, (command, description)) in commands.iter().enumerate() {
-            let style = if index == 0 {
+            let selected = index == app.command_menu_index.min(commands.len().saturating_sub(1));
+            let style = if selected {
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD)
@@ -330,6 +347,7 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, composer_area: Rect)
                 Style::default()
             };
             lines.push(Line::from(vec![
+                Span::styled(if selected { "| " } else { "  " }, style),
                 Span::styled(format!("{:<25}", command), style),
                 Span::styled(description.to_string(), Style::default().fg(Color::Gray)),
             ]));
@@ -339,9 +357,8 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, composer_area: Rect)
     let widget = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title("Commands"),
+                .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
+                .border_style(Style::default().fg(Color::DarkGray)),
         )
         .wrap(Wrap { trim: false });
 
@@ -356,7 +373,8 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
             "Keyboard",
             Style::default().add_modifier(Modifier::BOLD),
         )]),
-        Line::from("  Tab / Shift+Tab  cycle focus or resume scope tabs"),
+        Line::from("  Tab               cycle focus inside the console"),
+        Line::from("  Shift+Tab         open the resume browser from the console"),
         Line::from("  j / k / arrows    move through the active list or stream"),
         Line::from("  r                 open the resume browser"),
         Line::from("  Enter             send the current draft or select a session"),
@@ -406,6 +424,9 @@ fn console_lines(app: &App) -> Vec<Line<'_>> {
             Span::raw("  "),
             Span::styled("Channel ", Style::default().fg(Color::DarkGray)),
             Span::raw(session.channel.as_str()),
+            Span::raw("  "),
+            Span::styled("Runtime ", Style::default().fg(Color::DarkGray)),
+            Span::raw(session.runtime.as_str()),
             Span::raw("  "),
             Span::styled("State ", Style::default().fg(Color::DarkGray)),
             Span::raw(session.state.label()),
@@ -505,14 +526,39 @@ fn resume_tabs_line(scope: ResumeScope) -> Line<'static> {
     ])
 }
 
-fn matching_commands(query: &str) -> Vec<(&'static str, &'static str)> {
-    let trimmed = query.trim().to_ascii_lowercase();
-    COMMANDS
-        .into_iter()
-        .filter(|(command, _)| {
-            trimmed.is_empty() || command.to_ascii_lowercase().contains(&trimmed)
-        })
-        .collect()
+fn resume_table_header() -> Line<'static> {
+    Line::from(vec![
+        Span::styled("#   ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Type     ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Modified  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Created   ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Summary", Style::default().fg(Color::DarkGray)),
+    ])
+}
+
+fn resume_row_line(app: &App, index: usize) -> Line<'_> {
+    let session = &app.sessions[index];
+    let selected = index == app.selected_session;
+    let prefix = if selected { "> " } else { "  " };
+    let row_style = if selected {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+
+    Line::from(vec![
+        Span::styled(prefix, row_style),
+        Span::styled(
+            format!("{:<2}  ", index + 1),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(format!("{:<8} ", session.origin), row_style),
+        Span::styled(format!("{:<9} ", session.modified), row_style),
+        Span::styled(format!("{:<9} ", session.created), row_style),
+        Span::styled(session.title.as_str(), row_style),
+    ])
 }
 
 fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
@@ -525,6 +571,13 @@ fn centered_rect(area: Rect, width: u16, height: u16) -> Rect {
         width,
         height,
     }
+}
+
+fn display_workspace_path(path: &str) -> String {
+    std::env::var("HOME")
+        .ok()
+        .and_then(|home| path.strip_prefix(&home).map(|suffix| format!("~{suffix}")))
+        .unwrap_or_else(|| path.to_owned())
 }
 
 fn pad_between(width: u16, left_len: usize, right_len: usize) -> String {
@@ -571,11 +624,15 @@ mod tests {
         let app = App::new("/tmp/mosaic".into());
         let screen = render_to_text(&app, 140, 32);
 
-        assert!(screen.contains("Mosaic Control Plane"));
+        assert!(screen.contains("Mosaic Copilot"));
+        assert!(screen.contains("v0.1.0"));
+        assert!(screen.contains("[ ] [ ]"));
         assert!(screen.contains("Describe a task to get started."));
         assert!(screen.contains("Environment loaded"));
-        assert!(screen.contains("/tmp/mosaic"));
-        assert!(screen.contains("r resume"));
+        assert!(screen.contains("No active conversation on this route yet."));
+        assert!(screen.contains("[/_mosaic*]"));
+        assert!(screen.contains("shift+tab switch mode"));
+        assert!(screen.contains("0 reqs."));
     }
 
     #[test]
@@ -585,6 +642,9 @@ mod tests {
 
         assert!(screen.contains("Select a session to resume:"));
         assert!(screen.contains("Sessions Local"));
+        assert!(screen.contains("This branch"));
+        assert!(screen.contains("Other sessions"));
+        assert!(screen.contains("macOS node prep"));
         assert!(screen.contains("Modified"));
         assert!(screen.contains("Gateway routing soak"));
     }
@@ -597,7 +657,7 @@ mod tests {
 
         let screen = render_to_text(&app, 140, 32);
 
-        assert!(screen.contains("Commands"));
+        assert!(screen.contains("| /gateway connect"));
         assert!(screen.contains("/gateway connect"));
         assert!(screen.contains("/gateway disconnect"));
     }
@@ -617,6 +677,7 @@ mod tests {
     #[test]
     fn observability_toggle_changes_console_feed() {
         let mut app = App::new("/tmp/mosaic".into());
+        app.show_console_history = true;
         let with_feed = render_to_text(&app, 140, 32);
         app.show_observability = false;
         let without_feed = render_to_text(&app, 140, 32);

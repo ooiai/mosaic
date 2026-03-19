@@ -48,8 +48,11 @@
 - Reworked the TUI around the four local reference images:
   - default startup canvas with welcome card, environment summary, bottom context strip, and single-line operator composer
   - `--resume` launch path with a searchable session resume browser
-  - slash-command popup surface when the composer draft starts with `/`
+  - slash-command popup surface when the composer draft starts with `/`, including keyboard selection and accept behavior
   - updated mock session metadata so the resume browser has type, modified, created, and summary columns
+  - refined the startup canvas with quick actions plus a subtle empty-state prompt before the first message is submitted
+  - refined the resume browser with `This workspace` and `Other sessions` grouping plus per-session route/channel/model detail lines
+  - refined the command palette with an inline selected-command description and a more menu-like operator surface
 
 ### Verification
 

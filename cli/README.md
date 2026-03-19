@@ -24,7 +24,8 @@ Current launch modes:
 
 Current keyboard model:
 
-- `Tab` / `Shift+Tab`: cycle focus in the console, or cycle scope tabs in resume mode
+- `Tab`: cycle focus in the console, or cycle scope tabs in resume mode
+- `Shift+Tab`: switch from the console into the resume browser
 - `j` / `k` or arrow keys: move inside the active stream or resume list
 - `Enter`: submit from the composer
 - `r`: open the session resume browser from the console
@@ -36,9 +37,13 @@ Current keyboard model:
 
 Current reference-driven surfaces:
 
-- startup canvas with a welcome card, environment summary, bottom context strip, and composer
+- startup canvas with a welcome card, quick actions, subtle empty-state copy, bottom context strip, and composer
+  the session stream stays hidden until the operator resumes a session or submits work
 - resume browser with scope tabs plus searchable mock session history
+  local sessions stay grouped under `This workspace`, while remote history remains under `Other sessions`
 - slash-command popup when the composer draft starts with `/`
+  arrow keys or `Tab` cycle matches, `Enter` accepts the highlighted command before execution,
+  and the palette keeps an inline description for the currently selected command
 
 The help overlay mirrors the keyboard model and local slash-command reference inside the TUI, so operators do not need to leave the terminal to discover the available mock control actions.
 
