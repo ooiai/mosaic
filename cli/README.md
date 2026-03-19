@@ -12,20 +12,35 @@ The actual terminal UI implementation now lives in `crates/tui/`, which owns:
 - terminal event loop behavior
 - view state and mocked operator data
 - keyboard routing
-- rendering for sessions, task timeline, composer, and observability
-- local mock command routing for stage-2 control actions
+- rendering for the startup canvas, resume browser, command palette, and help overlay
+- local mock command routing for control-plane actions
 
 This matches the repository architecture in `AGENTS.md`: `cli/` launches the workflow, while reusable terminal UI internals live in the dedicated TUI crate.
 
+Current launch modes:
+
+- `mosaic`: open the startup canvas with the bottom operator composer ready
+- `mosaic --resume`: open the session resume browser first
+
 Current keyboard model:
 
-- `Tab` / `Shift+Tab`: cycle focus between panes
-- `j` / `k` or arrow keys: move inside the focused pane
-- `i`: jump to the composer
+- `Tab` / `Shift+Tab`: cycle focus in the console, or cycle scope tabs in resume mode
+- `j` / `k` or arrow keys: move inside the active stream or resume list
 - `Enter`: submit from the composer
+- `r`: open the session resume browser from the console
+- `F1`: open or close the in-app operator help overlay
+- `?`: open or close the help overlay outside the composer
 - `Ctrl+L`: toggle the observability panel
-- `Esc`: leave the composer and return focus to sessions
-- `q` or `Ctrl+C`: quit
+- `Esc`: leave help, resume, or search mode
+- `Ctrl+C`: quit
+
+Current reference-driven surfaces:
+
+- startup canvas with a welcome card, environment summary, bottom context strip, and composer
+- resume browser with scope tabs plus searchable mock session history
+- slash-command popup when the composer draft starts with `/`
+
+The help overlay mirrors the keyboard model and local slash-command reference inside the TUI, so operators do not need to leave the terminal to discover the available mock control actions.
 
 Current local mock commands:
 

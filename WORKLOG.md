@@ -44,6 +44,12 @@
   - `/session model <name>`
 - Updated the session list and composer copy so saved drafts and command availability are visible in the interface.
 - Added focused unit coverage for per-session drafts and command-driven state changes.
+- Added an in-app operator help overlay, opened with `F1` or `?` outside the composer, so keyboard shortcuts and local slash commands are discoverable inside the TUI itself.
+- Reworked the TUI around the four local reference images:
+  - default startup canvas with welcome card, environment summary, bottom context strip, and single-line operator composer
+  - `--resume` launch path with a searchable session resume browser
+  - slash-command popup surface when the composer draft starts with `/`
+  - updated mock session metadata so the resume browser has type, modified, created, and summary columns
 
 ### Verification
 

@@ -18,15 +18,23 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use self::app::{App, AppAction};
 
 pub fn run() -> io::Result<()> {
+    let start_in_resume = std::env::args().skip(1).any(|arg| arg == "--resume");
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal);
+    let result = run_app(&mut terminal, start_in_resume);
     restore_terminal(&mut terminal)?;
     result
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    start_in_resume: bool,
+) -> io::Result<()> {
     let workspace_path = std::env::current_dir()?;
-    let mut app = App::new(workspace_path);
+    let mut app = if start_in_resume {
+        App::new_with_resume(workspace_path, true)
+    } else {
+        App::new(workspace_path)
+    };
 
     loop {
         terminal.draw(|frame| ui::render(frame, &app))?;
@@ -47,6 +55,16 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn detects_resume_flag_from_cli_args() {
+        let args = ["mosaic", "--resume"];
+
+        assert!(args.into_iter().skip(1).any(|arg| arg == "--resume"));
+    }
 }
 
 fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {

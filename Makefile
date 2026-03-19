@@ -80,14 +80,23 @@ help: ## Show available Make targets.
 # Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root
 # Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root INSTALL_FLAGS="--offline --locked"
 install: ## Install the CLI binary from the cli crate.
-	$(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG)
-	$(CARGO) install --path $(CLI_PATH) $(INSTALL_ROOT_FLAG) $(INSTALL_FLAGS)
+	make check
+	@if $(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG); then \
+		:; \
+	else \
+		echo "$(CLI_PACKAGE) is not currently installed in the selected Cargo root"; \
+	fi
+	$(CARGO) install --path $(CLI_PATH) --force $(INSTALL_ROOT_FLAG) $(INSTALL_FLAGS)
 
 # Notes: Uninstall the CLI package from Cargo's install root.
 # Usage: make uninstall
 # Usage: make uninstall INSTALL_ROOT=/tmp/mosaic-test-root
 uninstall: ## Uninstall the CLI package from Cargo's install root.
-	$(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG)
+	@if $(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG); then \
+		:; \
+	else \
+		echo "$(CLI_PACKAGE) is not currently installed in the selected Cargo root"; \
+	fi
 
 # Notes: Run the CLI locally without installing it.
 # Usage: make run

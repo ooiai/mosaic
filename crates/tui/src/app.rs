@@ -11,6 +11,45 @@ pub enum AppAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Surface {
+    Console,
+    Resume,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeScope {
+    Local,
+    Remote,
+    All,
+}
+
+impl ResumeScope {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Local => Self::Remote,
+            Self::Remote => Self::All,
+            Self::All => Self::Local,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Local => Self::All,
+            Self::Remote => Self::Local,
+            Self::All => Self::Remote,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Local => "Local",
+            Self::Remote => "Remote",
+            Self::All => "All",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Sessions,
     Timeline,
@@ -96,6 +135,9 @@ pub struct TimelineEntry {
 pub struct SessionRecord {
     pub id: String,
     pub title: String,
+    pub origin: String,
+    pub modified: String,
+    pub created: String,
     pub channel: String,
     pub route: String,
     pub runtime: String,
@@ -119,9 +161,14 @@ pub struct App {
     pub workspace_path: String,
     pub sessions: Vec<SessionRecord>,
     pub activity: Vec<ActivityEntry>,
+    pub surface: Surface,
     pub selected_session: usize,
+    pub resume_scope: ResumeScope,
+    pub resume_query: String,
+    pub resume_search: bool,
     pub focus: Focus,
     pub show_observability: bool,
+    pub show_help_overlay: bool,
     pub timeline_scroll: u16,
     pub observability_scroll: u16,
     pub gateway_connected: bool,
@@ -132,20 +179,34 @@ pub struct App {
 
 impl App {
     pub fn new(workspace_path: PathBuf) -> Self {
+        Self::new_with_resume(workspace_path, false)
+    }
+
+    pub fn new_with_resume(workspace_path: PathBuf, start_in_resume: bool) -> Self {
         let workspace_name = workspace_path
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("workspace")
             .to_owned();
+        let workspace_path = workspace_path.display().to_string();
 
         Self {
             workspace_name,
-            workspace_path: workspace_path.display().to_string(),
+            workspace_path,
             sessions: mock::sessions(),
             activity: mock::activity_feed(),
+            surface: if start_in_resume {
+                Surface::Resume
+            } else {
+                Surface::Console
+            },
             selected_session: 0,
-            focus: Focus::Sessions,
+            resume_scope: ResumeScope::All,
+            resume_query: String::new(),
+            resume_search: false,
+            focus: Focus::Composer,
             show_observability: true,
+            show_help_overlay: false,
             timeline_scroll: 0,
             observability_scroll: 0,
             gateway_connected: true,
@@ -167,6 +228,27 @@ impl App {
             return AppAction::Quit;
         }
 
+        if self.show_help_overlay {
+            match key.code {
+                KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('?') => {
+                    self.show_help_overlay = false;
+                }
+                _ => {}
+            }
+            return AppAction::Continue;
+        }
+
+        if matches!(key.code, KeyCode::F(1))
+            || (matches!(key.code, KeyCode::Char('?')) && self.focus != Focus::Composer)
+        {
+            self.show_help_overlay = true;
+            return AppAction::Continue;
+        }
+
+        if self.surface == Surface::Resume {
+            return self.handle_resume_key(key);
+        }
+
         if matches!(
             key,
             KeyEvent {
@@ -184,6 +266,10 @@ impl App {
 
         match key.code {
             KeyCode::Char('q') if self.focus != Focus::Composer => AppAction::Quit,
+            KeyCode::Char('r') if self.focus != Focus::Composer => {
+                self.open_resume();
+                AppAction::Continue
+            }
             KeyCode::Tab => {
                 self.focus = self.advance_focus();
                 AppAction::Continue
@@ -232,6 +318,18 @@ impl App {
         &self.active_session().draft
     }
 
+    pub fn command_query(&self) -> Option<&str> {
+        self.active_draft().strip_prefix('/')
+    }
+
+    pub fn visible_session_indices(&self) -> Vec<usize> {
+        self.sessions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, session)| self.session_visible_in_resume(session).then_some(index))
+            .collect()
+    }
+
     fn handle_focus_key(&mut self, key: KeyEvent) {
         match self.focus {
             Focus::Sessions => self.handle_sessions_key(key.code),
@@ -239,6 +337,59 @@ impl App {
             Focus::Composer => self.handle_composer_key(key),
             Focus::Observability => self.handle_observability_key(key.code),
         }
+    }
+
+    fn handle_resume_key(&mut self, key: KeyEvent) -> AppAction {
+        if self.resume_search {
+            return self.handle_resume_search_key(key);
+        }
+
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => self.select_next_visible_session(),
+            KeyCode::Up | KeyCode::Char('k') => self.select_previous_visible_session(),
+            KeyCode::Tab => self.set_resume_scope(self.resume_scope.next()),
+            KeyCode::BackTab => self.set_resume_scope(self.resume_scope.previous()),
+            KeyCode::Char('/') => self.resume_search = true,
+            KeyCode::Enter => {
+                self.surface = Surface::Console;
+                self.focus = Focus::Composer;
+            }
+            KeyCode::Esc => {
+                self.surface = Surface::Console;
+                self.focus = Focus::Composer;
+            }
+            _ => {}
+        }
+
+        AppAction::Continue
+    }
+
+    fn handle_resume_search_key(&mut self, key: KeyEvent) -> AppAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.resume_search = false;
+                self.resume_query.clear();
+                self.ensure_selected_session_visible();
+            }
+            KeyCode::Enter => {
+                self.resume_search = false;
+                self.ensure_selected_session_visible();
+            }
+            KeyCode::Backspace => {
+                self.resume_query.pop();
+                self.ensure_selected_session_visible();
+            }
+            KeyCode::Char(character)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.resume_query.push(character);
+                self.ensure_selected_session_visible();
+            }
+            _ => {}
+        }
+
+        AppAction::Continue
     }
 
     fn handle_sessions_key(&mut self, key: KeyCode) {
@@ -374,6 +525,81 @@ impl App {
         self.sessions[index].unread = 0;
     }
 
+    fn select_next_visible_session(&mut self) {
+        let visible = self.visible_session_indices();
+        if visible.is_empty() {
+            return;
+        }
+
+        let current = visible
+            .iter()
+            .position(|index| *index == self.selected_session)
+            .unwrap_or(0);
+        let next = (current + 1) % visible.len();
+        self.select_session(visible[next]);
+    }
+
+    fn select_previous_visible_session(&mut self) {
+        let visible = self.visible_session_indices();
+        if visible.is_empty() {
+            return;
+        }
+
+        let current = visible
+            .iter()
+            .position(|index| *index == self.selected_session)
+            .unwrap_or(0);
+        let next = if current == 0 {
+            visible.len() - 1
+        } else {
+            current - 1
+        };
+        self.select_session(visible[next]);
+    }
+
+    fn set_resume_scope(&mut self, scope: ResumeScope) {
+        self.resume_scope = scope;
+        self.ensure_selected_session_visible();
+    }
+
+    fn ensure_selected_session_visible(&mut self) {
+        if self
+            .visible_session_indices()
+            .contains(&self.selected_session)
+        {
+            return;
+        }
+
+        if let Some(first) = self.visible_session_indices().first().copied() {
+            self.select_session(first);
+        }
+    }
+
+    fn session_visible_in_resume(&self, session: &SessionRecord) -> bool {
+        let matches_scope = match self.resume_scope {
+            ResumeScope::Local => session.origin == "Local",
+            ResumeScope::Remote => session.origin == "Remote",
+            ResumeScope::All => true,
+        };
+        let query = self.resume_query.trim();
+        let matches_query = query.is_empty()
+            || [
+                session.id.as_str(),
+                session.title.as_str(),
+                session.origin.as_str(),
+                session.route.as_str(),
+                session.channel.as_str(),
+            ]
+            .iter()
+            .any(|value| {
+                value
+                    .to_ascii_lowercase()
+                    .contains(&query.to_ascii_lowercase())
+            });
+
+        matches_scope && matches_query
+    }
+
     fn advance_focus(&self) -> Focus {
         let next = self.focus.next();
         if !self.show_observability && next == Focus::Observability {
@@ -381,6 +607,14 @@ impl App {
         } else {
             next
         }
+    }
+
+    fn open_resume(&mut self) {
+        self.surface = Surface::Resume;
+        self.resume_search = false;
+        self.resume_query.clear();
+        self.resume_scope = ResumeScope::All;
+        self.ensure_selected_session_visible();
     }
 
     fn rewind_focus(&self) -> Focus {
@@ -537,7 +771,9 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, Focus, SessionState, TimelineKind};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::{App, AppAction, Focus, ResumeScope, SessionState, Surface, TimelineKind};
 
     #[test]
     fn tab_skips_hidden_observability_panel() {
@@ -615,5 +851,67 @@ mod tests {
         app.submit_composer();
 
         assert_eq!(app.active_session().state, SessionState::Degraded);
+    }
+
+    #[test]
+    fn help_overlay_opens_and_blocks_navigation_until_closed() {
+        let mut app = App::new("/tmp/mosaic".into());
+        let initial_focus = app.focus;
+
+        assert_eq!(
+            app.handle_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)),
+            AppAction::Continue
+        );
+        assert!(app.show_help_overlay);
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(app.show_help_overlay);
+        assert_eq!(app.focus, initial_focus);
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.show_help_overlay);
+    }
+
+    #[test]
+    fn question_mark_remains_typable_inside_composer() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.focus = Focus::Composer;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "?");
+        assert!(!app.show_help_overlay);
+    }
+
+    #[test]
+    fn app_can_start_in_resume_surface() {
+        let app = App::new_with_resume("/tmp/mosaic".into(), true);
+
+        assert_eq!(app.surface, Surface::Resume);
+        assert_eq!(app.focus, Focus::Composer);
+    }
+
+    #[test]
+    fn resume_surface_filters_sessions_and_selects_visible_match() {
+        let mut app = App::new_with_resume("/tmp/mosaic".into(), true);
+        app.resume_scope = ResumeScope::Remote;
+        app.resume_query = "ios".to_owned();
+        app.ensure_selected_session_visible();
+
+        let visible = app.visible_session_indices();
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(app.sessions[visible[0]].id, "sess-node-007");
+        assert_eq!(app.selected_session, visible[0]);
+    }
+
+    #[test]
+    fn enter_from_resume_returns_to_console() {
+        let mut app = App::new_with_resume("/tmp/mosaic".into(), true);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(app.surface, Surface::Console);
+        assert_eq!(app.focus, Focus::Composer);
     }
 }
