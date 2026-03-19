@@ -1,0 +1,140 @@
+use crate::app::{ActivityEntry, SessionRecord, SessionState, TimelineEntry, TimelineKind};
+
+pub fn sessions() -> Vec<SessionRecord> {
+    vec![
+        SessionRecord {
+            id: "sess-gateway-001".to_owned(),
+            title: "Gateway routing soak".to_owned(),
+            channel: "control".to_owned(),
+            route: "gateway.default".to_owned(),
+            runtime: "primary-agent".to_owned(),
+            model: "gpt-5.4-control".to_owned(),
+            state: SessionState::Active,
+            unread: 2,
+            timeline: vec![
+                entry(
+                    "15:02",
+                    TimelineKind::System,
+                    "gateway",
+                    "Session attached",
+                    "Operator console attached to gateway.default with mock transport.",
+                ),
+                entry(
+                    "15:03",
+                    TimelineKind::Agent,
+                    "pi",
+                    "Route health summary",
+                    "Primary runtime is warm. No downstream node pressure detected.",
+                ),
+                entry(
+                    "15:04",
+                    TimelineKind::Tool,
+                    "exec",
+                    "Pending capability visibility",
+                    "Tool execution stream will appear here once gateway events are wired.",
+                ),
+            ],
+        },
+        SessionRecord {
+            id: "sess-ops-013".to_owned(),
+            title: "Launch readiness audit".to_owned(),
+            channel: "slack".to_owned(),
+            route: "ops.launch".to_owned(),
+            runtime: "sub-agent:release".to_owned(),
+            model: "gpt-5.4-mini".to_owned(),
+            state: SessionState::Waiting,
+            unread: 1,
+            timeline: vec![
+                entry(
+                    "14:51",
+                    TimelineKind::Operator,
+                    "operator",
+                    "Requested deployment checklist",
+                    "Need a compact checkpoint list before opening the release window.",
+                ),
+                entry(
+                    "14:54",
+                    TimelineKind::Agent,
+                    "release-agent",
+                    "Checklist draft",
+                    "Drafted rollout, rollback, and observability checkpoints for the cluster.",
+                ),
+                entry(
+                    "14:58",
+                    TimelineKind::System,
+                    "gateway",
+                    "Awaiting operator input",
+                    "Session is idle and ready for the next routing or execution command.",
+                ),
+            ],
+        },
+        SessionRecord {
+            id: "sess-node-007".to_owned(),
+            title: "iOS node attach".to_owned(),
+            channel: "telegram".to_owned(),
+            route: "device.ios.primary".to_owned(),
+            runtime: "node-supervisor".to_owned(),
+            model: "gpt-5.4-control".to_owned(),
+            state: SessionState::Degraded,
+            unread: 0,
+            timeline: vec![
+                entry(
+                    "14:24",
+                    TimelineKind::System,
+                    "gateway",
+                    "Node reconnect required",
+                    "Last heartbeat exceeded the threshold. Control plane marked the node degraded.",
+                ),
+                entry(
+                    "14:26",
+                    TimelineKind::Agent,
+                    "node-supervisor",
+                    "Recovery stub",
+                    "Future device reattach commands and logs will replace this placeholder flow.",
+                ),
+            ],
+        },
+    ]
+}
+
+pub fn activity_feed() -> Vec<ActivityEntry> {
+    vec![
+        ActivityEntry {
+            timestamp: "15:05".to_owned(),
+            scope: "gateway".to_owned(),
+            message: "Mock websocket connected to local control-plane bridge.".to_owned(),
+        },
+        ActivityEntry {
+            timestamp: "15:05".to_owned(),
+            scope: "runtime".to_owned(),
+            message: "Primary runtime heartbeat steady; event bus integration pending.".to_owned(),
+        },
+        ActivityEntry {
+            timestamp: "15:06".to_owned(),
+            scope: "tools".to_owned(),
+            message: "Execution panel is scaffolded for tool stdout, results, and failures."
+                .to_owned(),
+        },
+        ActivityEntry {
+            timestamp: "15:06".to_owned(),
+            scope: "nodes".to_owned(),
+            message: "Device-node stream is placeholder-only in stage 1.".to_owned(),
+        },
+    ]
+}
+
+fn entry(
+    timestamp: &str,
+    kind: TimelineKind,
+    actor: &str,
+    title: &str,
+    body: &str,
+) -> TimelineEntry {
+    TimelineEntry {
+        timestamp: timestamp.to_owned(),
+        kind,
+        actor: actor.to_owned(),
+        title: title.to_owned(),
+        body: body.to_owned(),
+    }
+}

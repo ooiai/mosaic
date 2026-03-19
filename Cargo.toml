@@ -1,0 +1,14 @@
+[workspace]
+members = ["cli", "crates/tui"]
+default-members = ["cli"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+version = "0.1.0"
+
+[workspace.dependencies]
+crossterm = "0.29.0"
+ratatui = "0.29.0"
+mosaic-tui = { path = "crates/tui" }

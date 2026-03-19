@@ -8,9 +8,25 @@ CD := cd
 CLI_PATH := ./cli
 
 .PHONY: \
+	build \
+	check \
+	clean \
 	git-run \
 	git-commit \
+	install \
 
+
+install:
+	$(CARGO) install --path cli
+
+build:
+	$(CARGO) build -p mosaic-cli
+
+clean:
+	$(CARGO) clean
+
+check:
+	$(CARGO) check --workspace
 
 # Function to check if there are changes to commit
 define git_push_if_needed
