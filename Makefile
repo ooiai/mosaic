@@ -32,10 +32,17 @@ define git_commit_if_needed
 	fi
 endef
 
-# Git run add commit push
+# Git run: add, commit, push if there are changes
+# Usage: make git-run m="Your commit message"
 git-run:
 	$(call git_push_if_needed)
 
-# Git run add commit push
+# Git commit: add and commit if there are changes, but do not push
+# Usage: make git-commit m="Your commit message"
 git-commit:
 	$(call git_commit_if_needed)
+
+# Git rm cache: remove a file from git cache
+# Usage: make git-rm-cache f=path/to/file
+git-rm-cache:
+	$(GIT) rm --cached $(f)
