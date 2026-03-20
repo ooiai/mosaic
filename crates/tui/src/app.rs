@@ -312,9 +312,8 @@ impl App {
         self.heartbeat = self.heartbeat.wrapping_add(1);
     }
 
-    pub fn pulse_dot(&self) -> &'static str {
-        const FRAMES: [&str; 4] = ["·", "•", "●", "•"];
-        FRAMES[self.heartbeat % FRAMES.len()]
+    pub fn pulse_frame(&self) -> usize {
+        self.heartbeat % 4
     }
 
     pub fn active_session(&self) -> &SessionRecord {

@@ -58,25 +58,19 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
-            Constraint::Length(5),
+            Constraint::Length(1),
+            Constraint::Length(9),
             Constraint::Min(10),
             Constraint::Length(1),
         ])
         .split(frame.area());
 
-    let status = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("• ", Style::default().fg(Color::Cyan)),
-            Span::raw(
-                "Experimental local mode is enabled. Runtime, tool, and node feeds remain mock-driven.",
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("• ", Style::default().fg(Color::Blue)),
-            Span::raw("Use Tab to cycle scope tabs and / to filter the resume list."),
-        ]),
-    ]);
+    let status = Paragraph::new(vec![Line::from(vec![
+        Span::styled("• ", Style::default().fg(Color::Cyan)),
+        Span::raw(
+            "Experimental local mode is enabled. Runtime, tool, and node feeds remain mock-driven.",
+        ),
+    ])]);
     frame.render_widget(status, outer[0]);
 
     let visible = app.visible_session_indices();
@@ -92,7 +86,6 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
         .collect::<Vec<_>>();
 
     let mut lines = vec![
-        Line::from(""),
         Line::from(vec![Span::styled(
             "Select a session to resume:",
             Style::default().add_modifier(Modifier::BOLD),
@@ -157,7 +150,7 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(widget, outer[2]);
 
     let footer = Paragraph::new(Line::from(vec![
-        Span::raw("up/down to navigate · "),
+        Span::raw("↑↓ to navigate · "),
         Span::raw("Enter to select · "),
         Span::raw("Esc to cancel · "),
         Span::raw("/ to search"),
@@ -165,17 +158,18 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
     frame.render_widget(footer, outer[3]);
 }
 
-fn render_welcome(frame: &mut Frame<'_>, _app: &App, area: Rect) {
+fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let detail_height = if app.command_query().is_some() { 2 } else { 1 };
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(7),
-            Constraint::Length(1),
+            Constraint::Length(detail_height),
             Constraint::Min(1),
         ])
         .split(area);
 
-    let card_width = area.width.min(64);
+    let card_width = area.width.min(62);
     let card_area = Rect {
         x: area.x,
         y: area.y,
@@ -189,10 +183,14 @@ fn render_welcome(frame: &mut Frame<'_>, _app: &App, area: Rect) {
         Line::from(vec![
             Span::styled("Tip: ", Style::default().fg(Color::DarkGray)),
             Span::styled("/help", Style::default().fg(Color::Cyan)),
-            Span::raw(" Show local commands and shortcuts."),
+            Span::styled(
+                " Show local commands and shortcuts.",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]),
-        Line::from(vec![Span::raw(
+        Line::from(vec![Span::styled(
             "Mosaic uses AI, so always check for mistakes.",
+            Style::default().fg(Color::DarkGray),
         )]),
     ])
     .block(
@@ -204,12 +202,19 @@ fn render_welcome(frame: &mut Frame<'_>, _app: &App, area: Rect) {
     .wrap(Wrap { trim: false });
     frame.render_widget(card, card_area);
 
-    let details = Paragraph::new(vec![Line::from(vec![
+    let mut detail_lines = vec![Line::from(vec![
         Span::styled("• ", Style::default().fg(Color::Cyan)),
         Span::raw(
             "Experimental mode is enabled. These features are not stable, may have bugs, and may be removed in the future.",
         ),
-    ])]);
+    ])];
+    if app.command_query().is_some() {
+        detail_lines.push(Line::from(vec![
+            Span::styled("• ", Style::default().fg(Color::Blue)),
+            Span::raw("Environment loaded: 1 custom instruction, 1 MCP server, 3 skills, 2 agents"),
+        ]));
+    }
+    let details = Paragraph::new(detail_lines);
     frame.render_widget(details, sections[1]);
 }
 
@@ -231,11 +236,8 @@ fn render_console_stream(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let left = format!(
-        "{} [/_{}*]",
-        display_workspace_path(&app.workspace_path),
-        app.workspace_name
-    );
+    let path = display_workspace_path(&app.workspace_path);
+    let badge = format!(" [/_{}*]", app.workspace_name);
     let right = format!(
         "{} ({}) (1x)",
         display_control_model(&app.control_model),
@@ -243,8 +245,13 @@ fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
     );
 
     let widget = Paragraph::new(Line::from(vec![
-        Span::raw(&left),
-        Span::raw(pad_between(area.width, left.len(), right.len())),
+        Span::styled(&path, Style::default().fg(Color::Gray)),
+        Span::styled(&badge, Style::default().fg(Color::DarkGray)),
+        Span::raw(pad_between(
+            area.width,
+            path.len() + badge.len(),
+            right.len(),
+        )),
         Span::styled(&right, Style::default().fg(Color::DarkGray)),
     ]));
     frame.render_widget(widget, area);
@@ -268,7 +275,7 @@ fn mosaic_mark_top() -> Line<'static> {
         tile_span('O', colors[1], true),
         Span::raw(" "),
         tile_span('S', colors[2], true),
-        Span::raw("  "),
+        Span::raw(" "),
         Span::styled(
             "Mosaic Copilot ".to_owned(),
             Style::default().add_modifier(Modifier::BOLD),
@@ -288,8 +295,11 @@ fn mosaic_mark_bottom() -> Line<'static> {
         tile_span('I', colors[1], false),
         Span::raw(" "),
         tile_span('C', colors[2], false),
-        Span::raw("  "),
-        Span::raw("Describe a task to get started."),
+        Span::raw(" "),
+        Span::styled(
+            "Describe a task to get started.",
+            Style::default().fg(Color::Gray),
+        ),
     ])
 }
 
@@ -345,7 +355,7 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
 fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let sections = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(10), Constraint::Length(27)])
+        .constraints([Constraint::Min(10), Constraint::Length(8)])
         .split(area);
     let hints = "shift+tab switch mode";
     let request_count = if app.show_console_history {
@@ -359,35 +369,10 @@ fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     )]));
     frame.render_widget(left, sections[0]);
 
-    let right = Paragraph::new(Line::from(vec![
-        Span::styled(
-            format!("{request_count} reqs."),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            if app.gateway_connected { "◉" } else { "○" },
-            Style::default().fg(Color::Cyan),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            if app.show_observability { "◌" } else { "◍" },
-            Style::default().fg(Color::Magenta),
-        ),
-        Span::raw(" "),
-        Span::styled(
-            if app.command_query().is_some() {
-                "/"
-            } else {
-                "⌘"
-            },
-            Style::default().fg(Color::Blue),
-        ),
-        Span::raw(" "),
-        Span::styled("⌨", Style::default().fg(Color::Yellow)),
-        Span::raw(" "),
-        Span::styled("⎋", Style::default().fg(Color::DarkGray)),
-    ]));
+    let right = Paragraph::new(Line::from(vec![Span::styled(
+        format!("{request_count} reqs."),
+        Style::default().fg(Color::DarkGray),
+    )]));
     frame.render_widget(right, sections[1]);
 }
 
@@ -399,7 +384,7 @@ fn command_palette_height(app: &App) -> u16 {
     let rows = matching_commands(app.command_query().unwrap_or_default())
         .len()
         .clamp(1, 8) as u16;
-    rows + 2
+    rows + 1
 }
 
 fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -422,7 +407,7 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 Style::default()
             };
             lines.push(Line::from(vec![
-                Span::styled(if selected { "│ " } else { "  " }, style),
+                Span::styled(if selected { "▎ " } else { "│ " }, style),
                 Span::styled(format!("{:<25}", command), style),
                 Span::styled(description.to_string(), Style::default().fg(Color::Gray)),
             ]));
@@ -432,7 +417,7 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let widget = Paragraph::new(lines)
         .block(
             Block::default()
-                .borders(Borders::LEFT | Borders::TOP | Borders::BOTTOM)
+                .borders(Borders::LEFT | Borders::BOTTOM)
                 .border_style(Style::default().fg(Color::DarkGray)),
         )
         .wrap(Wrap { trim: false });
@@ -542,9 +527,15 @@ fn console_lines(app: &App) -> Vec<Line<'_>> {
 fn stream_entry_lines<'a>(app: &'a App, entry: &'a TimelineEntry) -> Vec<Line<'a>> {
     let phase = entry.title.trim();
     let animated = if phase.eq_ignore_ascii_case("thinking") {
-        Some((app.pulse_dot(), Style::default().fg(Color::Cyan)))
+        Some((
+            ["·", "∙", "•", "∙"][app.pulse_frame()],
+            Style::default().fg(Color::Cyan),
+        ))
     } else if phase.eq_ignore_ascii_case("working") {
-        Some((app.pulse_dot(), Style::default().fg(Color::Yellow)))
+        Some((
+            ["∙", "•", "●", "•"][app.pulse_frame()],
+            Style::default().fg(Color::Yellow),
+        ))
     } else {
         None
     };
@@ -627,19 +618,20 @@ fn resume_tabs_line(scope: ResumeScope) -> Line<'static> {
     };
 
     Line::from(vec![
-        Span::styled("Sessions ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Sessions:", Style::default().fg(Color::DarkGray)),
+        Span::raw(" "),
         tab(ResumeScope::Local),
         Span::raw("  "),
         tab(ResumeScope::Remote),
         Span::raw("  "),
         tab(ResumeScope::All),
-        Span::styled("  (Tab to cycle)", Style::default().fg(Color::DarkGray)),
+        Span::styled("  (tab to cycle)", Style::default().fg(Color::DarkGray)),
     ])
 }
 
 fn resume_table_header() -> Line<'static> {
     Line::from(vec![
-        Span::styled("#   ", Style::default().fg(Color::DarkGray)),
+        Span::styled("    #   ", Style::default().fg(Color::DarkGray)),
         Span::styled("Type     ", Style::default().fg(Color::DarkGray)),
         Span::styled("Modified  ", Style::default().fg(Color::DarkGray)),
         Span::styled("Created   ", Style::default().fg(Color::DarkGray)),
@@ -650,7 +642,8 @@ fn resume_table_header() -> Line<'static> {
 fn resume_row_line(app: &App, index: usize) -> Line<'_> {
     let session = &app.sessions[index];
     let selected = index == app.selected_session;
-    let prefix = if selected { "│ " } else { "  " };
+    let prefix = if selected { "▏ " } else { "  " };
+    let marker = if selected { "> " } else { "  " };
     let row_style = if selected {
         Style::default()
             .fg(Color::Cyan)
@@ -661,6 +654,7 @@ fn resume_row_line(app: &App, index: usize) -> Line<'_> {
 
     Line::from(vec![
         Span::styled(prefix, row_style),
+        Span::styled(marker, row_style),
         Span::styled(
             format!("{:<2}  ", index + 1),
             Style::default().fg(Color::DarkGray),
@@ -772,7 +766,7 @@ mod tests {
         let screen = render_to_text(&app, 140, 32);
 
         assert!(screen.contains("Select a session to resume:"));
-        assert!(screen.contains("Sessions Local"));
+        assert!(screen.contains("Sessions: Local"));
         assert!(screen.contains("This branch"));
         assert!(screen.contains("Other sessions"));
         assert!(screen.contains("macOS node prep"));
@@ -788,13 +782,16 @@ mod tests {
 
         let screen = render_to_text(&app, 140, 32);
 
-        assert!(screen.contains("│ /gateway connect"));
+        assert!(screen.contains("▎ /gateway connect"));
         assert!(screen.contains("/gateway connect"));
         assert!(screen.contains("/gateway disconnect"));
+        assert!(screen.contains(
+            "Environment loaded: 1 custom instruction, 1 MCP server, 3 skills, 2 agents"
+        ));
 
         let composer_line = line_index(&screen, "› /gate").expect("composer line should render");
         let palette_line =
-            line_index(&screen, "│ /gateway connect").expect("palette line should render");
+            line_index(&screen, "▎ /gateway connect").expect("palette line should render");
         assert!(palette_line > composer_line);
     }
 
