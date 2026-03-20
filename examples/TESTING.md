@@ -18,6 +18,12 @@
 
 说明：当前阶段只验证配置骨架，MCP transport 还没有接通，因此不会真正调用远端 MCP server。
 
+`time-now.yaml`
+
+运行：`cargo run -p mosaic-cli -- run examples/time-now.yaml`
+
+说明：当前 `MockProvider` 还不会自动触发 tool call，这个示例主要用于验证 `time_now` 能力已可注册。
+
 `inspect trace`
 
 运行：`cargo run -p mosaic-cli -- inspect .mosaic/runs/<trace-id>.json`

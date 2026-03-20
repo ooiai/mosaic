@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
 use async_trait::async_trait;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -95,13 +96,57 @@ impl Tool for EchoTool {
     }
 }
 
+pub struct TimeNowTool {
+    meta: ToolMetadata,
+}
+
+impl TimeNowTool {
+    pub fn new() -> Self {
+        Self {
+            meta: ToolMetadata {
+                name: "time_now".to_owned(),
+                description: "Return the current UTC timestamp".to_owned(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+        }
+    }
+}
+
+impl Default for TimeNowTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for TimeNowTool {
+    fn metadata(&self) -> &ToolMetadata {
+        &self.meta
+    }
+
+    async fn call(&self, _input: serde_json::Value) -> Result<ToolResult> {
+        let now = Utc::now().to_rfc3339();
+
+        Ok(ToolResult {
+            content: now.clone(),
+            structured: Some(serde_json::json!({
+                "utc": now
+            })),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
+    use chrono::DateTime;
     use futures::executor::block_on;
 
-    use super::{EchoTool, ToolRegistry};
+    use super::{EchoTool, TimeNowTool, Tool, ToolRegistry};
 
     #[test]
     fn builtin_echo_tool_is_registered_and_callable() {
@@ -114,5 +159,17 @@ mod tests {
 
         assert_eq!(result.content, "hello");
         assert_eq!(registry.list(), vec!["echo".to_owned()]);
+    }
+
+    #[test]
+    fn time_now_tool_returns_a_rfc3339_utc_timestamp() {
+        let result = block_on(TimeNowTool::new().call(serde_json::json!({})))
+            .expect("time_now tool should succeed");
+
+        assert!(DateTime::parse_from_rfc3339(&result.content).is_ok());
+        assert_eq!(
+            result.structured,
+            Some(serde_json::json!({ "utc": result.content }))
+        );
     }
 }

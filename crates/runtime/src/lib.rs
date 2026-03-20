@@ -47,21 +47,26 @@ impl AgentRuntime {
                 }
             };
 
-            let input = serde_json::json!({ "text": req.input });
-            let started_at = Utc::now();
+            let skill_input = serde_json::json!({ "text": req.input });
+
+            trace.skill_calls.push(SkillTrace {
+                name: skill_name.clone(),
+                input: skill_input.clone(),
+                output: None,
+                started_at: Utc::now(),
+                finished_at: None,
+            });
+
             let ctx = SkillContext {
                 tools: self.ctx.tools.clone(),
             };
 
-            return match skill.execute(input.clone(), &ctx).await {
+            return match skill.execute(skill_input, &ctx).await {
                 Ok(out) => {
-                    trace.skill_calls.push(SkillTrace {
-                        name: skill_name,
-                        input,
-                        output: Some(out.content.clone()),
-                        started_at,
-                        finished_at: Some(Utc::now()),
-                    });
+                    if let Some(last) = trace.skill_calls.last_mut() {
+                        last.output = Some(out.content.clone());
+                        last.finished_at = Some(Utc::now());
+                    }
                     trace.finish_ok(out.content.clone());
                     Ok(RunResult {
                         output: out.content,
@@ -69,13 +74,9 @@ impl AgentRuntime {
                     })
                 }
                 Err(err) => {
-                    trace.skill_calls.push(SkillTrace {
-                        name: skill_name,
-                        input,
-                        output: None,
-                        started_at,
-                        finished_at: Some(Utc::now()),
-                    });
+                    if let Some(last) = trace.skill_calls.last_mut() {
+                        last.finished_at = Some(Utc::now());
+                    }
                     trace.finish_err(err.to_string());
                     Err(err)
                 }
@@ -199,6 +200,11 @@ mod tests {
 
         assert_eq!(result.output, "summary: Rust async enables concurrency.");
         assert_eq!(result.trace.skill_calls.len(), 1);
+        assert_eq!(
+            result.trace.skill_calls[0].output.as_deref(),
+            Some("summary: Rust async enables concurrency.")
+        );
+        assert!(result.trace.skill_calls[0].finished_at.is_some());
     }
 
     #[tokio::test]

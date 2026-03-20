@@ -17,12 +17,19 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 
 use self::app::{App, AppAction};
 
-pub fn run() -> io::Result<()> {
-    let start_in_resume = std::env::args().skip(1).any(|arg| arg == "--resume");
+pub fn run(start_in_resume: bool) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
     let result = run_app(&mut terminal, start_in_resume);
     restore_terminal(&mut terminal)?;
     result
+}
+
+fn build_app(workspace_path: std::path::PathBuf, start_in_resume: bool) -> App {
+    if start_in_resume {
+        App::new_with_resume(workspace_path, true)
+    } else {
+        App::new(workspace_path)
+    }
 }
 
 fn run_app(
@@ -30,11 +37,7 @@ fn run_app(
     start_in_resume: bool,
 ) -> io::Result<()> {
     let workspace_path = std::env::current_dir()?;
-    let mut app = if start_in_resume {
-        App::new_with_resume(workspace_path, true)
-    } else {
-        App::new(workspace_path)
-    };
+    let mut app = build_app(workspace_path, start_in_resume);
 
     loop {
         terminal.draw(|frame| ui::render(frame, &app))?;
@@ -59,11 +62,15 @@ fn run_app(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn detects_resume_flag_from_cli_args() {
-        let args = ["mosaic", "--resume"];
+    use crate::app::Surface;
 
-        assert!(args.into_iter().skip(1).any(|arg| arg == "--resume"));
+    use super::build_app;
+
+    #[test]
+    fn build_app_uses_explicit_resume_flag() {
+        let app = build_app("/tmp/mosaic".into(), true);
+
+        assert!(matches!(app.surface, Surface::Resume));
     }
 }
 

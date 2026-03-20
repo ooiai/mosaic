@@ -1,13 +1,12 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{fs, path::PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use mosaic_config::load_from_file;
 use mosaic_inspect::RunTrace;
-use mosaic_provider::MockProvider;
-use mosaic_runtime::{AgentRuntime, RunRequest, RuntimeContext};
-use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
-use mosaic_tool_core::{EchoTool, ToolRegistry};
+use mosaic_runtime::{AgentRuntime, RunRequest};
+
+mod bootstrap;
 
 #[derive(Debug, Parser)]
 #[command(name = "mosaic")]
@@ -34,7 +33,9 @@ enum Commands {
 
 #[derive(Debug, PartialEq, Eq)]
 enum DispatchCommand {
-    Tui,
+    Tui {
+        resume: bool,
+    },
     Run {
         file: PathBuf,
         skill: Option<String>,
@@ -47,7 +48,9 @@ enum DispatchCommand {
 impl Cli {
     fn dispatch(self) -> DispatchCommand {
         match self.command {
-            None | Some(Commands::Tui) => DispatchCommand::Tui,
+            None | Some(Commands::Tui) => DispatchCommand::Tui {
+                resume: self.resume,
+            },
             Some(Commands::Run { file, skill }) => DispatchCommand::Run { file, skill },
             Some(Commands::Inspect { file }) => DispatchCommand::Inspect { file },
         }
@@ -57,8 +60,8 @@ impl Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().dispatch() {
-        DispatchCommand::Tui => {
-            mosaic_tui::run()?;
+        DispatchCommand::Tui { resume } => {
+            mosaic_tui::run(resume)?;
             Ok(())
         }
         DispatchCommand::Run { file, skill } => run_cmd(file, skill).await,
@@ -68,16 +71,7 @@ async fn main() -> Result<()> {
 
 async fn run_cmd(file: PathBuf, skill: Option<String>) -> Result<()> {
     let cfg = load_from_file(&file)?;
-
-    let provider = build_provider(&cfg.provider.provider_type)?;
-    let tools = Arc::new(build_tools(&cfg.tools)?);
-    let skills = Arc::new(build_skills(&cfg.skills)?);
-
-    let runtime = AgentRuntime::new(RuntimeContext {
-        provider,
-        tools,
-        skills,
-    });
+    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(&cfg)?);
 
     let result = runtime
         .run(RunRequest {
@@ -108,38 +102,6 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
 
     Ok(())
 }
-
-fn build_provider(provider_type: &str) -> Result<Arc<MockProvider>> {
-    match provider_type {
-        "mock" | "openai-compatible" => Ok(Arc::new(MockProvider)),
-        other => bail!("unsupported provider type in skeleton mode: {other}"),
-    }
-}
-
-fn build_tools(configs: &[mosaic_config::ToolConfig]) -> Result<ToolRegistry> {
-    let mut tools = ToolRegistry::new();
-    for tool in configs {
-        match (tool.tool_type.as_str(), tool.name.as_str()) {
-            ("builtin", "echo") => tools.register(Arc::new(EchoTool::new())),
-            ("builtin", other) => bail!("unsupported builtin tool in skeleton mode: {other}"),
-            (other, _) => bail!("unsupported tool type in skeleton mode: {other}"),
-        }
-    }
-    Ok(tools)
-}
-
-fn build_skills(configs: &[mosaic_config::SkillConfig]) -> Result<SkillRegistry> {
-    let mut skills = SkillRegistry::new();
-    for skill in configs {
-        match (skill.skill_type.as_str(), skill.name.as_str()) {
-            ("builtin", "summarize") => skills.register(Arc::new(SummarizeSkill)),
-            ("builtin", other) => bail!("unsupported builtin skill in skeleton mode: {other}"),
-            (other, _) => bail!("unsupported skill type in skeleton mode: {other}"),
-        }
-    }
-    Ok(skills)
-}
-
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -150,14 +112,21 @@ mod tests {
     fn defaults_to_tui_when_no_subcommand_is_present() {
         let cli = Cli::parse_from(["mosaic"]);
 
-        assert_eq!(cli.dispatch(), DispatchCommand::Tui);
+        assert_eq!(cli.dispatch(), DispatchCommand::Tui { resume: false });
     }
 
     #[test]
     fn accepts_resume_flag_without_forcing_a_subcommand() {
         let cli = Cli::parse_from(["mosaic", "--resume"]);
 
-        assert_eq!(cli.dispatch(), DispatchCommand::Tui);
+        assert_eq!(cli.dispatch(), DispatchCommand::Tui { resume: true });
+    }
+
+    #[test]
+    fn parses_tui_subcommand_with_resume_flag() {
+        let cli = Cli::parse_from(["mosaic", "tui", "--resume"]);
+
+        assert_eq!(cli.dispatch(), DispatchCommand::Tui { resume: true });
     }
 
     #[test]
