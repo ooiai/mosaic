@@ -1,0 +1,21 @@
+app:
+  name: skill-demo
+
+provider:
+  type: openai-compatible
+  model: mock
+  api_key_env: OPENAI_API_KEY
+
+tools:
+  - type: builtin
+    name: echo
+
+skills:
+  - type: builtin
+    name: summarize
+
+agent:
+  system: "You are a helpful assistant."
+
+task:
+  input: "Rust async allows efficient concurrency with futures and executors."

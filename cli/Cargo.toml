@@ -9,4 +9,15 @@ name = "mosaic"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
+clap.workspace = true
 mosaic-tui.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+mosaic-config = { path = "../crates/config" }
+mosaic-inspect = { path = "../crates/inspect" }
+mosaic-provider = { path = "../crates/provider" }
+mosaic-runtime = { path = "../crates/runtime" }
+mosaic-skill-core = { path = "../crates/skill-core" }
+mosaic-tool-core = { path = "../crates/tool-core" }

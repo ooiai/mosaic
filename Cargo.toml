@@ -1,5 +1,17 @@
 [workspace]
-members = ["cli", "crates/tui"]
+members = [
+    "cli",
+    "crates/config",
+    "crates/provider",
+    "crates/tool-core",
+    "crates/skill-core",
+    "crates/mcp-core",
+    "crates/inspect",
+    "crates/runtime",
+    "crates/workflow",
+    "crates/tui",
+    "crates/gateway",
+]
 default-members = ["cli"]
 resolver = "2"
 
@@ -9,6 +21,17 @@ license = "MIT"
 version = "0.1.0"
 
 [workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
 crossterm = "0.29.0"
-ratatui = "0.29.0"
+futures = "0.3"
 mosaic-tui = { path = "crates/tui" }
+ratatui = "0.29.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4", "serde"] }

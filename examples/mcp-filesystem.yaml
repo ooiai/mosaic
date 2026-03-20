@@ -1,0 +1,28 @@
+app:
+  name: mcp-demo
+
+provider:
+  type: openai-compatible
+  model: mock
+  api_key_env: OPENAI_API_KEY
+
+tools:
+  - type: builtin
+    name: echo
+
+skills: []
+
+agent:
+  system: "You are a helpful assistant."
+
+task:
+  input: "Summarize the configured MCP servers."
+
+mcp:
+  servers:
+    - name: filesystem
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-filesystem"
+        - .

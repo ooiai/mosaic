@@ -1,0 +1,19 @@
+app:
+  name: basic-demo
+
+provider:
+  type: openai-compatible
+  model: mock
+  api_key_env: OPENAI_API_KEY
+
+tools:
+  - type: builtin
+    name: echo
+
+skills: []
+
+agent:
+  system: "You are a helpful assistant."
+
+task:
+  input: "Explain what Mosaic is."

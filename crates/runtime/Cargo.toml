@@ -1,0 +1,19 @@
+[package]
+name = "mosaic-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+
+mosaic-inspect = { path = "../inspect" }
+mosaic-provider = { path = "../provider" }
+mosaic-skill-core = { path = "../skill-core" }
+mosaic-tool-core = { path = "../tool-core" }
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio.workspace = true
