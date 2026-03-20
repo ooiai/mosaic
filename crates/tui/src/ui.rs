@@ -20,26 +20,38 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn render_console(frame: &mut Frame<'_>, app: &App) {
+    let palette_height = command_palette_height(app);
+    let mut constraints = vec![
+        Constraint::Length(11),
+        Constraint::Min(8),
+        Constraint::Length(1),
+        Constraint::Length(3),
+    ];
+    if palette_height > 0 {
+        constraints.push(Constraint::Length(palette_height));
+    }
+    constraints.push(Constraint::Length(1));
+
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(11),
-            Constraint::Min(8),
-            Constraint::Length(1),
-            Constraint::Length(3),
-            Constraint::Length(1),
-        ])
+        .constraints(constraints)
         .split(frame.area());
+
+    let footer_index = outer.len() - 1;
+    let palette_area = if palette_height > 0 {
+        Some(outer[footer_index - 1])
+    } else {
+        None
+    };
 
     render_welcome(frame, app, outer[0]);
     render_console_stream(frame, app, outer[1]);
     render_workspace_line(frame, app, outer[2]);
     render_composer(frame, app, outer[3]);
-    render_footer(frame, app, outer[4]);
-
-    if app.command_query().is_some() {
-        render_command_palette(frame, app, outer[3]);
+    if let Some(area) = palette_area {
+        render_command_palette(frame, app, area);
     }
+    render_footer(frame, app, outer[footer_index]);
 }
 
 fn render_resume(frame: &mut Frame<'_>, app: &App) {
@@ -163,7 +175,7 @@ fn render_welcome(frame: &mut Frame<'_>, _app: &App, area: Rect) {
         ])
         .split(area);
 
-    let card_width = area.width.min(68);
+    let card_width = area.width.min(64);
     let card_area = Rect {
         x: area.x,
         y: area.y,
@@ -171,23 +183,8 @@ fn render_welcome(frame: &mut Frame<'_>, _app: &App, area: Rect) {
         height: sections[0].height,
     };
     let card = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("◻ ◻", Style::default().fg(Color::Cyan)),
-            Span::raw("  "),
-            Span::styled(
-                "Mosaic Copilot ".to_owned(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("v{}", env!("CARGO_PKG_VERSION")),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("▐▛▜▌", Style::default().fg(Color::Magenta)),
-            Span::raw("  "),
-            Span::raw("Describe a task to get started."),
-        ]),
+        mosaic_mark_top(),
+        mosaic_mark_bottom(),
         Line::from(""),
         Line::from(vec![
             Span::styled("Tip: ", Style::default().fg(Color::DarkGray)),
@@ -239,7 +236,11 @@ fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
         display_workspace_path(&app.workspace_path),
         app.workspace_name
     );
-    let right = format!("{} ({}) (1x)", app.control_model, app.runtime_status);
+    let right = format!(
+        "{} ({}) (1x)",
+        display_control_model(&app.control_model),
+        display_runtime_label(&app.runtime_status)
+    );
 
     let widget = Paragraph::new(Line::from(vec![
         Span::raw(&left),
@@ -257,6 +258,48 @@ fn startup_environment_line<'a>() -> Paragraph<'a> {
             Style::default().fg(Color::DarkGray),
         ),
     ]))
+}
+
+fn mosaic_mark_top() -> Line<'static> {
+    let colors = [Color::Cyan, Color::Magenta, Color::Blue];
+    Line::from(vec![
+        tile_span('M', colors[0], true),
+        Span::raw(" "),
+        tile_span('O', colors[1], true),
+        Span::raw(" "),
+        tile_span('S', colors[2], true),
+        Span::raw("  "),
+        Span::styled(
+            "Mosaic Copilot ".to_owned(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("v{}", env!("CARGO_PKG_VERSION")),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ])
+}
+
+fn mosaic_mark_bottom() -> Line<'static> {
+    let colors = [Color::Magenta, Color::Blue, Color::Cyan];
+    Line::from(vec![
+        tile_span('A', colors[0], false),
+        Span::raw(" "),
+        tile_span('I', colors[1], false),
+        Span::raw(" "),
+        tile_span('C', colors[2], false),
+        Span::raw("  "),
+        Span::raw("Describe a task to get started."),
+    ])
+}
+
+fn tile_span(ch: char, color: Color, top: bool) -> Span<'static> {
+    let tile = if top {
+        format!("╭{}╮", ch)
+    } else {
+        format!("╰{}╯", ch)
+    };
+    Span::styled(tile, Style::default().fg(color))
 }
 
 fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
@@ -348,15 +391,19 @@ fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(right, sections[1]);
 }
 
-fn render_command_palette(frame: &mut Frame<'_>, app: &App, composer_area: Rect) {
+fn command_palette_height(app: &App) -> u16 {
+    if app.command_query().is_none() {
+        return 0;
+    }
+
+    let rows = matching_commands(app.command_query().unwrap_or_default())
+        .len()
+        .clamp(1, 8) as u16;
+    rows + 2
+}
+
+fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let commands = matching_commands(app.command_query().unwrap_or_default());
-    let height = commands.len().min(8) as u16 + 2;
-    let area = Rect {
-        x: composer_area.x,
-        y: composer_area.y.saturating_sub(height),
-        width: composer_area.width,
-        height,
-    };
 
     let mut lines = Vec::new();
     if commands.is_empty() {
@@ -463,7 +510,7 @@ fn console_lines(app: &App) -> Vec<Line<'_>> {
     ];
 
     for entry in &session.timeline {
-        lines.extend(stream_entry_lines(entry));
+        lines.extend(stream_entry_lines(app, entry));
     }
 
     if app.show_observability {
@@ -492,38 +539,74 @@ fn console_lines(app: &App) -> Vec<Line<'_>> {
     lines
 }
 
-fn stream_entry_lines(entry: &TimelineEntry) -> Vec<Line<'_>> {
-    let (marker, style) = match entry.kind {
-        TimelineKind::Operator => (">", Style::default().fg(Color::Cyan)),
-        TimelineKind::Agent => ("+", Style::default().fg(Color::Green)),
-        TimelineKind::Tool => ("!", Style::default().fg(Color::Yellow)),
-        TimelineKind::System => ("o", Style::default().fg(Color::Magenta)),
+fn stream_entry_lines<'a>(app: &'a App, entry: &'a TimelineEntry) -> Vec<Line<'a>> {
+    let phase = entry.title.trim();
+    let animated = if phase.eq_ignore_ascii_case("thinking") {
+        Some((app.pulse_dot(), Style::default().fg(Color::Cyan)))
+    } else if phase.eq_ignore_ascii_case("working") {
+        Some((app.pulse_dot(), Style::default().fg(Color::Yellow)))
+    } else {
+        None
     };
 
-    vec![
-        Line::from(vec![
-            Span::styled(format!("{} ", marker), style.add_modifier(Modifier::BOLD)),
-            Span::styled(
-                entry.title.as_str(),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                entry.timestamp.as_str(),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("  actor ", Style::default().fg(Color::DarkGray)),
-            Span::styled(entry.actor.as_str(), Style::default().fg(Color::Gray)),
-            Span::raw("  "),
-            Span::styled("phase ", Style::default().fg(Color::DarkGray)),
-            Span::styled(entry.kind.label(), Style::default().fg(Color::DarkGray)),
-            Span::raw("  "),
-            Span::styled(entry.body.as_str(), Style::default().fg(Color::Gray)),
-        ]),
-        Line::from(""),
-    ]
+    if let Some((marker, style)) = animated {
+        vec![
+            Line::from(vec![
+                Span::styled(format!("{marker} "), style.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    entry.title.as_str(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    entry.timestamp.as_str(),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  actor ", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.actor.as_str(), Style::default().fg(Color::Gray)),
+                Span::raw("  "),
+                Span::styled("phase ", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.kind.label(), Style::default().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::styled(entry.body.as_str(), Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(""),
+        ]
+    } else {
+        let (marker, style) = match entry.kind {
+            TimelineKind::Operator => (">", Style::default().fg(Color::Cyan)),
+            TimelineKind::Agent => ("+", Style::default().fg(Color::Green)),
+            TimelineKind::Tool => ("!", Style::default().fg(Color::Yellow)),
+            TimelineKind::System => ("o", Style::default().fg(Color::Magenta)),
+        };
+
+        vec![
+            Line::from(vec![
+                Span::styled(format!("{marker} "), style.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    entry.title.as_str(),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    entry.timestamp.as_str(),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("  actor ", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.actor.as_str(), Style::default().fg(Color::Gray)),
+                Span::raw("  "),
+                Span::styled("phase ", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.kind.label(), Style::default().fg(Color::DarkGray)),
+                Span::raw("  "),
+                Span::styled(entry.body.as_str(), Style::default().fg(Color::Gray)),
+            ]),
+            Line::from(""),
+        ]
+    }
 }
 
 fn resume_tabs_line(scope: ResumeScope) -> Line<'static> {
@@ -608,6 +691,14 @@ fn display_workspace_path(path: &str) -> String {
         .unwrap_or_else(|| path.to_owned())
 }
 
+fn display_control_model(model: &str) -> &str {
+    model.strip_suffix("-control").unwrap_or(model)
+}
+
+fn display_runtime_label(status: &str) -> &str {
+    if status == "warm" { "xhigh" } else { status }
+}
+
 fn pad_between(width: u16, left_len: usize, right_len: usize) -> String {
     let total = left_len + right_len;
     let padding = width as usize;
@@ -647,6 +738,14 @@ mod tests {
         text
     }
 
+    fn line_index(screen: &str, needle: &str) -> Option<usize> {
+        screen.lines().position(|line| line.contains(needle))
+    }
+
+    fn line_with<'a>(screen: &'a str, needle: &str) -> Option<&'a str> {
+        screen.lines().find(|line| line.contains(needle))
+    }
+
     #[test]
     fn startup_canvas_renders_welcome_environment_and_footer() {
         let app = App::new("/tmp/mosaic".into());
@@ -654,7 +753,12 @@ mod tests {
 
         assert!(screen.contains("Mosaic Copilot"));
         assert!(screen.contains("v0.1.0"));
-        assert!(screen.contains("◻ ◻"));
+        assert!(screen.contains("╭M╮"));
+        assert!(screen.contains("╭O╮"));
+        assert!(screen.contains("╭S╮"));
+        assert!(screen.contains("╰A╯"));
+        assert!(screen.contains("╰I╯"));
+        assert!(screen.contains("╰C╯"));
         assert!(screen.contains("Describe a task to get started."));
         assert!(screen.contains("Loading environment"));
         assert!(screen.contains("[/_mosaic*]"));
@@ -687,6 +791,11 @@ mod tests {
         assert!(screen.contains("│ /gateway connect"));
         assert!(screen.contains("/gateway connect"));
         assert!(screen.contains("/gateway disconnect"));
+
+        let composer_line = line_index(&screen, "› /gate").expect("composer line should render");
+        let palette_line =
+            line_index(&screen, "│ /gateway connect").expect("palette line should render");
+        assert!(palette_line > composer_line);
     }
 
     #[test]
@@ -711,6 +820,24 @@ mod tests {
 
         assert!(with_feed.contains("Activity Feed"));
         assert!(!without_feed.contains("Activity Feed"));
+    }
+
+    #[test]
+    fn thinking_and_working_markers_animate() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.show_console_history = true;
+
+        let first = render_to_text(&app, 140, 32);
+        app.tick();
+        let second = render_to_text(&app, 140, 32);
+
+        let first_thinking = line_with(&first, "Thinking").expect("thinking line should render");
+        let second_thinking = line_with(&second, "Thinking").expect("thinking line should render");
+        let first_working = line_with(&first, "Working").expect("working line should render");
+        let second_working = line_with(&second, "Working").expect("working line should render");
+
+        assert_ne!(first_thinking, second_thinking);
+        assert_ne!(first_working, second_working);
     }
 
     #[test]

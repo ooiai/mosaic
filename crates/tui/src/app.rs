@@ -312,6 +312,11 @@ impl App {
         self.heartbeat = self.heartbeat.wrapping_add(1);
     }
 
+    pub fn pulse_dot(&self) -> &'static str {
+        const FRAMES: [&str; 4] = ["·", "•", "●", "•"];
+        FRAMES[self.heartbeat % FRAMES.len()]
+    }
+
     pub fn active_session(&self) -> &SessionRecord {
         &self.sessions[self.selected_session]
     }
@@ -999,7 +1004,7 @@ mod tests {
                 .timeline
                 .last()
                 .map(|entry| entry.title.as_str()),
-            Some("Pending capability visibility")
+            Some("Working")
         );
     }
 
