@@ -15,6 +15,7 @@ pub enum Role {
 pub struct Message {
     pub role: Role,
     pub content: String,
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -77,11 +78,37 @@ impl LlmProvider for MockProvider {
             });
         }
 
+        if matches!(last.role, Role::User)
+            && last.content.to_lowercase().contains("read")
+            && tools
+                .unwrap_or_default()
+                .iter()
+                .any(|tool| tool.name == "read_file")
+        {
+            return Ok(CompletionResponse {
+                message: None,
+                tool_calls: vec![ToolCall {
+                    id: "call_mock_read_file".to_owned(),
+                    name: "read_file".to_owned(),
+                    arguments: serde_json::json!({
+                        "path": "README.md"
+                    }),
+                }],
+                finish_reason: Some("tool_calls".to_owned()),
+            });
+        }
+
         if matches!(last.role, Role::Tool) {
+            let content = match last.tool_call_id.as_deref() {
+                Some("call_mock_time_now") => format!("The current time is: {}", last.content),
+                _ => format!("Tool returned:\n{}", last.content),
+            };
+
             return Ok(CompletionResponse {
                 message: Some(Message {
                     role: Role::Assistant,
-                    content: format!("The current time is: {}", last.content),
+                    content,
+                    tool_call_id: None,
                 }),
                 tool_calls: vec![],
                 finish_reason: Some("stop".to_owned()),
@@ -92,6 +119,7 @@ impl LlmProvider for MockProvider {
             message: Some(Message {
                 role: Role::Assistant,
                 content: format!("mock response: {}", last.content),
+                tool_call_id: None,
             }),
             tool_calls: vec![],
             finish_reason: Some("stop".to_owned()),
@@ -126,14 +154,18 @@ impl LlmProvider for OpenAiCompatibleProvider {
     ) -> Result<CompletionResponse> {
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
-        // `tool_call_id` is intentionally deferred to the next protocol step.
         let req_messages: Vec<serde_json::Value> = messages
             .iter()
-            .map(|message| {
-                serde_json::json!({
+            .map(|message| match message.role {
+                Role::Tool => serde_json::json!({
                     "role": role_to_api(&message.role),
                     "content": message.content,
-                })
+                    "tool_call_id": message.tool_call_id,
+                }),
+                _ => serde_json::json!({
+                    "role": role_to_api(&message.role),
+                    "content": message.content,
+                }),
             })
             .collect();
 
@@ -205,6 +237,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
             Some(Message {
                 role: Role::Assistant,
                 content: choice.message.content.unwrap_or_default(),
+                tool_call_id: None,
             })
         } else {
             None
@@ -269,10 +302,12 @@ mod tests {
                 Message {
                     role: Role::System,
                     content: "system".to_owned(),
+                    tool_call_id: None,
                 },
                 Message {
                     role: Role::User,
                     content: "hello".to_owned(),
+                    tool_call_id: None,
                 },
             ],
             None,
@@ -299,6 +334,7 @@ mod tests {
             &[Message {
                 role: Role::User,
                 content: "What time is it now?".to_owned(),
+                tool_call_id: None,
             }],
             Some(&tools),
         ))
@@ -311,11 +347,43 @@ mod tests {
     }
 
     #[test]
+    fn mock_provider_emits_read_file_tool_call_when_tool_is_available() {
+        let tools = vec![ToolDefinition {
+            name: "read_file".to_owned(),
+            description: "Read a UTF-8 text file from disk".to_owned(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"],
+            }),
+        }];
+
+        let response = block_on(MockProvider.complete(
+            &[Message {
+                role: Role::User,
+                content: "Read a file for me.".to_owned(),
+                tool_call_id: None,
+            }],
+            Some(&tools),
+        ))
+        .expect("mock provider should succeed");
+
+        assert!(response.message.is_none());
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "read_file");
+        assert_eq!(
+            response.tool_calls[0].arguments,
+            serde_json::json!({ "path": "README.md" })
+        );
+    }
+
+    #[test]
     fn mock_provider_finalizes_after_tool_output() {
         let response = block_on(MockProvider.complete(
             &[Message {
                 role: Role::Tool,
                 content: "2026-03-20T12:00:00Z".to_owned(),
+                tool_call_id: Some("call_mock_time_now".to_owned()),
             }],
             None,
         ))

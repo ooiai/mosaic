@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -143,14 +143,98 @@ impl Tool for TimeNowTool {
     }
 }
 
+pub struct ReadFileTool {
+    meta: ToolMetadata,
+}
+
+impl ReadFileTool {
+    pub fn new() -> Self {
+        Self {
+            meta: ToolMetadata {
+                name: "read_file".to_owned(),
+                description: "Read a UTF-8 text file from disk".to_owned(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        }
+    }
+}
+
+impl Default for ReadFileTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Tool for ReadFileTool {
+    fn metadata(&self) -> &ToolMetadata {
+        &self.meta
+    }
+
+    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+        let path = input
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("missing required field: path"))?;
+
+        let path_ref = Path::new(path);
+
+        if !path_ref.exists() {
+            anyhow::bail!("file does not exist: {}", path);
+        }
+
+        if !path_ref.is_file() {
+            anyhow::bail!("path is not a file: {}", path);
+        }
+
+        let content = fs::read_to_string(path_ref)?;
+
+        Ok(ToolResult {
+            content: content.clone(),
+            structured: Some(serde_json::json!({
+                "path": path,
+                "content": content,
+            })),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        fs, process,
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use chrono::DateTime;
     use futures::executor::block_on;
 
-    use super::{EchoTool, TimeNowTool, Tool, ToolRegistry};
+    use super::{EchoTool, ReadFileTool, TimeNowTool, Tool, ToolRegistry};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_file_path(label: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        std::env::temp_dir().join(format!(
+            "mosaic-tool-core-{label}-{}-{nanos}-{count}.txt",
+            process::id()
+        ))
+    }
 
     #[test]
     fn builtin_echo_tool_is_registered_and_callable() {
@@ -175,5 +259,39 @@ mod tests {
             result.structured,
             Some(serde_json::json!({ "utc": result.content }))
         );
+    }
+
+    #[test]
+    fn read_file_tool_reads_utf8_text_files() {
+        let path = temp_file_path("read-success");
+        fs::write(&path, "hello from file").expect("temp file should be writable");
+
+        let result = block_on(ReadFileTool::new().call(serde_json::json!({
+            "path": path.to_string_lossy(),
+        })))
+        .expect("read_file tool should succeed");
+
+        assert_eq!(result.content, "hello from file");
+        assert_eq!(
+            result.structured,
+            Some(serde_json::json!({
+                "path": path.to_string_lossy(),
+                "content": "hello from file",
+            }))
+        );
+
+        fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn read_file_tool_rejects_missing_paths() {
+        let path = temp_file_path("missing");
+
+        let err = block_on(ReadFileTool::new().call(serde_json::json!({
+            "path": path.to_string_lossy(),
+        })))
+        .expect_err("missing path should fail");
+
+        assert!(err.to_string().contains("file does not exist"));
     }
 }

@@ -30,6 +30,12 @@
 
 预期：`MockProvider` 会先触发 `time_now`，runtime 执行工具后再返回最终答案；trace 里应有 1 条 `tool_calls`。
 
+`read-file-agent.yaml`
+
+运行：`cargo run -p mosaic-cli -- run examples/read-file-agent.yaml`
+
+预期：`MockProvider` 会触发 `read_file`；在仓库根目录运行时会读取 `README.md`，最终输出应以 `Tool returned:` 开头，trace 里应有 1 条带 `call_id` 的 `tool_calls`。
+
 `inspect trace`
 
 运行：`cargo run -p mosaic-cli -- inspect .mosaic/runs/<trace-id>.json`

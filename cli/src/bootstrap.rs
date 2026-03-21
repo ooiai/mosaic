@@ -5,7 +5,7 @@ use mosaic_config::{AppConfig, SkillConfig, ToolConfig};
 use mosaic_provider::{LlmProvider, MockProvider, OpenAiCompatibleProvider};
 use mosaic_runtime::RuntimeContext;
 use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
-use mosaic_tool_core::{EchoTool, TimeNowTool, ToolRegistry};
+use mosaic_tool_core::{EchoTool, ReadFileTool, TimeNowTool, ToolRegistry};
 
 pub fn build_runtime_context(cfg: &AppConfig) -> Result<RuntimeContext> {
     let provider = build_provider(cfg)?;
@@ -54,6 +54,7 @@ fn build_tools(configs: &[ToolConfig]) -> Result<ToolRegistry> {
     for tool in configs {
         match (tool.tool_type.as_str(), tool.name.as_str()) {
             ("builtin", "echo") => tools.register(Arc::new(EchoTool::new())),
+            ("builtin", "read_file") => tools.register(Arc::new(ReadFileTool::new())),
             ("builtin", "time_now") => tools.register(Arc::new(TimeNowTool::new())),
             ("builtin", other) => bail!("unsupported builtin tool in skeleton mode: {other}"),
             (other, _) => bail!("unsupported tool type in skeleton mode: {other}"),
@@ -86,7 +87,7 @@ mod tests {
     use super::{build_provider, build_runtime_context};
 
     #[test]
-    fn runtime_context_registers_time_now_tool() {
+    fn runtime_context_registers_builtin_tools_and_skills() {
         let cfg = AppConfig {
             app: None,
             provider: ProviderConfig {
@@ -95,10 +96,16 @@ mod tests {
                 model: "mock".to_owned(),
                 api_key_env: None,
             },
-            tools: vec![ToolConfig {
-                tool_type: "builtin".to_owned(),
-                name: "time_now".to_owned(),
-            }],
+            tools: vec![
+                ToolConfig {
+                    tool_type: "builtin".to_owned(),
+                    name: "time_now".to_owned(),
+                },
+                ToolConfig {
+                    tool_type: "builtin".to_owned(),
+                    name: "read_file".to_owned(),
+                },
+            ],
             skills: vec![SkillConfig {
                 skill_type: "builtin".to_owned(),
                 name: "summarize".to_owned(),
@@ -113,6 +120,7 @@ mod tests {
         let ctx = build_runtime_context(&cfg).expect("runtime context should build");
 
         assert!(ctx.tools.get("time_now").is_some());
+        assert!(ctx.tools.get("read_file").is_some());
         assert!(ctx.skills.get("summarize").is_some());
     }
 

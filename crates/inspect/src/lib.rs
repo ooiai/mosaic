@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolTrace {
+    pub call_id: Option<String>,
     pub name: String,
     pub input: serde_json::Value,
     pub output: Option<String>,
@@ -106,6 +107,14 @@ mod tests {
     fn saves_trace_to_a_custom_directory() {
         let dir = temp_dir("trace");
         let mut trace = RunTrace::new("hello".to_owned());
+        trace.tool_calls.push(ToolTrace {
+            call_id: Some("call-1".to_owned()),
+            name: "echo".to_owned(),
+            input: serde_json::json!({ "text": "hello" }),
+            output: Some("hello".to_owned()),
+            started_at: Utc::now(),
+            finished_at: Some(Utc::now()),
+        });
         trace.finish_ok("world".to_owned());
 
         let path = trace.save_to_dir(&dir).expect("trace should save");
@@ -114,6 +123,7 @@ mod tests {
 
         assert_eq!(loaded.input, "hello");
         assert_eq!(loaded.output.as_deref(), Some("world"));
+        assert_eq!(loaded.tool_calls[0].call_id.as_deref(), Some("call-1"));
 
         fs::remove_file(path).ok();
         fs::remove_dir_all(dir).ok();

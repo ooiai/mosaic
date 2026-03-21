@@ -1,0 +1,18 @@
+app:
+  name: read-file-agent
+
+provider:
+  type: mock
+  model: mock
+
+tools:
+  - type: builtin
+    name: read_file
+
+skills: []
+
+agent:
+  system: "You are a helpful assistant. Use tools when needed."
+
+task:
+  input: "Read a file for me."

@@ -89,12 +89,14 @@ impl AgentRuntime {
             messages.push(Message {
                 role: Role::System,
                 content: system,
+                tool_call_id: None,
             });
         }
 
         messages.push(Message {
             role: Role::User,
             content: req.input,
+            tool_call_id: None,
         });
 
         let tool_defs = self.collect_tool_definitions();
@@ -111,22 +113,27 @@ impl AgentRuntime {
 
             if !response.tool_calls.is_empty() {
                 for call in response.tool_calls {
+                    let call_id = call.id.clone();
+                    let tool_name = call.name.clone();
+                    let tool_input = call.arguments.clone();
+
                     trace.tool_calls.push(ToolTrace {
-                        name: call.name.clone(),
-                        input: call.arguments.clone(),
+                        call_id: Some(call_id.clone()),
+                        name: tool_name.clone(),
+                        input: tool_input,
                         output: None,
                         started_at: Utc::now(),
                         finished_at: None,
                     });
 
-                    let tool = match self.ctx.tools.get(&call.name) {
+                    let tool = match self.ctx.tools.get(&tool_name) {
                         Some(tool) => tool,
                         None => {
                             if let Some(last) = trace.tool_calls.last_mut() {
                                 last.finished_at = Some(Utc::now());
                             }
 
-                            let err = anyhow!("tool not found: {}", call.name);
+                            let err = anyhow!("tool not found: {}", tool_name);
                             trace.finish_err(err.to_string());
                             return Err(err);
                         }
@@ -142,6 +149,7 @@ impl AgentRuntime {
                             messages.push(Message {
                                 role: Role::Tool,
                                 content: result.content,
+                                tool_call_id: Some(call_id),
                             });
                         }
                         Err(err) => {
@@ -309,6 +317,10 @@ mod tests {
 
         assert!(result.output.starts_with("The current time is: "));
         assert_eq!(result.trace.tool_calls.len(), 1);
+        assert_eq!(
+            result.trace.tool_calls[0].call_id.as_deref(),
+            Some("call_mock_time_now")
+        );
         assert_eq!(result.trace.tool_calls[0].name, "time_now");
         assert!(result.trace.tool_calls[0].finished_at.is_some());
         assert!(result.trace.tool_calls[0].output.is_some());
