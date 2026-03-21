@@ -46,6 +46,10 @@ impl ToolRegistry {
     pub fn list(&self) -> Vec<String> {
         self.tools.keys().cloned().collect()
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = Arc<dyn Tool>> + '_ {
+        self.tools.values().cloned()
+    }
 }
 
 pub struct EchoTool {

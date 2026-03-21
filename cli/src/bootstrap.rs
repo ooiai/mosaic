@@ -1,14 +1,14 @@
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 use anyhow::{Result, bail};
 use mosaic_config::{AppConfig, SkillConfig, ToolConfig};
-use mosaic_provider::{LlmProvider, MockProvider};
+use mosaic_provider::{LlmProvider, MockProvider, OpenAiCompatibleProvider};
 use mosaic_runtime::RuntimeContext;
 use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{EchoTool, TimeNowTool, ToolRegistry};
 
 pub fn build_runtime_context(cfg: &AppConfig) -> Result<RuntimeContext> {
-    let provider = build_provider(&cfg.provider.provider_type)?;
+    let provider = build_provider(cfg)?;
     let tools = Arc::new(build_tools(&cfg.tools)?);
     let skills = Arc::new(build_skills(&cfg.skills)?);
 
@@ -19,10 +19,32 @@ pub fn build_runtime_context(cfg: &AppConfig) -> Result<RuntimeContext> {
     })
 }
 
-fn build_provider(provider_type: &str) -> Result<Arc<dyn LlmProvider>> {
-    match provider_type {
-        "mock" | "openai-compatible" => Ok(Arc::new(MockProvider)),
-        other => bail!("unsupported provider type in skeleton mode: {other}"),
+fn build_provider(cfg: &AppConfig) -> Result<Arc<dyn LlmProvider>> {
+    match cfg.provider.provider_type.as_str() {
+        "mock" => Ok(Arc::new(MockProvider)),
+        "openai-compatible" => {
+            let base_url = cfg
+                .provider
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_owned());
+
+            let key_env = cfg
+                .provider
+                .api_key_env
+                .clone()
+                .unwrap_or_else(|| "OPENAI_API_KEY".to_owned());
+
+            let api_key = env::var(&key_env)
+                .map_err(|_| anyhow::anyhow!("missing provider api key env: {}", key_env))?;
+
+            Ok(Arc::new(OpenAiCompatibleProvider::new(
+                base_url,
+                api_key,
+                cfg.provider.model.clone(),
+            )))
+        }
+        other => bail!("unsupported provider type: {other}"),
     }
 }
 
@@ -61,7 +83,7 @@ mod tests {
         AgentConfig, AppConfig, ProviderConfig, SkillConfig, TaskConfig, ToolConfig,
     };
 
-    use super::build_runtime_context;
+    use super::{build_provider, build_runtime_context};
 
     #[test]
     fn runtime_context_registers_time_now_tool() {
@@ -92,5 +114,32 @@ mod tests {
 
         assert!(ctx.tools.get("time_now").is_some());
         assert!(ctx.skills.get("summarize").is_some());
+    }
+
+    #[test]
+    fn openai_compatible_provider_requires_api_key_env() {
+        let cfg = AppConfig {
+            app: None,
+            provider: ProviderConfig {
+                provider_type: "openai-compatible".to_owned(),
+                base_url: None,
+                model: "gpt-4o-mini".to_owned(),
+                api_key_env: Some("MOSAIC_TEST_PROVIDER_KEY_SHOULD_NOT_EXIST_12345".to_owned()),
+            },
+            tools: vec![],
+            skills: vec![],
+            agent: AgentConfig { system: None },
+            task: TaskConfig {
+                input: "hello".to_owned(),
+            },
+            mcp: None,
+        };
+
+        let err = match build_provider(&cfg) {
+            Ok(_) => panic!("missing env should fail"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("missing provider api key env"));
     }
 }

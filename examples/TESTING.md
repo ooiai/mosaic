@@ -24,6 +24,12 @@
 
 说明：当前 `MockProvider` 还不会自动触发 tool call，这个示例主要用于验证 `time_now` 能力已可注册。
 
+`time-now-agent.yaml`
+
+运行：`cargo run -p mosaic-cli -- run examples/time-now-agent.yaml`
+
+预期：`MockProvider` 会先触发 `time_now`，runtime 执行工具后再返回最终答案；trace 里应有 1 条 `tool_calls`。
+
 `inspect trace`
 
 运行：`cargo run -p mosaic-cli -- inspect .mosaic/runs/<trace-id>.json`

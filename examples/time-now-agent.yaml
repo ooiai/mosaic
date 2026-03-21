@@ -1,0 +1,18 @@
+app:
+  name: time-now-agent
+
+provider:
+  type: mock
+  model: mock
+
+tools:
+  - type: builtin
+    name: time_now
+
+skills: []
+
+agent:
+  system: "You are a helpful assistant. Use tools when needed."
+
+task:
+  input: "What time is it now?"
