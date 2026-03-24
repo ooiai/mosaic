@@ -100,8 +100,53 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
     println!("tool_calls: {}", trace.tool_calls.len());
     println!("skill_calls: {}", trace.skill_calls.len());
 
+    if !trace.tool_calls.is_empty() {
+        println!("\n== tool calls ==");
+
+        for (idx, call) in trace.tool_calls.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  call_id: {:?}", call.call_id);
+            println!("  name: {}", call.name);
+            println!("  started_at: {}", call.started_at);
+            println!("  finished_at: {:?}", call.finished_at);
+            println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
+
+            match &call.output {
+                Some(output) => println!("  output: {}", truncate_for_cli(output, 240)),
+                None => println!("  output: <none>"),
+            }
+        }
+    }
+
+    if !trace.skill_calls.is_empty() {
+        println!("\n== skill calls ==");
+
+        for (idx, call) in trace.skill_calls.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  name: {}", call.name);
+            println!("  started_at: {}", call.started_at);
+            println!("  finished_at: {:?}", call.finished_at);
+            println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
+
+            match &call.output {
+                Some(output) => println!("  output: {}", truncate_for_cli(output, 240)),
+                None => println!("  output: <none>"),
+            }
+        }
+    }
+
     Ok(())
 }
+
+fn truncate_for_cli(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        return value.to_string();
+    }
+
+    let truncated: String = value.chars().take(limit).collect();
+    format!("{truncated}...")
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -157,6 +202,19 @@ mod tests {
             DispatchCommand::Inspect {
                 file: ".mosaic/runs/demo.json".into(),
             }
+        );
+    }
+
+    #[test]
+    fn truncate_for_cli_keeps_short_strings() {
+        assert_eq!(super::truncate_for_cli("hello", 10), "hello");
+    }
+
+    #[test]
+    fn truncate_for_cli_shortens_long_strings() {
+        assert_eq!(
+            super::truncate_for_cli("abcdefghijklmnopqrstuvwxyz", 5),
+            "abcde..."
         );
     }
 }

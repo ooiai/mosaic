@@ -15,4 +15,4 @@ agent:
   system: "You are a helpful assistant. Use tools when needed."
 
 task:
-  input: "Read a file for me."
+  input: "Read the file for me."

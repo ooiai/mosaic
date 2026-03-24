@@ -60,70 +60,78 @@ impl LlmProvider for MockProvider {
     ) -> Result<CompletionResponse> {
         let last = messages.last().ok_or_else(|| anyhow!("no messages"))?;
 
-        if matches!(last.role, Role::User)
-            && last.content.to_lowercase().contains("time")
-            && tools
-                .unwrap_or_default()
-                .iter()
-                .any(|tool| tool.name == "time_now")
-        {
-            return Ok(CompletionResponse {
-                message: None,
-                tool_calls: vec![ToolCall {
-                    id: "call_mock_time_now".to_owned(),
-                    name: "time_now".to_owned(),
-                    arguments: serde_json::json!({}),
-                }],
-                finish_reason: Some("tool_calls".to_owned()),
-            });
-        }
+        match last.role {
+            Role::User => {
+                let content = last.content.to_lowercase();
 
-        if matches!(last.role, Role::User)
-            && last.content.to_lowercase().contains("read")
-            && tools
-                .unwrap_or_default()
-                .iter()
-                .any(|tool| tool.name == "read_file")
-        {
-            return Ok(CompletionResponse {
-                message: None,
-                tool_calls: vec![ToolCall {
-                    id: "call_mock_read_file".to_owned(),
-                    name: "read_file".to_owned(),
-                    arguments: serde_json::json!({
-                        "path": "README.md"
+                if content.contains("time") && tool_is_available(tools, "time_now") {
+                    return Ok(CompletionResponse {
+                        message: None,
+                        tool_calls: vec![ToolCall {
+                            id: "call_mock_time_now".to_owned(),
+                            name: "time_now".to_owned(),
+                            arguments: serde_json::json!({}),
+                        }],
+                        finish_reason: Some("tool_calls".to_owned()),
+                    });
+                }
+
+                if (content.contains("read") || content.contains("file"))
+                    && tool_is_available(tools, "read_file")
+                {
+                    return Ok(CompletionResponse {
+                        message: None,
+                        tool_calls: vec![ToolCall {
+                            id: "call_mock_read_file".to_owned(),
+                            name: "read_file".to_owned(),
+                            arguments: serde_json::json!({
+                                "path": "README.md"
+                            }),
+                        }],
+                        finish_reason: Some("tool_calls".to_owned()),
+                    });
+                }
+
+                Ok(CompletionResponse {
+                    message: Some(Message {
+                        role: Role::Assistant,
+                        content: format!("mock response: {}", last.content),
+                        tool_call_id: None,
                     }),
-                }],
-                finish_reason: Some("tool_calls".to_owned()),
-            });
-        }
+                    tool_calls: vec![],
+                    finish_reason: Some("stop".to_owned()),
+                })
+            }
+            Role::Tool => {
+                let reply = match infer_tool_name_from_call_id(last.tool_call_id.as_deref()) {
+                    Some("time_now") => format!("The current time is: {}", last.content),
+                    Some("read_file") => {
+                        let preview = preview_text(&last.content, 220);
+                        format!("I read the file successfully. Preview:\n{}", preview)
+                    }
+                    _ => format!("Tool returned:\n{}", last.content),
+                };
 
-        if matches!(last.role, Role::Tool) {
-            let content = match last.tool_call_id.as_deref() {
-                Some("call_mock_time_now") => format!("The current time is: {}", last.content),
-                _ => format!("Tool returned:\n{}", last.content),
-            };
-
-            return Ok(CompletionResponse {
+                Ok(CompletionResponse {
+                    message: Some(Message {
+                        role: Role::Assistant,
+                        content: reply,
+                        tool_call_id: None,
+                    }),
+                    tool_calls: vec![],
+                    finish_reason: Some("stop".to_owned()),
+                })
+            }
+            _ => Ok(CompletionResponse {
                 message: Some(Message {
                     role: Role::Assistant,
-                    content,
+                    content: "mock response".to_owned(),
                     tool_call_id: None,
                 }),
                 tool_calls: vec![],
                 finish_reason: Some("stop".to_owned()),
-            });
-        }
-
-        Ok(CompletionResponse {
-            message: Some(Message {
-                role: Role::Assistant,
-                content: format!("mock response: {}", last.content),
-                tool_call_id: None,
             }),
-            tool_calls: vec![],
-            finish_reason: Some("stop".to_owned()),
-        })
+        }
     }
 }
 
@@ -260,6 +268,29 @@ fn role_to_api(role: &Role) -> &'static str {
     }
 }
 
+fn tool_is_available(tools: Option<&[ToolDefinition]>, name: &str) -> bool {
+    tools
+        .map(|defs| defs.iter().any(|tool| tool.name == name))
+        .unwrap_or(false)
+}
+
+fn infer_tool_name_from_call_id(call_id: Option<&str>) -> Option<&'static str> {
+    match call_id {
+        Some(id) if id.contains("time_now") => Some("time_now"),
+        Some(id) if id.contains("read_file") => Some("read_file"),
+        _ => None,
+    }
+}
+
+fn preview_text(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        return value.to_string();
+    }
+
+    let truncated: String = value.chars().take(limit).collect();
+    format!("{truncated}...")
+}
+
 #[derive(Debug, Deserialize)]
 struct ApiChatCompletionResponse {
     choices: Vec<ApiChoice>,
@@ -295,6 +326,26 @@ mod tests {
 
     use super::{LlmProvider, Message, MockProvider, Role, ToolDefinition};
 
+    fn time_tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            name: "time_now".to_owned(),
+            description: "Return the current UTC timestamp".to_owned(),
+            input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+        }
+    }
+
+    fn read_file_tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            name: "read_file".to_owned(),
+            description: "Read a UTF-8 text file from disk".to_owned(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"],
+            }),
+        }
+    }
+
     #[test]
     fn mock_provider_replies_to_the_last_message_when_no_tool_is_needed() {
         let response = block_on(MockProvider.complete(
@@ -324,11 +375,7 @@ mod tests {
 
     #[test]
     fn mock_provider_emits_time_now_tool_call_when_tool_is_available() {
-        let tools = vec![ToolDefinition {
-            name: "time_now".to_owned(),
-            description: "Return the current UTC timestamp".to_owned(),
-            input_schema: serde_json::json!({ "type": "object", "properties": {} }),
-        }];
+        let tools = vec![time_tool_definition()];
 
         let response = block_on(MockProvider.complete(
             &[Message {
@@ -348,15 +395,7 @@ mod tests {
 
     #[test]
     fn mock_provider_emits_read_file_tool_call_when_tool_is_available() {
-        let tools = vec![ToolDefinition {
-            name: "read_file".to_owned(),
-            description: "Read a UTF-8 text file from disk".to_owned(),
-            input_schema: serde_json::json!({
-                "type": "object",
-                "properties": { "path": { "type": "string" } },
-                "required": ["path"],
-            }),
-        }];
+        let tools = vec![read_file_tool_definition()];
 
         let response = block_on(MockProvider.complete(
             &[Message {
@@ -392,6 +431,46 @@ mod tests {
         assert_eq!(
             response.message.expect("message should exist").content,
             "The current time is: 2026-03-20T12:00:00Z"
+        );
+    }
+
+    #[test]
+    fn mock_provider_uses_file_preview_after_read_file_tool_output() {
+        let response = block_on(MockProvider.complete(
+            &[Message {
+                role: Role::Tool,
+                content: "abcdefghijklmnopqrstuvwxyz".repeat(12),
+                tool_call_id: Some("call_mock_read_file".to_owned()),
+            }],
+            Some(&[read_file_tool_definition()]),
+        ))
+        .expect("mock provider should succeed");
+
+        let message = response.message.expect("message should exist");
+        assert!(
+            message
+                .content
+                .starts_with("I read the file successfully. Preview:\n")
+        );
+        assert!(message.content.ends_with("..."));
+    }
+
+    #[test]
+    fn mock_provider_falls_back_when_requested_tool_is_unavailable() {
+        let response = block_on(MockProvider.complete(
+            &[Message {
+                role: Role::User,
+                content: "What time is it?".to_owned(),
+                tool_call_id: None,
+            }],
+            Some(&[read_file_tool_definition()]),
+        ))
+        .expect("mock provider should succeed");
+
+        assert!(response.tool_calls.is_empty());
+        assert_eq!(
+            response.message.expect("message should exist").content,
+            "mock response: What time is it?"
         );
     }
 }
