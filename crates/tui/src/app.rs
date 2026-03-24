@@ -1278,4 +1278,73 @@ mod tests {
         assert!(last.body.contains("call_id=call-123"));
         assert!(last.body.contains("permission denied"));
     }
+
+    #[test]
+    fn apply_tool_calling_appends_tool_activity_and_timeline() {
+        let mut app = App::new("/tmp/mosaic".into());
+
+        app.apply_run_event(RunEvent::ToolCalling {
+            name: "read_file".to_owned(),
+            call_id: "call_123".to_owned(),
+        });
+
+        let last_activity = app.activity.last().expect("activity entry should exist");
+        assert_eq!(last_activity.scope, "tool");
+        assert_eq!(last_activity.message, "Calling tool: read_file");
+
+        let last_timeline = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("timeline entry should exist");
+        assert!(last_timeline.title.contains("Tool call"));
+        assert!(last_timeline.title.contains("read_file"));
+        assert!(last_timeline.body.contains("call_123"));
+    }
+
+    #[test]
+    fn apply_run_finished_sets_runtime_status_to_idle() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.runtime_status = "running".to_owned();
+
+        app.apply_run_event(RunEvent::RunFinished {
+            output_preview: "done".to_owned(),
+        });
+
+        assert_eq!(app.runtime_status, "idle");
+
+        let last_activity = app.activity.last().expect("activity entry should exist");
+        assert_eq!(last_activity.scope, "runtime");
+        assert_eq!(last_activity.message, "Run finished");
+
+        let last_timeline = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("timeline entry should exist");
+        assert_eq!(last_timeline.title, "Run finished");
+        assert!(last_timeline.body.contains("done"));
+    }
+
+    #[test]
+    fn apply_run_failed_sets_runtime_status_to_error() {
+        let mut app = App::new("/tmp/mosaic".into());
+
+        app.apply_run_event(RunEvent::RunFailed {
+            error: "boom".to_owned(),
+        });
+
+        assert_eq!(app.runtime_status, "error");
+
+        let last_activity = app.activity.last().expect("activity entry should exist");
+        assert_eq!(last_activity.message, "Run failed");
+
+        let last_timeline = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("timeline entry should exist");
+        assert_eq!(last_timeline.title, "Run failed");
+        assert!(last_timeline.body.contains("boom"));
+    }
 }

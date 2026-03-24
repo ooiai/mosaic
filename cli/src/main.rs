@@ -62,7 +62,12 @@ impl Cli {
 async fn main() -> Result<()> {
     match Cli::parse().dispatch() {
         DispatchCommand::Tui { resume } => {
-            mosaic_tui::run(resume)?;
+            let sinks = bootstrap::build_cli_and_tui_sinks();
+            let event_buffer = sinks
+                .tui_buffer
+                .expect("cli+tui sink builder should provide a TUI buffer");
+
+            mosaic_tui::run_with_event_buffer(resume, event_buffer)?;
             Ok(())
         }
         DispatchCommand::Run { file, skill } => run_cmd(file, skill).await,
@@ -72,8 +77,8 @@ async fn main() -> Result<()> {
 
 async fn run_cmd(file: PathBuf, skill: Option<String>) -> Result<()> {
     let cfg = load_from_file(&file)?;
-    let event_sink = bootstrap::build_cli_event_sink();
-    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(&cfg, event_sink)?);
+    let sinks = bootstrap::build_cli_only_sinks();
+    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(&cfg, sinks.event_sink)?);
 
     let result = runtime
         .run(RunRequest {

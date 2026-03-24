@@ -3,11 +3,20 @@ use std::{env, sync::Arc};
 use anyhow::{Result, bail};
 use mosaic_config::{AppConfig, SkillConfig, ToolConfig};
 use mosaic_provider::{LlmProvider, MockProvider, OpenAiCompatibleProvider};
-use mosaic_runtime::{RuntimeContext, events::SharedRunEventSink};
+use mosaic_runtime::{
+    RuntimeContext,
+    events::{CompositeEventSink, SharedRunEventSink},
+};
 use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{EchoTool, ReadFileTool, TimeNowTool, ToolRegistry};
+use mosaic_tui::{TuiEventBuffer, build_tui_event_buffer, build_tui_event_sink};
 
 use crate::output::CliEventSink;
+
+pub struct OutputSinks {
+    pub event_sink: SharedRunEventSink,
+    pub tui_buffer: Option<TuiEventBuffer>,
+}
 
 pub fn build_runtime_context(
     cfg: &AppConfig,
@@ -25,8 +34,29 @@ pub fn build_runtime_context(
     })
 }
 
-pub fn build_cli_event_sink() -> SharedRunEventSink {
-    Arc::new(CliEventSink)
+pub fn build_cli_only_sinks() -> OutputSinks {
+    OutputSinks {
+        event_sink: Arc::new(CliEventSink),
+        tui_buffer: None,
+    }
+}
+
+pub fn build_cli_and_tui_sinks() -> OutputSinks {
+    let buffer = build_tui_event_buffer();
+
+    let cli_sink: SharedRunEventSink = Arc::new(CliEventSink);
+    let tui_sink = build_tui_event_sink(buffer.clone());
+
+    let composite: SharedRunEventSink = Arc::new(
+        CompositeEventSink::new()
+            .with_sink(cli_sink)
+            .with_sink(tui_sink),
+    );
+
+    OutputSinks {
+        event_sink: composite,
+        tui_buffer: Some(buffer),
+    }
 }
 
 fn build_provider(cfg: &AppConfig) -> Result<Arc<dyn LlmProvider>> {
@@ -95,9 +125,9 @@ mod tests {
     use mosaic_config::{
         AgentConfig, AppConfig, ProviderConfig, SkillConfig, TaskConfig, ToolConfig,
     };
-    use mosaic_runtime::events::NoopEventSink;
+    use mosaic_runtime::events::{NoopEventSink, RunEvent};
 
-    use super::{build_provider, build_runtime_context};
+    use super::{build_cli_and_tui_sinks, build_provider, build_runtime_context};
 
     #[test]
     fn runtime_context_registers_builtin_tools_and_skills() {
@@ -163,5 +193,22 @@ mod tests {
         };
 
         assert!(err.to_string().contains("missing provider api key env"));
+    }
+
+    #[test]
+    fn cli_and_tui_sinks_expose_a_tui_buffer_and_broadcast_events() {
+        let sinks = build_cli_and_tui_sinks();
+        let buffer = sinks.tui_buffer.expect("tui buffer should be present");
+
+        sinks.event_sink.emit(RunEvent::RunStarted {
+            input: "hello".to_owned(),
+        });
+
+        assert_eq!(
+            buffer.drain(),
+            vec![RunEvent::RunStarted {
+                input: "hello".to_owned(),
+            }]
+        );
     }
 }

@@ -2,9 +2,9 @@
 //! This crate owns terminal rendering, keyboard interaction, local operator
 //! view-state, and the first event loop boundary for the control-plane console.
 
-mod app;
-mod mock;
-mod ui;
+pub mod app;
+pub mod mock;
+pub mod ui;
 
 use std::sync::{Arc, Mutex};
 use std::{io, time::Duration};
@@ -56,9 +56,24 @@ impl RunEventSink for TuiEventSink {
     }
 }
 
+pub fn build_tui_event_buffer() -> TuiEventBuffer {
+    TuiEventBuffer::default()
+}
+
+pub fn build_tui_event_sink(buffer: TuiEventBuffer) -> Arc<dyn RunEventSink> {
+    Arc::new(TuiEventSink::new(buffer))
+}
+
 pub fn run(start_in_resume: bool) -> io::Result<()> {
+    let buffer = build_tui_event_buffer();
+    run_with_event_buffer(start_in_resume, buffer)
+}
+
+pub fn run_with_event_buffer(
+    start_in_resume: bool,
+    event_buffer: TuiEventBuffer,
+) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let event_buffer = TuiEventBuffer::default();
     let result = run_app(&mut terminal, start_in_resume, event_buffer);
     restore_terminal(&mut terminal)?;
     result
