@@ -7,6 +7,7 @@ use mosaic_inspect::RunTrace;
 use mosaic_runtime::{AgentRuntime, RunRequest};
 
 mod bootstrap;
+mod output;
 
 #[derive(Debug, Parser)]
 #[command(name = "mosaic")]
@@ -71,14 +72,14 @@ async fn main() -> Result<()> {
 
 async fn run_cmd(file: PathBuf, skill: Option<String>) -> Result<()> {
     let cfg = load_from_file(&file)?;
-    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(&cfg)?);
+    let event_sink = bootstrap::build_cli_event_sink();
+    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(&cfg, event_sink)?);
 
     let result = runtime
         .run(RunRequest {
             system: cfg.agent.system,
             input: cfg.task.input,
             skill,
-            verbose_events: true,
         })
         .await?;
 

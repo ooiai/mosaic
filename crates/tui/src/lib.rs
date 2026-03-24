@@ -6,6 +6,7 @@ mod app;
 mod mock;
 mod ui;
 
+use std::sync::{Arc, Mutex};
 use std::{io, time::Duration};
 
 use crossterm::{
@@ -13,13 +14,52 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use mosaic_runtime::events::{RunEvent, RunEventSink};
 use ratatui::{Terminal, backend::CrosstermBackend};
 
 use self::app::{App, AppAction};
 
+#[derive(Clone, Default)]
+pub struct TuiEventBuffer {
+    inner: Arc<Mutex<Vec<RunEvent>>>,
+}
+
+impl TuiEventBuffer {
+    pub fn push(&self, event: RunEvent) {
+        if let Ok(mut events) = self.inner.lock() {
+            events.push(event);
+        }
+    }
+
+    pub fn drain(&self) -> Vec<RunEvent> {
+        if let Ok(mut events) = self.inner.lock() {
+            return events.drain(..).collect();
+        }
+
+        Vec::new()
+    }
+}
+
+pub struct TuiEventSink {
+    buffer: TuiEventBuffer,
+}
+
+impl TuiEventSink {
+    pub fn new(buffer: TuiEventBuffer) -> Self {
+        Self { buffer }
+    }
+}
+
+impl RunEventSink for TuiEventSink {
+    fn emit(&self, event: RunEvent) {
+        self.buffer.push(event);
+    }
+}
+
 pub fn run(start_in_resume: bool) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, start_in_resume);
+    let event_buffer = TuiEventBuffer::default();
+    let result = run_app(&mut terminal, start_in_resume, event_buffer);
     restore_terminal(&mut terminal)?;
     result
 }
@@ -35,11 +75,16 @@ fn build_app(workspace_path: std::path::PathBuf, start_in_resume: bool) -> App {
 fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     start_in_resume: bool,
+    event_buffer: TuiEventBuffer,
 ) -> io::Result<()> {
     let workspace_path = std::env::current_dir()?;
     let mut app = build_app(workspace_path, start_in_resume);
 
     loop {
+        for event in event_buffer.drain() {
+            app.apply_run_event(event);
+        }
+
         terminal.draw(|frame| ui::render(frame, &app))?;
 
         if event::poll(Duration::from_millis(200))? {
@@ -62,15 +107,35 @@ fn run_app(
 
 #[cfg(test)]
 mod tests {
+    use mosaic_runtime::events::{RunEvent, RunEventSink};
+
     use crate::app::Surface;
 
-    use super::build_app;
+    use super::{TuiEventBuffer, TuiEventSink, build_app};
 
     #[test]
     fn build_app_uses_explicit_resume_flag() {
         let app = build_app("/tmp/mosaic".into(), true);
 
         assert!(matches!(app.surface, Surface::Resume));
+    }
+
+    #[test]
+    fn tui_event_sink_buffers_and_drains_events() {
+        let buffer = TuiEventBuffer::default();
+        let sink = TuiEventSink::new(buffer.clone());
+
+        sink.emit(RunEvent::RunStarted {
+            input: "hello".to_owned(),
+        });
+
+        assert_eq!(
+            buffer.drain(),
+            vec![RunEvent::RunStarted {
+                input: "hello".to_owned(),
+            }]
+        );
+        assert!(buffer.drain().is_empty());
     }
 }
 

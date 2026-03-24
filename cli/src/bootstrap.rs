@@ -3,11 +3,16 @@ use std::{env, sync::Arc};
 use anyhow::{Result, bail};
 use mosaic_config::{AppConfig, SkillConfig, ToolConfig};
 use mosaic_provider::{LlmProvider, MockProvider, OpenAiCompatibleProvider};
-use mosaic_runtime::RuntimeContext;
+use mosaic_runtime::{RuntimeContext, events::SharedRunEventSink};
 use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{EchoTool, ReadFileTool, TimeNowTool, ToolRegistry};
 
-pub fn build_runtime_context(cfg: &AppConfig) -> Result<RuntimeContext> {
+use crate::output::CliEventSink;
+
+pub fn build_runtime_context(
+    cfg: &AppConfig,
+    event_sink: SharedRunEventSink,
+) -> Result<RuntimeContext> {
     let provider = build_provider(cfg)?;
     let tools = Arc::new(build_tools(&cfg.tools)?);
     let skills = Arc::new(build_skills(&cfg.skills)?);
@@ -16,7 +21,12 @@ pub fn build_runtime_context(cfg: &AppConfig) -> Result<RuntimeContext> {
         provider,
         tools,
         skills,
+        event_sink,
     })
+}
+
+pub fn build_cli_event_sink() -> SharedRunEventSink {
+    Arc::new(CliEventSink)
 }
 
 fn build_provider(cfg: &AppConfig) -> Result<Arc<dyn LlmProvider>> {
@@ -80,9 +90,12 @@ fn build_skills(configs: &[SkillConfig]) -> Result<SkillRegistry> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use mosaic_config::{
         AgentConfig, AppConfig, ProviderConfig, SkillConfig, TaskConfig, ToolConfig,
     };
+    use mosaic_runtime::events::NoopEventSink;
 
     use super::{build_provider, build_runtime_context};
 
@@ -117,7 +130,8 @@ mod tests {
             mcp: None,
         };
 
-        let ctx = build_runtime_context(&cfg).expect("runtime context should build");
+        let ctx = build_runtime_context(&cfg, Arc::new(NoopEventSink))
+            .expect("runtime context should build");
 
         assert!(ctx.tools.get("time_now").is_some());
         assert!(ctx.tools.get("read_file").is_some());

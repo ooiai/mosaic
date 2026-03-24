@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+chrono.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
-
+mosaic-runtime = { path = "../runtime" }

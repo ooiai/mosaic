@@ -1038,6 +1038,7 @@ dependencies = [
  "mosaic-provider",
  "mosaic-skill-core",
  "mosaic-tool-core",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -1070,7 +1071,9 @@ dependencies = [
 name = "mosaic-tui"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "crossterm 0.29.0",
+ "mosaic-runtime",
  "ratatui",
 ]
 

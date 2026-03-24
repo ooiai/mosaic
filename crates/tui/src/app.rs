@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use mosaic_runtime::events::RunEvent;
 
 use crate::mock;
 
@@ -312,6 +313,139 @@ impl App {
         self.heartbeat = self.heartbeat.wrapping_add(1);
     }
 
+    pub fn apply_run_event(&mut self, event: RunEvent) {
+        match event {
+            RunEvent::RunStarted { input } => {
+                self.runtime_status = "running".to_owned();
+                self.push_activity("runtime", "Run started");
+                self.push_timeline(
+                    TimelineKind::System,
+                    "runtime",
+                    "Run started",
+                    &format!("Input: {}", truncate_for_timeline(&input, 180)),
+                );
+            }
+            RunEvent::SkillStarted { name } => {
+                self.push_activity("skill", &format!("Executing skill: {}", name));
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "skill",
+                    "Skill started",
+                    &format!("Skill: {}", name),
+                );
+            }
+            RunEvent::SkillFinished { name } => {
+                self.push_activity("skill", &format!("Skill finished: {}", name));
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "skill",
+                    "Skill finished",
+                    &format!("Skill: {}", name),
+                );
+            }
+            RunEvent::SkillFailed { name, error } => {
+                self.runtime_status = "error".to_owned();
+                self.push_activity("skill", &format!("Skill failed: {}", name));
+                self.push_timeline(
+                    TimelineKind::System,
+                    "skill",
+                    "Skill failed",
+                    &format!(
+                        "Skill: {}\nError: {}",
+                        name,
+                        truncate_for_timeline(&error, 180)
+                    ),
+                );
+            }
+            RunEvent::ProviderRequest {
+                tool_count,
+                message_count,
+            } => {
+                self.push_activity(
+                    "provider",
+                    &format!(
+                        "Completion request dispatched (tools={}, messages={})",
+                        tool_count, message_count
+                    ),
+                );
+                self.push_timeline(
+                    TimelineKind::System,
+                    "provider",
+                    "Provider request",
+                    &format!("tools={}, messages={}", tool_count, message_count),
+                );
+            }
+            RunEvent::ToolCalling { name, call_id } => {
+                self.push_activity("tool", &format!("Calling tool: {}", name));
+                self.push_timeline(
+                    TimelineKind::Tool,
+                    "tool",
+                    &format!("Tool call: {}", name),
+                    &format!("call_id={}", call_id),
+                );
+            }
+            RunEvent::ToolFinished { name, call_id } => {
+                self.push_activity("tool", &format!("Tool finished: {}", name));
+                self.push_timeline(
+                    TimelineKind::Tool,
+                    "tool",
+                    &format!("Tool finished: {}", name),
+                    &format!("call_id={}", call_id),
+                );
+            }
+            RunEvent::ToolFailed {
+                name,
+                call_id,
+                error,
+            } => {
+                self.runtime_status = "error".to_owned();
+                self.push_activity("tool", &format!("Tool failed: {}", name));
+                self.push_timeline(
+                    TimelineKind::System,
+                    "tool",
+                    &format!("Tool failed: {}", name),
+                    &format!(
+                        "call_id={}\nerror={}",
+                        call_id,
+                        truncate_for_timeline(&error, 180)
+                    ),
+                );
+            }
+            RunEvent::FinalAnswerReady => {
+                self.push_activity("runtime", "Final answer ready");
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "runtime",
+                    "Final answer ready",
+                    "Assistant output is ready to present.",
+                );
+            }
+            RunEvent::RunFinished { output_preview } => {
+                self.runtime_status = "idle".to_owned();
+                self.push_activity("runtime", "Run finished");
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "runtime",
+                    "Run finished",
+                    &format!(
+                        "Output preview: {}",
+                        truncate_for_timeline(&output_preview, 180)
+                    ),
+                );
+            }
+            RunEvent::RunFailed { error } => {
+                self.runtime_status = "error".to_owned();
+                self.push_activity("runtime", "Run failed");
+                self.push_timeline(
+                    TimelineKind::System,
+                    "runtime",
+                    "Run failed",
+                    &truncate_for_timeline(&error, 180),
+                );
+            }
+        }
+    }
+
     pub fn pulse_frame(&self) -> usize {
         self.heartbeat % 4
     }
@@ -536,13 +670,12 @@ impl App {
     fn queue_operator_instruction(&mut self, message: &str) {
         let session_label = self.session_label().to_owned();
 
-        self.active_session_mut().timeline.push(TimelineEntry {
-            timestamp: "now".to_owned(),
-            kind: TimelineKind::Operator,
-            actor: "operator".to_owned(),
-            title: "Queued operator instruction".to_owned(),
-            body: message.to_owned(),
-        });
+        self.push_timeline(
+            TimelineKind::Operator,
+            "operator",
+            "Queued operator instruction",
+            message,
+        );
 
         self.push_activity(
             "composer",
@@ -838,22 +971,60 @@ impl App {
     }
 
     fn push_system_entry(&mut self, title: impl Into<String>, body: impl Into<String>) {
-        self.active_session_mut().timeline.push(TimelineEntry {
-            timestamp: "now".to_owned(),
-            kind: TimelineKind::System,
-            actor: "control-plane".to_owned(),
-            title: title.into(),
-            body: body.into(),
-        });
+        self.push_timeline(
+            TimelineKind::System,
+            "control-plane",
+            &title.into(),
+            &body.into(),
+        );
     }
 
     fn push_activity(&mut self, scope: impl Into<String>, message: impl Into<String>) {
         self.activity.push(ActivityEntry {
-            timestamp: "now".to_owned(),
+            timestamp: current_hhmm(),
             scope: scope.into(),
             message: message.into(),
         });
+
+        if self.activity.len() > 200 {
+            let overflow = self.activity.len() - 200;
+            self.activity.drain(0..overflow);
+        }
     }
+
+    fn push_timeline(&mut self, kind: TimelineKind, actor: &str, title: &str, body: &str) {
+        if let Some(session) = self.sessions.get_mut(self.selected_session) {
+            session.timeline.push(TimelineEntry {
+                timestamp: current_hhmm(),
+                kind,
+                actor: actor.to_owned(),
+                title: title.to_owned(),
+                body: body.to_owned(),
+            });
+
+            if session.timeline.len() > 400 {
+                let overflow = session.timeline.len() - 400;
+                session.timeline.drain(0..overflow);
+            }
+        }
+
+        self.show_console_history = true;
+    }
+}
+
+fn current_hhmm() -> String {
+    use chrono::Local;
+
+    Local::now().format("%H:%M").to_string()
+}
+
+fn truncate_for_timeline(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        return value.to_owned();
+    }
+
+    let truncated: String = value.chars().take(limit).collect();
+    format!("{truncated}...")
 }
 
 pub fn matching_commands(query: &str) -> Vec<(&'static str, &'static str)> {
@@ -877,6 +1048,7 @@ pub fn matching_commands(query: &str) -> Vec<(&'static str, &'static str)> {
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use mosaic_runtime::events::RunEvent;
 
     use super::{App, AppAction, Focus, ResumeScope, SessionState, Surface, TimelineKind};
 
@@ -1049,5 +1221,61 @@ mod tests {
 
         assert_eq!(app.surface, Surface::Console);
         assert_eq!(app.focus, Focus::Composer);
+    }
+
+    #[test]
+    fn apply_run_event_updates_activity_timeline_and_runtime_status() {
+        let mut app = App::new("/tmp/mosaic".into());
+        let initial_activity_len = app.activity.len();
+        let initial_timeline_len = app.active_session().timeline.len();
+
+        app.apply_run_event(RunEvent::RunStarted {
+            input: "Explain what happened in the control plane".to_owned(),
+        });
+
+        assert_eq!(app.runtime_status, "running");
+        assert!(app.show_console_history);
+        assert_eq!(app.activity.len(), initial_activity_len + 1);
+        assert_eq!(
+            app.active_session().timeline.len(),
+            initial_timeline_len + 1
+        );
+        assert_eq!(
+            app.activity.last().map(|entry| entry.scope.as_str()),
+            Some("runtime")
+        );
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Run started")
+        );
+    }
+
+    #[test]
+    fn apply_run_event_marks_failures_in_activity_and_timeline() {
+        let mut app = App::new("/tmp/mosaic".into());
+
+        app.apply_run_event(RunEvent::ToolFailed {
+            name: "read_file".to_owned(),
+            call_id: "call-123".to_owned(),
+            error: "permission denied".to_owned(),
+        });
+
+        assert_eq!(app.runtime_status, "error");
+        assert_eq!(
+            app.activity.last().map(|entry| entry.message.as_str()),
+            Some("Tool failed: read_file")
+        );
+        let last = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("timeline entry should exist");
+        assert_eq!(last.kind, TimelineKind::System);
+        assert_eq!(last.title, "Tool failed: read_file");
+        assert!(last.body.contains("call_id=call-123"));
+        assert!(last.body.contains("permission denied"));
     }
 }

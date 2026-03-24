@@ -1,5 +1,8 @@
+pub mod events;
+
 use std::sync::Arc;
 
+use crate::events::{RunEvent, SharedRunEventSink};
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use mosaic_inspect::{RunTrace, SkillTrace, ToolTrace};
@@ -11,13 +14,13 @@ pub struct RuntimeContext {
     pub provider: Arc<dyn LlmProvider>,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
+    pub event_sink: SharedRunEventSink,
 }
 
 pub struct RunRequest {
     pub system: Option<String>,
     pub input: String,
     pub skill: Option<String>,
-    pub verbose_events: bool,
 }
 
 #[derive(Debug)]
@@ -35,17 +38,25 @@ impl AgentRuntime {
         Self { ctx }
     }
 
-    fn emit(verbose: bool, message: impl AsRef<str>) {
-        if verbose {
-            println!("{}", message.as_ref());
+    fn emit(&self, event: RunEvent) {
+        self.ctx.event_sink.emit(event);
+    }
+
+    fn truncate_preview(value: &str, limit: usize) -> String {
+        if value.chars().count() <= limit {
+            return value.to_string();
         }
+
+        let truncated: String = value.chars().take(limit).collect();
+        format!("{truncated}...")
     }
 
     pub async fn run(&self, req: RunRequest) -> Result<RunResult> {
-        let verbose = req.verbose_events;
         let mut trace = RunTrace::new(req.input.clone());
 
-        Self::emit(verbose, "[run] starting");
+        self.emit(RunEvent::RunStarted {
+            input: trace.input.clone(),
+        });
 
         if let Some(skill_name) = req.skill.clone() {
             let skill = self
@@ -54,7 +65,9 @@ impl AgentRuntime {
                 .get(&skill_name)
                 .ok_or_else(|| anyhow!("skill not found: {}", skill_name))?;
 
-            Self::emit(verbose, format!("[run] executing skill: {}", skill_name));
+            self.emit(RunEvent::SkillStarted {
+                name: skill_name.clone(),
+            });
 
             let skill_input = serde_json::json!({ "text": req.input });
 
@@ -77,8 +90,13 @@ impl AgentRuntime {
                         last.finished_at = Some(Utc::now());
                     }
 
-                    Self::emit(verbose, "[run] skill finished");
-                    Self::emit(verbose, "[run] final answer ready");
+                    self.emit(RunEvent::SkillFinished {
+                        name: skill_name.clone(),
+                    });
+                    self.emit(RunEvent::FinalAnswerReady);
+                    self.emit(RunEvent::RunFinished {
+                        output_preview: Self::truncate_preview(&out.content, 120),
+                    });
 
                     trace.finish_ok(out.content.clone());
 
@@ -92,7 +110,13 @@ impl AgentRuntime {
                         last.finished_at = Some(Utc::now());
                     }
 
-                    Self::emit(verbose, format!("[run] skill failed: {}", err));
+                    self.emit(RunEvent::SkillFailed {
+                        name: skill_name.clone(),
+                        error: err.to_string(),
+                    });
+                    self.emit(RunEvent::RunFailed {
+                        error: err.to_string(),
+                    });
 
                     trace.finish_err(err.to_string());
                     return Err(err);
@@ -120,15 +144,17 @@ impl AgentRuntime {
         let provider_tools = (!tool_defs.is_empty()).then_some(tool_defs.as_slice());
 
         for _ in 0..8 {
-            Self::emit(
-                verbose,
-                format!("[run] provider=request tools={}", tool_defs.len()),
-            );
+            self.emit(RunEvent::ProviderRequest {
+                tool_count: tool_defs.len(),
+                message_count: messages.len(),
+            });
 
             let response = match self.ctx.provider.complete(&messages, provider_tools).await {
                 Ok(response) => response,
                 Err(err) => {
-                    Self::emit(verbose, format!("[run] failed: {}", err));
+                    self.emit(RunEvent::RunFailed {
+                        error: err.to_string(),
+                    });
                     trace.finish_err(err.to_string());
                     return Err(err);
                 }
@@ -140,10 +166,10 @@ impl AgentRuntime {
                     let tool_name = call.name.clone();
                     let tool_input = call.arguments.clone();
 
-                    Self::emit(
-                        verbose,
-                        format!("[run] calling tool: {} (call_id={})", tool_name, call_id),
-                    );
+                    self.emit(RunEvent::ToolCalling {
+                        name: tool_name.clone(),
+                        call_id: call_id.clone(),
+                    });
 
                     trace.tool_calls.push(ToolTrace {
                         call_id: Some(call_id.clone()),
@@ -166,10 +192,14 @@ impl AgentRuntime {
                             }
 
                             let err = anyhow!("tool not found: {}", tool_name);
-                            Self::emit(
-                                verbose,
-                                format!("[run] tool failed: {} error={}", tool_name, err),
-                            );
+                            self.emit(RunEvent::ToolFailed {
+                                name: tool_name.clone(),
+                                call_id: call_id.clone(),
+                                error: err.to_string(),
+                            });
+                            self.emit(RunEvent::RunFailed {
+                                error: err.to_string(),
+                            });
                             trace.finish_err(err.to_string());
                             return Err(err);
                         }
@@ -182,7 +212,10 @@ impl AgentRuntime {
                                 last.finished_at = Some(Utc::now());
                             }
 
-                            Self::emit(verbose, format!("[run] tool finished: {}", tool_name));
+                            self.emit(RunEvent::ToolFinished {
+                                name: tool_name.clone(),
+                                call_id: call_id.clone(),
+                            });
 
                             messages.push(Message {
                                 role: Role::Tool,
@@ -196,10 +229,14 @@ impl AgentRuntime {
                                 last.finished_at = Some(Utc::now());
                             }
 
-                            Self::emit(
-                                verbose,
-                                format!("[run] tool failed: {} error={}", tool_name, err),
-                            );
+                            self.emit(RunEvent::ToolFailed {
+                                name: tool_name.clone(),
+                                call_id: call_id.clone(),
+                                error: err.to_string(),
+                            });
+                            self.emit(RunEvent::RunFailed {
+                                error: err.to_string(),
+                            });
 
                             trace.finish_err(err.to_string());
                             return Err(err);
@@ -211,7 +248,10 @@ impl AgentRuntime {
             }
 
             if let Some(message) = response.message {
-                Self::emit(verbose, "[run] final answer ready");
+                self.emit(RunEvent::FinalAnswerReady);
+                self.emit(RunEvent::RunFinished {
+                    output_preview: Self::truncate_preview(&message.content, 120),
+                });
                 trace.finish_ok(message.content.clone());
 
                 return Ok(RunResult {
@@ -224,7 +264,9 @@ impl AgentRuntime {
         }
 
         let err = anyhow!("runtime stopped without final assistant message");
-        Self::emit(verbose, format!("[run] failed: {}", err));
+        self.emit(RunEvent::RunFailed {
+            error: err.to_string(),
+        });
         trace.finish_err(err.to_string());
         Err(err)
     }
@@ -247,8 +289,9 @@ impl AgentRuntime {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
+    use crate::events::{NoopEventSink, RunEvent, RunEventSink};
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use mosaic_provider::{CompletionResponse, LlmProvider, Message, MockProvider, ToolDefinition};
@@ -256,6 +299,29 @@ mod tests {
     use mosaic_tool_core::{TimeNowTool, ToolRegistry};
 
     use super::{AgentRuntime, RunRequest, RuntimeContext};
+
+    #[derive(Default)]
+    struct RecordingEventSink {
+        events: Mutex<Vec<RunEvent>>,
+    }
+
+    impl RecordingEventSink {
+        fn snapshot(&self) -> Vec<RunEvent> {
+            self.events
+                .lock()
+                .expect("event lock should not be poisoned")
+                .clone()
+        }
+    }
+
+    impl RunEventSink for RecordingEventSink {
+        fn emit(&self, event: RunEvent) {
+            self.events
+                .lock()
+                .expect("event lock should not be poisoned")
+                .push(event);
+        }
+    }
 
     struct EmptyProvider;
 
@@ -292,25 +358,52 @@ mod tests {
             provider,
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(SkillRegistry::new()),
+            event_sink: Arc::new(NoopEventSink),
         })
     }
 
     #[tokio::test]
     async fn provider_only_run_returns_mock_output() {
-        let runtime = runtime_with_provider(Arc::new(MockProvider));
+        let sink = Arc::new(RecordingEventSink::default());
+        let runtime = AgentRuntime::new(RuntimeContext {
+            provider: Arc::new(MockProvider),
+            tools: Arc::new(ToolRegistry::new()),
+            skills: Arc::new(SkillRegistry::new()),
+            event_sink: sink.clone(),
+        });
 
         let result = runtime
             .run(RunRequest {
                 system: Some("You are helpful.".to_owned()),
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
-                verbose_events: false,
             })
             .await
             .expect("runtime should succeed");
 
         assert_eq!(result.output, "mock response: Explain Mosaic.");
         assert!(result.trace.error.is_none());
+
+        let events = sink.snapshot();
+
+        assert!(matches!(events.first(), Some(RunEvent::RunStarted { .. })));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RunEvent::ProviderRequest {
+                tool_count: 0,
+                message_count: 2,
+            }
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RunEvent::FinalAnswerReady))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RunEvent::RunFinished { .. }))
+        );
     }
 
     #[tokio::test]
@@ -322,6 +415,7 @@ mod tests {
             provider: Arc::new(MockProvider),
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(skills),
+            event_sink: Arc::new(NoopEventSink),
         });
 
         let result = runtime
@@ -329,7 +423,6 @@ mod tests {
                 system: None,
                 input: "Rust async enables concurrency.".to_owned(),
                 skill: Some("summarize".to_owned()),
-                verbose_events: false,
             })
             .await
             .expect("skill run should succeed");
@@ -345,6 +438,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_loop_executes_time_now_and_records_tool_trace() {
+        let sink = Arc::new(RecordingEventSink::default());
         let mut tools = ToolRegistry::new();
         tools.register(Arc::new(TimeNowTool::new()));
 
@@ -352,6 +446,7 @@ mod tests {
             provider: Arc::new(MockProvider),
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
+            event_sink: sink.clone(),
         });
 
         let result = runtime
@@ -359,7 +454,6 @@ mod tests {
                 system: Some("Use tools when needed.".to_owned()),
                 input: "What time is it now?".to_owned(),
                 skill: None,
-                verbose_events: false,
             })
             .await
             .expect("tool loop should succeed");
@@ -373,6 +467,24 @@ mod tests {
         assert_eq!(result.trace.tool_calls[0].name, "time_now");
         assert!(result.trace.tool_calls[0].finished_at.is_some());
         assert!(result.trace.tool_calls[0].output.is_some());
+
+        let events = sink.snapshot();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RunEvent::ToolCalling { name, call_id }
+                if name == "time_now" && call_id == "call_mock_time_now"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            RunEvent::ToolFinished { name, call_id }
+                if name == "time_now" && call_id == "call_mock_time_now"
+        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, RunEvent::RunFinished { .. }))
+        );
     }
 
     #[tokio::test]
@@ -384,7 +496,6 @@ mod tests {
                 system: None,
                 input: "Rust async enables concurrency.".to_owned(),
                 skill: Some("missing".to_owned()),
-                verbose_events: false,
             })
             .await
             .expect_err("missing skill should fail");
@@ -401,7 +512,6 @@ mod tests {
                 system: None,
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
-                verbose_events: false,
             })
             .await
             .expect_err("empty provider response should fail");
@@ -421,7 +531,6 @@ mod tests {
                 system: None,
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
-                verbose_events: false,
             })
             .await
             .expect_err("provider error should fail");
