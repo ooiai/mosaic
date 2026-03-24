@@ -3,7 +3,7 @@ pub mod events;
 use std::sync::Arc;
 
 use crate::events::{RunEvent, SharedRunEventSink};
-use anyhow::{Result, anyhow};
+use anyhow::anyhow;
 use chrono::Utc;
 use mosaic_inspect::{RunTrace, SkillTrace, ToolTrace};
 use mosaic_provider::{LlmProvider, Message, Role, ToolDefinition};
@@ -29,6 +29,34 @@ pub struct RunResult {
     pub trace: RunTrace,
 }
 
+#[derive(Debug)]
+pub struct RunError {
+    source: anyhow::Error,
+    trace: RunTrace,
+}
+
+impl RunError {
+    fn new(source: anyhow::Error, trace: RunTrace) -> Self {
+        Self { source, trace }
+    }
+
+    pub fn trace(&self) -> &RunTrace {
+        &self.trace
+    }
+
+    pub fn into_parts(self) -> (anyhow::Error, RunTrace) {
+        (self.source, self.trace)
+    }
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.source)
+    }
+}
+
+impl std::error::Error for RunError {}
+
 pub struct AgentRuntime {
     ctx: RuntimeContext,
 }
@@ -51,7 +79,22 @@ impl AgentRuntime {
         format!("{truncated}...")
     }
 
-    pub async fn run(&self, req: RunRequest) -> Result<RunResult> {
+    fn fail_run<T>(
+        &self,
+        mut trace: RunTrace,
+        error: anyhow::Error,
+    ) -> std::result::Result<T, RunError> {
+        let message = error.to_string();
+
+        self.emit(RunEvent::RunFailed {
+            error: message.clone(),
+        });
+        trace.finish_err(message);
+
+        Err(RunError::new(error, trace))
+    }
+
+    pub async fn run(&self, req: RunRequest) -> std::result::Result<RunResult, RunError> {
         let mut trace = RunTrace::new(req.input.clone());
 
         self.emit(RunEvent::RunStarted {
@@ -59,11 +102,10 @@ impl AgentRuntime {
         });
 
         if let Some(skill_name) = req.skill.clone() {
-            let skill = self
-                .ctx
-                .skills
-                .get(&skill_name)
-                .ok_or_else(|| anyhow!("skill not found: {}", skill_name))?;
+            let skill = match self.ctx.skills.get(&skill_name) {
+                Some(skill) => skill,
+                None => return self.fail_run(trace, anyhow!("skill not found: {}", skill_name)),
+            };
 
             self.emit(RunEvent::SkillStarted {
                 name: skill_name.clone(),
@@ -114,12 +156,7 @@ impl AgentRuntime {
                         name: skill_name.clone(),
                         error: err.to_string(),
                     });
-                    self.emit(RunEvent::RunFailed {
-                        error: err.to_string(),
-                    });
-
-                    trace.finish_err(err.to_string());
-                    return Err(err);
+                    return self.fail_run(trace, err);
                 }
             }
         }
@@ -151,13 +188,7 @@ impl AgentRuntime {
 
             let response = match self.ctx.provider.complete(&messages, provider_tools).await {
                 Ok(response) => response,
-                Err(err) => {
-                    self.emit(RunEvent::RunFailed {
-                        error: err.to_string(),
-                    });
-                    trace.finish_err(err.to_string());
-                    return Err(err);
-                }
+                Err(err) => return self.fail_run(trace, err),
             };
 
             if !response.tool_calls.is_empty() {
@@ -197,11 +228,7 @@ impl AgentRuntime {
                                 call_id: call_id.clone(),
                                 error: err.to_string(),
                             });
-                            self.emit(RunEvent::RunFailed {
-                                error: err.to_string(),
-                            });
-                            trace.finish_err(err.to_string());
-                            return Err(err);
+                            return self.fail_run(trace, err);
                         }
                     };
 
@@ -234,12 +261,7 @@ impl AgentRuntime {
                                 call_id: call_id.clone(),
                                 error: err.to_string(),
                             });
-                            self.emit(RunEvent::RunFailed {
-                                error: err.to_string(),
-                            });
-
-                            trace.finish_err(err.to_string());
-                            return Err(err);
+                            return self.fail_run(trace, err);
                         }
                     }
                 }
@@ -264,11 +286,7 @@ impl AgentRuntime {
         }
 
         let err = anyhow!("runtime stopped without final assistant message");
-        self.emit(RunEvent::RunFailed {
-            error: err.to_string(),
-        });
-        trace.finish_err(err.to_string());
-        Err(err)
+        self.fail_run(trace, err)
     }
 
     fn collect_tool_definitions(&self) -> Vec<ToolDefinition> {
@@ -301,11 +319,11 @@ mod tests {
     use super::{AgentRuntime, RunRequest, RuntimeContext};
 
     #[derive(Default)]
-    struct RecordingEventSink {
+    struct VecEventSink {
         events: Mutex<Vec<RunEvent>>,
     }
 
-    impl RecordingEventSink {
+    impl VecEventSink {
         fn snapshot(&self) -> Vec<RunEvent> {
             self.events
                 .lock()
@@ -314,7 +332,7 @@ mod tests {
         }
     }
 
-    impl RunEventSink for RecordingEventSink {
+    impl RunEventSink for VecEventSink {
         fn emit(&self, event: RunEvent) {
             self.events
                 .lock()
@@ -353,18 +371,45 @@ mod tests {
         }
     }
 
-    fn runtime_with_provider(provider: Arc<dyn LlmProvider>) -> AgentRuntime {
-        AgentRuntime::new(RuntimeContext {
-            provider,
-            tools: Arc::new(ToolRegistry::new()),
-            skills: Arc::new(SkillRegistry::new()),
-            event_sink: Arc::new(NoopEventSink),
-        })
+    struct FailingSkill;
+
+    #[async_trait]
+    impl mosaic_skill_core::Skill for FailingSkill {
+        fn name(&self) -> &str {
+            "explode"
+        }
+
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &mosaic_skill_core::SkillContext,
+        ) -> Result<mosaic_skill_core::SkillOutput> {
+            Err(anyhow!("skill exploded"))
+        }
+    }
+
+    fn event_names(events: &[RunEvent]) -> Vec<&'static str> {
+        events
+            .iter()
+            .map(|event| match event {
+                RunEvent::RunStarted { .. } => "RunStarted",
+                RunEvent::SkillStarted { .. } => "SkillStarted",
+                RunEvent::SkillFinished { .. } => "SkillFinished",
+                RunEvent::SkillFailed { .. } => "SkillFailed",
+                RunEvent::ProviderRequest { .. } => "ProviderRequest",
+                RunEvent::ToolCalling { .. } => "ToolCalling",
+                RunEvent::ToolFinished { .. } => "ToolFinished",
+                RunEvent::ToolFailed { .. } => "ToolFailed",
+                RunEvent::FinalAnswerReady => "FinalAnswerReady",
+                RunEvent::RunFinished { .. } => "RunFinished",
+                RunEvent::RunFailed { .. } => "RunFailed",
+            })
+            .collect()
     }
 
     #[tokio::test]
     async fn provider_only_run_returns_mock_output() {
-        let sink = Arc::new(RecordingEventSink::default());
+        let sink = Arc::new(VecEventSink::default());
         let runtime = AgentRuntime::new(RuntimeContext {
             provider: Arc::new(MockProvider),
             tools: Arc::new(ToolRegistry::new()),
@@ -386,23 +431,14 @@ mod tests {
 
         let events = sink.snapshot();
 
-        assert!(matches!(events.first(), Some(RunEvent::RunStarted { .. })));
-        assert!(events.iter().any(|event| matches!(
-            event,
-            RunEvent::ProviderRequest {
-                tool_count: 0,
-                message_count: 2,
-            }
-        )));
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, RunEvent::FinalAnswerReady))
-        );
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, RunEvent::RunFinished { .. }))
+        assert_eq!(
+            event_names(&events),
+            vec![
+                "RunStarted",
+                "ProviderRequest",
+                "FinalAnswerReady",
+                "RunFinished"
+            ]
         );
     }
 
@@ -438,7 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_loop_executes_time_now_and_records_tool_trace() {
-        let sink = Arc::new(RecordingEventSink::default());
+        let sink = Arc::new(VecEventSink::default());
         let mut tools = ToolRegistry::new();
         tools.register(Arc::new(TimeNowTool::new()));
 
@@ -470,26 +506,29 @@ mod tests {
 
         let events = sink.snapshot();
 
-        assert!(events.iter().any(|event| matches!(
-            event,
-            RunEvent::ToolCalling { name, call_id }
-                if name == "time_now" && call_id == "call_mock_time_now"
-        )));
-        assert!(events.iter().any(|event| matches!(
-            event,
-            RunEvent::ToolFinished { name, call_id }
-                if name == "time_now" && call_id == "call_mock_time_now"
-        )));
-        assert!(
-            events
-                .iter()
-                .any(|event| matches!(event, RunEvent::RunFinished { .. }))
+        assert_eq!(
+            event_names(&events),
+            vec![
+                "RunStarted",
+                "ProviderRequest",
+                "ToolCalling",
+                "ToolFinished",
+                "ProviderRequest",
+                "FinalAnswerReady",
+                "RunFinished"
+            ]
         );
     }
 
     #[tokio::test]
     async fn missing_skill_returns_an_error() {
-        let runtime = runtime_with_provider(Arc::new(MockProvider));
+        let sink = Arc::new(VecEventSink::default());
+        let runtime = AgentRuntime::new(RuntimeContext {
+            provider: Arc::new(MockProvider),
+            tools: Arc::new(ToolRegistry::new()),
+            skills: Arc::new(SkillRegistry::new()),
+            event_sink: sink.clone(),
+        });
 
         let err = runtime
             .run(RunRequest {
@@ -501,11 +540,22 @@ mod tests {
             .expect_err("missing skill should fail");
 
         assert!(err.to_string().contains("skill not found"));
+        assert_eq!(err.trace().status(), "failed");
+        assert_eq!(
+            event_names(&sink.snapshot()),
+            vec!["RunStarted", "RunFailed"]
+        );
     }
 
     #[tokio::test]
     async fn empty_provider_response_returns_an_error() {
-        let runtime = runtime_with_provider(Arc::new(EmptyProvider));
+        let sink = Arc::new(VecEventSink::default());
+        let runtime = AgentRuntime::new(RuntimeContext {
+            provider: Arc::new(EmptyProvider),
+            tools: Arc::new(ToolRegistry::new()),
+            skills: Arc::new(SkillRegistry::new()),
+            event_sink: sink.clone(),
+        });
 
         let err = runtime
             .run(RunRequest {
@@ -520,11 +570,22 @@ mod tests {
             err.to_string()
                 .contains("runtime stopped without final assistant message")
         );
+        assert_eq!(err.trace().status(), "failed");
+        assert_eq!(
+            event_names(&sink.snapshot()),
+            vec!["RunStarted", "ProviderRequest", "RunFailed"]
+        );
     }
 
     #[tokio::test]
     async fn provider_failures_are_propagated() {
-        let runtime = runtime_with_provider(Arc::new(FailingProvider));
+        let sink = Arc::new(VecEventSink::default());
+        let runtime = AgentRuntime::new(RuntimeContext {
+            provider: Arc::new(FailingProvider),
+            tools: Arc::new(ToolRegistry::new()),
+            skills: Arc::new(SkillRegistry::new()),
+            event_sink: sink.clone(),
+        });
 
         let err = runtime
             .run(RunRequest {
@@ -536,5 +597,40 @@ mod tests {
             .expect_err("provider error should fail");
 
         assert!(err.to_string().contains("provider failure"));
+        assert_eq!(err.trace().status(), "failed");
+        assert_eq!(
+            event_names(&sink.snapshot()),
+            vec!["RunStarted", "ProviderRequest", "RunFailed"]
+        );
+    }
+
+    #[tokio::test]
+    async fn skill_failures_emit_skill_failed_then_run_failed() {
+        let sink = Arc::new(VecEventSink::default());
+        let mut skills = SkillRegistry::new();
+        skills.register(Arc::new(FailingSkill));
+
+        let runtime = AgentRuntime::new(RuntimeContext {
+            provider: Arc::new(MockProvider),
+            tools: Arc::new(ToolRegistry::new()),
+            skills: Arc::new(skills),
+            event_sink: sink.clone(),
+        });
+
+        let err = runtime
+            .run(RunRequest {
+                system: None,
+                input: "boom".to_owned(),
+                skill: Some("explode".to_owned()),
+            })
+            .await
+            .expect_err("failing skill should fail");
+
+        assert!(err.to_string().contains("skill exploded"));
+        assert_eq!(err.trace().status(), "failed");
+        assert_eq!(
+            event_names(&sink.snapshot()),
+            vec!["RunStarted", "SkillStarted", "SkillFailed", "RunFailed"]
+        );
     }
 }

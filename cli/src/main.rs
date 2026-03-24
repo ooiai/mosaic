@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use mosaic_config::load_from_file;
 use mosaic_inspect::RunTrace;
-use mosaic_runtime::{AgentRuntime, RunRequest};
+use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult};
 
 mod bootstrap;
 mod output;
@@ -25,6 +25,8 @@ enum Commands {
         file: PathBuf,
         #[arg(long)]
         skill: Option<String>,
+        #[arg(long, help = "Show the TUI while the run executes")]
+        tui: bool,
     },
     Inspect {
         file: PathBuf,
@@ -40,6 +42,8 @@ enum DispatchCommand {
     Run {
         file: PathBuf,
         skill: Option<String>,
+        tui: bool,
+        resume: bool,
     },
     Inspect {
         file: PathBuf,
@@ -52,7 +56,12 @@ impl Cli {
             None | Some(Commands::Tui) => DispatchCommand::Tui {
                 resume: self.resume,
             },
-            Some(Commands::Run { file, skill }) => DispatchCommand::Run { file, skill },
+            Some(Commands::Run { file, skill, tui }) => DispatchCommand::Run {
+                file,
+                skill,
+                tui,
+                resume: self.resume,
+            },
             Some(Commands::Inspect { file }) => DispatchCommand::Inspect { file },
         }
     }
@@ -62,36 +71,97 @@ impl Cli {
 async fn main() -> Result<()> {
     match Cli::parse().dispatch() {
         DispatchCommand::Tui { resume } => {
-            let sinks = bootstrap::build_cli_and_tui_sinks();
-            let event_buffer = sinks
-                .tui_buffer
-                .expect("cli+tui sink builder should provide a TUI buffer");
-
-            mosaic_tui::run_with_event_buffer(resume, event_buffer)?;
+            mosaic_tui::run(resume)?;
             Ok(())
         }
-        DispatchCommand::Run { file, skill } => run_cmd(file, skill).await,
+        DispatchCommand::Run {
+            file,
+            skill,
+            tui,
+            resume,
+        } => run_cmd(file, skill, tui, resume).await,
         DispatchCommand::Inspect { file } => inspect_cmd(file),
     }
 }
 
-async fn run_cmd(file: PathBuf, skill: Option<String>) -> Result<()> {
+async fn run_cmd(file: PathBuf, skill: Option<String>, tui: bool, resume: bool) -> Result<()> {
     let cfg = load_from_file(&file)?;
+
+    if tui {
+        return run_cmd_with_tui(cfg, skill, resume).await;
+    }
+
     let sinks = bootstrap::build_cli_only_sinks();
     let runtime = AgentRuntime::new(bootstrap::build_runtime_context(&cfg, sinks.event_sink)?);
-
-    let result = runtime
+    let outcome = runtime
         .run(RunRequest {
             system: cfg.agent.system,
             input: cfg.task.input,
             skill,
         })
-        .await?;
+        .await;
 
+    finish_run_outcome(outcome)
+}
+
+async fn run_cmd_with_tui(
+    cfg: mosaic_config::AppConfig,
+    skill: Option<String>,
+    resume: bool,
+) -> Result<()> {
+    let sinks = bootstrap::build_cli_and_tui_sinks();
+    let event_buffer = sinks
+        .tui_buffer
+        .expect("cli+tui sink builder should provide a TUI buffer");
+    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(&cfg, sinks.event_sink)?);
+
+    let request = RunRequest {
+        system: cfg.agent.system,
+        input: cfg.task.input,
+        skill,
+    };
+
+    let runtime_handle = tokio::spawn(async move { runtime.run(request).await });
+    let tui_handle = tokio::task::spawn_blocking(move || {
+        mosaic_tui::run_until_complete_with_event_buffer(resume, event_buffer)
+    });
+
+    let runtime_outcome = runtime_handle.await?;
+    let tui_join = tui_handle.await;
+
+    let run_result = finish_run_outcome(runtime_outcome);
+
+    match (run_result, tui_join) {
+        (Err(err), _) => Err(err),
+        (Ok(()), Err(err)) => Err(err.into()),
+        (Ok(()), Ok(tui_result)) => {
+            tui_result?;
+            Ok(())
+        }
+    }
+}
+
+fn finish_run_outcome(outcome: std::result::Result<RunResult, RunError>) -> Result<()> {
+    match outcome {
+        Ok(result) => persist_successful_run(result),
+        Err(err) => persist_failed_run(err),
+    }
+}
+
+fn persist_successful_run(result: RunResult) -> Result<()> {
     let path = result.trace.save_to_default_dir()?;
     println!("{}", result.output);
     println!("saved trace: {}", path.display());
     Ok(())
+}
+
+fn persist_failed_run(err: RunError) -> Result<()> {
+    let (source, trace) = err.into_parts();
+    let path = trace.save_to_default_dir()?;
+
+    println!("saved trace: {}", path.display());
+
+    Err(source)
 }
 
 fn inspect_cmd(file: PathBuf) -> Result<()> {
@@ -125,8 +195,8 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
             println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
 
             match &call.output {
-                Some(output) => println!("  output: {}", truncate_for_cli(output, 240)),
-                None => println!("  output: <none>"),
+                Some(output) => println!("  output_preview: {}", truncate_for_cli(output, 240)),
+                None => println!("  output_preview: <none>"),
             }
         }
     }
@@ -143,8 +213,8 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
             println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
 
             match &call.output {
-                Some(output) => println!("  output: {}", truncate_for_cli(output, 240)),
-                None => println!("  output: <none>"),
+                Some(output) => println!("  output_preview: {}", truncate_for_cli(output, 240)),
+                None => println!("  output_preview: <none>"),
             }
         }
     }
@@ -203,6 +273,29 @@ mod tests {
             DispatchCommand::Run {
                 file: "examples/basic-agent.yaml".into(),
                 skill: Some("summarize".to_owned()),
+                tui: false,
+                resume: false,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_run_subcommand_with_tui() {
+        let cli = Cli::parse_from([
+            "mosaic",
+            "--resume",
+            "run",
+            "examples/time-now-agent.yaml",
+            "--tui",
+        ]);
+
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Run {
+                file: "examples/time-now-agent.yaml".into(),
+                skill: None,
+                tui: true,
+                resume: true,
             }
         );
     }

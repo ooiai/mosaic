@@ -74,7 +74,17 @@ pub fn run_with_event_buffer(
     event_buffer: TuiEventBuffer,
 ) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
-    let result = run_app(&mut terminal, start_in_resume, event_buffer);
+    let result = run_app(&mut terminal, start_in_resume, event_buffer, false);
+    restore_terminal(&mut terminal)?;
+    result
+}
+
+pub fn run_until_complete_with_event_buffer(
+    start_in_resume: bool,
+    event_buffer: TuiEventBuffer,
+) -> io::Result<()> {
+    let mut terminal = setup_terminal()?;
+    let result = run_app(&mut terminal, start_in_resume, event_buffer, true);
     restore_terminal(&mut terminal)?;
     result
 }
@@ -91,16 +101,19 @@ fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     start_in_resume: bool,
     event_buffer: TuiEventBuffer,
+    exit_on_run_completion: bool,
 ) -> io::Result<()> {
     let workspace_path = std::env::current_dir()?;
     let mut app = build_app(workspace_path, start_in_resume);
 
     loop {
-        for event in event_buffer.drain() {
-            app.apply_run_event(event);
-        }
+        let saw_terminal_event = drain_run_events(&mut app, &event_buffer);
 
         terminal.draw(|frame| ui::render(frame, &app))?;
+
+        if exit_on_run_completion && saw_terminal_event {
+            break;
+        }
 
         if event::poll(Duration::from_millis(200))? {
             match event::read()? {
@@ -120,13 +133,30 @@ fn run_app(
     Ok(())
 }
 
+fn drain_run_events(app: &mut App, event_buffer: &TuiEventBuffer) -> bool {
+    let mut saw_terminal_event = false;
+
+    for event in event_buffer.drain() {
+        if matches!(
+            event,
+            RunEvent::RunFinished { .. } | RunEvent::RunFailed { .. }
+        ) {
+            saw_terminal_event = true;
+        }
+
+        app.apply_run_event(event);
+    }
+
+    saw_terminal_event
+}
+
 #[cfg(test)]
 mod tests {
     use mosaic_runtime::events::{RunEvent, RunEventSink};
 
     use crate::app::Surface;
 
-    use super::{TuiEventBuffer, TuiEventSink, build_app};
+    use super::{TuiEventBuffer, TuiEventSink, build_app, drain_run_events};
 
     #[test]
     fn build_app_uses_explicit_resume_flag() {
@@ -151,6 +181,22 @@ mod tests {
             }]
         );
         assert!(buffer.drain().is_empty());
+    }
+
+    #[test]
+    fn drain_run_events_marks_terminal_run_events_for_auto_exit() {
+        let mut app = build_app("/tmp/mosaic".into(), false);
+        let buffer = TuiEventBuffer::default();
+
+        buffer.push(RunEvent::RunStarted {
+            input: "hello".to_owned(),
+        });
+        buffer.push(RunEvent::RunFinished {
+            output_preview: "done".to_owned(),
+        });
+
+        assert!(drain_run_events(&mut app, &buffer));
+        assert_eq!(app.runtime_status, "idle");
     }
 }
 
