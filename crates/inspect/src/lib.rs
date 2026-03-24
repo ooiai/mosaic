@@ -18,6 +18,16 @@ pub struct ToolTrace {
     pub finished_at: Option<DateTime<Utc>>,
 }
 
+impl ToolTrace {
+    pub fn duration_ms(&self) -> Option<i64> {
+        self.finished_at.map(|finished| {
+            finished
+                .signed_duration_since(self.started_at)
+                .num_milliseconds()
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillTrace {
     pub name: String,
@@ -25,6 +35,24 @@ pub struct SkillTrace {
     pub output: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
+}
+
+impl SkillTrace {
+    pub fn duration_ms(&self) -> Option<i64> {
+        self.finished_at.map(|finished| {
+            finished
+                .signed_duration_since(self.started_at)
+                .num_milliseconds()
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunSummary {
+    pub status: String,
+    pub tool_calls: usize,
+    pub skill_calls: usize,
+    pub duration_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +94,33 @@ impl RunTrace {
         self.error = Some(error);
     }
 
+    pub fn duration_ms(&self) -> Option<i64> {
+        self.finished_at.map(|finished| {
+            finished
+                .signed_duration_since(self.started_at)
+                .num_milliseconds()
+        })
+    }
+
+    pub fn status(&self) -> &'static str {
+        if self.error.is_some() {
+            "failed"
+        } else if self.finished_at.is_some() {
+            "success"
+        } else {
+            "running"
+        }
+    }
+
+    pub fn summary(&self) -> RunSummary {
+        RunSummary {
+            status: self.status().to_owned(),
+            tool_calls: self.tool_calls.len(),
+            skill_calls: self.skill_calls.len(),
+            duration_ms: self.duration_ms(),
+        }
+    }
+
     pub fn save_to_default_dir(&self) -> Result<PathBuf> {
         self.save_to_dir(PathBuf::from(".mosaic/runs"))
     }
@@ -86,6 +141,8 @@ mod tests {
         sync::atomic::{AtomicU64, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    use chrono::Duration;
 
     use super::*;
 
@@ -127,5 +184,49 @@ mod tests {
 
         fs::remove_file(path).ok();
         fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn trace_summary_reports_status_counts_and_duration() {
+        let started_at = Utc::now();
+        let finished_at = started_at + Duration::milliseconds(18);
+
+        let trace = RunTrace {
+            run_id: "run-1".to_owned(),
+            started_at,
+            finished_at: Some(finished_at),
+            input: "hello".to_owned(),
+            output: Some("world".to_owned()),
+            tool_calls: vec![ToolTrace {
+                call_id: Some("call-1".to_owned()),
+                name: "echo".to_owned(),
+                input: serde_json::json!({ "text": "hello" }),
+                output: Some("hello".to_owned()),
+                started_at,
+                finished_at: Some(started_at + Duration::milliseconds(3)),
+            }],
+            skill_calls: vec![],
+            error: None,
+        };
+
+        let summary = trace.summary();
+
+        assert_eq!(trace.status(), "success");
+        assert_eq!(trace.duration_ms(), Some(18));
+        assert_eq!(summary.status, "success");
+        assert_eq!(summary.tool_calls, 1);
+        assert_eq!(summary.skill_calls, 0);
+        assert_eq!(summary.duration_ms, Some(18));
+        assert_eq!(trace.tool_calls[0].duration_ms(), Some(3));
+    }
+
+    #[test]
+    fn trace_status_reports_failure_when_error_exists() {
+        let mut trace = RunTrace::new("hello".to_owned());
+        trace.finish_err("boom".to_owned());
+
+        assert_eq!(trace.status(), "failed");
+        assert_eq!(trace.summary().status, "failed");
+        assert!(trace.duration_ms().is_some());
     }
 }

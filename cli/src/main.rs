@@ -78,6 +78,7 @@ async fn run_cmd(file: PathBuf, skill: Option<String>) -> Result<()> {
             system: cfg.agent.system,
             input: cfg.task.input,
             skill,
+            verbose_events: true,
         })
         .await?;
 
@@ -90,15 +91,20 @@ async fn run_cmd(file: PathBuf, skill: Option<String>) -> Result<()> {
 fn inspect_cmd(file: PathBuf) -> Result<()> {
     let content = fs::read_to_string(file)?;
     let trace: RunTrace = serde_json::from_str(&content)?;
+    let summary = trace.summary();
 
     println!("run_id: {}", trace.run_id);
+    println!("status: {}", summary.status);
     println!("started_at: {}", trace.started_at);
     println!("finished_at: {:?}", trace.finished_at);
+    println!("duration_ms: {:?}", summary.duration_ms);
     println!("input: {}", trace.input);
     println!("output: {:?}", trace.output);
     println!("error: {:?}", trace.error);
-    println!("tool_calls: {}", trace.tool_calls.len());
-    println!("skill_calls: {}", trace.skill_calls.len());
+
+    println!("\nsummary:");
+    println!("  tool_calls: {}", summary.tool_calls);
+    println!("  skill_calls: {}", summary.skill_calls);
 
     if !trace.tool_calls.is_empty() {
         println!("\n== tool calls ==");
@@ -109,6 +115,7 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
             println!("  name: {}", call.name);
             println!("  started_at: {}", call.started_at);
             println!("  finished_at: {:?}", call.finished_at);
+            println!("  duration_ms: {:?}", call.duration_ms());
             println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
 
             match &call.output {
@@ -126,6 +133,7 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
             println!("  name: {}", call.name);
             println!("  started_at: {}", call.started_at);
             println!("  finished_at: {:?}", call.finished_at);
+            println!("  duration_ms: {:?}", call.duration_ms());
             println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
 
             match &call.output {

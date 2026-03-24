@@ -17,6 +17,7 @@ pub struct RunRequest {
     pub system: Option<String>,
     pub input: String,
     pub skill: Option<String>,
+    pub verbose_events: bool,
 }
 
 #[derive(Debug)]
@@ -34,8 +35,17 @@ impl AgentRuntime {
         Self { ctx }
     }
 
+    fn emit(verbose: bool, message: impl AsRef<str>) {
+        if verbose {
+            println!("{}", message.as_ref());
+        }
+    }
+
     pub async fn run(&self, req: RunRequest) -> Result<RunResult> {
+        let verbose = req.verbose_events;
         let mut trace = RunTrace::new(req.input.clone());
+
+        Self::emit(verbose, "[run] starting");
 
         if let Some(skill_name) = req.skill.clone() {
             let skill = self
@@ -43,6 +53,8 @@ impl AgentRuntime {
                 .skills
                 .get(&skill_name)
                 .ok_or_else(|| anyhow!("skill not found: {}", skill_name))?;
+
+            Self::emit(verbose, format!("[run] executing skill: {}", skill_name));
 
             let skill_input = serde_json::json!({ "text": req.input });
 
@@ -65,6 +77,9 @@ impl AgentRuntime {
                         last.finished_at = Some(Utc::now());
                     }
 
+                    Self::emit(verbose, "[run] skill finished");
+                    Self::emit(verbose, "[run] final answer ready");
+
                     trace.finish_ok(out.content.clone());
 
                     return Ok(RunResult {
@@ -76,6 +91,8 @@ impl AgentRuntime {
                     if let Some(last) = trace.skill_calls.last_mut() {
                         last.finished_at = Some(Utc::now());
                     }
+
+                    Self::emit(verbose, format!("[run] skill failed: {}", err));
 
                     trace.finish_err(err.to_string());
                     return Err(err);
@@ -103,9 +120,15 @@ impl AgentRuntime {
         let provider_tools = (!tool_defs.is_empty()).then_some(tool_defs.as_slice());
 
         for _ in 0..8 {
+            Self::emit(
+                verbose,
+                format!("[run] provider=request tools={}", tool_defs.len()),
+            );
+
             let response = match self.ctx.provider.complete(&messages, provider_tools).await {
                 Ok(response) => response,
                 Err(err) => {
+                    Self::emit(verbose, format!("[run] failed: {}", err));
                     trace.finish_err(err.to_string());
                     return Err(err);
                 }
@@ -116,6 +139,11 @@ impl AgentRuntime {
                     let call_id = call.id.clone();
                     let tool_name = call.name.clone();
                     let tool_input = call.arguments.clone();
+
+                    Self::emit(
+                        verbose,
+                        format!("[run] calling tool: {} (call_id={})", tool_name, call_id),
+                    );
 
                     trace.tool_calls.push(ToolTrace {
                         call_id: Some(call_id.clone()),
@@ -130,10 +158,18 @@ impl AgentRuntime {
                         Some(tool) => tool,
                         None => {
                             if let Some(last) = trace.tool_calls.last_mut() {
+                                last.output = Some(format!(
+                                    "[runtime tool failure] tool not found: {}",
+                                    tool_name
+                                ));
                                 last.finished_at = Some(Utc::now());
                             }
 
                             let err = anyhow!("tool not found: {}", tool_name);
+                            Self::emit(
+                                verbose,
+                                format!("[run] tool failed: {} error={}", tool_name, err),
+                            );
                             trace.finish_err(err.to_string());
                             return Err(err);
                         }
@@ -146,6 +182,8 @@ impl AgentRuntime {
                                 last.finished_at = Some(Utc::now());
                             }
 
+                            Self::emit(verbose, format!("[run] tool finished: {}", tool_name));
+
                             messages.push(Message {
                                 role: Role::Tool,
                                 content: result.content,
@@ -154,8 +192,14 @@ impl AgentRuntime {
                         }
                         Err(err) => {
                             if let Some(last) = trace.tool_calls.last_mut() {
+                                last.output = Some(format!("[runtime tool failure] {}", err));
                                 last.finished_at = Some(Utc::now());
                             }
+
+                            Self::emit(
+                                verbose,
+                                format!("[run] tool failed: {} error={}", tool_name, err),
+                            );
 
                             trace.finish_err(err.to_string());
                             return Err(err);
@@ -167,6 +211,7 @@ impl AgentRuntime {
             }
 
             if let Some(message) = response.message {
+                Self::emit(verbose, "[run] final answer ready");
                 trace.finish_ok(message.content.clone());
 
                 return Ok(RunResult {
@@ -179,6 +224,7 @@ impl AgentRuntime {
         }
 
         let err = anyhow!("runtime stopped without final assistant message");
+        Self::emit(verbose, format!("[run] failed: {}", err));
         trace.finish_err(err.to_string());
         Err(err)
     }
@@ -258,6 +304,7 @@ mod tests {
                 system: Some("You are helpful.".to_owned()),
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
+                verbose_events: false,
             })
             .await
             .expect("runtime should succeed");
@@ -282,6 +329,7 @@ mod tests {
                 system: None,
                 input: "Rust async enables concurrency.".to_owned(),
                 skill: Some("summarize".to_owned()),
+                verbose_events: false,
             })
             .await
             .expect("skill run should succeed");
@@ -311,6 +359,7 @@ mod tests {
                 system: Some("Use tools when needed.".to_owned()),
                 input: "What time is it now?".to_owned(),
                 skill: None,
+                verbose_events: false,
             })
             .await
             .expect("tool loop should succeed");
@@ -335,6 +384,7 @@ mod tests {
                 system: None,
                 input: "Rust async enables concurrency.".to_owned(),
                 skill: Some("missing".to_owned()),
+                verbose_events: false,
             })
             .await
             .expect_err("missing skill should fail");
@@ -351,6 +401,7 @@ mod tests {
                 system: None,
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
+                verbose_events: false,
             })
             .await
             .expect_err("empty provider response should fail");
@@ -370,6 +421,7 @@ mod tests {
                 system: None,
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
+                verbose_events: false,
             })
             .await
             .expect_err("provider error should fail");
