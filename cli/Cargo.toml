@@ -23,3 +23,4 @@ mosaic-runtime = { path = "../crates/runtime" }
 mosaic-session-core = { path = "../crates/session-core" }
 mosaic-skill-core = { path = "../crates/skill-core" }
 mosaic-tool-core = { path = "../crates/tool-core" }
+mosaic-workflow = { path = "../crates/workflow" }

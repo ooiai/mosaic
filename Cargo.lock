@@ -977,6 +977,7 @@ dependencies = [
  "mosaic-skill-core",
  "mosaic-tool-core",
  "mosaic-tui",
+ "mosaic-workflow",
  "serde_json",
  "tokio",
 ]
@@ -986,6 +987,8 @@ name = "mosaic-config"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "mosaic-skill-core",
+ "mosaic-workflow",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -1004,6 +1007,7 @@ dependencies = [
  "mosaic-session-core",
  "mosaic-skill-core",
  "mosaic-tool-core",
+ "mosaic-workflow",
  "serde",
  "tokio",
  "uuid",
@@ -1057,6 +1061,7 @@ dependencies = [
  "mosaic-session-core",
  "mosaic-skill-core",
  "mosaic-tool-core",
+ "mosaic-workflow",
  "serde",
  "serde_json",
  "tokio",
@@ -1115,8 +1120,10 @@ name = "mosaic-workflow"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

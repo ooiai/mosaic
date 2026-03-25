@@ -33,8 +33,10 @@ struct Cli {
 enum Commands {
     Run {
         file: PathBuf,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "workflow")]
         skill: Option<String>,
+        #[arg(long, conflicts_with = "skill")]
+        workflow: Option<String>,
         #[arg(long)]
         session: Option<String>,
         #[arg(long)]
@@ -82,17 +84,13 @@ enum SetupCommand {
 #[derive(Debug, Subcommand, PartialEq, Eq)]
 enum SessionCommand {
     List,
-    Show {
-        id: String,
-    },
+    Show { id: String },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
 enum ModelCommand {
     List,
-    Use {
-        profile: String,
-    },
+    Use { profile: String },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -114,6 +112,7 @@ enum DispatchCommand {
     Run {
         file: PathBuf,
         skill: Option<String>,
+        workflow: Option<String>,
         session: Option<String>,
         profile: Option<String>,
         tui: bool,
@@ -152,12 +151,14 @@ impl Cli {
             Some(Commands::Run {
                 file,
                 skill,
+                workflow,
                 session,
                 profile,
                 tui,
             }) => DispatchCommand::Run {
                 file,
                 skill,
+                workflow,
                 session,
                 profile,
                 tui,
@@ -183,11 +184,12 @@ async fn main() -> Result<()> {
         DispatchCommand::Run {
             file,
             skill,
+            workflow,
             session,
             profile,
             tui,
             resume,
-        } => run_cmd(file, skill, session, profile, tui, resume).await,
+        } => run_cmd(file, skill, workflow, session, profile, tui, resume).await,
         DispatchCommand::Inspect { file } => inspect_cmd(file),
         DispatchCommand::Setup { command } => setup_cmd(command),
         DispatchCommand::Session { command } => session_cmd(command),
@@ -196,11 +198,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn tui_cmd(
-    resume: bool,
-    session: Option<String>,
-    profile: Option<String>,
-) -> Result<()> {
+async fn tui_cmd(resume: bool, session: Option<String>, profile: Option<String>) -> Result<()> {
     let loaded = ensure_loaded_config(profile.clone())?;
     let gateway = build_gateway_handle(&loaded, None)?;
     let session_id = resolve_tui_session_id(&gateway, session.as_deref())?;
@@ -240,6 +238,7 @@ async fn tui_cmd(
 async fn run_cmd(
     file: PathBuf,
     skill: Option<String>,
+    workflow: Option<String>,
     session: Option<String>,
     profile: Option<String>,
     tui: bool,
@@ -249,19 +248,18 @@ async fn run_cmd(
     let loaded = ensure_loaded_config(profile.clone())?;
 
     if tui {
-        return run_cmd_with_tui(loaded, app_cfg, skill, session, profile, resume).await;
+        return run_cmd_with_tui(loaded, app_cfg, skill, workflow, session, profile, resume).await;
     }
 
     let gateway = build_gateway_handle(&loaded, Some(&app_cfg))?;
-    let forwarder = spawn_gateway_runtime_event_forwarder(
-        gateway.subscribe(),
-        Arc::new(output::CliEventSink),
-    );
+    let forwarder =
+        spawn_gateway_runtime_event_forwarder(gateway.subscribe(), Arc::new(output::CliEventSink));
     let outcome = gateway
         .submit_command(GatewayControlCommand::SubmitRun(GatewayRunRequest {
             system: app_cfg.agent.system,
             input: app_cfg.task.input,
             skill,
+            workflow,
             session_id: session,
             profile,
         }))?
@@ -276,6 +274,7 @@ async fn run_cmd_with_tui(
     loaded: LoadedMosaicConfig,
     app_cfg: mosaic_config::AppConfig,
     skill: Option<String>,
+    workflow: Option<String>,
     session: Option<String>,
     profile: Option<String>,
     resume: bool,
@@ -291,6 +290,7 @@ async fn run_cmd_with_tui(
         system: app_cfg.agent.system,
         input: app_cfg.task.input,
         skill,
+        workflow,
         session_id: session,
         profile,
     };
@@ -401,9 +401,7 @@ fn session_cmd(command: SessionCommand) -> Result<()> {
     let gateway = build_gateway_handle(&loaded, None)?;
 
     match command {
-        SessionCommand::List => {
-            print_session_list(&gateway.list_sessions()?)
-        }
+        SessionCommand::List => print_session_list(&gateway.list_sessions()?),
         SessionCommand::Show { id } => {
             let session = gateway
                 .load_session(&id)?
@@ -418,8 +416,14 @@ fn session_cmd(command: SessionCommand) -> Result<()> {
             println!("model: {}", session.model);
             println!("last_run_id: {:?}", session.last_run_id);
             println!("session_route: {}", session.gateway.route);
-            println!("last_gateway_run_id: {:?}", session.gateway.last_gateway_run_id);
-            println!("last_correlation_id: {:?}", session.gateway.last_correlation_id);
+            println!(
+                "last_gateway_run_id: {:?}",
+                session.gateway.last_gateway_run_id
+            );
+            println!(
+                "last_correlation_id: {:?}",
+                session.gateway.last_correlation_id
+            );
             println!("message_count: {}", session.transcript.len());
 
             if !session.transcript.is_empty() {
@@ -558,6 +562,7 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
     println!("correlation_id: {:?}", trace.correlation_id);
     println!("session_id: {:?}", trace.session_id);
     println!("session_route: {:?}", trace.session_route);
+    println!("workflow_name: {:?}", trace.workflow_name);
     println!("status: {}", summary.status);
     println!("started_at: {}", trace.started_at);
     println!("finished_at: {:?}", trace.finished_at);
@@ -578,12 +583,16 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
     println!("\nsummary:");
     println!("  tool_calls: {}", summary.tool_calls);
     println!("  skill_calls: {}", summary.skill_calls);
+    println!("  workflow_steps: {}", trace.step_traces.len());
 
     if let Ok(loaded) = load_config() {
         let redacted = redact_mosaic_config(&loaded.config);
         println!("\ncurrent_workspace_config:");
         println!("  active_profile: {}", redacted.active_profile);
-        println!("  session_store_root_dir: {}", redacted.session_store_root_dir);
+        println!(
+            "  session_store_root_dir: {}",
+            redacted.session_store_root_dir
+        );
         println!("  inspect_runs_dir: {}", redacted.inspect_runs_dir);
         println!("  profiles:");
         for profile in redacted.profiles {
@@ -635,6 +644,31 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
         }
     }
 
+    if !trace.step_traces.is_empty() {
+        println!("\n== workflow steps ==");
+
+        for (idx, step) in trace.step_traces.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  name: {}", step.name);
+            println!("  kind: {}", step.kind);
+            println!("  status: {}", step.status());
+            println!("  started_at: {}", step.started_at);
+            println!("  finished_at: {:?}", step.finished_at);
+            println!("  duration_ms: {:?}", step.duration_ms());
+            println!("  input_preview: {}", truncate_for_cli(&step.input, 240));
+
+            match &step.output {
+                Some(output) => println!("  output_preview: {}", truncate_for_cli(output, 240)),
+                None => println!("  output_preview: <none>"),
+            }
+
+            match &step.error {
+                Some(error) => println!("  error: {}", truncate_for_cli(error, 240)),
+                None => println!("  error: <none>"),
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -642,10 +676,7 @@ fn load_config() -> Result<LoadedMosaicConfig> {
     load_mosaic_config(&LoadConfigOptions::default())
 }
 
-fn resolve_tui_session_id(
-    gateway: &GatewayHandle,
-    requested: Option<&str>,
-) -> Result<String> {
+fn resolve_tui_session_id(gateway: &GatewayHandle, requested: Option<&str>) -> Result<String> {
     if let Some(session_id) = requested {
         return Ok(session_id.to_owned());
     }
@@ -714,10 +745,16 @@ fn gateway_event_label(event: &GatewayEvent) -> String {
         GatewayEvent::RunSubmitted { profile, .. } => format!("run_submitted profile={profile}"),
         GatewayEvent::Runtime(_) => "runtime_event".to_owned(),
         GatewayEvent::SessionUpdated { summary } => {
-            format!("session_updated id={} messages={}", summary.id, summary.message_count)
+            format!(
+                "session_updated id={} messages={}",
+                summary.id, summary.message_count
+            )
         }
         GatewayEvent::RunCompleted { output_preview } => {
-            format!("run_completed preview={}", truncate_for_cli(output_preview, 80))
+            format!(
+                "run_completed preview={}",
+                truncate_for_cli(output_preview, 80)
+            )
         }
         GatewayEvent::RunFailed { error } => {
             format!("run_failed error={}", truncate_for_cli(error, 80))
@@ -732,7 +769,10 @@ fn ensure_loaded_config(active_profile_override: Option<String>) -> Result<Loade
     let loaded = load_mosaic_config(&options)?;
     let report = validate_mosaic_config(&loaded.config);
     if report.has_errors() {
-        bail!("configuration is invalid:\n{}", render_validation_issues(&report));
+        bail!(
+            "configuration is invalid:\n{}",
+            render_validation_issues(&report)
+        );
     }
 
     Ok(loaded)
@@ -745,14 +785,21 @@ fn current_dir() -> Result<PathBuf> {
 fn print_config_summary(loaded: &LoadedMosaicConfig) {
     println!("config sources:");
     for source in &loaded.sources {
-        println!("  [{}] {}", config_source_label(&source.kind), source.detail);
+        println!(
+            "  [{}] {}",
+            config_source_label(&source.kind),
+            source.detail
+        );
     }
 
     let redacted = redact_mosaic_config(&loaded.config);
     println!("\nconfig summary:");
     println!("  schema_version: {}", redacted.schema_version);
     println!("  active_profile: {}", redacted.active_profile);
-    println!("  session_store_root_dir: {}", redacted.session_store_root_dir);
+    println!(
+        "  session_store_root_dir: {}",
+        redacted.session_store_root_dir
+    );
     println!("  inspect_runs_dir: {}", redacted.inspect_runs_dir);
     println!("  profiles:");
     for profile in redacted.profiles {
@@ -910,6 +957,7 @@ mod tests {
             DispatchCommand::Run {
                 file: "examples/basic-agent.yaml".into(),
                 skill: Some("summarize".to_owned()),
+                workflow: None,
                 session: Some("demo".to_owned()),
                 profile: Some("gpt-5.4-mini".to_owned()),
                 tui: false,
@@ -933,10 +981,35 @@ mod tests {
             DispatchCommand::Run {
                 file: "examples/time-now-agent.yaml".into(),
                 skill: None,
+                workflow: None,
                 session: None,
                 profile: None,
                 tui: true,
                 resume: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_run_subcommand_with_workflow() {
+        let cli = Cli::parse_from([
+            "mosaic",
+            "run",
+            "examples/research-skill.yaml",
+            "--workflow",
+            "research_brief",
+        ]);
+
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Run {
+                file: "examples/research-skill.yaml".into(),
+                skill: None,
+                workflow: Some("research_brief".to_owned()),
+                session: None,
+                profile: None,
+                tui: false,
+                resume: false,
             }
         );
     }

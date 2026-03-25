@@ -5,6 +5,8 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use mosaic_skill_core::ManifestSkillStep;
+use mosaic_workflow::Workflow;
 use serde::{Deserialize, Serialize};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
@@ -18,6 +20,8 @@ pub struct AppConfig {
     pub tools: Vec<ToolConfig>,
     #[serde(default)]
     pub skills: Vec<SkillConfig>,
+    #[serde(default)]
+    pub workflows: Vec<Workflow>,
     pub agent: AgentConfig,
     pub task: TaskConfig,
     pub mcp: Option<McpConfig>,
@@ -49,6 +53,14 @@ pub struct SkillConfig {
     #[serde(rename = "type")]
     pub skill_type: String,
     pub name: String,
+    pub description: Option<String>,
+    #[serde(default = "default_skill_input_schema")]
+    pub input_schema: serde_json::Value,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<ManifestSkillStep>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -300,6 +312,10 @@ struct MosaicConfigPatch {
     pub inspect: Option<InspectConfig>,
 }
 
+fn default_skill_input_schema() -> serde_json::Value {
+    serde_json::json!({ "type": "object" })
+}
+
 pub fn load_from_file(path: impl AsRef<Path>) -> Result<AppConfig> {
     let content = fs::read_to_string(path)?;
     let cfg = serde_yaml::from_str::<AppConfig>(&content)?;
@@ -464,7 +480,10 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
             report.push(
                 ValidationLevel::Error,
                 format!("{field_prefix}.type"),
-                format!("unsupported provider type '{}': expected mock or openai-compatible", profile.provider_type),
+                format!(
+                    "unsupported provider type '{}': expected mock or openai-compatible",
+                    profile.provider_type
+                ),
             );
         }
 
@@ -513,11 +532,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
     let mut checks = Vec::new();
 
     let session_root = cwd.join(&config.session_store.root_dir);
-    checks.push(path_check(
-        &session_root,
-        "session store directory",
-        true,
-    ));
+    checks.push(path_check(&session_root, "session store directory", true));
 
     let runs_root = cwd.join(&config.inspect.runs_dir);
     checks.push(path_check(&runs_root, "run trace directory", true));
@@ -625,14 +640,20 @@ fn path_check(path: &Path, label: &str, create_if_missing: bool) -> DoctorCheck 
         } else {
             DoctorCheck {
                 status: DoctorStatus::Error,
-                message: format!("{label} path {} exists but is not a directory", path.display()),
+                message: format!(
+                    "{label} path {} exists but is not a directory",
+                    path.display()
+                ),
             }
         }
     } else {
         DoctorCheck {
             status: DoctorStatus::Warning,
             message: if create_if_missing {
-                format!("{label} does not exist yet at {} and will be created on demand", path.display())
+                format!(
+                    "{label} does not exist yet at {} and will be created on demand",
+                    path.display()
+                )
             } else {
                 format!("{label} does not exist at {}", path.display())
             },
@@ -829,14 +850,18 @@ profiles:
         let report = validate_mosaic_config(&config);
 
         assert!(report.has_errors());
-        assert!(report
-            .issues
-            .iter()
-            .any(|issue| issue.field == "active_profile"));
-        assert!(report
-            .issues
-            .iter()
-            .any(|issue| issue.field == "profiles.broken.api_key_env"));
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue.field == "active_profile")
+        );
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue.field == "profiles.broken.api_key_env")
+        );
     }
 
     #[test]
@@ -850,14 +875,15 @@ profiles:
 
         assert!(doctor.has_errors());
         assert!(doctor.checks.iter().any(|check| {
-            check.message.contains("OPENAI_API_KEY")
-                && matches!(check.status, DoctorStatus::Error)
+            check.message.contains("OPENAI_API_KEY") && matches!(check.status, DoctorStatus::Error)
         }));
         assert_eq!(redacted.active_profile, "gpt-5.4");
-        assert!(redacted
-            .profiles
-            .iter()
-            .any(|profile| profile.name == "gpt-5.4" && !profile.api_key_present));
+        assert!(
+            redacted
+                .profiles
+                .iter()
+                .any(|profile| profile.name == "gpt-5.4" && !profile.api_key_present)
+        );
 
         fs::remove_dir_all(dir).ok();
     }

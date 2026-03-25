@@ -187,7 +187,11 @@ fn run_interactive_app(
     loop {
         drain_run_events(&mut app, &context.event_buffer);
         if gateway_link.load(Ordering::Relaxed) {
-            refresh_interactive_session_from_gateway(&mut app, &context.gateway, &context.session_id);
+            refresh_interactive_session_from_gateway(
+                &mut app,
+                &context.gateway,
+                &context.session_id,
+            );
         }
 
         terminal.draw(|frame| ui::render(frame, &app))?;
@@ -229,16 +233,13 @@ fn run_interactive_app(
     Ok(())
 }
 
-fn spawn_interactive_run(
-    context: &InteractiveSessionContext,
-    profile: String,
-    input: String,
-) {
+fn spawn_interactive_run(context: &InteractiveSessionContext, profile: String, input: String) {
     let gateway = context.gateway.clone();
     let request = GatewayRunRequest {
         system: context.system.clone(),
         input,
         skill: None,
+        workflow: None,
         session_id: Some(context.session_id.clone()),
         profile: Some(profile),
     };
@@ -300,11 +301,7 @@ fn refresh_interactive_session_from_gateway(
 }
 
 #[cfg(test)]
-fn refresh_interactive_session(
-    app: &mut App,
-    session_store: &dyn SessionStore,
-    session_id: &str,
-) {
+fn refresh_interactive_session(app: &mut App, session_store: &dyn SessionStore, session_id: &str) {
     if let Ok(Some(session)) = session_store.load(session_id) {
         app.sync_runtime_session(&session);
     }
@@ -334,7 +331,9 @@ mod tests {
 
     use crate::app::Surface;
 
-    use super::{TuiEventBuffer, TuiEventSink, build_app, drain_run_events, refresh_interactive_session};
+    use super::{
+        TuiEventBuffer, TuiEventSink, build_app, drain_run_events, refresh_interactive_session,
+    };
 
     struct MemorySessionStore {
         session: Option<SessionRecord>,

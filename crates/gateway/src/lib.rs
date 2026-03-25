@@ -5,13 +5,12 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use mosaic_inspect::RunTrace;
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry};
-use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult, RuntimeContext};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
-use mosaic_session_core::{
-    SessionRecord, SessionStore, SessionSummary, session_route_for_id,
-};
+use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult, RuntimeContext};
+use mosaic_session_core::{SessionRecord, SessionStore, SessionSummary, session_route_for_id};
 use mosaic_skill_core::SkillRegistry;
 use mosaic_tool_core::ToolRegistry;
+use mosaic_workflow::WorkflowRegistry;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 use tokio::sync::broadcast;
@@ -24,6 +23,7 @@ pub struct GatewayRuntimeComponents {
     pub session_store: Arc<dyn SessionStore>,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
+    pub workflows: Arc<WorkflowRegistry>,
     pub runs_dir: PathBuf,
 }
 
@@ -35,6 +35,7 @@ impl GatewayRuntimeComponents {
             session_store: self.session_store.clone(),
             tools: self.tools.clone(),
             skills: self.skills.clone(),
+            workflows: self.workflows.clone(),
             event_sink,
         }
     }
@@ -50,26 +51,18 @@ pub struct GatewayRunRequest {
     pub system: Option<String>,
     pub input: String,
     pub skill: Option<String>,
+    pub workflow: Option<String>,
     pub session_id: Option<String>,
     pub profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum GatewayEvent {
-    RunSubmitted {
-        input: String,
-        profile: String,
-    },
+    RunSubmitted { input: String, profile: String },
     Runtime(RunEvent),
-    SessionUpdated {
-        summary: SessionSummary,
-    },
-    RunCompleted {
-        output_preview: String,
-    },
-    RunFailed {
-        error: String,
-    },
+    SessionUpdated { summary: SessionSummary },
+    RunCompleted { output_preview: String },
+    RunFailed { error: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -182,10 +175,13 @@ impl GatewayHandle {
         let gateway_run_id = Uuid::new_v4().to_string();
         let correlation_id = Uuid::new_v4().to_string();
         let session_route = self.resolve_session_route(request.session_id.as_deref())?;
-        let resolved_profile = request
-            .profile
-            .clone()
-            .unwrap_or_else(|| self.inner.components.profiles.active_profile_name().to_owned());
+        let resolved_profile = request.profile.clone().unwrap_or_else(|| {
+            self.inner
+                .components
+                .profiles
+                .active_profile_name()
+                .to_owned()
+        });
         let meta = GatewayRunMeta {
             gateway_run_id: gateway_run_id.clone(),
             correlation_id: correlation_id.clone(),
@@ -209,6 +205,7 @@ impl GatewayHandle {
                 system: request.system,
                 input: request.input,
                 skill: request.skill,
+                workflow: request.workflow,
                 session_id: meta.session_id.clone(),
                 profile: request.profile,
             };
@@ -233,7 +230,9 @@ impl GatewayHandle {
         match session_id {
             Some(id) => Ok(self
                 .load_session(id)?
-                .and_then(|session| (!session.gateway.route.is_empty()).then_some(session.gateway.route))
+                .and_then(|session| {
+                    (!session.gateway.route.is_empty()).then_some(session.gateway.route)
+                })
                 .unwrap_or_else(|| session_route_for_id(id))),
             None => Ok("gateway.local/ephemeral".to_owned()),
         }
@@ -308,7 +307,9 @@ struct GatewayRunEventSink {
 
 impl RunEventSink for GatewayRunEventSink {
     fn emit(&self, event: RunEvent) {
-        let _ = self.sender.send(self.meta.envelope(GatewayEvent::Runtime(event)));
+        let _ = self
+            .sender
+            .send(self.meta.envelope(GatewayEvent::Runtime(event)));
     }
 }
 
@@ -439,7 +440,7 @@ mod tests {
     use std::sync::Mutex;
 
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
-    use mosaic_provider::{MockProvider};
+    use mosaic_provider::MockProvider;
     use mosaic_session_core::{SessionStore, TranscriptRole};
 
     use super::*;
@@ -490,8 +491,8 @@ mod tests {
                 api_key_env: None,
             },
         );
-        let profiles = ProviderProfileRegistry::from_config(&config)
-            .expect("profile registry should build");
+        let profiles =
+            ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
         let mut tools = ToolRegistry::new();
         tools.register(Arc::new(mosaic_tool_core::TimeNowTool::new()));
 
@@ -503,6 +504,7 @@ mod tests {
                 session_store: Arc::new(MemorySessionStore::default()),
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
+                workflows: Arc::new(WorkflowRegistry::new()),
                 runs_dir: std::env::temp_dir(),
             },
         )
@@ -516,6 +518,7 @@ mod tests {
                 system: Some("You are helpful.".to_owned()),
                 input: "hello gateway".to_owned(),
                 skill: None,
+                workflow: None,
                 session_id: Some("demo".to_owned()),
                 profile: None,
             })
@@ -528,13 +531,21 @@ mod tests {
             .expect("session should exist");
 
         assert_eq!(result.trace.session_id.as_deref(), Some("demo"));
-        assert_eq!(result.trace.gateway_run_id.as_deref(), Some(result.gateway_run_id.as_str()));
-        assert_eq!(session.gateway.last_gateway_run_id.as_deref(), Some(result.gateway_run_id.as_str()));
+        assert_eq!(
+            result.trace.gateway_run_id.as_deref(),
+            Some(result.gateway_run_id.as_str())
+        );
+        assert_eq!(
+            session.gateway.last_gateway_run_id.as_deref(),
+            Some(result.gateway_run_id.as_str())
+        );
         assert_eq!(session.gateway.route, "gateway.local/demo");
-        assert!(session
-            .transcript
-            .iter()
-            .any(|message| matches!(message.role, TranscriptRole::Assistant)));
+        assert!(
+            session
+                .transcript
+                .iter()
+                .any(|message| matches!(message.role, TranscriptRole::Assistant))
+        );
     }
 
     #[tokio::test]
@@ -546,6 +557,7 @@ mod tests {
                 system: Some("Use tools when needed.".to_owned()),
                 input: "What time is it now?".to_owned(),
                 skill: None,
+                workflow: None,
                 session_id: Some("clock".to_owned()),
                 profile: None,
             }))

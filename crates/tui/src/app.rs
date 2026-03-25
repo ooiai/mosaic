@@ -22,7 +22,10 @@ pub const LOCAL_COMMANDS: [(&str, &str); 8] = [
         "Update the selected session state or model label",
     ),
     ("/model list", "Show available runtime profiles"),
-    ("/model use <profile>", "Switch the real runtime profile for next turns"),
+    (
+        "/model use <profile>",
+        "Switch the real runtime profile for next turns",
+    ),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -328,11 +331,7 @@ impl App {
             view.state = state;
             view.unread = unread;
             view.draft = draft;
-            view.timeline = session
-                .transcript
-                .iter()
-                .map(transcript_entry)
-                .collect();
+            view.timeline = session.transcript.iter().map(transcript_entry).collect();
         }
 
         self.show_console_history = true;
@@ -422,9 +421,7 @@ impl App {
                 self.focus = Focus::Composer;
                 AppAction::Continue
             }
-            _ => {
-                self.handle_focus_key(key)
-            }
+            _ => self.handle_focus_key(key),
         }
     }
 
@@ -445,6 +442,85 @@ impl App {
                     "runtime",
                     "Run started",
                     &format!("Input: {}", truncate_for_timeline(&input, 180)),
+                );
+            }
+            RunEvent::WorkflowStarted { name, step_count } => {
+                self.push_activity(
+                    "workflow",
+                    format!("Workflow started: {} ({} steps)", name, step_count),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "workflow",
+                    "Workflow started",
+                    &format!("Workflow: {}\nsteps={}", name, step_count),
+                );
+            }
+            RunEvent::WorkflowStepStarted {
+                workflow,
+                step,
+                kind,
+            } => {
+                self.push_activity(
+                    "workflow",
+                    format!("Step started: {}.{} ({})", workflow, step, kind),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "workflow",
+                    &format!("Workflow step: {}", step),
+                    &format!("workflow={}\nkind={}", workflow, kind),
+                );
+            }
+            RunEvent::WorkflowStepFinished { workflow, step } => {
+                self.push_activity("workflow", format!("Step finished: {}.{}", workflow, step));
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "workflow",
+                    &format!("Workflow step finished: {}", step),
+                    &format!("workflow={}", workflow),
+                );
+            }
+            RunEvent::WorkflowStepFailed {
+                workflow,
+                step,
+                error,
+            } => {
+                self.runtime_status = "error".to_owned();
+                self.push_activity("workflow", format!("Step failed: {}.{}", workflow, step));
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::System,
+                    "workflow",
+                    &format!("Workflow step failed: {}", step),
+                    &format!(
+                        "workflow={}\nerror={}",
+                        workflow,
+                        truncate_for_timeline(&error, 180)
+                    ),
+                );
+            }
+            RunEvent::WorkflowFinished { name } => {
+                self.push_activity("workflow", format!("Workflow finished: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "workflow",
+                    "Workflow finished",
+                    &format!("Workflow: {}", name),
                 );
             }
             RunEvent::SkillStarted { name } => {
@@ -1056,7 +1132,9 @@ impl App {
         match args.as_slice() {
             ["list"] => {
                 if self.available_profiles.is_empty() {
-                    self.push_command_error("No runtime profiles are available in this TUI session");
+                    self.push_command_error(
+                        "No runtime profiles are available in this TUI session",
+                    );
                     return;
                 }
 

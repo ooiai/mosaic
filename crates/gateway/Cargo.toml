@@ -17,6 +17,7 @@ mosaic-runtime = { path = "../runtime" }
 mosaic-session-core = { path = "../session-core" }
 mosaic-skill-core = { path = "../skill-core" }
 mosaic-tool-core = { path = "../tool-core" }
+mosaic-workflow = { path = "../workflow" }
 
 [dev-dependencies]
 mosaic-config = { path = "../config" }

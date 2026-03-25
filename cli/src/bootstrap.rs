@@ -9,9 +9,10 @@ use mosaic_runtime::{
     events::{CompositeEventSink, SharedRunEventSink},
 };
 use mosaic_session_core::FileSessionStore;
-use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
+use mosaic_skill_core::{SkillManifest, SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{EchoTool, ReadFileTool, TimeNowTool, ToolRegistry};
 use mosaic_tui::{TuiEventBuffer, build_tui_event_buffer, build_tui_event_sink};
+use mosaic_workflow::{Workflow, WorkflowRegistry};
 use tokio::runtime::Handle;
 
 use crate::output::CliEventSink;
@@ -39,6 +40,9 @@ pub fn build_runtime_context(
         session_store: Arc::new(FileSessionStore::new(session_store_root)),
         tools,
         skills,
+        workflows: Arc::new(build_workflows(
+            app_config.map(|cfg| cfg.workflows.as_slice()),
+        )?),
         event_sink,
     })
 }
@@ -52,6 +56,9 @@ pub fn build_gateway_components(
     let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
     let tools = Arc::new(build_tools(app_config.map(|cfg| cfg.tools.as_slice()))?);
     let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
+    let workflows = Arc::new(build_workflows(
+        app_config.map(|cfg| cfg.workflows.as_slice()),
+    )?);
 
     Ok(GatewayRuntimeComponents {
         profiles,
@@ -59,6 +66,7 @@ pub fn build_gateway_components(
         session_store: Arc::new(FileSessionStore::new(session_store_root)),
         tools,
         skills,
+        workflows,
         runs_dir,
     })
 }
@@ -138,6 +146,17 @@ fn build_skills(configs: Option<&[SkillConfig]>) -> Result<SkillRegistry> {
             for skill in configs {
                 match (skill.skill_type.as_str(), skill.name.as_str()) {
                     ("builtin", "summarize") => skills.register(Arc::new(SummarizeSkill)),
+                    ("manifest", _) => skills.register_manifest(SkillManifest {
+                        name: skill.name.clone(),
+                        description: skill
+                            .description
+                            .clone()
+                            .unwrap_or_else(|| format!("manifest skill {}", skill.name)),
+                        input_schema: skill.input_schema.clone(),
+                        tools: skill.tools.clone(),
+                        system_prompt: skill.system_prompt.clone(),
+                        steps: skill.steps.clone(),
+                    }),
                     ("builtin", other) => {
                         bail!("unsupported builtin skill in skeleton mode: {other}")
                     }
@@ -151,6 +170,18 @@ fn build_skills(configs: Option<&[SkillConfig]>) -> Result<SkillRegistry> {
     }
 
     Ok(skills)
+}
+
+fn build_workflows(configs: Option<&[Workflow]>) -> Result<WorkflowRegistry> {
+    let mut workflows = WorkflowRegistry::new();
+
+    if let Some(configs) = configs {
+        for workflow in configs {
+            workflows.register(workflow.clone());
+        }
+    }
+
+    Ok(workflows)
 }
 
 fn resolve_workspace_path(path: &str) -> Result<PathBuf> {
@@ -195,7 +226,13 @@ mod tests {
             skills: vec![SkillConfig {
                 skill_type: "builtin".to_owned(),
                 name: "summarize".to_owned(),
+                description: None,
+                input_schema: serde_json::json!({ "type": "object" }),
+                tools: Vec::new(),
+                system_prompt: None,
+                steps: Vec::new(),
             }],
+            workflows: Vec::new(),
             agent: AgentConfig { system: None },
             task: TaskConfig {
                 input: "hello".to_owned(),
@@ -216,6 +253,7 @@ mod tests {
         assert!(ctx.tools.get("time_now").is_some());
         assert!(ctx.tools.get("read_file").is_some());
         assert!(ctx.skills.get("summarize").is_some());
+        assert!(ctx.workflows.is_empty());
         assert_eq!(ctx.profiles.active_profile_name(), "mock");
     }
 
@@ -228,6 +266,7 @@ mod tests {
         assert!(ctx.tools.get("read_file").is_some());
         assert!(ctx.tools.get("time_now").is_some());
         assert!(ctx.skills.get("summarize").is_some());
+        assert!(ctx.workflows.is_empty());
     }
 
     #[test]
@@ -239,6 +278,7 @@ mod tests {
         assert!(components.tools.get("time_now").is_some());
         assert!(components.tools.get("read_file").is_some());
         assert!(components.skills.get("summarize").is_some());
+        assert!(components.workflows.is_empty());
         assert_eq!(components.profiles.active_profile_name(), "mock");
         assert!(components.runs_dir.ends_with(".mosaic/runs"));
     }

@@ -259,7 +259,8 @@ impl SessionStore for FileSessionStore {
             }
 
             let content = fs::read_to_string(&path)?;
-            let session = normalize_loaded_session(serde_json::from_str::<SessionRecord>(&content)?);
+            let session =
+                normalize_loaded_session(serde_json::from_str::<SessionRecord>(&content)?);
             sessions.push(session.summary());
         }
 
@@ -373,7 +374,10 @@ mod tests {
         let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
         session.gateway.route.clear();
 
-        assert_eq!(session.summary().session_route, session_route_for_id("demo"));
+        assert_eq!(
+            session.summary().session_route,
+            session_route_for_id("demo")
+        );
     }
 
     #[test]

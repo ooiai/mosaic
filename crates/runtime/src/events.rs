@@ -7,6 +7,27 @@ pub enum RunEvent {
     RunStarted {
         input: String,
     },
+    WorkflowStarted {
+        name: String,
+        step_count: usize,
+    },
+    WorkflowStepStarted {
+        workflow: String,
+        step: String,
+        kind: String,
+    },
+    WorkflowStepFinished {
+        workflow: String,
+        step: String,
+    },
+    WorkflowStepFailed {
+        workflow: String,
+        step: String,
+        error: String,
+    },
+    WorkflowFinished {
+        name: String,
+    },
     SkillStarted {
         name: String,
     },

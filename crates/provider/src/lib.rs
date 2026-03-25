@@ -77,6 +77,17 @@ impl ProviderProfile {
     }
 }
 
+pub fn validate_step_tools_support(profile: &ProviderProfile, tool_names: &[String]) -> Result<()> {
+    if !tool_names.is_empty() && !profile.capabilities.supports_tools {
+        bail!(
+            "profile '{}' does not support tool-enabled workflow steps",
+            profile.name
+        );
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderProfileRegistry {
     active_profile: String,
@@ -92,9 +103,7 @@ impl ProviderProfileRegistry {
         let profiles = config
             .profiles
             .iter()
-            .map(|(name, profile)| {
-                (name.clone(), provider_profile_from_config(name, profile))
-            })
+            .map(|(name, profile)| (name.clone(), provider_profile_from_config(name, profile)))
             .collect::<BTreeMap<_, _>>();
 
         if !profiles.contains_key(&config.active_profile) {

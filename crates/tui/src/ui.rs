@@ -68,7 +68,9 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
     let status = if app.is_interactive() {
         Paragraph::new(vec![Line::from(vec![
             Span::styled("• ", Style::default().fg(Color::Cyan)),
-            Span::raw("Interactive local session mode is enabled. Enter resumes the selected conversation."),
+            Span::raw(
+                "Interactive local session mode is enabled. Enter resumes the selected conversation.",
+            ),
         ])])
     } else {
         Paragraph::new(vec![Line::from(vec![
@@ -212,7 +214,9 @@ fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let mut detail_lines = if app.is_interactive() {
         vec![Line::from(vec![
             Span::styled("• ", Style::default().fg(Color::Cyan)),
-            Span::raw("Interactive mode is enabled. Messages are sent to the real local runtime and stored in the current session."),
+            Span::raw(
+                "Interactive mode is enabled. Messages are sent to the real local runtime and stored in the current session.",
+            ),
         ])]
     } else {
         vec![Line::from(vec![

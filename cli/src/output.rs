@@ -5,6 +5,31 @@ pub struct CliEventSink;
 fn format_run_event(event: &RunEvent) -> String {
     match event {
         RunEvent::RunStarted { .. } => "[run] starting".to_owned(),
+        RunEvent::WorkflowStarted { name, step_count } => {
+            format!("[run] workflow started: {} steps={}", name, step_count)
+        }
+        RunEvent::WorkflowStepStarted {
+            workflow,
+            step,
+            kind,
+        } => format!(
+            "[run] workflow step started: {}.{} kind={}",
+            workflow, step, kind
+        ),
+        RunEvent::WorkflowStepFinished { workflow, step } => {
+            format!("[run] workflow step finished: {}.{}", workflow, step)
+        }
+        RunEvent::WorkflowStepFailed {
+            workflow,
+            step,
+            error,
+        } => format!(
+            "[run] workflow step failed: {}.{} error={}",
+            workflow, step, error
+        ),
+        RunEvent::WorkflowFinished { name } => {
+            format!("[run] workflow finished: {}", name)
+        }
         RunEvent::SkillStarted { name } => format!("[run] executing skill: {}", name),
         RunEvent::SkillFinished { name } => format!("[run] skill finished: {}", name),
         RunEvent::SkillFailed { name, error } => {
@@ -61,6 +86,20 @@ mod tests {
         });
 
         assert_eq!(line, "[run] provider=request tools=2 messages=3");
+    }
+
+    #[test]
+    fn formats_workflow_step_failures_with_workflow_prefix() {
+        let line = format_run_event(&RunEvent::WorkflowStepFailed {
+            workflow: "research_brief".to_owned(),
+            step: "draft".to_owned(),
+            error: "provider failure".to_owned(),
+        });
+
+        assert_eq!(
+            line,
+            "[run] workflow step failed: research_brief.draft error=provider failure"
+        );
     }
 
     #[test]

@@ -56,6 +56,37 @@ impl SkillTrace {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkflowStepTrace {
+    pub name: String,
+    pub kind: String,
+    pub input: String,
+    pub output: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+impl WorkflowStepTrace {
+    pub fn duration_ms(&self) -> Option<i64> {
+        self.finished_at.map(|finished| {
+            finished
+                .signed_duration_since(self.started_at)
+                .num_milliseconds()
+        })
+    }
+
+    pub fn status(&self) -> &'static str {
+        if self.error.is_some() {
+            "failed"
+        } else if self.finished_at.is_some() {
+            "success"
+        } else {
+            "running"
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
     pub status: String,
@@ -71,6 +102,7 @@ pub struct RunTrace {
     pub correlation_id: Option<String>,
     pub session_id: Option<String>,
     pub session_route: Option<String>,
+    pub workflow_name: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub input: String,
@@ -80,6 +112,8 @@ pub struct RunTrace {
     pub tool_calls: Vec<ToolTrace>,
     #[serde(default)]
     pub skill_calls: Vec<SkillTrace>,
+    #[serde(default)]
+    pub step_traces: Vec<WorkflowStepTrace>,
     pub error: Option<String>,
 }
 
@@ -91,6 +125,7 @@ impl RunTrace {
             correlation_id: None,
             session_id: None,
             session_route: None,
+            workflow_name: None,
             started_at: Utc::now(),
             finished_at: None,
             input,
@@ -98,6 +133,7 @@ impl RunTrace {
             effective_profile: None,
             tool_calls: vec![],
             skill_calls: vec![],
+            step_traces: vec![],
             error: None,
         }
     }
@@ -115,6 +151,10 @@ impl RunTrace {
         self.gateway_run_id = Some(gateway_run_id.into());
         self.correlation_id = Some(correlation_id.into());
         self.session_route = Some(session_route.into());
+    }
+
+    pub fn bind_workflow(&mut self, workflow_name: impl Into<String>) {
+        self.workflow_name = Some(workflow_name.into());
     }
 
     pub fn bind_effective_profile(&mut self, profile: EffectiveProfileTrace) {
@@ -235,6 +275,7 @@ mod tests {
             correlation_id: Some("corr-1".to_owned()),
             session_id: Some("session-1".to_owned()),
             session_route: Some("gateway.local/session-1".to_owned()),
+            workflow_name: Some("research_brief".to_owned()),
             started_at,
             finished_at: Some(finished_at),
             input: "hello".to_owned(),
@@ -255,6 +296,15 @@ mod tests {
                 finished_at: Some(started_at + Duration::milliseconds(3)),
             }],
             skill_calls: vec![],
+            step_traces: vec![WorkflowStepTrace {
+                name: "draft".to_owned(),
+                kind: "prompt".to_owned(),
+                input: "hello".to_owned(),
+                output: Some("world".to_owned()),
+                started_at,
+                finished_at: Some(started_at + Duration::milliseconds(9)),
+                error: None,
+            }],
             error: None,
         };
 
@@ -267,6 +317,8 @@ mod tests {
         assert_eq!(summary.skill_calls, 0);
         assert_eq!(summary.duration_ms, Some(18));
         assert_eq!(trace.tool_calls[0].duration_ms(), Some(3));
+        assert_eq!(trace.step_traces[0].duration_ms(), Some(9));
+        assert_eq!(trace.step_traces[0].status(), "success");
     }
 
     #[test]
