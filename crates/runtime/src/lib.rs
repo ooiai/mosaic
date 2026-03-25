@@ -366,26 +366,9 @@ impl AgentRuntime {
                         call_id: call_id.clone(),
                     });
 
-                    trace.tool_calls.push(ToolTrace {
-                        call_id: Some(call_id.clone()),
-                        name: tool_name.clone(),
-                        input: tool_input,
-                        output: None,
-                        started_at: Utc::now(),
-                        finished_at: None,
-                    });
-
                     let tool = match self.ctx.tools.get(&tool_name) {
                         Some(tool) => tool,
                         None => {
-                            if let Some(last) = trace.tool_calls.last_mut() {
-                                last.output = Some(format!(
-                                    "[runtime tool failure] tool not found: {}",
-                                    tool_name
-                                ));
-                                last.finished_at = Some(Utc::now());
-                            }
-
                             let err = anyhow!("tool not found: {}", tool_name);
                             self.emit(RunEvent::ToolFailed {
                                 name: tool_name,
@@ -395,6 +378,17 @@ impl AgentRuntime {
                             return Err(err);
                         }
                     };
+                    let tool_source = tool.metadata().source.clone();
+
+                    trace.tool_calls.push(ToolTrace {
+                        call_id: Some(call_id.clone()),
+                        name: tool_name.clone(),
+                        source: tool_source,
+                        input: tool_input,
+                        output: None,
+                        started_at: Utc::now(),
+                        finished_at: None,
+                    });
 
                     match tool.call(call.arguments).await {
                         Ok(result) => {
@@ -506,29 +500,10 @@ impl AgentRuntime {
                         name: tool_name.clone(),
                         call_id: call_id.clone(),
                     });
-                    push_tool_trace(
-                        tool_traces,
-                        ToolTrace {
-                            call_id: Some(call_id.clone()),
-                            name: tool_name.clone(),
-                            input: tool_input,
-                            output: None,
-                            started_at: Utc::now(),
-                            finished_at: None,
-                        },
-                    );
 
                     let tool = match self.ctx.tools.get(&tool_name) {
                         Some(tool) => tool,
                         None => {
-                            update_tool_trace(tool_traces, &call_id, |trace| {
-                                trace.output = Some(format!(
-                                    "[runtime tool failure] tool not found: {}",
-                                    tool_name
-                                ));
-                                trace.finished_at = Some(Utc::now());
-                            });
-
                             let err = anyhow!("tool not found: {}", tool_name);
                             self.emit(RunEvent::ToolFailed {
                                 name: tool_name,
@@ -538,6 +513,20 @@ impl AgentRuntime {
                             return Err(err);
                         }
                     };
+                    let tool_source = tool.metadata().source.clone();
+
+                    push_tool_trace(
+                        tool_traces,
+                        ToolTrace {
+                            call_id: Some(call_id.clone()),
+                            name: tool_name.clone(),
+                            source: tool_source,
+                            input: tool_input,
+                            output: None,
+                            started_at: Utc::now(),
+                            finished_at: None,
+                        },
+                    );
 
                     match tool.call(call.arguments).await {
                         Ok(result) => {
@@ -1052,7 +1041,7 @@ mod tests {
         SessionRecord, SessionStore, SessionSummary, TranscriptMessage, TranscriptRole,
     };
     use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
-    use mosaic_tool_core::{TimeNowTool, ToolRegistry};
+    use mosaic_tool_core::{TimeNowTool, Tool, ToolMetadata, ToolRegistry, ToolResult, ToolSource};
     use mosaic_workflow::{Workflow, WorkflowRegistry, WorkflowStep, WorkflowStepKind};
 
     use super::{AgentRuntime, RunRequest, RuntimeContext};
@@ -1150,6 +1139,51 @@ mod tests {
             _ctx: &mosaic_skill_core::SkillContext,
         ) -> Result<mosaic_skill_core::SkillOutput> {
             Err(anyhow!("skill exploded"))
+        }
+    }
+
+    struct FakeMcpReadFileTool {
+        meta: ToolMetadata,
+    }
+
+    impl FakeMcpReadFileTool {
+        fn new() -> Self {
+            Self {
+                meta: ToolMetadata::mcp(
+                    "filesystem",
+                    "read_file",
+                    "Read a UTF-8 text file from disk via MCP",
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string" }
+                        },
+                        "required": ["path"]
+                    }),
+                ),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Tool for FakeMcpReadFileTool {
+        fn metadata(&self) -> &ToolMetadata {
+            &self.meta
+        }
+
+        async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+            let path = input
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("README.md");
+
+            Ok(ToolResult {
+                content: format!("remote mcp contents from {path}"),
+                structured: Some(serde_json::json!({
+                    "path": path,
+                    "origin": "mcp",
+                })),
+            })
         }
     }
 
@@ -1369,6 +1403,7 @@ mod tests {
         assert!(result.output.starts_with("The current time is: "));
         assert_eq!(result.trace.tool_calls.len(), 1);
         assert_eq!(result.trace.session_id.as_deref(), Some("time-demo"));
+        assert_eq!(result.trace.tool_calls[0].source, ToolSource::Builtin);
         assert_eq!(
             event_names(&sink.snapshot()),
             vec![
@@ -1380,6 +1415,52 @@ mod tests {
                 "FinalAnswerReady",
                 "RunFinished",
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
+        let mut config = MosaicConfig::default();
+        config.active_profile = "mock".to_owned();
+        let profiles =
+            ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(FakeMcpReadFileTool::new()));
+        let runtime = AgentRuntime::new(RuntimeContext {
+            profiles: Arc::new(profiles),
+            provider_override: Some(Arc::new(MockProvider)),
+            session_store: Arc::new(MemorySessionStore::default()),
+            tools: Arc::new(tools),
+            skills: Arc::new(SkillRegistry::new()),
+            workflows: Arc::new(WorkflowRegistry::new()),
+            event_sink: Arc::new(NoopEventSink),
+        });
+
+        let result = runtime
+            .run(RunRequest {
+                system: Some("Use tools when needed.".to_owned()),
+                input: "Read a file for me.".to_owned(),
+                skill: None,
+                workflow: None,
+                session_id: None,
+                profile: None,
+            })
+            .await
+            .expect("remote MCP tool loop should succeed");
+
+        assert_eq!(result.trace.tool_calls.len(), 1);
+        assert_eq!(result.trace.tool_calls[0].name, "mcp.filesystem.read_file");
+        assert_eq!(
+            result.trace.tool_calls[0].source,
+            ToolSource::Mcp {
+                server: "filesystem".to_owned(),
+                remote_tool: "read_file".to_owned(),
+            }
+        );
+        assert!(
+            result
+                .output
+                .starts_with("I read the file successfully. Preview:\n")
         );
     }
 

@@ -18,6 +18,7 @@ tokio.workspace = true
 mosaic-config = { path = "../crates/config" }
 mosaic-gateway = { path = "../crates/gateway" }
 mosaic-inspect = { path = "../crates/inspect" }
+mosaic-mcp-core = { path = "../crates/mcp-core" }
 mosaic-provider = { path = "../crates/provider" }
 mosaic-runtime = { path = "../crates/runtime" }
 mosaic-session-core = { path = "../crates/session-core" }

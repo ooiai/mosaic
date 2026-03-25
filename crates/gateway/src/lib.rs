@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use mosaic_inspect::RunTrace;
+use mosaic_mcp_core::McpServerManager;
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult, RuntimeContext};
@@ -24,6 +25,7 @@ pub struct GatewayRuntimeComponents {
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
     pub workflows: Arc<WorkflowRegistry>,
+    pub mcp_manager: Option<Arc<McpServerManager>>,
     pub runs_dir: PathBuf,
 }
 
@@ -440,6 +442,7 @@ mod tests {
     use std::sync::Mutex;
 
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
+    use mosaic_mcp_core::{McpServerManager, McpServerSpec};
     use mosaic_provider::MockProvider;
     use mosaic_session_core::{SessionStore, TranscriptRole};
 
@@ -505,8 +508,16 @@ mod tests {
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
+                mcp_manager: None,
                 runs_dir: std::env::temp_dir(),
             },
+        )
+    }
+
+    fn mcp_script_path() -> String {
+        format!(
+            "{}/../../scripts/mock_mcp_server.py",
+            env!("CARGO_MANIFEST_DIR")
         )
     }
 
@@ -588,5 +599,57 @@ mod tests {
         assert!(saw_runtime);
         assert!(saw_session_updated);
         assert!(saw_completed);
+    }
+
+    #[tokio::test]
+    async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
+        let mut config = MosaicConfig::default();
+        config.active_profile = "mock".to_owned();
+        let profiles =
+            ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(mosaic_tool_core::TimeNowTool::new()));
+        let manager = Arc::new(
+            McpServerManager::start(&[McpServerSpec {
+                name: "filesystem".to_owned(),
+                command: "python3".to_owned(),
+                args: vec![mcp_script_path(), "filesystem".to_owned()],
+            }])
+            .expect("MCP manager should start"),
+        );
+
+        let gateway = GatewayHandle::new_local(
+            Handle::current(),
+            GatewayRuntimeComponents {
+                profiles: Arc::new(profiles),
+                provider_override: Some(Arc::new(MockProvider)),
+                session_store: Arc::new(MemorySessionStore::default()),
+                tools: Arc::new(tools),
+                skills: Arc::new(SkillRegistry::new()),
+                workflows: Arc::new(WorkflowRegistry::new()),
+                mcp_manager: Some(manager),
+                runs_dir: std::env::temp_dir(),
+            },
+        );
+
+        assert_eq!(
+            gateway
+                .inner
+                .components
+                .mcp_manager
+                .as_ref()
+                .map(|manager| manager.server_count()),
+            Some(1)
+        );
+        assert_eq!(
+            gateway
+                .inner
+                .components
+                .mcp_manager
+                .as_ref()
+                .expect("MCP manager should be retained")
+                .list_servers(),
+            vec!["filesystem".to_owned()]
+        );
     }
 }

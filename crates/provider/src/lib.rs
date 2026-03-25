@@ -165,33 +165,37 @@ impl LlmProvider for MockProvider {
         match last.role {
             Role::User => {
                 let content = last.content.to_lowercase();
+                let time_tool = resolve_tool_name(tools, "time_now");
+                let read_file_tool = resolve_tool_name(tools, "read_file");
 
-                if content.contains("time") && tool_is_available(tools, "time_now") {
-                    return Ok(CompletionResponse {
-                        message: None,
-                        tool_calls: vec![ToolCall {
-                            id: "call_mock_time_now".to_owned(),
-                            name: "time_now".to_owned(),
-                            arguments: serde_json::json!({}),
-                        }],
-                        finish_reason: Some("tool_calls".to_owned()),
-                    });
+                if content.contains("time") {
+                    if let Some(tool_name) = time_tool {
+                        return Ok(CompletionResponse {
+                            message: None,
+                            tool_calls: vec![ToolCall {
+                                id: format!("call_mock_{}", tool_name.replace('.', "_")),
+                                name: tool_name,
+                                arguments: serde_json::json!({}),
+                            }],
+                            finish_reason: Some("tool_calls".to_owned()),
+                        });
+                    }
                 }
 
-                if (content.contains("read") || content.contains("file"))
-                    && tool_is_available(tools, "read_file")
-                {
-                    return Ok(CompletionResponse {
-                        message: None,
-                        tool_calls: vec![ToolCall {
-                            id: "call_mock_read_file".to_owned(),
-                            name: "read_file".to_owned(),
-                            arguments: serde_json::json!({
-                                "path": "README.md"
-                            }),
-                        }],
-                        finish_reason: Some("tool_calls".to_owned()),
-                    });
+                if content.contains("read") || content.contains("file") {
+                    if let Some(tool_name) = read_file_tool {
+                        return Ok(CompletionResponse {
+                            message: None,
+                            tool_calls: vec![ToolCall {
+                                id: format!("call_mock_{}", tool_name.replace('.', "_")),
+                                name: tool_name,
+                                arguments: serde_json::json!({
+                                    "path": "README.md"
+                                }),
+                            }],
+                            finish_reason: Some("tool_calls".to_owned()),
+                        });
+                    }
                 }
 
                 Ok(CompletionResponse {
@@ -399,10 +403,17 @@ fn role_to_api(role: &Role) -> &'static str {
     }
 }
 
-fn tool_is_available(tools: Option<&[ToolDefinition]>, name: &str) -> bool {
-    tools
-        .map(|defs| defs.iter().any(|tool| tool.name == name))
-        .unwrap_or(false)
+fn resolve_tool_name(tools: Option<&[ToolDefinition]>, canonical: &str) -> Option<String> {
+    let defs = tools?;
+
+    defs.iter()
+        .find(|tool| tool.name == canonical)
+        .map(|tool| tool.name.clone())
+        .or_else(|| {
+            defs.iter()
+                .find(|tool| tool.name.ends_with(&format!(".{canonical}")))
+                .map(|tool| tool.name.clone())
+        })
 }
 
 fn infer_tool_name_from_call_id(call_id: Option<&str>) -> Option<&'static str> {
@@ -498,6 +509,18 @@ mod tests {
         ToolDefinition {
             name: "read_file".to_owned(),
             description: "Read a UTF-8 text file from disk".to_owned(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": { "path": { "type": "string" } },
+                "required": ["path"],
+            }),
+        }
+    }
+
+    fn mcp_read_file_tool_definition() -> ToolDefinition {
+        ToolDefinition {
+            name: "mcp.filesystem.read_file".to_owned(),
+            description: "Read a UTF-8 text file from disk via MCP".to_owned(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": { "path": { "type": "string" } },
@@ -613,6 +636,23 @@ mod tests {
                 .starts_with("I read the file successfully. Preview:\n")
         );
         assert!(message.content.ends_with("..."));
+    }
+
+    #[test]
+    fn mock_provider_can_target_remote_mcp_tools_by_suffix() {
+        let response = block_on(MockProvider.complete(
+            &[Message {
+                role: Role::User,
+                content: "Read a file for me.".to_owned(),
+                tool_call_id: None,
+            }],
+            Some(&[mcp_read_file_tool_definition()]),
+        ))
+        .expect("mock provider should succeed");
+
+        assert!(response.message.is_none());
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "mcp.filesystem.read_file");
     }
 
     #[test]

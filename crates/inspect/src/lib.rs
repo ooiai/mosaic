@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use mosaic_tool_core::ToolSource;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -12,6 +13,8 @@ use uuid::Uuid;
 pub struct ToolTrace {
     pub call_id: Option<String>,
     pub name: String,
+    #[serde(default)]
+    pub source: ToolSource,
     pub input: serde_json::Value,
     pub output: Option<String>,
     pub started_at: DateTime<Utc>,
@@ -245,6 +248,7 @@ mod tests {
         trace.tool_calls.push(ToolTrace {
             call_id: Some("call-1".to_owned()),
             name: "echo".to_owned(),
+            source: ToolSource::Builtin,
             input: serde_json::json!({ "text": "hello" }),
             output: Some("hello".to_owned()),
             started_at: Utc::now(),
@@ -290,6 +294,7 @@ mod tests {
             tool_calls: vec![ToolTrace {
                 call_id: Some("call-1".to_owned()),
                 name: "echo".to_owned(),
+                source: ToolSource::Builtin,
                 input: serde_json::json!({ "text": "hello" }),
                 output: Some("hello".to_owned()),
                 started_at,

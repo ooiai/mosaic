@@ -971,6 +971,7 @@ dependencies = [
  "mosaic-config",
  "mosaic-gateway",
  "mosaic-inspect",
+ "mosaic-mcp-core",
  "mosaic-provider",
  "mosaic-runtime",
  "mosaic-session-core",
@@ -1002,6 +1003,7 @@ dependencies = [
  "chrono",
  "mosaic-config",
  "mosaic-inspect",
+ "mosaic-mcp-core",
  "mosaic-provider",
  "mosaic-runtime",
  "mosaic-session-core",
@@ -1019,6 +1021,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "mosaic-tool-core",
  "serde",
  "serde_json",
  "uuid",
@@ -1030,6 +1033,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "futures",
  "mosaic-tool-core",
  "serde",
  "serde_json",

@@ -10,3 +10,5 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+
+mosaic-tool-core = { path = "../tool-core" }

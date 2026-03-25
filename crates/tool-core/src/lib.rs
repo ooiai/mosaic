@@ -5,11 +5,88 @@ use async_trait::async_trait;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolSource {
+    Builtin,
+    Mcp { server: String, remote_tool: String },
+}
+
+impl Default for ToolSource {
+    fn default() -> Self {
+        Self::Builtin
+    }
+}
+
+impl ToolSource {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::Mcp { .. } => "mcp",
+        }
+    }
+
+    pub fn server_name(&self) -> Option<&str> {
+        match self {
+            Self::Builtin => None,
+            Self::Mcp { server, .. } => Some(server),
+        }
+    }
+
+    pub fn remote_tool_name(&self) -> Option<&str> {
+        match self {
+            Self::Builtin => None,
+            Self::Mcp { remote_tool, .. } => Some(remote_tool),
+        }
+    }
+}
+
+pub fn mcp_tool_name(server: &str, remote_tool: &str) -> String {
+    format!("mcp.{server}.{remote_tool}")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolMetadata {
     pub name: String,
     pub description: String,
     pub input_schema: serde_json::Value,
+    #[serde(default)]
+    pub source: ToolSource,
+}
+
+impl ToolMetadata {
+    pub fn builtin(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            input_schema,
+            source: ToolSource::Builtin,
+        }
+    }
+
+    pub fn mcp(
+        server: impl Into<String>,
+        remote_tool: impl Into<String>,
+        description: impl Into<String>,
+        input_schema: serde_json::Value,
+    ) -> Self {
+        let server = server.into();
+        let remote_tool = remote_tool.into();
+
+        Self {
+            name: mcp_tool_name(&server, &remote_tool),
+            description: description.into(),
+            input_schema,
+            source: ToolSource::Mcp {
+                server,
+                remote_tool,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -59,17 +136,17 @@ pub struct EchoTool {
 impl EchoTool {
     pub fn new() -> Self {
         Self {
-            meta: ToolMetadata {
-                name: "echo".to_owned(),
-                description: "Echo input as output".to_owned(),
-                input_schema: serde_json::json!({
+            meta: ToolMetadata::builtin(
+                "echo",
+                "Echo input as output",
+                serde_json::json!({
                     "type": "object",
                     "properties": {
                         "text": { "type": "string" }
                     },
                     "required": ["text"]
                 }),
-            },
+            ),
         }
     }
 }
@@ -107,14 +184,14 @@ pub struct TimeNowTool {
 impl TimeNowTool {
     pub fn new() -> Self {
         Self {
-            meta: ToolMetadata {
-                name: "time_now".to_owned(),
-                description: "Return the current UTC timestamp".to_owned(),
-                input_schema: serde_json::json!({
+            meta: ToolMetadata::builtin(
+                "time_now",
+                "Return the current UTC timestamp",
+                serde_json::json!({
                     "type": "object",
                     "properties": {}
                 }),
-            },
+            ),
         }
     }
 }
@@ -150,17 +227,17 @@ pub struct ReadFileTool {
 impl ReadFileTool {
     pub fn new() -> Self {
         Self {
-            meta: ToolMetadata {
-                name: "read_file".to_owned(),
-                description: "Read a UTF-8 text file from disk".to_owned(),
-                input_schema: serde_json::json!({
+            meta: ToolMetadata::builtin(
+                "read_file",
+                "Read a UTF-8 text file from disk",
+                serde_json::json!({
                     "type": "object",
                     "properties": {
                         "path": { "type": "string" }
                     },
                     "required": ["path"]
                 }),
-            },
+            ),
         }
     }
 }
@@ -219,7 +296,10 @@ mod tests {
     use chrono::DateTime;
     use futures::executor::block_on;
 
-    use super::{EchoTool, ReadFileTool, TimeNowTool, Tool, ToolRegistry};
+    use super::{
+        EchoTool, ReadFileTool, TimeNowTool, Tool, ToolMetadata, ToolRegistry, ToolSource,
+        mcp_tool_name,
+    };
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -247,6 +327,23 @@ mod tests {
 
         assert_eq!(result.content, "hello");
         assert_eq!(registry.list(), vec!["echo".to_owned()]);
+        assert_eq!(tool.metadata().source, ToolSource::Builtin);
+    }
+
+    #[test]
+    fn mcp_tool_metadata_uses_qualified_registration_name() {
+        let metadata = ToolMetadata::mcp(
+            "filesystem",
+            "read_file",
+            "Read a file over MCP",
+            serde_json::json!({ "type": "object" }),
+        );
+
+        assert_eq!(metadata.name, "mcp.filesystem.read_file");
+        assert_eq!(mcp_tool_name("filesystem", "read_file"), metadata.name);
+        assert_eq!(metadata.source.label(), "mcp");
+        assert_eq!(metadata.source.server_name(), Some("filesystem"));
+        assert_eq!(metadata.source.remote_tool_name(), Some("read_file"));
     }
 
     #[test]

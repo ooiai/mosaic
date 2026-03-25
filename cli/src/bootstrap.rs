@@ -1,8 +1,9 @@
 use std::{env, path::PathBuf, sync::Arc};
 
 use anyhow::{Result, bail};
-use mosaic_config::{AppConfig, MosaicConfig, SkillConfig, ToolConfig};
+use mosaic_config::{AppConfig, McpConfig, MosaicConfig, SkillConfig, ToolConfig};
 use mosaic_gateway::{GatewayHandle, GatewayRuntimeComponents};
+use mosaic_mcp_core::{McpServerManager, McpServerSpec};
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::{
     RuntimeContext,
@@ -31,7 +32,11 @@ pub fn build_runtime_context(
 ) -> Result<RuntimeContext> {
     let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
-    let tools = Arc::new(build_tools(app_config.map(|cfg| cfg.tools.as_slice()))?);
+    let (tools, _mcp_manager) = build_tools_with_mcp(
+        app_config.map(|cfg| cfg.tools.as_slice()),
+        app_config.and_then(|cfg| cfg.mcp.as_ref()),
+    )?;
+    let tools = Arc::new(tools);
     let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
 
     Ok(RuntimeContext {
@@ -54,7 +59,11 @@ pub fn build_gateway_components(
     let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
     let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
-    let tools = Arc::new(build_tools(app_config.map(|cfg| cfg.tools.as_slice()))?);
+    let (tools, mcp_manager) = build_tools_with_mcp(
+        app_config.map(|cfg| cfg.tools.as_slice()),
+        app_config.and_then(|cfg| cfg.mcp.as_ref()),
+    )?;
+    let tools = Arc::new(tools);
     let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
     let workflows = Arc::new(build_workflows(
         app_config.map(|cfg| cfg.workflows.as_slice()),
@@ -67,6 +76,7 @@ pub fn build_gateway_components(
         tools,
         skills,
         workflows,
+        mcp_manager,
         runs_dir,
     })
 }
@@ -124,6 +134,42 @@ fn build_tools(configs: Option<&[ToolConfig]>) -> Result<ToolRegistry> {
     }
 
     Ok(tools)
+}
+
+fn build_tools_with_mcp(
+    tool_configs: Option<&[ToolConfig]>,
+    mcp_config: Option<&McpConfig>,
+) -> Result<(ToolRegistry, Option<Arc<McpServerManager>>)> {
+    let mut tools = build_tools(tool_configs)?;
+    let mcp_manager = build_mcp_manager(mcp_config)?;
+
+    if let Some(manager) = &mcp_manager {
+        manager.register_tools(&mut tools)?;
+    }
+
+    Ok((tools, mcp_manager))
+}
+
+fn build_mcp_manager(config: Option<&McpConfig>) -> Result<Option<Arc<McpServerManager>>> {
+    let Some(config) = config else {
+        return Ok(None);
+    };
+
+    if config.servers.is_empty() {
+        return Ok(None);
+    }
+
+    let specs = config
+        .servers
+        .iter()
+        .map(|server| McpServerSpec {
+            name: server.name.clone(),
+            command: server.command.clone(),
+            args: server.args.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Some(Arc::new(McpServerManager::start(&specs)?)))
 }
 
 fn register_tool(registry: &mut ToolRegistry, tool: &ToolConfig) -> Result<()> {
@@ -198,11 +244,19 @@ mod tests {
     use std::sync::Arc;
 
     use mosaic_config::{
-        AgentConfig, AppConfig, MosaicConfig, ProviderConfig, SkillConfig, TaskConfig, ToolConfig,
+        AgentConfig, AppConfig, McpConfig, McpServerConfig, MosaicConfig, ProviderConfig,
+        SkillConfig, TaskConfig, ToolConfig,
     };
     use mosaic_runtime::events::{NoopEventSink, RunEvent};
 
     use super::{build_cli_and_tui_sinks, build_gateway_components, build_runtime_context};
+
+    fn mcp_script_path() -> String {
+        format!(
+            "{}/../scripts/mock_mcp_server.py",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
 
     fn app_config() -> AppConfig {
         AppConfig {
@@ -239,6 +293,19 @@ mod tests {
             },
             mcp: None,
         }
+    }
+
+    fn app_config_with_mcp() -> AppConfig {
+        let mut config = app_config();
+        config.tools = Vec::new();
+        config.mcp = Some(McpConfig {
+            servers: vec![McpServerConfig {
+                name: "filesystem".to_owned(),
+                command: "python3".to_owned(),
+                args: vec![mcp_script_path(), "filesystem".to_owned()],
+            }],
+        });
+        config
     }
 
     #[test]
@@ -298,5 +365,42 @@ mod tests {
                 input: "hello".to_owned(),
             }]
         );
+    }
+
+    #[test]
+    fn gateway_components_register_discovered_mcp_tools() {
+        let config = MosaicConfig::default();
+        let components = build_gateway_components(&config, Some(&app_config_with_mcp()))
+            .expect("gateway components with MCP should build");
+
+        assert!(components.tools.get("mcp.filesystem.read_file").is_some());
+        assert_eq!(
+            components
+                .mcp_manager
+                .as_ref()
+                .map(|manager| manager.server_count()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn runtime_context_keeps_discovered_mcp_tools_callable() {
+        let ctx = build_runtime_context(
+            &MosaicConfig::default(),
+            Some(&app_config_with_mcp()),
+            Arc::new(NoopEventSink),
+        )
+        .expect("runtime context with MCP should build");
+        let tool = ctx
+            .tools
+            .get("mcp.filesystem.read_file")
+            .expect("MCP tool should be registered");
+
+        let result = tokio::runtime::Runtime::new()
+            .expect("tokio runtime should build")
+            .block_on(tool.call(serde_json::json!({ "path": "README.md" })))
+            .expect("MCP tool should remain callable");
+
+        assert!(result.content.contains("Mosaic"));
     }
 }

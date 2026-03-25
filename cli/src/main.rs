@@ -614,6 +614,13 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
             println!("[{}]", idx + 1);
             println!("  call_id: {:?}", call.call_id);
             println!("  name: {}", call.name);
+            println!("  source: {}", call.source.label());
+            if let Some(server_name) = call.source.server_name() {
+                println!("  server_name: {}", server_name);
+            }
+            if let Some(remote_tool_name) = call.source.remote_tool_name() {
+                println!("  remote_tool_name: {}", remote_tool_name);
+            }
             println!("  started_at: {}", call.started_at);
             println!("  finished_at: {:?}", call.finished_at);
             println!("  duration_ms: {:?}", call.duration_ms());
@@ -893,6 +900,7 @@ fn truncate_for_cli(value: &str, limit: usize) -> String {
 #[cfg(test)]
 mod tests {
     use clap::Parser;
+    use mosaic_tool_core::ToolSource;
 
     use super::{Cli, DispatchCommand, ModelCommand, SessionCommand, SetupCommand};
 
@@ -1079,5 +1087,26 @@ mod tests {
             super::truncate_for_cli("abcdefghijklmnopqrstuvwxyz", 5),
             "abcde..."
         );
+    }
+
+    #[test]
+    fn builtin_tool_source_has_no_remote_details() {
+        let source = ToolSource::Builtin;
+
+        assert_eq!(source.label(), "builtin");
+        assert_eq!(source.server_name(), None);
+        assert_eq!(source.remote_tool_name(), None);
+    }
+
+    #[test]
+    fn mcp_tool_source_exposes_server_and_remote_tool_names() {
+        let source = ToolSource::Mcp {
+            server: "filesystem".to_owned(),
+            remote_tool: "read_file".to_owned(),
+        };
+
+        assert_eq!(source.label(), "mcp");
+        assert_eq!(source.server_name(), Some("filesystem"));
+        assert_eq!(source.remote_tool_name(), Some("read_file"));
     }
 }

@@ -12,6 +12,7 @@ tokio.workspace = true
 uuid.workspace = true
 
 mosaic-inspect = { path = "../inspect" }
+mosaic-mcp-core = { path = "../mcp-core" }
 mosaic-provider = { path = "../provider" }
 mosaic-runtime = { path = "../runtime" }
 mosaic-session-core = { path = "../session-core" }
