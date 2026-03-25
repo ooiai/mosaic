@@ -88,6 +88,25 @@ pub fn validate_step_tools_support(profile: &ProviderProfile, tool_names: &[Stri
     Ok(())
 }
 
+pub fn public_error_message(error: &anyhow::Error) -> String {
+    redact_provider_message(&error.to_string())
+}
+
+fn redact_provider_message(message: &str) -> String {
+    let lower = message.to_ascii_lowercase();
+    if let Some(index) = lower.find("bearer ") {
+        let prefix = &message[..index + "Bearer ".len()];
+        let rest = &message[index + "Bearer ".len()..];
+        let suffix = rest
+            .find(char::is_whitespace)
+            .map(|offset| &rest[offset..])
+            .unwrap_or("");
+        return format!("{}<redacted>{}", prefix, suffix);
+    }
+
+    message.to_owned()
+}
+
 #[derive(Debug, Clone)]
 pub struct ProviderProfileRegistry {
     active_profile: String,
@@ -495,7 +514,7 @@ struct ApiFunctionCall {
 mod tests {
     use futures::executor::block_on;
 
-    use super::{LlmProvider, Message, MockProvider, Role, ToolDefinition};
+    use super::{LlmProvider, Message, MockProvider, Role, ToolDefinition, public_error_message};
 
     fn time_tool_definition() -> ToolDefinition {
         ToolDefinition {
@@ -672,5 +691,15 @@ mod tests {
             response.message.expect("message should exist").content,
             "mock response: What time is it?"
         );
+    }
+
+    #[test]
+    fn public_error_message_redacts_bearer_tokens() {
+        let message = public_error_message(&anyhow::anyhow!(
+            "upstream provider rejected Authorization: Bearer sk-test-secret with status 401"
+        ));
+
+        assert!(message.contains("Bearer <redacted>"));
+        assert!(!message.contains("sk-test-secret"));
     }
 }

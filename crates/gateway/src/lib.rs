@@ -1,14 +1,28 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Utc};
-use mosaic_inspect::RunTrace;
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::StatusCode,
+    response::sse::{Event as SseEvent, KeepAlive, Sse},
+    routing::{get, post},
+};
+use chrono::Utc;
+use futures::stream;
+use mosaic_control_protocol::{
+    ErrorResponse, EventStreamEnvelope, GatewayEvent, HealthResponse, InboundMessage, RunResponse,
+    RunSubmission, SessionDetailDto, SessionGatewayDto, SessionSummaryDto, TranscriptMessageDto,
+    TranscriptRoleDto,
+};
+use mosaic_inspect::{IngressTrace, RunTrace};
 use mosaic_mcp_core::McpServerManager;
-use mosaic_provider::{LlmProvider, ProviderProfileRegistry};
+use mosaic_provider::{LlmProvider, ProviderProfileRegistry, public_error_message};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult, RuntimeContext};
-use mosaic_session_core::{SessionRecord, SessionStore, SessionSummary, session_route_for_id};
+use mosaic_session_core::{
+    SessionRecord, SessionStore, SessionSummary, TranscriptRole, session_route_for_id,
+};
 use mosaic_skill_core::SkillRegistry;
 use mosaic_tool_core::ToolRegistry;
 use mosaic_workflow::WorkflowRegistry;
@@ -16,6 +30,10 @@ use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 use tokio::sync::broadcast;
 use uuid::Uuid;
+
+pub use mosaic_control_protocol::{
+    GatewayEvent as ProtocolGatewayEvent, HealthResponse as GatewayHealthResponse,
+};
 
 #[derive(Clone)]
 pub struct GatewayRuntimeComponents {
@@ -48,34 +66,8 @@ pub enum GatewayCommand {
     SubmitRun(GatewayRunRequest),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct GatewayRunRequest {
-    pub system: Option<String>,
-    pub input: String,
-    pub skill: Option<String>,
-    pub workflow: Option<String>,
-    pub session_id: Option<String>,
-    pub profile: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum GatewayEvent {
-    RunSubmitted { input: String, profile: String },
-    Runtime(RunEvent),
-    SessionUpdated { summary: SessionSummary },
-    RunCompleted { output_preview: String },
-    RunFailed { error: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct GatewayEventEnvelope {
-    pub gateway_run_id: String,
-    pub correlation_id: String,
-    pub session_id: Option<String>,
-    pub session_route: String,
-    pub emitted_at: DateTime<Utc>,
-    pub event: GatewayEvent,
-}
+pub type GatewayRunRequest = RunSubmission;
+pub type GatewayEventEnvelope = EventStreamEnvelope;
 
 #[derive(Debug)]
 pub struct GatewayRunResult {
@@ -167,6 +159,10 @@ impl GatewayHandle {
         self.inner.components.session_store.load(id)
     }
 
+    pub fn active_profile_name(&self) -> &str {
+        self.inner.components.profiles.active_profile_name()
+    }
+
     pub fn submit_command(&self, command: GatewayCommand) -> Result<GatewaySubmittedRun> {
         match command {
             GatewayCommand::SubmitRun(request) => self.submit_run(request),
@@ -189,11 +185,13 @@ impl GatewayHandle {
             correlation_id: correlation_id.clone(),
             session_id: request.session_id.clone(),
             session_route: session_route.clone(),
+            ingress: request.ingress.clone(),
         };
 
         self.emit(meta.envelope(GatewayEvent::RunSubmitted {
             input: request.input.clone(),
             profile: resolved_profile,
+            ingress: request.ingress.clone(),
         }));
 
         let state = self.inner.clone();
@@ -210,6 +208,7 @@ impl GatewayHandle {
                 workflow: request.workflow,
                 session_id: meta.session_id.clone(),
                 profile: request.profile,
+                ingress: meta.ingress.clone(),
             };
 
             finalize_run(state, meta, runtime.run(run_request).await)
@@ -287,6 +286,7 @@ struct GatewayRunMeta {
     correlation_id: String,
     session_id: Option<String>,
     session_route: String,
+    ingress: Option<IngressTrace>,
 }
 
 impl GatewayRunMeta {
@@ -356,7 +356,9 @@ fn finalize_success(
     if let Some(summary) = session_summary.clone() {
         let _ = state
             .events
-            .send(meta.envelope(GatewayEvent::SessionUpdated { summary }));
+            .send(meta.envelope(GatewayEvent::SessionUpdated {
+                summary: session_summary_dto(&summary),
+            }));
     }
 
     Ok(GatewayRunResult {
@@ -394,12 +396,14 @@ fn finalize_failure(
         })?;
 
     let _ = state.events.send(meta.envelope(GatewayEvent::RunFailed {
-        error: source.to_string(),
+        error: public_error_message(&source),
     }));
     if let Some(summary) = session_summary {
         let _ = state
             .events
-            .send(meta.envelope(GatewayEvent::SessionUpdated { summary }));
+            .send(meta.envelope(GatewayEvent::SessionUpdated {
+                summary: session_summary_dto(&summary),
+            }));
     }
 
     Err(GatewayRunError {
@@ -436,15 +440,257 @@ fn truncate_preview(value: &str, limit: usize) -> String {
     format!("{truncated}...")
 }
 
+pub fn session_summary_dto(summary: &SessionSummary) -> SessionSummaryDto {
+    SessionSummaryDto {
+        id: summary.id.clone(),
+        title: summary.title.clone(),
+        updated_at: summary.updated_at,
+        provider_profile: summary.provider_profile.clone(),
+        provider_type: summary.provider_type.clone(),
+        model: summary.model.clone(),
+        session_route: summary.session_route.clone(),
+        last_gateway_run_id: summary.last_gateway_run_id.clone(),
+        last_correlation_id: summary.last_correlation_id.clone(),
+        message_count: summary.message_count,
+        last_message_preview: summary.last_message_preview.clone(),
+    }
+}
+
+pub fn session_detail_dto(session: &SessionRecord) -> SessionDetailDto {
+    SessionDetailDto {
+        id: session.id.clone(),
+        title: session.title.clone(),
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        provider_profile: session.provider_profile.clone(),
+        provider_type: session.provider_type.clone(),
+        model: session.model.clone(),
+        last_run_id: session.last_run_id.clone(),
+        gateway: SessionGatewayDto {
+            route: session.gateway.route.clone(),
+            last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
+            last_correlation_id: session.gateway.last_correlation_id.clone(),
+        },
+        transcript: session
+            .transcript
+            .iter()
+            .map(|message| TranscriptMessageDto {
+                role: match message.role {
+                    TranscriptRole::System => TranscriptRoleDto::System,
+                    TranscriptRole::User => TranscriptRoleDto::User,
+                    TranscriptRole::Assistant => TranscriptRoleDto::Assistant,
+                    TranscriptRole::Tool => TranscriptRoleDto::Tool,
+                },
+                content: message.content.clone(),
+                tool_call_id: message.tool_call_id.clone(),
+                created_at: message.created_at,
+            })
+            .collect(),
+    }
+}
+
+pub fn run_response(result: GatewayRunResult) -> RunResponse {
+    RunResponse {
+        gateway_run_id: result.gateway_run_id,
+        correlation_id: result.correlation_id,
+        session_route: result.session_route,
+        output: result.output,
+        trace: result.trace,
+        session_summary: result.session_summary.as_ref().map(session_summary_dto),
+    }
+}
+
+#[derive(Clone)]
+struct GatewayHttpState {
+    gateway: GatewayHandle,
+}
+
+type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, Json<ErrorResponse>)>;
+
+pub fn http_router(gateway: GatewayHandle) -> Router {
+    Router::new()
+        .route("/health", get(http_health))
+        .route("/sessions", get(http_list_sessions))
+        .route("/sessions/{id}", get(http_get_session))
+        .route("/runs", post(http_submit_run))
+        .route("/ingress/webchat", post(http_webchat_ingress))
+        .route("/events", get(http_events))
+        .with_state(GatewayHttpState { gateway })
+}
+
+pub async fn serve_http(gateway: GatewayHandle, addr: SocketAddr) -> Result<()> {
+    serve_http_with_shutdown(gateway, addr, std::future::pending::<()>()).await
+}
+
+pub async fn serve_http_with_shutdown<F>(
+    gateway: GatewayHandle,
+    addr: SocketAddr,
+    shutdown: F,
+) -> Result<()>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, http_router(gateway))
+        .with_graceful_shutdown(shutdown)
+        .await?;
+    Ok(())
+}
+
+async fn http_health(State(state): State<GatewayHttpState>) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: "ok".to_owned(),
+        active_profile: state.gateway.active_profile_name().to_owned(),
+        session_count: state
+            .gateway
+            .list_sessions()
+            .map(|sessions| sessions.len())
+            .unwrap_or(0),
+        transport: "http+sse".to_owned(),
+    })
+}
+
+async fn http_list_sessions(
+    State(state): State<GatewayHttpState>,
+) -> HttpResult<Vec<SessionSummaryDto>> {
+    let sessions = state
+        .gateway
+        .list_sessions()
+        .map_err(http_internal_error)?
+        .iter()
+        .map(session_summary_dto)
+        .collect();
+    Ok(Json(sessions))
+}
+
+async fn http_get_session(
+    Path(id): Path<String>,
+    State(state): State<GatewayHttpState>,
+) -> HttpResult<SessionDetailDto> {
+    let session = state
+        .gateway
+        .load_session(&id)
+        .map_err(http_internal_error)?;
+    match session {
+        Some(session) => Ok(Json(session_detail_dto(&session))),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("session not found: {id}"),
+            }),
+        )),
+    }
+}
+
+async fn http_submit_run(
+    State(state): State<GatewayHttpState>,
+    Json(mut request): Json<RunSubmission>,
+) -> HttpResult<RunResponse> {
+    if request.ingress.is_none() {
+        request.ingress = Some(IngressTrace {
+            kind: "remote_operator".to_owned(),
+            channel: Some("api".to_owned()),
+            source: Some("mosaic-sdk".to_owned()),
+            remote_addr: None,
+            display_name: None,
+            gateway_url: None,
+        });
+    }
+
+    let submitted = state
+        .gateway
+        .submit_run(request)
+        .map_err(http_internal_error)?;
+    let result = submitted.wait().await.map_err(http_run_error)?;
+    Ok(Json(run_response(result)))
+}
+
+async fn http_webchat_ingress(
+    State(state): State<GatewayHttpState>,
+    Json(message): Json<InboundMessage>,
+) -> HttpResult<RunResponse> {
+    let request = RunSubmission {
+        system: None,
+        input: message.input,
+        skill: None,
+        workflow: None,
+        session_id: Some(
+            message
+                .session_id
+                .unwrap_or_else(|| format!("webchat-{}", Uuid::new_v4())),
+        ),
+        profile: message.profile,
+        ingress: Some(message.ingress.unwrap_or(IngressTrace {
+            kind: "webchat".to_owned(),
+            channel: Some("webchat".to_owned()),
+            source: Some("webchat-ingress".to_owned()),
+            remote_addr: None,
+            display_name: message.display_name,
+            gateway_url: None,
+        })),
+    };
+
+    let submitted = state
+        .gateway
+        .submit_run(request)
+        .map_err(http_internal_error)?;
+    let result = submitted.wait().await.map_err(http_run_error)?;
+    Ok(Json(run_response(result)))
+}
+
+async fn http_events(
+    State(state): State<GatewayHttpState>,
+) -> Sse<impl futures::Stream<Item = std::result::Result<SseEvent, Infallible>>> {
+    let receiver = state.gateway.subscribe();
+    let stream = stream::unfold(receiver, |mut receiver| async move {
+        match receiver.recv().await {
+            Ok(envelope) => {
+                let payload = serde_json::to_string(&envelope)
+                    .unwrap_or_else(|_| "{\"error\":\"failed to encode event\"}".to_owned());
+                Some((Ok(SseEvent::default().data(payload)), receiver))
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => Some((
+                Ok(SseEvent::default()
+                    .event("lagged")
+                    .data(skipped.to_string())),
+                receiver,
+            )),
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
+        }
+    });
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn http_internal_error(error: anyhow::Error) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse {
+            error: public_error_message(&error),
+        }),
+    )
+}
+
+fn http_run_error(error: GatewayRunError) -> (StatusCode, Json<ErrorResponse>) {
+    let message = public_error_message(&error.into_parts().0);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse { error: message }),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
     use std::sync::Mutex;
+    use std::time::Duration;
 
+    use futures::StreamExt;
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
     use mosaic_mcp_core::{McpServerManager, McpServerSpec};
     use mosaic_provider::MockProvider;
     use mosaic_session_core::{SessionStore, TranscriptRole};
+    use tokio::sync::oneshot;
 
     use super::*;
 
@@ -521,6 +767,47 @@ mod tests {
         )
     }
 
+    async fn spawn_http_gateway(gateway: GatewayHandle) -> Result<(String, oneshot::Sender<()>)> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let router = http_router(gateway);
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        });
+
+        Ok((format!("http://{addr}"), shutdown_tx))
+    }
+
+    async fn read_first_sse_frame(response: reqwest::Response) -> Result<String> {
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(delimiter) = buffer.find(
+                    "
+
+",
+                ) {
+                    let frame = buffer[..delimiter].to_owned();
+                    return Ok::<String, anyhow::Error>(frame);
+                }
+
+                let Some(chunk) = stream.next().await else {
+                    return Err(anyhow::anyhow!("event stream closed before first frame"));
+                };
+                buffer.push_str(&String::from_utf8_lossy(&chunk?));
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for SSE frame"))?
+    }
+
     #[tokio::test]
     async fn submit_run_routes_session_and_persists_gateway_metadata() {
         let gateway = gateway();
@@ -532,6 +819,7 @@ mod tests {
                 workflow: None,
                 session_id: Some("demo".to_owned()),
                 profile: None,
+                ingress: None,
             })
             .expect("submit should succeed");
 
@@ -571,6 +859,7 @@ mod tests {
                 workflow: None,
                 session_id: Some("clock".to_owned()),
                 profile: None,
+                ingress: None,
             }))
             .expect("submit should succeed");
         let run_id = submitted.gateway_run_id().to_owned();
@@ -651,5 +940,186 @@ mod tests {
                 .list_servers(),
             vec!["filesystem".to_owned()]
         );
+    }
+
+    #[tokio::test]
+    async fn http_health_reports_gateway_state() {
+        let gateway = gateway();
+        let (base_url, shutdown) = spawn_http_gateway(gateway)
+            .await
+            .expect("http gateway should start");
+
+        let response = reqwest::get(format!("{base_url}/health"))
+            .await
+            .expect("health request should succeed");
+        assert_eq!(response.status(), StatusCode::OK);
+        let health: HealthResponse = response.json().await.expect("health should deserialize");
+
+        assert_eq!(health.status, "ok");
+        assert_eq!(health.active_profile, "mock");
+        assert_eq!(health.transport, "http+sse");
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn http_runs_and_sessions_handlers_return_gateway_state() {
+        let gateway = gateway();
+        let (base_url, shutdown) = spawn_http_gateway(gateway)
+            .await
+            .expect("http gateway should start");
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(format!("{base_url}/runs"))
+            .json(&RunSubmission {
+                system: Some("You are helpful.".to_owned()),
+                input: "hello over http".to_owned(),
+                skill: None,
+                workflow: None,
+                session_id: Some("http-demo".to_owned()),
+                profile: None,
+                ingress: None,
+            })
+            .send()
+            .await
+            .expect("run request should succeed");
+        assert_eq!(response.status(), StatusCode::OK);
+        let run: RunResponse = response
+            .json()
+            .await
+            .expect("run response should deserialize");
+
+        assert_eq!(run.trace.session_id.as_deref(), Some("http-demo"));
+        assert_eq!(
+            run.trace
+                .ingress
+                .as_ref()
+                .map(|ingress| ingress.kind.as_str()),
+            Some("remote_operator")
+        );
+        assert_eq!(
+            run.trace
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.channel.as_deref()),
+            Some("api")
+        );
+
+        let sessions_response = client
+            .get(format!("{base_url}/sessions"))
+            .send()
+            .await
+            .expect("session list should succeed");
+        assert_eq!(sessions_response.status(), StatusCode::OK);
+        let sessions: Vec<SessionSummaryDto> = sessions_response
+            .json()
+            .await
+            .expect("sessions should deserialize");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].id, "http-demo");
+
+        let detail_response = client
+            .get(format!("{base_url}/sessions/http-demo"))
+            .send()
+            .await
+            .expect("session detail should succeed");
+        assert_eq!(detail_response.status(), StatusCode::OK);
+        let detail: SessionDetailDto = detail_response
+            .json()
+            .await
+            .expect("session detail should deserialize");
+        assert_eq!(detail.id, "http-demo");
+        assert_eq!(detail.gateway.route, "gateway.local/http-demo");
+        assert_eq!(detail.transcript.len(), 3);
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn http_webchat_ingress_sets_webchat_trace_metadata() {
+        let gateway = gateway();
+        let (base_url, shutdown) = spawn_http_gateway(gateway)
+            .await
+            .expect("http gateway should start");
+        let client = reqwest::Client::new();
+
+        let response = client
+            .post(format!("{base_url}/ingress/webchat"))
+            .json(&InboundMessage {
+                session_id: None,
+                input: "hello from browser".to_owned(),
+                profile: None,
+                display_name: Some("guest".to_owned()),
+                ingress: None,
+            })
+            .send()
+            .await
+            .expect("webchat request should succeed");
+        assert_eq!(response.status(), StatusCode::OK);
+        let run: RunResponse = response
+            .json()
+            .await
+            .expect("run response should deserialize");
+
+        assert!(
+            run.trace
+                .session_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("webchat-"))
+        );
+        assert_eq!(
+            run.trace
+                .ingress
+                .as_ref()
+                .map(|ingress| ingress.kind.as_str()),
+            Some("webchat")
+        );
+        assert_eq!(
+            run.trace
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.display_name.as_deref()),
+            Some("guest")
+        );
+
+        let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn http_events_stream_emits_gateway_envelopes() {
+        let gateway = gateway();
+        let (base_url, shutdown) = spawn_http_gateway(gateway.clone())
+            .await
+            .expect("http gateway should start");
+        let client = reqwest::Client::new();
+        let events_response = client
+            .get(format!("{base_url}/events"))
+            .send()
+            .await
+            .expect("event stream request should succeed");
+        assert_eq!(events_response.status(), StatusCode::OK);
+
+        let wait_handle = gateway
+            .submit_run(GatewayRunRequest {
+                system: Some("You are helpful.".to_owned()),
+                input: "hello events".to_owned(),
+                skill: None,
+                workflow: None,
+                session_id: Some("events-demo".to_owned()),
+                profile: None,
+                ingress: None,
+            })
+            .expect("run submission should succeed");
+        let frame = read_first_sse_frame(events_response)
+            .await
+            .expect("first SSE frame should arrive");
+        let _ = wait_handle.wait().await.expect("run should succeed");
+
+        assert!(frame.contains("data:"));
+        assert!(frame.contains("RunSubmitted"));
+        assert!(frame.contains("events-demo"));
+
+        let _ = shutdown.send(());
     }
 }

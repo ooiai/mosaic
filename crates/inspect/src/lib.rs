@@ -41,6 +41,16 @@ pub struct SkillTrace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IngressTrace {
+    pub kind: String,
+    pub channel: Option<String>,
+    pub source: Option<String>,
+    pub remote_addr: Option<String>,
+    pub display_name: Option<String>,
+    pub gateway_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EffectiveProfileTrace {
     pub profile: String,
     pub provider_type: String,
@@ -105,6 +115,7 @@ pub struct RunTrace {
     pub correlation_id: Option<String>,
     pub session_id: Option<String>,
     pub session_route: Option<String>,
+    pub ingress: Option<IngressTrace>,
     pub workflow_name: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
@@ -128,6 +139,7 @@ impl RunTrace {
             correlation_id: None,
             session_id: None,
             session_route: None,
+            ingress: None,
             workflow_name: None,
             started_at: Utc::now(),
             finished_at: None,
@@ -154,6 +166,10 @@ impl RunTrace {
         self.gateway_run_id = Some(gateway_run_id.into());
         self.correlation_id = Some(correlation_id.into());
         self.session_route = Some(session_route.into());
+    }
+
+    pub fn bind_ingress(&mut self, ingress: IngressTrace) {
+        self.ingress = Some(ingress);
     }
 
     pub fn bind_workflow(&mut self, workflow_name: impl Into<String>) {
@@ -245,6 +261,14 @@ mod tests {
     fn saves_trace_to_a_custom_directory() {
         let dir = temp_dir("trace");
         let mut trace = RunTrace::new("hello".to_owned());
+        trace.bind_ingress(IngressTrace {
+            kind: "remote_operator".to_owned(),
+            channel: Some("cli".to_owned()),
+            source: Some("mosaic-cli".to_owned()),
+            remote_addr: None,
+            display_name: None,
+            gateway_url: Some("http://127.0.0.1:8080".to_owned()),
+        });
         trace.tool_calls.push(ToolTrace {
             call_id: Some("call-1".to_owned()),
             name: "echo".to_owned(),
@@ -263,6 +287,13 @@ mod tests {
         assert_eq!(loaded.input, "hello");
         assert_eq!(loaded.output.as_deref(), Some("world"));
         assert_eq!(loaded.tool_calls[0].call_id.as_deref(), Some("call-1"));
+        assert_eq!(
+            loaded
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.gateway_url.as_deref()),
+            Some("http://127.0.0.1:8080")
+        );
 
         fs::remove_file(path).ok();
         fs::remove_dir_all(dir).ok();
@@ -279,6 +310,7 @@ mod tests {
             correlation_id: Some("corr-1".to_owned()),
             session_id: Some("session-1".to_owned()),
             session_route: Some("gateway.local/session-1".to_owned()),
+            ingress: None,
             workflow_name: Some("research_brief".to_owned()),
             started_at,
             finished_at: Some(finished_at),
@@ -334,5 +366,30 @@ mod tests {
         assert_eq!(trace.status(), "failed");
         assert_eq!(trace.summary().status, "failed");
         assert!(trace.duration_ms().is_some());
+    }
+
+    #[test]
+    fn bind_ingress_updates_trace_metadata() {
+        let mut trace = RunTrace::new("hello".to_owned());
+        trace.bind_ingress(IngressTrace {
+            kind: "webchat".to_owned(),
+            channel: Some("webchat".to_owned()),
+            source: Some("browser".to_owned()),
+            remote_addr: Some("127.0.0.1".to_owned()),
+            display_name: Some("guest".to_owned()),
+            gateway_url: None,
+        });
+
+        assert_eq!(
+            trace.ingress.as_ref().map(|ingress| ingress.kind.as_str()),
+            Some("webchat")
+        );
+        assert_eq!(
+            trace
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.display_name.as_deref()),
+            Some("guest")
+        );
     }
 }

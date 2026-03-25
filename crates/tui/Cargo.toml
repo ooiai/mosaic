@@ -8,8 +8,10 @@ license.workspace = true
 chrono.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
+mosaic-control-protocol = { path = "../control-protocol" }
 mosaic-gateway = { path = "../gateway" }
 mosaic-runtime = { path = "../runtime" }
+mosaic-sdk = { path = "../sdk" }
 mosaic-session-core = { path = "../session-core" }
 tokio.workspace = true
 

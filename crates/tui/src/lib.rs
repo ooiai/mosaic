@@ -15,14 +15,25 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use mosaic_gateway::{GatewayEvent, GatewayHandle, GatewayRunRequest};
+use mosaic_control_protocol::{GatewayEvent, IngressTrace, SessionDetailDto, TranscriptRoleDto};
+use mosaic_gateway::{GatewayHandle, GatewayRunRequest};
 use mosaic_runtime::events::{RunEvent, RunEventSink};
+use mosaic_sdk::GatewayClient;
 #[cfg(test)]
 use mosaic_session_core::SessionStore;
+use mosaic_session_core::{
+    SessionGatewayMetadata, SessionRecord as StoredSessionRecord, TranscriptMessage, TranscriptRole,
+};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::runtime::Handle;
 
 use self::app::{App, AppAction, ProfileOption};
+
+#[derive(Clone)]
+pub enum InteractiveGateway {
+    Local(GatewayHandle),
+    Remote(GatewayClient),
+}
 
 #[derive(Clone, Default)]
 pub struct TuiEventBuffer {
@@ -63,7 +74,7 @@ impl RunEventSink for TuiEventSink {
 
 #[derive(Clone)]
 pub struct InteractiveSessionContext {
-    pub gateway: GatewayHandle,
+    pub gateway: InteractiveGateway,
     pub runtime_handle: Handle,
     pub event_buffer: TuiEventBuffer,
     pub session_id: String,
@@ -175,23 +186,31 @@ fn run_interactive_app(
         start_in_resume,
     );
     let gateway_link = Arc::new(AtomicBool::new(true));
-    refresh_interactive_session_from_gateway(&mut app, &context.gateway, &context.session_id);
+    refresh_interactive_session_from_gateway(&mut app, &context, &context.session_id);
 
-    let event_forwarder = context.runtime_handle.spawn(forward_gateway_runtime_events(
-        context.gateway.subscribe(),
-        context.event_buffer.clone(),
-        gateway_link.clone(),
-        Some(context.session_id.clone()),
-    ));
+    let event_forwarder = match context.gateway.clone() {
+        InteractiveGateway::Local(gateway) => {
+            context.runtime_handle.spawn(forward_gateway_runtime_events(
+                gateway.subscribe(),
+                context.event_buffer.clone(),
+                gateway_link.clone(),
+                Some(context.session_id.clone()),
+            ))
+        }
+        InteractiveGateway::Remote(client) => {
+            context.runtime_handle.spawn(forward_remote_runtime_events(
+                client,
+                context.event_buffer.clone(),
+                gateway_link.clone(),
+                Some(context.session_id.clone()),
+            ))
+        }
+    };
 
     loop {
         drain_run_events(&mut app, &context.event_buffer);
         if gateway_link.load(Ordering::Relaxed) {
-            refresh_interactive_session_from_gateway(
-                &mut app,
-                &context.gateway,
-                &context.session_id,
-            );
+            refresh_interactive_session_from_gateway(&mut app, &context, &context.session_id);
         }
 
         terminal.draw(|frame| ui::render(frame, &app))?;
@@ -212,7 +231,7 @@ fn run_interactive_app(
                         gateway_link.store(true, Ordering::Relaxed);
                         refresh_interactive_session_from_gateway(
                             &mut app,
-                            &context.gateway,
+                            &context,
                             &context.session_id,
                         );
                     }
@@ -234,33 +253,72 @@ fn run_interactive_app(
 }
 
 fn spawn_interactive_run(context: &InteractiveSessionContext, profile: String, input: String) {
-    let gateway = context.gateway.clone();
-    let request = GatewayRunRequest {
-        system: context.system.clone(),
-        input,
-        skill: None,
-        workflow: None,
-        session_id: Some(context.session_id.clone()),
-        profile: Some(profile),
-    };
     let event_buffer = context.event_buffer.clone();
 
-    context.runtime_handle.spawn(async move {
-        match gateway.submit_run(request) {
-            Ok(submitted) => {
-                if let Err(err) = submitted.wait().await {
+    match context.gateway.clone() {
+        InteractiveGateway::Local(gateway) => {
+            let request = GatewayRunRequest {
+                system: context.system.clone(),
+                input,
+                skill: None,
+                workflow: None,
+                session_id: Some(context.session_id.clone()),
+                profile: Some(profile),
+                ingress: Some(IngressTrace {
+                    kind: "local_tui".to_owned(),
+                    channel: Some("tui".to_owned()),
+                    source: Some("mosaic-tui".to_owned()),
+                    remote_addr: None,
+                    display_name: None,
+                    gateway_url: None,
+                }),
+            };
+
+            context.runtime_handle.spawn(async move {
+                match gateway.submit_run(request) {
+                    Ok(submitted) => {
+                        if let Err(err) = submitted.wait().await {
+                            event_buffer.push(RunEvent::RunFailed {
+                                error: err.to_string(),
+                            });
+                        }
+                    }
+                    Err(err) => {
+                        event_buffer.push(RunEvent::RunFailed {
+                            error: err.to_string(),
+                        });
+                    }
+                }
+            });
+        }
+        InteractiveGateway::Remote(client) => {
+            let gateway_url = client.base_url().to_owned();
+            let request = GatewayRunRequest {
+                system: context.system.clone(),
+                input,
+                skill: None,
+                workflow: None,
+                session_id: Some(context.session_id.clone()),
+                profile: Some(profile),
+                ingress: Some(IngressTrace {
+                    kind: "remote_operator".to_owned(),
+                    channel: Some("tui".to_owned()),
+                    source: Some("mosaic-tui".to_owned()),
+                    remote_addr: None,
+                    display_name: None,
+                    gateway_url: Some(gateway_url),
+                }),
+            };
+
+            context.runtime_handle.spawn(async move {
+                if let Err(err) = client.submit_run(request).await {
                     event_buffer.push(RunEvent::RunFailed {
                         error: err.to_string(),
                     });
                 }
-            }
-            Err(err) => {
-                event_buffer.push(RunEvent::RunFailed {
-                    error: err.to_string(),
-                });
-            }
+            });
         }
-    });
+    }
 }
 
 async fn forward_gateway_runtime_events(
@@ -292,11 +350,101 @@ async fn forward_gateway_runtime_events(
 
 fn refresh_interactive_session_from_gateway(
     app: &mut App,
-    gateway: &GatewayHandle,
+    context: &InteractiveSessionContext,
     session_id: &str,
 ) {
-    if let Ok(Some(session)) = gateway.load_session(session_id) {
-        app.sync_runtime_session(&session);
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => {
+            if let Ok(Some(session)) = gateway.load_session(session_id) {
+                app.sync_runtime_session_with_origin(&session, "Local");
+            }
+        }
+        InteractiveGateway::Remote(client) => {
+            if let Ok(Some(session)) = context
+                .runtime_handle
+                .block_on(client.get_session(session_id))
+            {
+                let stored = remote_session_to_stored(&session);
+                app.sync_runtime_session_with_origin(&stored, "Remote");
+            }
+        }
+    }
+}
+
+async fn forward_remote_runtime_events(
+    client: GatewayClient,
+    event_buffer: TuiEventBuffer,
+    gateway_link: Arc<AtomicBool>,
+    session_filter: Option<String>,
+) {
+    let mut stream = match client.subscribe_events().await {
+        Ok(stream) => stream,
+        Err(err) => {
+            event_buffer.push(RunEvent::RunFailed {
+                error: err.to_string(),
+            });
+            return;
+        }
+    };
+
+    loop {
+        let envelope = match stream.next_event().await {
+            Ok(Some(envelope)) => envelope,
+            Ok(None) => break,
+            Err(err) => {
+                event_buffer.push(RunEvent::RunFailed {
+                    error: err.to_string(),
+                });
+                break;
+            }
+        };
+
+        if !gateway_link.load(Ordering::Relaxed) {
+            continue;
+        }
+
+        if let Some(session_id) = session_filter.as_deref() {
+            if envelope.session_id.as_deref() != Some(session_id) {
+                continue;
+            }
+        }
+
+        if let GatewayEvent::Runtime(event) = envelope.event {
+            event_buffer.push(event);
+        }
+    }
+}
+
+fn remote_session_to_stored(session: &SessionDetailDto) -> StoredSessionRecord {
+    StoredSessionRecord {
+        id: session.id.clone(),
+        title: session.title.clone(),
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        provider_profile: session.provider_profile.clone(),
+        provider_type: session.provider_type.clone(),
+        model: session.model.clone(),
+        last_run_id: session.last_run_id.clone(),
+        gateway: SessionGatewayMetadata {
+            route: session.gateway.route.clone(),
+            last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
+            last_correlation_id: session.gateway.last_correlation_id.clone(),
+        },
+        transcript: session
+            .transcript
+            .iter()
+            .map(|message| TranscriptMessage {
+                role: match message.role {
+                    TranscriptRoleDto::System => TranscriptRole::System,
+                    TranscriptRoleDto::User => TranscriptRole::User,
+                    TranscriptRoleDto::Assistant => TranscriptRole::Assistant,
+                    TranscriptRoleDto::Tool => TranscriptRole::Tool,
+                },
+                content: message.content.clone(),
+                tool_call_id: message.tool_call_id.clone(),
+                created_at: message.created_at,
+            })
+            .collect(),
     }
 }
 
@@ -326,13 +474,18 @@ fn drain_run_events(app: &mut App, event_buffer: &TuiEventBuffer) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+    use mosaic_control_protocol::{
+        SessionDetailDto, SessionGatewayDto, TranscriptMessageDto, TranscriptRoleDto,
+    };
     use mosaic_runtime::events::{RunEvent, RunEventSink};
     use mosaic_session_core::{SessionRecord, SessionStore, SessionSummary, TranscriptRole};
 
-    use crate::app::Surface;
+    use crate::app::{App, Surface};
 
     use super::{
         TuiEventBuffer, TuiEventSink, build_app, drain_run_events, refresh_interactive_session,
+        remote_session_to_stored,
     };
 
     struct MemorySessionStore {
@@ -417,6 +570,56 @@ mod tests {
 
         assert_eq!(app.active_session().timeline.len(), 2);
         assert_eq!(app.active_session().title, "Demo");
+    }
+
+    #[test]
+    fn remote_session_refresh_updates_ui_origin_and_timeline() {
+        let now = Utc::now();
+        let session = SessionDetailDto {
+            id: "remote-demo".to_owned(),
+            title: "Remote Demo".to_owned(),
+            created_at: now,
+            updated_at: now,
+            provider_profile: "mock".to_owned(),
+            provider_type: "mock".to_owned(),
+            model: "mock".to_owned(),
+            last_run_id: Some("run-1".to_owned()),
+            gateway: SessionGatewayDto {
+                route: "gateway.remote/remote-demo".to_owned(),
+                last_gateway_run_id: Some("gateway-run-1".to_owned()),
+                last_correlation_id: Some("corr-1".to_owned()),
+            },
+            transcript: vec![
+                TranscriptMessageDto {
+                    role: TranscriptRoleDto::User,
+                    content: "hello remote".to_owned(),
+                    tool_call_id: None,
+                    created_at: now,
+                },
+                TranscriptMessageDto {
+                    role: TranscriptRoleDto::Assistant,
+                    content: "remote reply".to_owned(),
+                    tool_call_id: None,
+                    created_at: now,
+                },
+            ],
+        };
+        let stored = remote_session_to_stored(&session);
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "remote-demo".to_owned(),
+            "mock".to_owned(),
+            "mock".to_owned(),
+            Vec::new(),
+            true,
+        );
+
+        app.sync_runtime_session_with_origin(&stored, "Remote");
+
+        assert_eq!(app.active_session().origin, "Remote");
+        assert_eq!(app.active_session().route, "gateway.remote/remote-demo");
+        assert_eq!(app.active_session().timeline.len(), 2);
+        assert_eq!(app.active_session().title, "Remote Demo");
     }
 }
 

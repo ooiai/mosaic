@@ -310,6 +310,14 @@ impl App {
     }
 
     pub fn sync_runtime_session(&mut self, session: &StoredSessionRecord) {
+        self.sync_runtime_session_with_origin(session, "Local");
+    }
+
+    pub fn sync_runtime_session_with_origin(
+        &mut self,
+        session: &StoredSessionRecord,
+        origin: &str,
+    ) {
         let draft = self.active_session().draft.clone();
         let unread = self.active_session().unread;
         let state = match self.runtime_status.as_str() {
@@ -321,7 +329,7 @@ impl App {
         if let Some(view) = self.sessions.get_mut(self.selected_session) {
             view.id = session.id.clone();
             view.title = session.title.clone();
-            view.origin = "Local".to_owned();
+            view.origin = origin.to_owned();
             view.modified = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
             view.created = session.created_at.format("%Y-%m-%d %H:%M").to_string();
             view.channel = "control".to_owned();

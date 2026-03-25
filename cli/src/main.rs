@@ -7,13 +7,17 @@ use mosaic_config::{
     ValidationLevel, doctor_mosaic_config, init_workspace_config, load_from_file,
     load_mosaic_config, redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
+use mosaic_control_protocol::{
+    GatewayEvent, IngressTrace, RunResponse, SessionDetailDto, SessionSummaryDto,
+};
 use mosaic_gateway::{
-    GatewayCommand as GatewayControlCommand, GatewayEvent, GatewayHandle, GatewayRunError,
-    GatewayRunRequest, GatewayRunResult,
+    GatewayCommand as GatewayControlCommand, GatewayHandle, GatewayRunError, GatewayRunRequest,
+    GatewayRunResult,
 };
 use mosaic_inspect::RunTrace;
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::events::RunEventSink;
+use mosaic_sdk::GatewayClient;
 use mosaic_session_core::SessionSummary;
 
 mod bootstrap;
@@ -41,6 +45,8 @@ enum Commands {
         session: Option<String>,
         #[arg(long)]
         profile: Option<String>,
+        #[arg(long)]
+        attach: Option<String>,
         #[arg(long, help = "Show the TUI while the run executes")]
         tui: bool,
     },
@@ -52,12 +58,16 @@ enum Commands {
         session: Option<String>,
         #[arg(long)]
         profile: Option<String>,
+        #[arg(long)]
+        attach: Option<String>,
     },
     Setup {
         #[command(subcommand)]
         command: SetupCommand,
     },
     Session {
+        #[arg(long)]
+        attach: Option<String>,
         #[command(subcommand)]
         command: SessionCommand,
     },
@@ -98,6 +108,8 @@ enum GatewayCliCommand {
     Serve {
         #[arg(long, help = "Start the local in-process gateway monitor")]
         local: bool,
+        #[arg(long, help = "Bind the HTTP gateway protocol on host:port")]
+        http: Option<String>,
     },
     Sessions,
 }
@@ -108,6 +120,7 @@ enum DispatchCommand {
         resume: bool,
         session: Option<String>,
         profile: Option<String>,
+        attach: Option<String>,
     },
     Run {
         file: PathBuf,
@@ -115,6 +128,7 @@ enum DispatchCommand {
         workflow: Option<String>,
         session: Option<String>,
         profile: Option<String>,
+        attach: Option<String>,
         tui: bool,
         resume: bool,
     },
@@ -125,6 +139,7 @@ enum DispatchCommand {
         command: SetupCommand,
     },
     Session {
+        attach: Option<String>,
         command: SessionCommand,
     },
     Model {
@@ -142,11 +157,17 @@ impl Cli {
                 resume: self.resume,
                 session: None,
                 profile: None,
+                attach: None,
             },
-            Some(Commands::Tui { session, profile }) => DispatchCommand::Tui {
+            Some(Commands::Tui {
+                session,
+                profile,
+                attach,
+            }) => DispatchCommand::Tui {
                 resume: self.resume,
                 session,
                 profile,
+                attach,
             },
             Some(Commands::Run {
                 file,
@@ -154,6 +175,7 @@ impl Cli {
                 workflow,
                 session,
                 profile,
+                attach,
                 tui,
             }) => DispatchCommand::Run {
                 file,
@@ -161,12 +183,15 @@ impl Cli {
                 workflow,
                 session,
                 profile,
+                attach,
                 tui,
                 resume: self.resume,
             },
             Some(Commands::Inspect { file }) => DispatchCommand::Inspect { file },
             Some(Commands::Setup { command }) => DispatchCommand::Setup { command },
-            Some(Commands::Session { command }) => DispatchCommand::Session { command },
+            Some(Commands::Session { attach, command }) => {
+                DispatchCommand::Session { attach, command }
+            }
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
             Some(Commands::Gateway { command }) => DispatchCommand::Gateway { command },
         }
@@ -180,34 +205,33 @@ async fn main() -> Result<()> {
             resume,
             session,
             profile,
-        } => tui_cmd(resume, session, profile).await,
+            attach,
+        } => tui_cmd(resume, session, profile, attach).await,
         DispatchCommand::Run {
             file,
             skill,
             workflow,
             session,
             profile,
+            attach,
             tui,
             resume,
-        } => run_cmd(file, skill, workflow, session, profile, tui, resume).await,
+        } => run_cmd(file, skill, workflow, session, profile, attach, tui, resume).await,
         DispatchCommand::Inspect { file } => inspect_cmd(file),
         DispatchCommand::Setup { command } => setup_cmd(command),
-        DispatchCommand::Session { command } => session_cmd(command),
+        DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
         DispatchCommand::Model { command } => model_cmd(command),
         DispatchCommand::Gateway { command } => gateway_cmd(command).await,
     }
 }
 
-async fn tui_cmd(resume: bool, session: Option<String>, profile: Option<String>) -> Result<()> {
+async fn tui_cmd(
+    resume: bool,
+    session: Option<String>,
+    profile: Option<String>,
+    attach: Option<String>,
+) -> Result<()> {
     let loaded = ensure_loaded_config(profile.clone())?;
-    let gateway = build_gateway_handle(&loaded, None)?;
-    let session_id = resolve_tui_session_id(&gateway, session.as_deref())?;
-    let active_profile = profile.unwrap_or_else(|| loaded.config.active_profile.clone());
-    let active_profile_config = loaded
-        .config
-        .profiles
-        .get(&active_profile)
-        .ok_or_else(|| anyhow!("unknown provider profile: {}", active_profile))?;
     let available_profiles = loaded
         .config
         .profiles
@@ -218,6 +242,55 @@ async fn tui_cmd(resume: bool, session: Option<String>, profile: Option<String>)
             provider_type: profile.provider_type.clone(),
         })
         .collect();
+    let (gateway, session_id, active_profile, active_model) = if let Some(url) = attach {
+        let client = GatewayClient::new(url);
+        let session_id = resolve_remote_tui_session_id(&client, session.as_deref()).await?;
+        let session_detail = client.get_session(&session_id).await?;
+        let active_profile = profile
+            .or_else(|| {
+                session_detail
+                    .as_ref()
+                    .map(|detail| detail.provider_profile.clone())
+            })
+            .unwrap_or_else(|| loaded.config.active_profile.clone());
+        let active_model = session_detail
+            .as_ref()
+            .map(|detail| detail.model.clone())
+            .or_else(|| {
+                loaded
+                    .config
+                    .profiles
+                    .get(&active_profile)
+                    .map(|profile| profile.model.clone())
+            })
+            .unwrap_or_else(|| active_profile.clone());
+
+        (
+            mosaic_tui::InteractiveGateway::Remote(client),
+            session_id,
+            active_profile,
+            active_model,
+        )
+    } else {
+        let gateway = build_gateway_handle(&loaded, None)?;
+        let session_id = resolve_tui_session_id(&gateway, session.as_deref())?;
+        let active_profile = profile.unwrap_or_else(|| loaded.config.active_profile.clone());
+        let active_model = loaded
+            .config
+            .profiles
+            .get(&active_profile)
+            .ok_or_else(|| anyhow!("unknown provider profile: {}", active_profile))?
+            .model
+            .clone();
+
+        (
+            mosaic_tui::InteractiveGateway::Local(gateway),
+            session_id,
+            active_profile,
+            active_model,
+        )
+    };
+
     let context = mosaic_tui::InteractiveSessionContext {
         gateway,
         runtime_handle: tokio::runtime::Handle::current(),
@@ -225,7 +298,7 @@ async fn tui_cmd(resume: bool, session: Option<String>, profile: Option<String>)
         session_id,
         system: None,
         active_profile,
-        active_model: active_profile_config.model.clone(),
+        active_model,
         available_profiles,
     };
 
@@ -241,11 +314,22 @@ async fn run_cmd(
     workflow: Option<String>,
     session: Option<String>,
     profile: Option<String>,
+    attach: Option<String>,
     tui: bool,
     resume: bool,
 ) -> Result<()> {
     let app_cfg = load_from_file(&file)?;
     let loaded = ensure_loaded_config(profile.clone())?;
+
+    if let Some(url) = attach {
+        if tui {
+            bail!(
+                "remote attach does not support `mosaic run --tui`; use `mosaic tui --attach {url}`"
+            )
+        }
+
+        return run_cmd_remote(loaded, app_cfg, skill, workflow, session, profile, url).await;
+    }
 
     if tui {
         return run_cmd_with_tui(loaded, app_cfg, skill, workflow, session, profile, resume).await;
@@ -262,6 +346,7 @@ async fn run_cmd(
             workflow,
             session_id: session,
             profile,
+            ingress: Some(local_cli_ingress(None)),
         }))?
         .wait()
         .await;
@@ -293,6 +378,7 @@ async fn run_cmd_with_tui(
         workflow,
         session_id: session,
         profile,
+        ingress: Some(local_cli_ingress(None)),
     };
 
     let submitted = gateway.submit_command(GatewayControlCommand::SubmitRun(request))?;
@@ -315,6 +401,31 @@ async fn run_cmd_with_tui(
             Ok(())
         }
     }
+}
+
+async fn run_cmd_remote(
+    loaded: LoadedMosaicConfig,
+    app_cfg: mosaic_config::AppConfig,
+    skill: Option<String>,
+    workflow: Option<String>,
+    session: Option<String>,
+    profile: Option<String>,
+    attach: String,
+) -> Result<()> {
+    let client = GatewayClient::new(attach.clone());
+    let response = client
+        .submit_run(GatewayRunRequest {
+            system: app_cfg.agent.system,
+            input: app_cfg.task.input,
+            skill,
+            workflow,
+            session_id: session,
+            profile,
+            ingress: Some(remote_cli_ingress(&attach)),
+        })
+        .await?;
+
+    finish_remote_gateway_run(&loaded, response)
 }
 
 fn finish_gateway_outcome(
@@ -396,7 +507,22 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
     }
 }
 
-fn session_cmd(command: SessionCommand) -> Result<()> {
+async fn session_cmd(attach: Option<String>, command: SessionCommand) -> Result<()> {
+    if let Some(url) = attach {
+        let client = GatewayClient::new(url);
+
+        return match command {
+            SessionCommand::List => print_remote_session_list(&client.list_sessions().await?),
+            SessionCommand::Show { id } => {
+                let session = client
+                    .get_session(&id)
+                    .await?
+                    .ok_or_else(|| anyhow!("session not found: {}", id))?;
+                print_remote_session_detail(&session)
+            }
+        };
+    }
+
     let loaded = ensure_loaded_config(None)?;
     let gateway = build_gateway_handle(&loaded, None)?;
 
@@ -451,9 +577,26 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
 
     match command {
         GatewayCliCommand::Sessions => print_session_list(&gateway.list_sessions()?),
-        GatewayCliCommand::Serve { local } => {
+        GatewayCliCommand::Serve { local, http } => {
+            if let Some(bind) = http {
+                let addr: std::net::SocketAddr = bind.parse()?;
+                let session_count = gateway.list_sessions()?.len();
+                println!("http gateway ready");
+                println!("active_profile: {}", loaded.config.active_profile);
+                println!("sessions: {}", session_count);
+                println!("listen: {}", addr);
+                println!("press Ctrl-C to stop");
+
+                mosaic_gateway::serve_http_with_shutdown(gateway, addr, async {
+                    let _ = tokio::signal::ctrl_c().await;
+                })
+                .await?;
+                println!("http gateway stopped");
+                return Ok(());
+            }
+
             if !local {
-                bail!("d3 only supports `mosaic gateway serve --local`");
+                bail!("use `mosaic gateway serve --local` or `mosaic gateway serve --http <addr>`");
             }
 
             let session_count = gateway.list_sessions()?.len();
@@ -562,6 +705,7 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
     println!("correlation_id: {:?}", trace.correlation_id);
     println!("session_id: {:?}", trace.session_id);
     println!("session_route: {:?}", trace.session_route);
+    println!("ingress: {:?}", trace.ingress);
     println!("workflow_name: {:?}", trace.workflow_name);
     println!("status: {}", summary.status);
     println!("started_at: {}", trace.started_at);
@@ -578,6 +722,16 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
         println!("  model: {}", profile.model);
         println!("  api_key_env: {:?}", profile.api_key_env);
         println!("  api_key_present: {}", profile.api_key_present);
+    }
+
+    if let Some(ingress) = &trace.ingress {
+        println!("\ningress:");
+        println!("  kind: {}", ingress.kind);
+        println!("  channel: {:?}", ingress.channel);
+        println!("  source: {:?}", ingress.source);
+        println!("  remote_addr: {:?}", ingress.remote_addr);
+        println!("  display_name: {:?}", ingress.display_name);
+        println!("  gateway_url: {:?}", ingress.gateway_url);
     }
 
     println!("\nsummary:");
@@ -696,6 +850,23 @@ fn resolve_tui_session_id(gateway: &GatewayHandle, requested: Option<&str>) -> R
         .unwrap_or_else(|| "default".to_owned()))
 }
 
+async fn resolve_remote_tui_session_id(
+    client: &GatewayClient,
+    requested: Option<&str>,
+) -> Result<String> {
+    if let Some(session_id) = requested {
+        return Ok(session_id.to_owned());
+    }
+
+    Ok(client
+        .list_sessions()
+        .await?
+        .into_iter()
+        .next()
+        .map(|session| session.id)
+        .unwrap_or_else(|| "default".to_owned()))
+}
+
 fn build_gateway_handle(
     loaded: &LoadedMosaicConfig,
     app_cfg: Option<&mosaic_config::AppConfig>,
@@ -728,6 +899,116 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
+    if sessions.is_empty() {
+        println!("no sessions found");
+        return Ok(());
+    }
+
+    for session in sessions {
+        println!(
+            "{} | {} | profile={} | model={} | route={} | messages={} | updated_at={} | gateway_run={} | correlation={}",
+            session.id,
+            session.title,
+            session.provider_profile,
+            session.model,
+            session.session_route,
+            session.message_count,
+            session.updated_at,
+            session.last_gateway_run_id.as_deref().unwrap_or("-"),
+            session.last_correlation_id.as_deref().unwrap_or("-"),
+        );
+        if let Some(preview) = session.last_message_preview.as_deref() {
+            println!("  last: {}", preview);
+        }
+    }
+
+    Ok(())
+}
+
+fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
+    println!("id: {}", session.id);
+    println!("title: {}", session.title);
+    println!("created_at: {}", session.created_at);
+    println!("updated_at: {}", session.updated_at);
+    println!("provider_profile: {}", session.provider_profile);
+    println!("provider_type: {}", session.provider_type);
+    println!("model: {}", session.model);
+    println!("last_run_id: {:?}", session.last_run_id);
+    println!("session_route: {}", session.gateway.route);
+    println!(
+        "last_gateway_run_id: {:?}",
+        session.gateway.last_gateway_run_id
+    );
+    println!(
+        "last_correlation_id: {:?}",
+        session.gateway.last_correlation_id
+    );
+    println!("message_count: {}", session.transcript.len());
+
+    if !session.transcript.is_empty() {
+        println!("\ntranscript:");
+        for (idx, message) in session.transcript.iter().enumerate() {
+            println!(
+                "[{}] {} {} {:?}",
+                idx + 1,
+                remote_transcript_role_label(&message.role),
+                message.created_at,
+                message.tool_call_id
+            );
+            println!("  {}", truncate_for_cli(&message.content, 400));
+        }
+    }
+
+    Ok(())
+}
+
+fn finish_remote_gateway_run(loaded: &LoadedMosaicConfig, result: RunResponse) -> Result<()> {
+    let trace_path = save_remote_trace(loaded, &result.trace)?;
+    println!("{}", result.output);
+    println!("saved trace: {}", trace_path.display());
+    println!("gateway_run_id: {}", result.gateway_run_id);
+    println!("correlation_id: {}", result.correlation_id);
+    println!("session_route: {}", result.session_route);
+    Ok(())
+}
+
+fn save_remote_trace(loaded: &LoadedMosaicConfig, trace: &RunTrace) -> Result<PathBuf> {
+    let dir = resolve_workspace_relative_path(&loaded.config.inspect.runs_dir)?;
+    trace.save_to_dir(dir)
+}
+
+fn resolve_workspace_relative_path(path: &str) -> Result<PathBuf> {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        return Ok(path);
+    }
+
+    Ok(env::current_dir()?.join(path))
+}
+
+fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
+    IngressTrace {
+        kind: "local_cli".to_owned(),
+        channel: Some("cli".to_owned()),
+        source: Some("mosaic-cli".to_owned()),
+        remote_addr: None,
+        display_name: None,
+        gateway_url,
+    }
+}
+
+fn remote_cli_ingress(gateway_url: &str) -> IngressTrace {
+    IngressTrace {
+        kind: "remote_operator".to_owned(),
+        channel: Some("cli".to_owned()),
+        source: Some("mosaic-cli".to_owned()),
+        remote_addr: None,
+        display_name: None,
+        gateway_url: Some(gateway_url.to_owned()),
+    }
 }
 
 fn spawn_gateway_runtime_event_forwarder(
@@ -888,6 +1169,15 @@ fn transcript_role_label(role: &mosaic_session_core::TranscriptRole) -> &'static
     }
 }
 
+fn remote_transcript_role_label(role: &mosaic_control_protocol::TranscriptRoleDto) -> &'static str {
+    match role {
+        mosaic_control_protocol::TranscriptRoleDto::System => "system",
+        mosaic_control_protocol::TranscriptRoleDto::User => "user",
+        mosaic_control_protocol::TranscriptRoleDto::Assistant => "assistant",
+        mosaic_control_protocol::TranscriptRoleDto::Tool => "tool",
+    }
+}
+
 fn truncate_for_cli(value: &str, limit: usize) -> String {
     if value.chars().count() <= limit {
         return value.to_string();
@@ -914,6 +1204,7 @@ mod tests {
                 resume: false,
                 session: None,
                 profile: None,
+                attach: None,
             }
         );
     }
@@ -928,6 +1219,7 @@ mod tests {
                 resume: true,
                 session: None,
                 profile: None,
+                attach: None,
             }
         );
     }
@@ -942,6 +1234,29 @@ mod tests {
                 resume: true,
                 session: Some("demo".to_owned()),
                 profile: None,
+                attach: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_tui_subcommand_with_remote_attach() {
+        let cli = Cli::parse_from([
+            "mosaic",
+            "tui",
+            "--attach",
+            "http://127.0.0.1:8080",
+            "--session",
+            "remote-demo",
+        ]);
+
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Tui {
+                resume: false,
+                session: Some("remote-demo".to_owned()),
+                profile: None,
+                attach: Some("http://127.0.0.1:8080".to_owned()),
             }
         );
     }
@@ -968,6 +1283,32 @@ mod tests {
                 workflow: None,
                 session: Some("demo".to_owned()),
                 profile: Some("gpt-5.4-mini".to_owned()),
+                attach: None,
+                tui: false,
+                resume: false,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_run_subcommand_with_remote_attach() {
+        let cli = Cli::parse_from([
+            "mosaic",
+            "run",
+            "examples/basic-agent.yaml",
+            "--attach",
+            "http://127.0.0.1:8080",
+        ]);
+
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Run {
+                file: "examples/basic-agent.yaml".into(),
+                skill: None,
+                workflow: None,
+                session: None,
+                profile: None,
+                attach: Some("http://127.0.0.1:8080".to_owned()),
                 tui: false,
                 resume: false,
             }
@@ -992,6 +1333,7 @@ mod tests {
                 workflow: None,
                 session: None,
                 profile: None,
+                attach: None,
                 tui: true,
                 resume: true,
             }
@@ -1016,6 +1358,7 @@ mod tests {
                 workflow: Some("research_brief".to_owned()),
                 session: None,
                 profile: None,
+                attach: None,
                 tui: false,
                 resume: false,
             }
@@ -1059,6 +1402,7 @@ mod tests {
         assert_eq!(
             cli.dispatch(),
             DispatchCommand::Session {
+                attach: None,
                 command: SessionCommand::Show {
                     id: "demo".to_owned(),
                 },
@@ -1071,6 +1415,40 @@ mod tests {
             DispatchCommand::Model {
                 command: ModelCommand::Use {
                     profile: "gpt-5.4-mini".to_owned(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn parses_session_subcommand_with_remote_attach() {
+        let cli = Cli::parse_from([
+            "mosaic",
+            "session",
+            "--attach",
+            "http://127.0.0.1:8080",
+            "list",
+        ]);
+
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Session {
+                attach: Some("http://127.0.0.1:8080".to_owned()),
+                command: SessionCommand::List,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_gateway_serve_http_subcommand() {
+        let cli = Cli::parse_from(["mosaic", "gateway", "serve", "--http", "127.0.0.1:8080"]);
+
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Gateway {
+                command: super::GatewayCliCommand::Serve {
+                    local: false,
+                    http: Some("127.0.0.1:8080".to_owned()),
                 },
             }
         );

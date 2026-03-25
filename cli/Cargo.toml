@@ -16,11 +16,13 @@ serde_json.workspace = true
 tokio.workspace = true
 
 mosaic-config = { path = "../crates/config" }
+mosaic-control-protocol = { path = "../crates/control-protocol" }
 mosaic-gateway = { path = "../crates/gateway" }
 mosaic-inspect = { path = "../crates/inspect" }
 mosaic-mcp-core = { path = "../crates/mcp-core" }
 mosaic-provider = { path = "../crates/provider" }
 mosaic-runtime = { path = "../crates/runtime" }
+mosaic-sdk = { path = "../crates/sdk" }
 mosaic-session-core = { path = "../crates/session-core" }
 mosaic-skill-core = { path = "../crates/skill-core" }
 mosaic-tool-core = { path = "../crates/tool-core" }

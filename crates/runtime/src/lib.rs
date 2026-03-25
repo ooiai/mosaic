@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::Utc;
-use mosaic_inspect::{EffectiveProfileTrace, RunTrace, SkillTrace, ToolTrace, WorkflowStepTrace};
+use mosaic_inspect::{
+    EffectiveProfileTrace, IngressTrace, RunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
+};
 use mosaic_provider::{
     LlmProvider, Message, ProviderProfile, ProviderProfileRegistry, Role, ToolDefinition,
     validate_step_tools_support,
@@ -40,6 +42,7 @@ pub struct RunRequest {
     pub workflow: Option<String>,
     pub session_id: Option<String>,
     pub profile: Option<String>,
+    pub ingress: Option<IngressTrace>,
 }
 
 #[derive(Debug)]
@@ -128,6 +131,9 @@ impl AgentRuntime {
             Err(err) => return self.fail_run(trace, err),
         };
         trace.bind_effective_profile(Self::effective_profile_trace(&profile));
+        if let Some(ingress) = req.ingress.clone() {
+            trace.bind_ingress(ingress);
+        }
 
         let session = match self.load_session(&req, &profile, &mut trace) {
             Ok(session) => session,
@@ -1033,6 +1039,7 @@ mod tests {
     use anyhow::{Result, anyhow};
     use async_trait::async_trait;
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
+    use mosaic_inspect::IngressTrace;
     use mosaic_provider::{
         CompletionResponse, LlmProvider, Message, MockProvider, ProviderProfileRegistry,
         ToolDefinition,
@@ -1300,6 +1307,7 @@ mod tests {
                 workflow: None,
                 session_id: None,
                 profile: None,
+                ingress: None,
             })
             .await
             .expect("runtime should succeed");
@@ -1326,6 +1334,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn run_records_ingress_metadata_in_trace() {
+        let runtime = runtime_with_provider(
+            Arc::new(MockProvider),
+            Arc::new(MemorySessionStore::default()),
+            Arc::new(NoopEventSink),
+        );
+
+        let result = runtime
+            .run(RunRequest {
+                system: Some("You are helpful.".to_owned()),
+                input: "hello ingress".to_owned(),
+                skill: None,
+                workflow: None,
+                session_id: Some("ingress-demo".to_owned()),
+                profile: None,
+                ingress: Some(IngressTrace {
+                    kind: "remote_operator".to_owned(),
+                    channel: Some("cli".to_owned()),
+                    source: Some("mosaic-cli".to_owned()),
+                    remote_addr: Some("127.0.0.1".to_owned()),
+                    display_name: Some("operator".to_owned()),
+                    gateway_url: Some("http://127.0.0.1:8080".to_owned()),
+                }),
+            })
+            .await
+            .expect("runtime should succeed");
+
+        assert_eq!(result.trace.session_id.as_deref(), Some("ingress-demo"));
+        assert_eq!(
+            result
+                .trace
+                .ingress
+                .as_ref()
+                .map(|ingress| ingress.kind.as_str()),
+            Some("remote_operator")
+        );
+        assert_eq!(
+            result
+                .trace
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.gateway_url.as_deref()),
+            Some("http://127.0.0.1:8080")
+        );
+    }
+
+    #[tokio::test]
     async fn session_runs_roundtrip_transcript_messages() {
         let store = Arc::new(MemorySessionStore::default());
         let runtime = runtime_with_provider(
@@ -1342,6 +1397,7 @@ mod tests {
                 workflow: None,
                 session_id: Some("demo".to_owned()),
                 profile: None,
+                ingress: None,
             })
             .await
             .expect("first run should succeed");
@@ -1354,6 +1410,7 @@ mod tests {
                 workflow: None,
                 session_id: Some("demo".to_owned()),
                 profile: None,
+                ingress: None,
             })
             .await
             .expect("second run should succeed");
@@ -1396,6 +1453,7 @@ mod tests {
                 workflow: None,
                 session_id: Some("time-demo".to_owned()),
                 profile: None,
+                ingress: None,
             })
             .await
             .expect("tool loop should succeed");
@@ -1444,6 +1502,7 @@ mod tests {
                 workflow: None,
                 session_id: None,
                 profile: None,
+                ingress: None,
             })
             .await
             .expect("remote MCP tool loop should succeed");
@@ -1497,6 +1556,7 @@ mod tests {
                 workflow: Some("research_brief".to_owned()),
                 session_id: Some("workflow-demo".to_owned()),
                 profile: None,
+                ingress: None,
             })
             .await
             .expect("workflow run should succeed");
@@ -1599,6 +1659,7 @@ mod tests {
                 workflow: Some("tool_step".to_owned()),
                 session_id: None,
                 profile: None,
+                ingress: None,
             })
             .await
             .expect_err("tool-capability mismatch should fail");
@@ -1636,6 +1697,7 @@ mod tests {
                 workflow: None,
                 session_id: None,
                 profile: None,
+                ingress: None,
             })
             .await
             .expect_err("empty provider response should fail");
@@ -1679,6 +1741,7 @@ mod tests {
                 workflow: None,
                 session_id: Some("skill-demo".to_owned()),
                 profile: None,
+                ingress: None,
             })
             .await
             .expect_err("failing skill should fail");
@@ -1718,6 +1781,7 @@ mod tests {
                 workflow: None,
                 session_id: Some("summary-demo".to_owned()),
                 profile: None,
+                ingress: None,
             })
             .await
             .expect("skill run should succeed");
