@@ -15,6 +15,7 @@ tokio.workspace = true
 uuid.workspace = true
 
 mosaic-control-protocol = { path = "../control-protocol" }
+mosaic-memory = { path = "../memory" }
 mosaic-inspect = { path = "../inspect" }
 mosaic-mcp-core = { path = "../mcp-core" }
 mosaic-provider = { path = "../provider" }

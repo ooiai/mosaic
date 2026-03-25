@@ -17,6 +17,7 @@ use mosaic_control_protocol::{
 };
 use mosaic_inspect::{IngressTrace, RunTrace};
 use mosaic_mcp_core::McpServerManager;
+use mosaic_memory::{MemoryPolicy, MemoryStore};
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry, public_error_message};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult, RuntimeContext};
@@ -40,6 +41,8 @@ pub struct GatewayRuntimeComponents {
     pub profiles: Arc<ProviderProfileRegistry>,
     pub provider_override: Option<Arc<dyn LlmProvider>>,
     pub session_store: Arc<dyn SessionStore>,
+    pub memory_store: Arc<dyn MemoryStore>,
+    pub memory_policy: MemoryPolicy,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
     pub workflows: Arc<WorkflowRegistry>,
@@ -53,6 +56,8 @@ impl GatewayRuntimeComponents {
             profiles: self.profiles.clone(),
             provider_override: self.provider_override.clone(),
             session_store: self.session_store.clone(),
+            memory_store: self.memory_store.clone(),
+            memory_policy: self.memory_policy.clone(),
             tools: self.tools.clone(),
             skills: self.skills.clone(),
             workflows: self.workflows.clone(),
@@ -453,6 +458,8 @@ pub fn session_summary_dto(summary: &SessionSummary) -> SessionSummaryDto {
         last_correlation_id: summary.last_correlation_id.clone(),
         message_count: summary.message_count,
         last_message_preview: summary.last_message_preview.clone(),
+        memory_summary_preview: summary.memory_summary_preview.clone(),
+        reference_count: summary.reference_count,
     }
 }
 
@@ -471,6 +478,17 @@ pub fn session_detail_dto(session: &SessionRecord) -> SessionDetailDto {
             last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
             last_correlation_id: session.gateway.last_correlation_id.clone(),
         },
+        memory_summary: session.memory.latest_summary.clone(),
+        compressed_context: session.memory.compressed_context.clone(),
+        references: session
+            .references
+            .iter()
+            .map(|reference| mosaic_control_protocol::SessionReferenceDto {
+                session_id: reference.session_id.clone(),
+                reason: reference.reason.clone(),
+                created_at: reference.created_at,
+            })
+            .collect(),
         transcript: session
             .transcript
             .iter()
@@ -688,6 +706,7 @@ mod tests {
     use futures::StreamExt;
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
     use mosaic_mcp_core::{McpServerManager, McpServerSpec};
+    use mosaic_memory::{FileMemoryStore, MemoryPolicy};
     use mosaic_provider::MockProvider;
     use mosaic_session_core::{SessionStore, TranscriptRole};
     use tokio::sync::oneshot;
@@ -751,6 +770,10 @@ mod tests {
                 profiles: Arc::new(profiles),
                 provider_override: Some(Arc::new(MockProvider)),
                 session_store: Arc::new(MemorySessionStore::default()),
+                memory_store: Arc::new(FileMemoryStore::new(
+                    std::env::temp_dir().join("mosaic-gateway-tests-memory"),
+                )),
+                memory_policy: MemoryPolicy::default(),
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
@@ -913,6 +936,10 @@ mod tests {
                 profiles: Arc::new(profiles),
                 provider_override: Some(Arc::new(MockProvider)),
                 session_store: Arc::new(MemorySessionStore::default()),
+                memory_store: Arc::new(FileMemoryStore::new(
+                    std::env::temp_dir().join("mosaic-gateway-tests-memory"),
+                )),
+                memory_policy: MemoryPolicy::default(),
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),

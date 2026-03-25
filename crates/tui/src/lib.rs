@@ -430,6 +430,22 @@ fn remote_session_to_stored(session: &SessionDetailDto) -> StoredSessionRecord {
             last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
             last_correlation_id: session.gateway.last_correlation_id.clone(),
         },
+        memory: mosaic_session_core::SessionMemoryMetadata {
+            latest_summary: session.memory_summary.clone(),
+            compressed_context: session.compressed_context.clone(),
+            last_memory_write_at: None,
+            memory_entry_count: 0,
+            compression_count: usize::from(session.compressed_context.is_some()),
+        },
+        references: session
+            .references
+            .iter()
+            .map(|reference| mosaic_session_core::SessionReference {
+                session_id: reference.session_id.clone(),
+                reason: reference.reason.clone(),
+                created_at: reference.created_at,
+            })
+            .collect(),
         transcript: session
             .transcript
             .iter()
@@ -589,6 +605,13 @@ mod tests {
                 last_gateway_run_id: Some("gateway-run-1".to_owned()),
                 last_correlation_id: Some("corr-1".to_owned()),
             },
+            memory_summary: Some("Remote summary".to_owned()),
+            compressed_context: Some("Remote compressed context".to_owned()),
+            references: vec![mosaic_control_protocol::SessionReferenceDto {
+                session_id: "other-session".to_owned(),
+                reason: "explicit_session_reference".to_owned(),
+                created_at: now,
+            }],
             transcript: vec![
                 TranscriptMessageDto {
                     role: TranscriptRoleDto::User,
@@ -620,6 +643,15 @@ mod tests {
         assert_eq!(app.active_session().route, "gateway.remote/remote-demo");
         assert_eq!(app.active_session().timeline.len(), 2);
         assert_eq!(app.active_session().title, "Remote Demo");
+        assert_eq!(
+            app.active_session().memory_summary.as_deref(),
+            Some("Remote summary")
+        );
+        assert_eq!(
+            app.active_session().compressed_context.as_deref(),
+            Some("Remote compressed context")
+        );
+        assert_eq!(app.active_session().references.len(), 1);
     }
 }
 

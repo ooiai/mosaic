@@ -15,6 +15,7 @@ use mosaic_gateway::{
     GatewayRunResult,
 };
 use mosaic_inspect::RunTrace;
+use mosaic_memory::{FileMemoryStore, MemoryStore};
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::events::RunEventSink;
 use mosaic_sdk::GatewayClient;
@@ -79,6 +80,10 @@ enum Commands {
         #[command(subcommand)]
         command: GatewayCliCommand,
     },
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -114,6 +119,19 @@ enum GatewayCliCommand {
     Sessions,
 }
 
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum MemoryCommand {
+    List,
+    Show {
+        session: String,
+    },
+    Search {
+        query: String,
+        #[arg(long)]
+        tag: Option<String>,
+    },
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum DispatchCommand {
     Tui {
@@ -147,6 +165,9 @@ enum DispatchCommand {
     },
     Gateway {
         command: GatewayCliCommand,
+    },
+    Memory {
+        command: MemoryCommand,
     },
 }
 
@@ -194,6 +215,7 @@ impl Cli {
             }
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
             Some(Commands::Gateway { command }) => DispatchCommand::Gateway { command },
+            Some(Commands::Memory { command }) => DispatchCommand::Memory { command },
         }
     }
 }
@@ -222,6 +244,7 @@ async fn main() -> Result<()> {
         DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
         DispatchCommand::Model { command } => model_cmd(command),
         DispatchCommand::Gateway { command } => gateway_cmd(command).await,
+        DispatchCommand::Memory { command } => memory_cmd(command),
     }
 }
 
@@ -551,6 +574,24 @@ async fn session_cmd(attach: Option<String>, command: SessionCommand) -> Result<
                 session.gateway.last_correlation_id
             );
             println!("message_count: {}", session.transcript.len());
+            println!("memory_summary: {:?}", session.memory.latest_summary);
+            println!(
+                "compressed_context: {:?}",
+                session.memory.compressed_context
+            );
+            println!("memory_entry_count: {}", session.memory.memory_entry_count);
+            println!("compression_count: {}", session.memory.compression_count);
+            println!("reference_count: {}", session.references.len());
+
+            if !session.references.is_empty() {
+                println!("\nreferences:");
+                for reference in &session.references {
+                    println!(
+                        "- {} | reason={} | created_at={}",
+                        reference.session_id, reference.reason, reference.created_at
+                    );
+                }
+            }
 
             if !session.transcript.is_empty() {
                 println!("\ntranscript:");
@@ -639,6 +680,87 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
     }
 }
 
+fn memory_cmd(command: MemoryCommand) -> Result<()> {
+    let _loaded = ensure_loaded_config(None)?;
+    let store = local_memory_store()?;
+
+    match command {
+        MemoryCommand::List => {
+            let sessions = store.list_sessions()?;
+            if sessions.is_empty() {
+                println!("no memory sessions found");
+                return Ok(());
+            }
+
+            for session in sessions {
+                println!(
+                    "{} | updated_at={} | related_sessions={} | entries={}",
+                    session.session_id,
+                    session.updated_at,
+                    session.related_sessions.len(),
+                    session.entries.len(),
+                );
+                if let Some(summary) = session.summary.as_deref() {
+                    println!("  summary: {}", truncate_for_cli(summary, 200));
+                }
+                if let Some(compressed) = session.compressed_context.as_deref() {
+                    println!("  compressed: {}", truncate_for_cli(compressed, 200));
+                }
+            }
+
+            Ok(())
+        }
+        MemoryCommand::Show { session } => {
+            let record = store
+                .load_session(&session)?
+                .ok_or_else(|| anyhow!("memory session not found: {}", session))?;
+            println!("session_id: {}", record.session_id);
+            println!("updated_at: {}", record.updated_at);
+            println!("tags: {:?}", record.tags);
+            println!("related_sessions: {:?}", record.related_sessions);
+            println!("summary: {:?}", record.summary);
+            println!("compressed_context: {:?}", record.compressed_context);
+            println!("entry_count: {}", record.entries.len());
+
+            if !record.entries.is_empty() {
+                println!(
+                    "
+entries:"
+                );
+                for (idx, entry) in record.entries.iter().enumerate() {
+                    println!(
+                        "[{}] kind={:?} created_at={} tags={:?}",
+                        idx + 1,
+                        entry.kind,
+                        entry.created_at,
+                        entry.tags
+                    );
+                    println!("  {}", truncate_for_cli(&entry.content, 320));
+                }
+            }
+
+            Ok(())
+        }
+        MemoryCommand::Search { query, tag } => {
+            let hits = store.search(&query, tag.as_deref())?;
+            if hits.is_empty() {
+                println!("no memory hits found");
+                return Ok(());
+            }
+
+            for hit in hits {
+                println!(
+                    "{} | kind={} | updated_at={} | tags={:?}",
+                    hit.session_id, hit.kind, hit.updated_at, hit.tags
+                );
+                println!("  {}", hit.preview);
+            }
+
+            Ok(())
+        }
+    }
+}
+
 fn model_cmd(command: ModelCommand) -> Result<()> {
     match command {
         ModelCommand::List => {
@@ -652,7 +774,7 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
                     ' '
                 };
                 println!(
-                    "{} {} | type={} | model={} | family={} | tools={} | sessions={} | api_key_env={:?} | api_key_present={}",
+                    "{} {} | type={} | model={} | family={} | tools={} | sessions={} | context_window_chars={} | budget_tier={} | api_key_env={:?} | api_key_present={}",
                     marker,
                     profile.name,
                     profile.provider_type,
@@ -660,6 +782,8 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
                     profile.capabilities.family,
                     profile.capabilities.supports_tools,
                     profile.capabilities.supports_sessions,
+                    profile.capabilities.context_window_chars,
+                    profile.capabilities.budget_tier,
                     profile.api_key_env,
                     profile.api_key_present(),
                 );
@@ -734,10 +858,75 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
         println!("  gateway_url: {:?}", ingress.gateway_url);
     }
 
-    println!("\nsummary:");
+    println!(
+        "
+summary:"
+    );
     println!("  tool_calls: {}", summary.tool_calls);
     println!("  skill_calls: {}", summary.skill_calls);
     println!("  workflow_steps: {}", trace.step_traces.len());
+    println!("  model_selections: {}", trace.model_selections.len());
+    println!("  memory_reads: {}", trace.memory_reads.len());
+    println!("  memory_writes: {}", trace.memory_writes.len());
+    println!("  compression: {}", trace.compression.is_some());
+
+    if !trace.model_selections.is_empty() {
+        println!(
+            "
+== model selections =="
+        );
+        for (idx, selection) in trace.model_selections.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  scope: {}", selection.scope);
+            println!("  requested_profile: {:?}", selection.requested_profile);
+            println!("  selected_profile: {}", selection.selected_profile);
+            println!("  selected_model: {}", selection.selected_model);
+            println!("  reason: {}", selection.reason);
+            println!("  context_window_chars: {}", selection.context_window_chars);
+            println!("  budget_tier: {}", selection.budget_tier);
+        }
+    }
+
+    if !trace.memory_reads.is_empty() {
+        println!(
+            "
+== memory reads =="
+        );
+        for (idx, read) in trace.memory_reads.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  session_id: {}", read.session_id);
+            println!("  source: {}", read.source);
+            println!("  tags: {:?}", read.tags);
+            println!("  preview: {}", read.preview);
+        }
+    }
+
+    if let Some(compression) = &trace.compression {
+        println!(
+            "
+== compression =="
+        );
+        println!(
+            "  original_message_count: {}",
+            compression.original_message_count
+        );
+        println!("  kept_recent_count: {}", compression.kept_recent_count);
+        println!("  summary_preview: {}", compression.summary_preview);
+    }
+
+    if !trace.memory_writes.is_empty() {
+        println!(
+            "
+== memory writes =="
+        );
+        for (idx, write) in trace.memory_writes.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  session_id: {}", write.session_id);
+            println!("  kind: {}", write.kind);
+            println!("  tags: {:?}", write.tags);
+            println!("  preview: {}", write.preview);
+        }
+    }
 
     if let Ok(loaded) = load_config() {
         let redacted = redact_mosaic_config(&loaded.config);
@@ -882,19 +1071,23 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
 
     for session in sessions {
         println!(
-            "{} | {} | profile={} | model={} | route={} | messages={} | updated_at={} | gateway_run={} | correlation={}",
+            "{} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
             session.id,
             session.title,
             session.provider_profile,
             session.model,
             session.session_route,
             session.message_count,
+            session.reference_count,
             session.updated_at,
             session.last_gateway_run_id.as_deref().unwrap_or("-"),
             session.last_correlation_id.as_deref().unwrap_or("-"),
         );
         if let Some(preview) = session.last_message_preview.as_deref() {
             println!("  last: {}", preview);
+        }
+        if let Some(summary) = session.memory_summary_preview.as_deref() {
+            println!("  memory: {}", summary);
         }
     }
 
@@ -909,19 +1102,23 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
 
     for session in sessions {
         println!(
-            "{} | {} | profile={} | model={} | route={} | messages={} | updated_at={} | gateway_run={} | correlation={}",
+            "{} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
             session.id,
             session.title,
             session.provider_profile,
             session.model,
             session.session_route,
             session.message_count,
+            session.reference_count,
             session.updated_at,
             session.last_gateway_run_id.as_deref().unwrap_or("-"),
             session.last_correlation_id.as_deref().unwrap_or("-"),
         );
         if let Some(preview) = session.last_message_preview.as_deref() {
             println!("  last: {}", preview);
+        }
+        if let Some(summary) = session.memory_summary_preview.as_deref() {
+            println!("  memory: {}", summary);
         }
     }
 
@@ -947,6 +1144,19 @@ fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
         session.gateway.last_correlation_id
     );
     println!("message_count: {}", session.transcript.len());
+    println!("memory_summary: {:?}", session.memory_summary);
+    println!("compressed_context: {:?}", session.compressed_context);
+    println!("reference_count: {}", session.references.len());
+
+    if !session.references.is_empty() {
+        println!("\nreferences:");
+        for reference in &session.references {
+            println!(
+                "- {} | reason={} | created_at={}",
+                reference.session_id, reference.reason, reference.created_at
+            );
+        }
+    }
 
     if !session.transcript.is_empty() {
         println!("\ntranscript:");
@@ -987,6 +1197,12 @@ fn resolve_workspace_relative_path(path: &str) -> Result<PathBuf> {
     }
 
     Ok(env::current_dir()?.join(path))
+}
+
+fn local_memory_store() -> Result<FileMemoryStore> {
+    Ok(FileMemoryStore::new(resolve_workspace_relative_path(
+        ".mosaic/memory",
+    )?))
 }
 
 fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
@@ -1192,7 +1408,7 @@ mod tests {
     use clap::Parser;
     use mosaic_tool_core::ToolSource;
 
-    use super::{Cli, DispatchCommand, ModelCommand, SessionCommand, SetupCommand};
+    use super::{Cli, DispatchCommand, MemoryCommand, ModelCommand, SessionCommand, SetupCommand};
 
     #[test]
     fn defaults_to_tui_when_no_subcommand_is_present() {
@@ -1415,6 +1631,30 @@ mod tests {
             DispatchCommand::Model {
                 command: ModelCommand::Use {
                     profile: "gpt-5.4-mini".to_owned(),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn parses_memory_subcommands() {
+        let cli = Cli::parse_from(["mosaic", "memory", "show", "demo"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Memory {
+                command: MemoryCommand::Show {
+                    session: "demo".to_owned(),
+                },
+            }
+        );
+
+        let cli = Cli::parse_from(["mosaic", "memory", "search", "summary", "--tag", "note"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Memory {
+                command: MemoryCommand::Search {
+                    query: "summary".to_owned(),
+                    tag: Some("note".to_owned()),
                 },
             }
         );

@@ -553,8 +553,30 @@ fn console_lines(app: &App) -> Vec<Line<'_>> {
             Span::styled("State ", Style::default().fg(Color::DarkGray)),
             Span::raw(session.state.label()),
         ]),
-        Line::from(""),
     ];
+
+    if let Some(summary) = session.memory_summary.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("Summary ", Style::default().fg(Color::DarkGray)),
+            Span::raw(truncate_console_value(summary, 180)),
+        ]));
+    }
+
+    if let Some(compressed) = session.compressed_context.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("Compressed ", Style::default().fg(Color::DarkGray)),
+            Span::raw(truncate_console_value(compressed, 180)),
+        ]));
+    }
+
+    if !session.references.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled("References ", Style::default().fg(Color::DarkGray)),
+            Span::raw(truncate_console_value(&session.references.join(", "), 180)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
 
     for entry in &session.timeline {
         lines.extend(stream_entry_lines(app, entry));
@@ -755,6 +777,15 @@ fn display_runtime_label(status: &str) -> &str {
     if status == "warm" { "xhigh" } else { status }
 }
 
+fn truncate_console_value(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        return value.to_owned();
+    }
+
+    let truncated: String = value.chars().take(limit).collect();
+    format!("{truncated}...")
+}
+
 fn pad_between(width: u16, left_len: usize, right_len: usize) -> String {
     let total = left_len + right_len;
     let padding = width as usize;
@@ -873,9 +904,9 @@ mod tests {
     fn observability_toggle_changes_console_feed() {
         let mut app = App::new("/tmp/mosaic".into());
         app.show_console_history = true;
-        let with_feed = render_to_text(&app, 140, 32);
+        let with_feed = render_to_text(&app, 140, 40);
         app.show_observability = false;
-        let without_feed = render_to_text(&app, 140, 32);
+        let without_feed = render_to_text(&app, 140, 40);
 
         assert!(with_feed.contains("Activity Feed"));
         assert!(!without_feed.contains("Activity Feed"));

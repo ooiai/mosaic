@@ -179,6 +179,7 @@ mod tests {
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
     use mosaic_control_protocol::{GatewayEvent, InboundMessage, IngressTrace, RunSubmission};
     use mosaic_gateway::{GatewayHandle, GatewayRuntimeComponents, http_router};
+    use mosaic_memory::{FileMemoryStore, MemoryPolicy};
     use mosaic_provider::{MockProvider, ProviderProfileRegistry};
     use mosaic_session_core::FileSessionStore;
     use mosaic_skill_core::SkillRegistry;
@@ -212,6 +213,8 @@ mod tests {
                 profiles: Arc::new(profiles),
                 provider_override: Some(Arc::new(MockProvider)),
                 session_store: Arc::new(FileSessionStore::new(&session_root)),
+                memory_store: Arc::new(FileMemoryStore::new(session_root.join("memory"))),
+                memory_policy: MemoryPolicy::default(),
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),

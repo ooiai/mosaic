@@ -9,6 +9,7 @@ members = [
     "crates/skill-core",
     "crates/mcp-core",
     "crates/inspect",
+    "crates/memory",
     "crates/runtime",
     "crates/sdk",
     "crates/workflow",

@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use mosaic_config::{AppConfig, McpConfig, MosaicConfig, SkillConfig, ToolConfig};
 use mosaic_gateway::{GatewayHandle, GatewayRuntimeComponents};
 use mosaic_mcp_core::{McpServerManager, McpServerSpec};
+use mosaic_memory::{FileMemoryStore, MemoryPolicy};
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::{
     RuntimeContext,
@@ -32,6 +33,8 @@ pub fn build_runtime_context(
 ) -> Result<RuntimeContext> {
     let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
+    let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
+    let memory_policy = MemoryPolicy::default();
     let (tools, _mcp_manager) = build_tools_with_mcp(
         app_config.map(|cfg| cfg.tools.as_slice()),
         app_config.and_then(|cfg| cfg.mcp.as_ref()),
@@ -43,6 +46,8 @@ pub fn build_runtime_context(
         profiles,
         provider_override: None,
         session_store: Arc::new(FileSessionStore::new(session_store_root)),
+        memory_store: Arc::new(FileMemoryStore::new(memory_store_root)),
+        memory_policy,
         tools,
         skills,
         workflows: Arc::new(build_workflows(
@@ -58,6 +63,8 @@ pub fn build_gateway_components(
 ) -> Result<GatewayRuntimeComponents> {
     let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
+    let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
+    let memory_policy = MemoryPolicy::default();
     let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
     let (tools, mcp_manager) = build_tools_with_mcp(
         app_config.map(|cfg| cfg.tools.as_slice()),
@@ -73,6 +80,8 @@ pub fn build_gateway_components(
         profiles,
         provider_override: None,
         session_store: Arc::new(FileSessionStore::new(session_store_root)),
+        memory_store: Arc::new(FileMemoryStore::new(memory_store_root)),
+        memory_policy,
         tools,
         skills,
         workflows,

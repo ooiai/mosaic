@@ -38,6 +38,32 @@ impl TranscriptMessage {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionMemoryMetadata {
+    pub latest_summary: Option<String>,
+    pub compressed_context: Option<String>,
+    pub last_memory_write_at: Option<DateTime<Utc>>,
+    pub memory_entry_count: usize,
+    pub compression_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionReference {
+    pub session_id: String,
+    pub reason: String,
+    pub created_at: DateTime<Utc>,
+}
+
+impl SessionReference {
+    pub fn new(session_id: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+            reason: reason.into(),
+            created_at: Utc::now(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionRecord {
     pub id: String,
@@ -50,6 +76,10 @@ pub struct SessionRecord {
     pub last_run_id: Option<String>,
     #[serde(default)]
     pub gateway: SessionGatewayMetadata,
+    #[serde(default)]
+    pub memory: SessionMemoryMetadata,
+    #[serde(default)]
+    pub references: Vec<SessionReference>,
     #[serde(default)]
     pub transcript: Vec<TranscriptMessage>,
 }
@@ -86,6 +116,8 @@ impl SessionRecord {
                 last_gateway_run_id: None,
                 last_correlation_id: None,
             },
+            memory: SessionMemoryMetadata::default(),
+            references: Vec::new(),
             transcript: Vec::new(),
         }
     }
@@ -130,6 +162,38 @@ impl SessionRecord {
         self.updated_at = Utc::now();
     }
 
+    pub fn set_memory_state(
+        &mut self,
+        latest_summary: Option<String>,
+        compressed_context: Option<String>,
+        memory_entry_count: usize,
+        increment_compression_count: bool,
+    ) {
+        self.memory.latest_summary = latest_summary;
+        self.memory.compressed_context = compressed_context;
+        self.memory.memory_entry_count = memory_entry_count;
+        self.memory.last_memory_write_at = Some(Utc::now());
+        if increment_compression_count {
+            self.memory.compression_count += 1;
+        }
+        self.updated_at = Utc::now();
+    }
+
+    pub fn record_reference(&mut self, session_id: impl Into<String>, reason: impl Into<String>) {
+        let session_id = session_id.into();
+        if self
+            .references
+            .iter()
+            .any(|reference| reference.session_id == session_id)
+        {
+            return;
+        }
+
+        self.references
+            .push(SessionReference::new(session_id, reason));
+        self.updated_at = Utc::now();
+    }
+
     pub fn summary(&self) -> SessionSummary {
         SessionSummary {
             id: self.id.clone(),
@@ -146,6 +210,12 @@ impl SessionRecord {
                 .transcript
                 .last()
                 .map(|message| truncate_preview(&message.content, 120)),
+            memory_summary_preview: self
+                .memory
+                .latest_summary
+                .as_deref()
+                .map(|summary| truncate_preview(summary, 120)),
+            reference_count: self.references.len(),
         }
     }
 
@@ -171,6 +241,8 @@ pub struct SessionSummary {
     pub last_correlation_id: Option<String>,
     pub message_count: usize,
     pub last_message_preview: Option<String>,
+    pub memory_summary_preview: Option<String>,
+    pub reference_count: usize,
 }
 
 pub trait SessionStore: Send + Sync {
@@ -359,6 +431,13 @@ mod tests {
         session.append_message(TranscriptRole::User, "hello", None);
         session.append_message(TranscriptRole::Assistant, "world", None);
         session.set_last_run_id("run-1");
+        session.set_memory_state(
+            Some("Summary for demo".to_owned()),
+            Some("Compressed demo context".to_owned()),
+            2,
+            true,
+        );
+        session.record_reference("related", "explicit_session_reference");
 
         let summary = session.summary();
 
@@ -366,7 +445,13 @@ mod tests {
         assert_eq!(summary.message_count, 2);
         assert_eq!(summary.last_message_preview.as_deref(), Some("world"));
         assert_eq!(summary.session_route, session_route_for_id("demo"));
+        assert_eq!(
+            summary.memory_summary_preview.as_deref(),
+            Some("Summary for demo")
+        );
+        assert_eq!(summary.reference_count, 1);
         assert_eq!(session.last_run_id.as_deref(), Some("run-1"));
+        assert_eq!(session.memory.compression_count, 1);
     }
 
     #[test]
@@ -387,6 +472,7 @@ mod tests {
 
         let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
         session.append_message(TranscriptRole::User, "hello", None);
+        session.set_memory_state(Some("Stored summary".to_owned()), None, 1, false);
         store.save(&session).expect("session should save");
 
         let loaded = store
@@ -397,6 +483,10 @@ mod tests {
 
         assert_eq!(loaded.id, "demo");
         assert_eq!(loaded.transcript.len(), 1);
+        assert_eq!(
+            loaded.memory.latest_summary.as_deref(),
+            Some("Stored summary")
+        );
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].id, "demo");
 

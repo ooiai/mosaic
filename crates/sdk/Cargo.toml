@@ -21,6 +21,7 @@ uuid.workspace = true
 
 mosaic-config = { path = "../config" }
 mosaic-gateway = { path = "../gateway" }
+mosaic-memory = { path = "../memory" }
 mosaic-provider = { path = "../provider" }
 mosaic-session-core = { path = "../session-core" }
 mosaic-skill-core = { path = "../skill-core" }

@@ -1056,6 +1056,7 @@ dependencies = [
  "mosaic-gateway",
  "mosaic-inspect",
  "mosaic-mcp-core",
+ "mosaic-memory",
  "mosaic-provider",
  "mosaic-runtime",
  "mosaic-sdk",
@@ -1103,6 +1104,7 @@ dependencies = [
  "mosaic-control-protocol",
  "mosaic-inspect",
  "mosaic-mcp-core",
+ "mosaic-memory",
  "mosaic-provider",
  "mosaic-runtime",
  "mosaic-session-core",
@@ -1141,6 +1143,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-memory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "mosaic-provider"
 version = "0.1.0"
 dependencies = [
@@ -1162,6 +1175,7 @@ dependencies = [
  "chrono",
  "mosaic-config",
  "mosaic-inspect",
+ "mosaic-memory",
  "mosaic-provider",
  "mosaic-session-core",
  "mosaic-skill-core",
@@ -1183,6 +1197,7 @@ dependencies = [
  "mosaic-config",
  "mosaic-control-protocol",
  "mosaic-gateway",
+ "mosaic-memory",
  "mosaic-provider",
  "mosaic-session-core",
  "mosaic-skill-core",

@@ -85,6 +85,8 @@ pub struct SessionSummaryDto {
     pub last_correlation_id: Option<String>,
     pub message_count: usize,
     pub last_message_preview: Option<String>,
+    pub memory_summary_preview: Option<String>,
+    pub reference_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -98,6 +100,9 @@ pub struct SessionDetailDto {
     pub model: String,
     pub last_run_id: Option<String>,
     pub gateway: SessionGatewayDto,
+    pub memory_summary: Option<String>,
+    pub compressed_context: Option<String>,
+    pub references: Vec<SessionReferenceDto>,
     pub transcript: Vec<TranscriptMessageDto>,
 }
 
@@ -106,6 +111,13 @@ pub struct SessionGatewayDto {
     pub route: String,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionReferenceDto {
+    pub session_id: String,
+    pub reason: String,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

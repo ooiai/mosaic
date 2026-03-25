@@ -19,6 +19,7 @@ mosaic-config = { path = "../crates/config" }
 mosaic-control-protocol = { path = "../crates/control-protocol" }
 mosaic-gateway = { path = "../crates/gateway" }
 mosaic-inspect = { path = "../crates/inspect" }
+mosaic-memory = { path = "../crates/memory" }
 mosaic-mcp-core = { path = "../crates/mcp-core" }
 mosaic-provider = { path = "../crates/provider" }
 mosaic-runtime = { path = "../crates/runtime" }

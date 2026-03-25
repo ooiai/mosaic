@@ -101,6 +101,42 @@ impl WorkflowStepTrace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryReadTrace {
+    pub session_id: String,
+    pub source: String,
+    pub preview: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryWriteTrace {
+    pub session_id: String,
+    pub kind: String,
+    pub preview: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompressionTrace {
+    pub original_message_count: usize,
+    pub kept_recent_count: usize,
+    pub summary_preview: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelSelectionTrace {
+    pub scope: String,
+    pub requested_profile: Option<String>,
+    pub selected_profile: String,
+    pub selected_model: String,
+    pub reason: String,
+    pub context_window_chars: usize,
+    pub budget_tier: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
     pub status: String,
     pub tool_calls: usize,
@@ -122,6 +158,13 @@ pub struct RunTrace {
     pub input: String,
     pub output: Option<String>,
     pub effective_profile: Option<EffectiveProfileTrace>,
+    #[serde(default)]
+    pub model_selections: Vec<ModelSelectionTrace>,
+    #[serde(default)]
+    pub memory_reads: Vec<MemoryReadTrace>,
+    #[serde(default)]
+    pub memory_writes: Vec<MemoryWriteTrace>,
+    pub compression: Option<CompressionTrace>,
     #[serde(default)]
     pub tool_calls: Vec<ToolTrace>,
     #[serde(default)]
@@ -146,6 +189,10 @@ impl RunTrace {
             input,
             output: None,
             effective_profile: None,
+            model_selections: vec![],
+            memory_reads: vec![],
+            memory_writes: vec![],
+            compression: None,
             tool_calls: vec![],
             skill_calls: vec![],
             step_traces: vec![],
@@ -178,6 +225,22 @@ impl RunTrace {
 
     pub fn bind_effective_profile(&mut self, profile: EffectiveProfileTrace) {
         self.effective_profile = Some(profile);
+    }
+
+    pub fn add_model_selection(&mut self, trace: ModelSelectionTrace) {
+        self.model_selections.push(trace);
+    }
+
+    pub fn add_memory_read(&mut self, trace: MemoryReadTrace) {
+        self.memory_reads.push(trace);
+    }
+
+    pub fn add_memory_write(&mut self, trace: MemoryWriteTrace) {
+        self.memory_writes.push(trace);
+    }
+
+    pub fn bind_compression(&mut self, trace: CompressionTrace) {
+        self.compression = Some(trace);
     }
 
     pub fn finish_ok(&mut self, output: String) {
@@ -269,6 +332,23 @@ mod tests {
             display_name: None,
             gateway_url: Some("http://127.0.0.1:8080".to_owned()),
         });
+        trace.add_memory_read(MemoryReadTrace {
+            session_id: "demo".to_owned(),
+            source: "session_summary".to_owned(),
+            preview: "Stored summary".to_owned(),
+            tags: vec![],
+        });
+        trace.add_memory_write(MemoryWriteTrace {
+            session_id: "demo".to_owned(),
+            kind: "summary".to_owned(),
+            preview: "New summary".to_owned(),
+            tags: vec!["session".to_owned()],
+        });
+        trace.bind_compression(CompressionTrace {
+            original_message_count: 12,
+            kept_recent_count: 6,
+            summary_preview: "Compressed older turns".to_owned(),
+        });
         trace.tool_calls.push(ToolTrace {
             call_id: Some("call-1".to_owned()),
             name: "echo".to_owned(),
@@ -294,6 +374,8 @@ mod tests {
                 .and_then(|ingress| ingress.gateway_url.as_deref()),
             Some("http://127.0.0.1:8080")
         );
+        assert_eq!(loaded.memory_reads.len(), 1);
+        assert!(loaded.compression.is_some());
 
         fs::remove_file(path).ok();
         fs::remove_dir_all(dir).ok();
@@ -323,6 +405,18 @@ mod tests {
                 api_key_env: None,
                 api_key_present: false,
             }),
+            model_selections: vec![ModelSelectionTrace {
+                scope: "run".to_owned(),
+                requested_profile: None,
+                selected_profile: "mock".to_owned(),
+                selected_model: "mock".to_owned(),
+                reason: "active_profile".to_owned(),
+                context_window_chars: 4000,
+                budget_tier: "debug".to_owned(),
+            }],
+            memory_reads: vec![],
+            memory_writes: vec![],
+            compression: None,
             tool_calls: vec![ToolTrace {
                 call_id: Some("call-1".to_owned()),
                 name: "echo".to_owned(),
@@ -356,6 +450,7 @@ mod tests {
         assert_eq!(trace.tool_calls[0].duration_ms(), Some(3));
         assert_eq!(trace.step_traces[0].duration_ms(), Some(9));
         assert_eq!(trace.step_traces[0].status(), "success");
+        assert_eq!(trace.model_selections.len(), 1);
     }
 
     #[test]

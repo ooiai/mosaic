@@ -167,6 +167,9 @@ pub struct SessionRecord {
     pub state: SessionState,
     pub unread: usize,
     pub draft: String,
+    pub memory_summary: Option<String>,
+    pub compressed_context: Option<String>,
+    pub references: Vec<String>,
     pub timeline: Vec<TimelineEntry>,
 }
 
@@ -339,6 +342,13 @@ impl App {
             view.state = state;
             view.unread = unread;
             view.draft = draft;
+            view.memory_summary = session.memory.latest_summary.clone();
+            view.compressed_context = session.memory.compressed_context.clone();
+            view.references = session
+                .references
+                .iter()
+                .map(|reference| format!("{} ({})", reference.session_id, reference.reason))
+                .collect();
             view.timeline = session.transcript.iter().map(transcript_entry).collect();
         }
 
@@ -1354,6 +1364,9 @@ fn interactive_session_record(session_id: &str, model: &str) -> SessionRecord {
         state: SessionState::Waiting,
         unread: 0,
         draft: String::new(),
+        memory_summary: None,
+        compressed_context: None,
+        references: Vec::new(),
         timeline: Vec::new(),
     }
 }

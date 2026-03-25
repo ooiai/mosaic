@@ -57,6 +57,8 @@ pub struct ModelCapabilities {
     pub supports_tools: bool,
     pub supports_sessions: bool,
     pub family: String,
+    pub context_window_chars: usize,
+    pub budget_tier: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,6 +77,28 @@ impl ProviderProfile {
             .as_deref()
             .is_some_and(|env_var| env::var(env_var).is_ok())
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SchedulingIntent {
+    InteractiveRun,
+    Summary,
+    WorkflowStep,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SchedulingRequest {
+    pub requested_profile: Option<String>,
+    pub intent: SchedulingIntent,
+    pub estimated_context_chars: usize,
+    pub requires_tools: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduledProfile {
+    pub profile: ProviderProfile,
+    pub reason: String,
 }
 
 pub fn validate_step_tools_support(profile: &ProviderProfile, tool_names: &[String]) -> Result<()> {
@@ -167,6 +191,89 @@ impl ProviderProfileRegistry {
     pub fn build_provider(&self, name: Option<&str>) -> Result<Arc<dyn LlmProvider>> {
         let profile = self.resolve(name)?;
         build_provider_from_profile(&profile)
+    }
+
+    pub fn schedule(&self, request: SchedulingRequest) -> Result<ScheduledProfile> {
+        if let Some(requested_profile) = request.requested_profile.as_deref() {
+            let profile = self.resolve(Some(requested_profile))?;
+            if request.requires_tools && !profile.capabilities.supports_tools {
+                bail!(
+                    "profile '{}' does not support tool-enabled runs",
+                    profile.name
+                );
+            }
+            return Ok(ScheduledProfile {
+                profile,
+                reason: "requested_profile".to_owned(),
+            });
+        }
+
+        let mut candidates = self
+            .list()
+            .into_iter()
+            .filter(|profile| !request.requires_tools || profile.capabilities.supports_tools)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        if candidates.is_empty() {
+            bail!("no provider profiles satisfy the requested runtime constraints");
+        }
+
+        let active = self.active_profile().clone();
+        let active_available = candidates.iter().any(|profile| profile.name == active.name);
+        let long_context = request.estimated_context_chars
+            > active.capabilities.context_window_chars.saturating_mul(3) / 4;
+
+        let selected = match request.intent {
+            SchedulingIntent::Summary => candidates
+                .into_iter()
+                .min_by_key(|profile| {
+                    (
+                        budget_rank(&profile.capabilities.budget_tier),
+                        profile.capabilities.context_window_chars,
+                    )
+                })
+                .expect("summary scheduling should have candidates"),
+            SchedulingIntent::WorkflowStep => {
+                if long_context {
+                    candidates
+                        .into_iter()
+                        .max_by_key(|profile| profile.capabilities.context_window_chars)
+                        .expect("workflow scheduling should have candidates")
+                } else if active_available {
+                    active.clone()
+                } else {
+                    candidates.remove(0)
+                }
+            }
+            SchedulingIntent::InteractiveRun => {
+                if long_context {
+                    candidates
+                        .into_iter()
+                        .max_by_key(|profile| profile.capabilities.context_window_chars)
+                        .expect("interactive scheduling should have candidates")
+                } else if active_available {
+                    active.clone()
+                } else {
+                    candidates.remove(0)
+                }
+            }
+        };
+
+        let reason = if selected.name == active.name {
+            "active_profile"
+        } else if long_context {
+            "expanded_context_window"
+        } else if matches!(request.intent, SchedulingIntent::Summary) {
+            "summary_budget_policy"
+        } else {
+            "capability_policy"
+        };
+
+        Ok(ScheduledProfile {
+            profile: selected,
+            reason: reason.to_owned(),
+        })
     }
 }
 
@@ -474,10 +581,37 @@ fn infer_model_capabilities(provider_type: &str, model: &str) -> ModelCapabiliti
         provider_type.to_owned()
     };
 
+    let (context_window_chars, budget_tier) = infer_context_budget(model);
+
     ModelCapabilities {
         supports_tools: matches!(provider_type, "mock" | "openai-compatible"),
         supports_sessions: true,
         family,
+        context_window_chars,
+        budget_tier: budget_tier.to_owned(),
+    }
+}
+
+fn infer_context_budget(model: &str) -> (usize, &'static str) {
+    if model == "mock" {
+        (64_000, "medium")
+    } else if model.contains("mini") {
+        (32_000, "small")
+    } else if model.starts_with("gpt-5.4") {
+        (128_000, "large")
+    } else if model.starts_with("gpt-") {
+        (64_000, "medium")
+    } else {
+        (24_000, "small")
+    }
+}
+
+fn budget_rank(value: &str) -> usize {
+    match value {
+        "small" => 0,
+        "medium" => 1,
+        "large" => 2,
+        _ => 3,
     }
 }
 
@@ -513,8 +647,12 @@ struct ApiFunctionCall {
 #[cfg(test)]
 mod tests {
     use futures::executor::block_on;
+    use mosaic_config::{MosaicConfig, ProviderProfileConfig};
 
-    use super::{LlmProvider, Message, MockProvider, Role, ToolDefinition, public_error_message};
+    use super::{
+        LlmProvider, Message, MockProvider, ProviderProfileRegistry, Role, SchedulingIntent,
+        SchedulingRequest, ToolDefinition, public_error_message,
+    };
 
     fn time_tool_definition() -> ToolDefinition {
         ToolDefinition {
@@ -691,6 +829,65 @@ mod tests {
             response.message.expect("message should exist").content,
             "mock response: What time is it?"
         );
+    }
+
+    fn registry_for_scheduling() -> ProviderProfileRegistry {
+        let mut config = MosaicConfig::default();
+        config.profiles.clear();
+        config.active_profile = "mini".to_owned();
+        config.profiles.insert(
+            "mini".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "mock".to_owned(),
+                model: "gpt-5.4-mini".to_owned(),
+                base_url: None,
+                api_key_env: None,
+            },
+        );
+        config.profiles.insert(
+            "large".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "mock".to_owned(),
+                model: "gpt-5.4".to_owned(),
+                base_url: None,
+                api_key_env: None,
+            },
+        );
+        ProviderProfileRegistry::from_config(&config).expect("registry should build")
+    }
+
+    #[test]
+    fn summary_scheduling_prefers_lower_budget_profile() {
+        let registry = registry_for_scheduling();
+
+        let scheduled = registry
+            .schedule(SchedulingRequest {
+                requested_profile: None,
+                intent: SchedulingIntent::Summary,
+                estimated_context_chars: 2_000,
+                requires_tools: false,
+            })
+            .expect("summary schedule should succeed");
+
+        assert_eq!(scheduled.profile.name, "mini");
+        assert_eq!(scheduled.profile.capabilities.budget_tier, "small");
+    }
+
+    #[test]
+    fn interactive_scheduling_expands_to_larger_context_window() {
+        let registry = registry_for_scheduling();
+
+        let scheduled = registry
+            .schedule(SchedulingRequest {
+                requested_profile: None,
+                intent: SchedulingIntent::InteractiveRun,
+                estimated_context_chars: 40_000,
+                requires_tools: false,
+            })
+            .expect("interactive schedule should succeed");
+
+        assert_eq!(scheduled.profile.name, "large");
+        assert_eq!(scheduled.reason, "expanded_context_window");
     }
 
     #[test]
