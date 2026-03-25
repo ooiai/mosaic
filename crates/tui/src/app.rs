@@ -2,10 +2,13 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mosaic_runtime::events::RunEvent;
+use mosaic_session_core::{
+    SessionRecord as StoredSessionRecord, TranscriptMessage, TranscriptRole,
+};
 
 use crate::mock;
 
-pub const LOCAL_COMMANDS: [(&str, &str); 6] = [
+pub const LOCAL_COMMANDS: [(&str, &str); 8] = [
     ("/help", "Show local control command reference"),
     ("/logs", "Toggle activity feed visibility"),
     ("/gateway connect", "Mark the mock gateway as connected"),
@@ -18,12 +21,28 @@ pub const LOCAL_COMMANDS: [(&str, &str); 6] = [
         "/session state|model",
         "Update the selected session state or model label",
     ),
+    ("/model list", "Show available runtime profiles"),
+    ("/model use <profile>", "Switch the real runtime profile for next turns"),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppAction {
     Continue,
     Quit,
+    Submit(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppMode {
+    Mock,
+    Interactive,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileOption {
+    pub name: String,
+    pub model: String,
+    pub provider_type: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,6 +174,7 @@ pub struct ActivityEntry {
 
 #[derive(Debug, Clone)]
 pub struct App {
+    pub mode: AppMode,
     pub workspace_name: String,
     pub workspace_path: String,
     pub sessions: Vec<SessionRecord>,
@@ -174,6 +194,8 @@ pub struct App {
     pub gateway_connected: bool,
     pub runtime_status: String,
     pub control_model: String,
+    pub selected_profile: String,
+    pub available_profiles: Vec<ProfileOption>,
     heartbeat: usize,
 }
 
@@ -191,6 +213,7 @@ impl App {
         let workspace_path = workspace_path.display().to_string();
 
         Self {
+            mode: AppMode::Mock,
             workspace_name,
             workspace_path,
             sessions: mock::sessions(),
@@ -214,8 +237,103 @@ impl App {
             gateway_connected: true,
             runtime_status: "warm".to_owned(),
             control_model: "gpt-5.4-control".to_owned(),
+            selected_profile: "gpt-5.4-control".to_owned(),
+            available_profiles: Vec::new(),
             heartbeat: 0,
         }
+    }
+
+    pub fn new_interactive(
+        workspace_path: PathBuf,
+        session_id: String,
+        profile: String,
+        model: String,
+        available_profiles: Vec<ProfileOption>,
+        start_in_resume: bool,
+    ) -> Self {
+        let workspace_name = workspace_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("workspace")
+            .to_owned();
+        let workspace_path = workspace_path.display().to_string();
+
+        Self {
+            mode: AppMode::Interactive,
+            workspace_name,
+            workspace_path,
+            sessions: vec![interactive_session_record(&session_id, &model)],
+            activity: vec![ActivityEntry {
+                timestamp: current_hhmm(),
+                scope: "session".to_owned(),
+                message: format!(
+                    "Interactive session {} is ready. Profile={} model={}",
+                    session_id, profile, model
+                ),
+            }],
+            surface: if start_in_resume {
+                Surface::Resume
+            } else {
+                Surface::Console
+            },
+            selected_session: 0,
+            resume_scope: ResumeScope::Local,
+            resume_query: String::new(),
+            resume_search: false,
+            command_menu_index: 0,
+            show_console_history: true,
+            focus: Focus::Composer,
+            show_observability: true,
+            show_help_overlay: false,
+            timeline_scroll: 0,
+            observability_scroll: 0,
+            gateway_connected: true,
+            runtime_status: "idle".to_owned(),
+            control_model: model,
+            selected_profile: profile,
+            available_profiles,
+            heartbeat: 0,
+        }
+    }
+
+    pub fn is_interactive(&self) -> bool {
+        self.mode == AppMode::Interactive
+    }
+
+    pub fn active_profile(&self) -> &str {
+        &self.selected_profile
+    }
+
+    pub fn sync_runtime_session(&mut self, session: &StoredSessionRecord) {
+        let draft = self.active_session().draft.clone();
+        let unread = self.active_session().unread;
+        let state = match self.runtime_status.as_str() {
+            "running" => SessionState::Active,
+            "error" => SessionState::Degraded,
+            _ => SessionState::Waiting,
+        };
+
+        if let Some(view) = self.sessions.get_mut(self.selected_session) {
+            view.id = session.id.clone();
+            view.title = session.title.clone();
+            view.origin = "Local".to_owned();
+            view.modified = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
+            view.created = session.created_at.format("%Y-%m-%d %H:%M").to_string();
+            view.channel = "control".to_owned();
+            view.route = "local.session".to_owned();
+            view.runtime = session.provider_type.clone();
+            view.model = session.model.clone();
+            view.state = state;
+            view.unread = unread;
+            view.draft = draft;
+            view.timeline = session
+                .transcript
+                .iter()
+                .map(transcript_entry)
+                .collect();
+        }
+
+        self.show_console_history = true;
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> AppAction {
@@ -303,8 +421,7 @@ impl App {
                 AppAction::Continue
             }
             _ => {
-                self.handle_focus_key(key);
-                AppAction::Continue
+                self.handle_focus_key(key)
             }
         }
     }
@@ -318,6 +435,9 @@ impl App {
             RunEvent::RunStarted { input } => {
                 self.runtime_status = "running".to_owned();
                 self.push_activity("runtime", "Run started");
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::System,
                     "runtime",
@@ -327,6 +447,9 @@ impl App {
             }
             RunEvent::SkillStarted { name } => {
                 self.push_activity("skill", &format!("Executing skill: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "skill",
@@ -336,6 +459,9 @@ impl App {
             }
             RunEvent::SkillFinished { name } => {
                 self.push_activity("skill", &format!("Skill finished: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "skill",
@@ -346,6 +472,9 @@ impl App {
             RunEvent::SkillFailed { name, error } => {
                 self.runtime_status = "error".to_owned();
                 self.push_activity("skill", &format!("Skill failed: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::System,
                     "skill",
@@ -368,6 +497,9 @@ impl App {
                         tool_count, message_count
                     ),
                 );
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::System,
                     "provider",
@@ -377,6 +509,9 @@ impl App {
             }
             RunEvent::ToolCalling { name, call_id } => {
                 self.push_activity("tool", &format!("Calling tool: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::Tool,
                     "tool",
@@ -386,6 +521,9 @@ impl App {
             }
             RunEvent::ToolFinished { name, call_id } => {
                 self.push_activity("tool", &format!("Tool finished: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::Tool,
                     "tool",
@@ -400,6 +538,9 @@ impl App {
             } => {
                 self.runtime_status = "error".to_owned();
                 self.push_activity("tool", &format!("Tool failed: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::System,
                     "tool",
@@ -413,6 +554,9 @@ impl App {
             }
             RunEvent::FinalAnswerReady => {
                 self.push_activity("runtime", "Final answer ready");
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "runtime",
@@ -423,6 +567,9 @@ impl App {
             RunEvent::RunFinished { output_preview } => {
                 self.runtime_status = "idle".to_owned();
                 self.push_activity("runtime", "Run finished");
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "runtime",
@@ -436,6 +583,9 @@ impl App {
             RunEvent::RunFailed { error } => {
                 self.runtime_status = "error".to_owned();
                 self.push_activity("runtime", "Run failed");
+                if self.is_interactive() {
+                    return;
+                }
                 self.push_timeline(
                     TimelineKind::System,
                     "runtime",
@@ -491,12 +641,21 @@ impl App {
             .collect()
     }
 
-    fn handle_focus_key(&mut self, key: KeyEvent) {
+    fn handle_focus_key(&mut self, key: KeyEvent) -> AppAction {
         match self.focus {
-            Focus::Sessions => self.handle_sessions_key(key.code),
-            Focus::Timeline => self.handle_timeline_key(key.code),
+            Focus::Sessions => {
+                self.handle_sessions_key(key.code);
+                AppAction::Continue
+            }
+            Focus::Timeline => {
+                self.handle_timeline_key(key.code);
+                AppAction::Continue
+            }
             Focus::Composer => self.handle_composer_key(key),
-            Focus::Observability => self.handle_observability_key(key.code),
+            Focus::Observability => {
+                self.handle_observability_key(key.code);
+                AppAction::Continue
+            }
         }
     }
 
@@ -610,31 +769,31 @@ impl App {
         }
     }
 
-    fn handle_composer_key(&mut self, key: KeyEvent) {
+    fn handle_composer_key(&mut self, key: KeyEvent) -> AppAction {
         if self.command_menu_active() {
             match key.code {
                 KeyCode::Down | KeyCode::Char('j') => {
                     self.select_next_command_match();
-                    return;
+                    return AppAction::Continue;
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.select_previous_command_match();
-                    return;
+                    return AppAction::Continue;
                 }
                 KeyCode::Tab => {
                     self.select_next_command_match();
-                    return;
+                    return AppAction::Continue;
                 }
                 KeyCode::Enter if self.command_menu_should_complete() => {
                     self.complete_selected_command();
-                    return;
+                    return AppAction::Continue;
                 }
                 _ => {}
             }
         }
 
         match key.code {
-            KeyCode::Enter => self.submit_composer(),
+            KeyCode::Enter => return self.submit_composer(),
             KeyCode::Backspace => {
                 self.active_session_mut().draft.pop();
                 self.command_menu_index = 0;
@@ -648,23 +807,40 @@ impl App {
             }
             _ => {}
         }
+
+        AppAction::Continue
     }
 
-    fn submit_composer(&mut self) {
+    fn submit_composer(&mut self) -> AppAction {
         let message = self.active_draft().trim().to_owned();
         if message.is_empty() {
-            return;
+            return AppAction::Continue;
         }
 
-        if let Some(command) = message.strip_prefix('/') {
+        let action = if let Some(command) = message.strip_prefix('/') {
             self.route_command(command.trim());
+            AppAction::Continue
+        } else if self.is_interactive() {
+            if self.runtime_status == "running" {
+                self.push_command_error("A run is already in progress for this session");
+                AppAction::Continue
+            } else {
+                self.push_activity(
+                    "composer",
+                    format!("Submitted message to session {}", self.session_label()),
+                );
+                AppAction::Submit(message.clone())
+            }
         } else {
             self.queue_operator_instruction(&message);
-        }
+            AppAction::Continue
+        };
 
         self.show_console_history = true;
         self.active_session_mut().draft.clear();
         self.timeline_scroll = 0;
+
+        action
     }
 
     fn queue_operator_instruction(&mut self, message: &str) {
@@ -857,12 +1033,42 @@ impl App {
             "help" => self.push_help(),
             "logs" => self.toggle_logs(),
             "gateway" => self.route_gateway_command(parts.next()),
+            "model" => self.route_model_command(parts.collect()),
             "runtime" => {
                 let status = parts.collect::<Vec<_>>().join(" ");
                 self.set_runtime_status(status.trim());
             }
             "session" => self.route_session_command(parts.collect()),
             _ => self.push_command_error(format!("Unknown command: /{name}")),
+        }
+    }
+
+    fn route_model_command(&mut self, args: Vec<&str>) {
+        match args.as_slice() {
+            ["list"] => {
+                if self.available_profiles.is_empty() {
+                    self.push_command_error("No runtime profiles are available in this TUI session");
+                    return;
+                }
+
+                let profiles = self
+                    .available_profiles
+                    .iter()
+                    .map(|profile| {
+                        if profile.name == self.selected_profile {
+                            format!("* {} ({})", profile.name, profile.model)
+                        } else {
+                            format!("- {} ({})", profile.name, profile.model)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                self.push_activity("model", "Listed available runtime profiles.");
+                self.push_system_entry("Runtime profiles", profiles);
+            }
+            ["use", rest @ ..] if !rest.is_empty() => self.set_active_profile(&rest.join(" ")),
+            _ => self.push_command_error("Usage: /model list | /model use <profile>"),
         }
     }
 
@@ -938,6 +1144,33 @@ impl App {
         );
     }
 
+    fn set_active_profile(&mut self, profile: &str) {
+        let Some(option) = self
+            .available_profiles
+            .iter()
+            .find(|candidate| candidate.name == profile)
+            .cloned()
+        else {
+            self.push_command_error(format!("Unknown profile: {profile}"));
+            return;
+        };
+
+        self.selected_profile = option.name.clone();
+        self.control_model = option.model.clone();
+        self.active_session_mut().model = option.model.clone();
+        self.push_activity(
+            "model",
+            format!("Interactive runtime profile switched to {}.", option.name),
+        );
+        self.push_system_entry(
+            "Runtime profile updated",
+            format!(
+                "Future turns will use profile {} (type={}, model={}).",
+                option.name, option.provider_type, option.model
+            ),
+        );
+    }
+
     fn toggle_logs(&mut self) {
         self.show_observability = !self.show_observability;
         if !self.show_observability && self.focus == Focus::Observability {
@@ -960,7 +1193,7 @@ impl App {
         self.push_activity("command", "Displayed local control command reference.");
         self.push_system_entry(
             "Local command reference",
-            "Available commands:\n/help\n/logs\n/gateway connect\n/gateway disconnect\n/runtime <status>\n/session state <active|waiting|degraded>\n/session model <name>",
+            "Available commands:\n/help\n/logs\n/gateway connect\n/gateway disconnect\n/runtime <status>\n/session state <active|waiting|degraded>\n/session model <name>\n/model list\n/model use <profile>",
         );
     }
 
@@ -1009,6 +1242,41 @@ impl App {
         }
 
         self.show_console_history = true;
+    }
+}
+
+fn interactive_session_record(session_id: &str, model: &str) -> SessionRecord {
+    SessionRecord {
+        id: session_id.to_owned(),
+        title: "Untitled session".to_owned(),
+        origin: "Local".to_owned(),
+        modified: current_hhmm(),
+        created: current_hhmm(),
+        channel: "control".to_owned(),
+        route: "local.session".to_owned(),
+        runtime: "agent-runtime".to_owned(),
+        model: model.to_owned(),
+        state: SessionState::Waiting,
+        unread: 0,
+        draft: String::new(),
+        timeline: Vec::new(),
+    }
+}
+
+fn transcript_entry(message: &TranscriptMessage) -> TimelineEntry {
+    let (kind, actor, title) = match message.role {
+        TranscriptRole::System => (TimelineKind::System, "system", "System"),
+        TranscriptRole::User => (TimelineKind::Operator, "user", "User"),
+        TranscriptRole::Assistant => (TimelineKind::Agent, "assistant", "Assistant"),
+        TranscriptRole::Tool => (TimelineKind::Tool, "tool", "Tool"),
+    };
+
+    TimelineEntry {
+        timestamp: message.created_at.format("%H:%M").to_string(),
+        kind,
+        actor: actor.to_owned(),
+        title: title.to_owned(),
+        body: message.content.clone(),
     }
 }
 

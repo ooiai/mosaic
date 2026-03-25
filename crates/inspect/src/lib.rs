@@ -37,6 +37,15 @@ pub struct SkillTrace {
     pub finished_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EffectiveProfileTrace {
+    pub profile: String,
+    pub provider_type: String,
+    pub model: String,
+    pub api_key_env: Option<String>,
+    pub api_key_present: bool,
+}
+
 impl SkillTrace {
     pub fn duration_ms(&self) -> Option<i64> {
         self.finished_at.map(|finished| {
@@ -58,10 +67,12 @@ pub struct RunSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RunTrace {
     pub run_id: String,
+    pub session_id: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub input: String,
     pub output: Option<String>,
+    pub effective_profile: Option<EffectiveProfileTrace>,
     #[serde(default)]
     pub tool_calls: Vec<ToolTrace>,
     #[serde(default)]
@@ -73,14 +84,24 @@ impl RunTrace {
     pub fn new(input: String) -> Self {
         Self {
             run_id: Uuid::new_v4().to_string(),
+            session_id: None,
             started_at: Utc::now(),
             finished_at: None,
             input,
             output: None,
+            effective_profile: None,
             tool_calls: vec![],
             skill_calls: vec![],
             error: None,
         }
+    }
+
+    pub fn bind_session(&mut self, session_id: impl Into<String>) {
+        self.session_id = Some(session_id.into());
+    }
+
+    pub fn bind_effective_profile(&mut self, profile: EffectiveProfileTrace) {
+        self.effective_profile = Some(profile);
     }
 
     pub fn finish_ok(&mut self, output: String) {
@@ -193,10 +214,18 @@ mod tests {
 
         let trace = RunTrace {
             run_id: "run-1".to_owned(),
+            session_id: Some("session-1".to_owned()),
             started_at,
             finished_at: Some(finished_at),
             input: "hello".to_owned(),
             output: Some("world".to_owned()),
+            effective_profile: Some(EffectiveProfileTrace {
+                profile: "mock".to_owned(),
+                provider_type: "mock".to_owned(),
+                model: "mock".to_owned(),
+                api_key_env: None,
+                api_key_present: false,
+            }),
             tool_calls: vec![ToolTrace {
                 call_id: Some("call-1".to_owned()),
                 name: "echo".to_owned(),

@@ -1,5 +1,8 @@
-use anyhow::{Result, anyhow};
+use std::{collections::BTreeMap, env, sync::Arc};
+
+use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
+use mosaic_config::{MosaicConfig, ProviderProfileConfig};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +50,96 @@ pub trait LlmProvider: Send + Sync {
         messages: &[Message],
         tools: Option<&[ToolDefinition]>,
     ) -> Result<CompletionResponse>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelCapabilities {
+    pub supports_tools: bool,
+    pub supports_sessions: bool,
+    pub family: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderProfile {
+    pub name: String,
+    pub provider_type: String,
+    pub model: String,
+    pub base_url: Option<String>,
+    pub api_key_env: Option<String>,
+    pub capabilities: ModelCapabilities,
+}
+
+impl ProviderProfile {
+    pub fn api_key_present(&self) -> bool {
+        self.api_key_env
+            .as_deref()
+            .is_some_and(|env_var| env::var(env_var).is_ok())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderProfileRegistry {
+    active_profile: String,
+    profiles: BTreeMap<String, ProviderProfile>,
+}
+
+impl ProviderProfileRegistry {
+    pub fn from_config(config: &MosaicConfig) -> Result<Self> {
+        if config.profiles.is_empty() {
+            bail!("no provider profiles configured");
+        }
+
+        let profiles = config
+            .profiles
+            .iter()
+            .map(|(name, profile)| {
+                (name.clone(), provider_profile_from_config(name, profile))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        if !profiles.contains_key(&config.active_profile) {
+            bail!(
+                "active profile '{}' does not exist in the provider registry",
+                config.active_profile
+            );
+        }
+
+        Ok(Self {
+            active_profile: config.active_profile.clone(),
+            profiles,
+        })
+    }
+
+    pub fn active_profile_name(&self) -> &str {
+        &self.active_profile
+    }
+
+    pub fn active_profile(&self) -> &ProviderProfile {
+        self.profiles
+            .get(&self.active_profile)
+            .expect("active profile should exist in registry")
+    }
+
+    pub fn list(&self) -> Vec<&ProviderProfile> {
+        self.profiles.values().collect()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&ProviderProfile> {
+        self.profiles.get(name)
+    }
+
+    pub fn resolve(&self, name: Option<&str>) -> Result<ProviderProfile> {
+        let name = name.unwrap_or(&self.active_profile);
+        self.profiles
+            .get(name)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown provider profile: {name}"))
+    }
+
+    pub fn build_provider(&self, name: Option<&str>) -> Result<Arc<dyn LlmProvider>> {
+        let profile = self.resolve(name)?;
+        build_provider_from_profile(&profile)
+    }
 }
 
 pub struct MockProvider;
@@ -140,6 +233,35 @@ pub struct OpenAiCompatibleProvider {
     base_url: String,
     api_key: String,
     model: String,
+}
+
+pub fn build_provider_from_profile(profile: &ProviderProfile) -> Result<Arc<dyn LlmProvider>> {
+    match profile.provider_type.as_str() {
+        "mock" => Ok(Arc::new(MockProvider)),
+        "openai-compatible" => {
+            let api_key_env = profile
+                .api_key_env
+                .as_deref()
+                .ok_or_else(|| anyhow!("profile '{}' is missing api_key_env", profile.name))?;
+            let api_key = env::var(api_key_env).map_err(|_| {
+                anyhow!(
+                    "profile '{}' expects environment variable {} to be set",
+                    profile.name,
+                    api_key_env
+                )
+            })?;
+
+            Ok(Arc::new(OpenAiCompatibleProvider::new(
+                profile
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.openai.com/v1".to_owned()),
+                api_key,
+                profile.model.clone(),
+            )))
+        }
+        other => bail!("unsupported provider type: {other}"),
+    }
 }
 
 impl OpenAiCompatibleProvider {
@@ -289,6 +411,35 @@ fn preview_text(value: &str, limit: usize) -> String {
 
     let truncated: String = value.chars().take(limit).collect();
     format!("{truncated}...")
+}
+
+fn provider_profile_from_config(name: &str, config: &ProviderProfileConfig) -> ProviderProfile {
+    ProviderProfile {
+        name: name.to_owned(),
+        provider_type: config.provider_type.clone(),
+        model: config.model.clone(),
+        base_url: config.base_url.clone(),
+        api_key_env: config.api_key_env.clone(),
+        capabilities: infer_model_capabilities(&config.provider_type, &config.model),
+    }
+}
+
+fn infer_model_capabilities(provider_type: &str, model: &str) -> ModelCapabilities {
+    let family = if model == "mock" {
+        "mock".to_owned()
+    } else if model.starts_with("gpt-5.4") {
+        "gpt-5.4".to_owned()
+    } else if model.starts_with("gpt-") {
+        model.split('-').take(2).collect::<Vec<_>>().join("-")
+    } else {
+        provider_type.to_owned()
+    };
+
+    ModelCapabilities {
+        supports_tools: matches!(provider_type, "mock" | "openai-compatible"),
+        supports_sessions: true,
+        family,
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -2,6 +2,7 @@
 members = [
     "cli",
     "crates/config",
+    "crates/session-core",
     "crates/provider",
     "crates/tool-core",
     "crates/skill-core",

@@ -15,7 +15,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App) {
     }
 
     if app.show_help_overlay {
-        render_help_overlay(frame);
+        render_help_overlay(frame, app);
     }
 }
 
@@ -65,12 +65,19 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
         ])
         .split(frame.area());
 
-    let status = Paragraph::new(vec![Line::from(vec![
-        Span::styled("• ", Style::default().fg(Color::Cyan)),
-        Span::raw(
-            "Experimental local mode is enabled. Runtime, tool, and node feeds remain mock-driven.",
-        ),
-    ])]);
+    let status = if app.is_interactive() {
+        Paragraph::new(vec![Line::from(vec![
+            Span::styled("• ", Style::default().fg(Color::Cyan)),
+            Span::raw("Interactive local session mode is enabled. Enter resumes the selected conversation."),
+        ])])
+    } else {
+        Paragraph::new(vec![Line::from(vec![
+            Span::styled("• ", Style::default().fg(Color::Cyan)),
+            Span::raw(
+                "Experimental local mode is enabled. Runtime, tool, and node feeds remain mock-driven.",
+            ),
+        ])])
+    };
     frame.render_widget(status, outer[0]);
 
     let visible = app.visible_session_indices();
@@ -202,13 +209,30 @@ fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
     .wrap(Wrap { trim: false });
     frame.render_widget(card, card_area);
 
-    let mut detail_lines = vec![Line::from(vec![
-        Span::styled("• ", Style::default().fg(Color::Cyan)),
-        Span::raw(
-            "Experimental mode is enabled. These features are not stable, may have bugs, and may be removed in the future.",
-        ),
-    ])];
-    if app.command_query().is_some() {
+    let mut detail_lines = if app.is_interactive() {
+        vec![Line::from(vec![
+            Span::styled("• ", Style::default().fg(Color::Cyan)),
+            Span::raw("Interactive mode is enabled. Messages are sent to the real local runtime and stored in the current session."),
+        ])]
+    } else {
+        vec![Line::from(vec![
+            Span::styled("• ", Style::default().fg(Color::Cyan)),
+            Span::raw(
+                "Experimental mode is enabled. These features are not stable, may have bugs, and may be removed in the future.",
+            ),
+        ])]
+    };
+    if app.is_interactive() {
+        detail_lines.push(Line::from(vec![
+            Span::styled("• ", Style::default().fg(Color::Blue)),
+            Span::raw(format!(
+                "Current profile: {}  model: {}  session: {}",
+                app.active_profile(),
+                app.control_model,
+                app.session_label()
+            )),
+        ]));
+    } else if app.command_query().is_some() {
         detail_lines.push(Line::from(vec![
             Span::styled("• ", Style::default().fg(Color::Blue)),
             Span::raw("Environment loaded: 1 custom instruction, 1 MCP server, 3 skills, 2 agents"),
@@ -231,7 +255,7 @@ fn render_console_stream(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .split(area);
 
         frame.render_widget(Paragraph::new(""), sections[0]);
-        frame.render_widget(startup_environment_line(), sections[1]);
+        frame.render_widget(startup_environment_line(app), sections[1]);
     }
 }
 
@@ -257,14 +281,31 @@ fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(widget, area);
 }
 
-fn startup_environment_line<'a>() -> Paragraph<'a> {
-    Paragraph::new(Line::from(vec![
-        Span::styled("◦ ", Style::default().fg(Color::Magenta)),
-        Span::styled(
-            "Loading environment: 1 custom instruction, 3 skills",
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]))
+fn startup_environment_line<'a>(app: &'a App) -> Paragraph<'a> {
+    let line = if app.is_interactive() {
+        Line::from(vec![
+            Span::styled("◦ ", Style::default().fg(Color::Magenta)),
+            Span::styled(
+                format!(
+                    "Session {} ready on profile {} ({})",
+                    app.session_label(),
+                    app.active_profile(),
+                    app.control_model
+                ),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("◦ ", Style::default().fg(Color::Magenta)),
+            Span::styled(
+                "Loading environment: 1 custom instruction, 3 skills",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ])
+    };
+
+    Paragraph::new(line)
 }
 
 fn mosaic_mark_top() -> Line<'static> {
@@ -426,9 +467,9 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(widget, area);
 }
 
-fn render_help_overlay(frame: &mut Frame<'_>) {
-    let area = centered_rect(frame.area(), 74, 20);
-    let lines = vec![
+fn render_help_overlay(frame: &mut Frame<'_>, app: &App) {
+    let area = centered_rect(frame.area(), 74, 24);
+    let mut lines = vec![
         Line::from(vec![Span::styled(
             "Keyboard",
             Style::default().add_modifier(Modifier::BOLD),
@@ -441,6 +482,7 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
         Line::from("  Ctrl+L            show or hide the activity feed"),
         Line::from("  F1                open or close this help"),
         Line::from("  Esc               leave help, resume, or search"),
+        Line::from("  q                 quit when the composer is not focused"),
         Line::from("  Ctrl+C            quit the TUI"),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -453,7 +495,23 @@ fn render_help_overlay(frame: &mut Frame<'_>) {
         Line::from("  /runtime <status>"),
         Line::from("  /session state <active|waiting|degraded>"),
         Line::from("  /session model <name>"),
+        Line::from("  /model list"),
+        Line::from("  /model use <profile>"),
     ];
+
+    if app.is_interactive() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![Span::styled(
+            "Current Runtime",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from(format!(
+            "  session={}  profile={}  model={}",
+            app.session_label(),
+            app.active_profile(),
+            app.control_model
+        )));
+    }
 
     let widget = Paragraph::new(lines)
         .block(

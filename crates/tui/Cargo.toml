@@ -9,3 +9,8 @@ chrono.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
 mosaic-runtime = { path = "../runtime" }
+mosaic-session-core = { path = "../session-core" }
+tokio.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true

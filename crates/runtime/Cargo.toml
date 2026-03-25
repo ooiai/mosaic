@@ -12,9 +12,11 @@ serde_json.workspace = true
 
 mosaic-inspect = { path = "../inspect" }
 mosaic-provider = { path = "../provider" }
+mosaic-session-core = { path = "../session-core" }
 mosaic-skill-core = { path = "../skill-core" }
 mosaic-tool-core = { path = "../tool-core" }
 
 [dev-dependencies]
 async-trait.workspace = true
+mosaic-config = { path = "../config" }
 tokio.workspace = true

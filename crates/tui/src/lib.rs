@@ -6,6 +6,7 @@ pub mod app;
 pub mod mock;
 pub mod ui;
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::{io, time::Duration};
 
@@ -14,10 +15,13 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use mosaic_runtime::{AgentRuntime, RunRequest};
 use mosaic_runtime::events::{RunEvent, RunEventSink};
+use mosaic_session_core::SessionStore;
 use ratatui::{Terminal, backend::CrosstermBackend};
+use tokio::runtime::Handle;
 
-use self::app::{App, AppAction};
+use self::app::{App, AppAction, ProfileOption};
 
 #[derive(Clone, Default)]
 pub struct TuiEventBuffer {
@@ -56,6 +60,20 @@ impl RunEventSink for TuiEventSink {
     }
 }
 
+#[derive(Clone)]
+pub struct InteractiveSessionContext {
+    pub runtime: Arc<AgentRuntime>,
+    pub runtime_handle: Handle,
+    pub event_buffer: TuiEventBuffer,
+    pub session_store: Arc<dyn SessionStore>,
+    pub session_id: String,
+    pub system: Option<String>,
+    pub runs_dir: PathBuf,
+    pub active_profile: String,
+    pub active_model: String,
+    pub available_profiles: Vec<ProfileOption>,
+}
+
 pub fn build_tui_event_buffer() -> TuiEventBuffer {
     TuiEventBuffer::default()
 }
@@ -85,6 +103,16 @@ pub fn run_until_complete_with_event_buffer(
 ) -> io::Result<()> {
     let mut terminal = setup_terminal()?;
     let result = run_app(&mut terminal, start_in_resume, event_buffer, true);
+    restore_terminal(&mut terminal)?;
+    result
+}
+
+pub fn run_interactive_session(
+    start_in_resume: bool,
+    context: InteractiveSessionContext,
+) -> io::Result<()> {
+    let mut terminal = setup_terminal()?;
+    let result = run_interactive_app(&mut terminal, start_in_resume, context);
     restore_terminal(&mut terminal)?;
     result
 }
@@ -133,6 +161,86 @@ fn run_app(
     Ok(())
 }
 
+fn run_interactive_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    start_in_resume: bool,
+    context: InteractiveSessionContext,
+) -> io::Result<()> {
+    let workspace_path = std::env::current_dir()?;
+    let mut app = App::new_interactive(
+        workspace_path,
+        context.session_id.clone(),
+        context.active_profile.clone(),
+        context.active_model.clone(),
+        context.available_profiles.clone(),
+        start_in_resume,
+    );
+    refresh_interactive_session(&mut app, context.session_store.as_ref(), &context.session_id);
+
+    loop {
+        drain_run_events(&mut app, &context.event_buffer);
+        refresh_interactive_session(&mut app, context.session_store.as_ref(), &context.session_id);
+
+        terminal.draw(|frame| ui::render(frame, &app))?;
+
+        if event::poll(Duration::from_millis(200))? {
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match app.handle_key(key) {
+                    AppAction::Quit => break,
+                    AppAction::Continue => {}
+                    AppAction::Submit(input) => {
+                        spawn_interactive_run(&context, app.active_profile().to_owned(), input);
+                    }
+                },
+                Event::Resize(_, _) => {}
+                _ => {}
+            }
+        }
+
+        app.tick();
+    }
+
+    Ok(())
+}
+
+fn spawn_interactive_run(
+    context: &InteractiveSessionContext,
+    profile: String,
+    input: String,
+) {
+    let runtime = context.runtime.clone();
+    let request = RunRequest {
+        system: context.system.clone(),
+        input,
+        skill: None,
+        session_id: Some(context.session_id.clone()),
+        profile: Some(profile),
+    };
+    let runs_dir = context.runs_dir.clone();
+
+    context.runtime_handle.spawn(async move {
+        match runtime.run(request).await {
+            Ok(result) => {
+                let _ = result.trace.save_to_dir(&runs_dir);
+            }
+            Err(err) => {
+                let (_, trace) = err.into_parts();
+                let _ = trace.save_to_dir(&runs_dir);
+            }
+        }
+    });
+}
+
+fn refresh_interactive_session(
+    app: &mut App,
+    session_store: &dyn SessionStore,
+    session_id: &str,
+) {
+    if let Ok(Some(session)) = session_store.load(session_id) {
+        app.sync_runtime_session(&session);
+    }
+}
+
 fn drain_run_events(app: &mut App, event_buffer: &TuiEventBuffer) -> bool {
     let mut saw_terminal_event = false;
 
@@ -153,10 +261,29 @@ fn drain_run_events(app: &mut App, event_buffer: &TuiEventBuffer) -> bool {
 #[cfg(test)]
 mod tests {
     use mosaic_runtime::events::{RunEvent, RunEventSink};
+    use mosaic_session_core::{SessionRecord, SessionStore, SessionSummary, TranscriptRole};
 
     use crate::app::Surface;
 
-    use super::{TuiEventBuffer, TuiEventSink, build_app, drain_run_events};
+    use super::{TuiEventBuffer, TuiEventSink, build_app, drain_run_events, refresh_interactive_session};
+
+    struct MemorySessionStore {
+        session: Option<SessionRecord>,
+    }
+
+    impl SessionStore for MemorySessionStore {
+        fn load(&self, _id: &str) -> anyhow::Result<Option<SessionRecord>> {
+            Ok(self.session.clone())
+        }
+
+        fn save(&self, _session: &SessionRecord) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn list(&self) -> anyhow::Result<Vec<SessionSummary>> {
+            Ok(Vec::new())
+        }
+    }
 
     #[test]
     fn build_app_uses_explicit_resume_flag() {
@@ -197,6 +324,31 @@ mod tests {
 
         assert!(drain_run_events(&mut app, &buffer));
         assert_eq!(app.runtime_status, "idle");
+    }
+
+    #[test]
+    fn refresh_interactive_session_rebuilds_timeline_from_transcript() {
+        let store = MemorySessionStore {
+            session: Some({
+                let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+                session.append_message(TranscriptRole::User, "hello", None);
+                session.append_message(TranscriptRole::Assistant, "world", None);
+                session
+            }),
+        };
+        let mut app = crate::app::App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "mock".to_owned(),
+            "mock".to_owned(),
+            Vec::new(),
+            false,
+        );
+
+        refresh_interactive_session(&mut app, &store, "demo");
+
+        assert_eq!(app.active_session().timeline.len(), 2);
+        assert_eq!(app.active_session().title, "Demo");
     }
 }
 

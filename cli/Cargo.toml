@@ -19,5 +19,6 @@ mosaic-config = { path = "../crates/config" }
 mosaic-inspect = { path = "../crates/inspect" }
 mosaic-provider = { path = "../crates/provider" }
 mosaic-runtime = { path = "../crates/runtime" }
+mosaic-session-core = { path = "../crates/session-core" }
 mosaic-skill-core = { path = "../crates/skill-core" }
 mosaic-tool-core = { path = "../crates/tool-core" }
