@@ -10,9 +10,12 @@ use mosaic_runtime::{
     RuntimeContext,
     events::{CompositeEventSink, SharedRunEventSink},
 };
+use mosaic_scheduler_core::{CronStore, FileCronStore};
 use mosaic_session_core::FileSessionStore;
 use mosaic_skill_core::{SkillManifest, SkillRegistry, SummarizeSkill};
-use mosaic_tool_core::{EchoTool, ReadFileTool, TimeNowTool, ToolRegistry};
+use mosaic_tool_core::{
+    CronRegisterTool, EchoTool, ExecTool, ReadFileTool, TimeNowTool, ToolRegistry, WebhookTool,
+};
 use mosaic_tui::{TuiEventBuffer, build_tui_event_buffer, build_tui_event_sink};
 use mosaic_workflow::{Workflow, WorkflowRegistry};
 use tokio::runtime::Handle;
@@ -34,10 +37,13 @@ pub fn build_runtime_context(
     let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
     let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
+    let cron_store_root = resolve_workspace_path(".mosaic/cron")?;
     let memory_policy = MemoryPolicy::default();
+    let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
     let (tools, _mcp_manager) = build_tools_with_mcp(
         app_config.map(|cfg| cfg.tools.as_slice()),
         app_config.and_then(|cfg| cfg.mcp.as_ref()),
+        cron_store.clone(),
     )?;
     let tools = Arc::new(tools);
     let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
@@ -64,11 +70,14 @@ pub fn build_gateway_components(
     let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
     let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
+    let cron_store_root = resolve_workspace_path(".mosaic/cron")?;
     let memory_policy = MemoryPolicy::default();
     let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
+    let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
     let (tools, mcp_manager) = build_tools_with_mcp(
         app_config.map(|cfg| cfg.tools.as_slice()),
         app_config.and_then(|cfg| cfg.mcp.as_ref()),
+        cron_store.clone(),
     )?;
     let tools = Arc::new(tools);
     let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
@@ -86,6 +95,7 @@ pub fn build_gateway_components(
         skills,
         workflows,
         mcp_manager,
+        cron_store,
         runs_dir,
     })
 }
@@ -126,19 +136,26 @@ pub fn build_cli_and_tui_sinks() -> OutputSinks {
     }
 }
 
-fn build_tools(configs: Option<&[ToolConfig]>) -> Result<ToolRegistry> {
+fn build_tools(
+    configs: Option<&[ToolConfig]>,
+    cron_store: Arc<dyn CronStore>,
+) -> Result<ToolRegistry> {
     let mut tools = ToolRegistry::new();
 
     match configs {
         Some(configs) => {
             for tool in configs {
-                register_tool(&mut tools, tool)?;
+                register_tool(&mut tools, tool, cron_store.clone())?;
             }
         }
         None => {
+            let roots = capability_roots()?;
+            tools.register(Arc::new(CronRegisterTool::new(cron_store.clone())));
             tools.register(Arc::new(EchoTool::new()));
-            tools.register(Arc::new(ReadFileTool::new()));
+            tools.register(Arc::new(ExecTool::new(roots.clone())));
+            tools.register(Arc::new(ReadFileTool::new_with_allowed_roots(roots)));
             tools.register(Arc::new(TimeNowTool::new()));
+            tools.register(Arc::new(WebhookTool::new()));
         }
     }
 
@@ -148,8 +165,9 @@ fn build_tools(configs: Option<&[ToolConfig]>) -> Result<ToolRegistry> {
 fn build_tools_with_mcp(
     tool_configs: Option<&[ToolConfig]>,
     mcp_config: Option<&McpConfig>,
+    cron_store: Arc<dyn CronStore>,
 ) -> Result<(ToolRegistry, Option<Arc<McpServerManager>>)> {
-    let mut tools = build_tools(tool_configs)?;
+    let mut tools = build_tools(tool_configs, cron_store)?;
     let mcp_manager = build_mcp_manager(mcp_config)?;
 
     if let Some(manager) = &mcp_manager {
@@ -181,11 +199,24 @@ fn build_mcp_manager(config: Option<&McpConfig>) -> Result<Option<Arc<McpServerM
     Ok(Some(Arc::new(McpServerManager::start(&specs)?)))
 }
 
-fn register_tool(registry: &mut ToolRegistry, tool: &ToolConfig) -> Result<()> {
+fn register_tool(
+    registry: &mut ToolRegistry,
+    tool: &ToolConfig,
+    cron_store: Arc<dyn CronStore>,
+) -> Result<()> {
+    let roots = capability_roots()?;
+
     match (tool.tool_type.as_str(), tool.name.as_str()) {
+        ("builtin", "cron_register") => {
+            registry.register(Arc::new(CronRegisterTool::new(cron_store)))
+        }
         ("builtin", "echo") => registry.register(Arc::new(EchoTool::new())),
-        ("builtin", "read_file") => registry.register(Arc::new(ReadFileTool::new())),
+        ("builtin", "exec_command") => registry.register(Arc::new(ExecTool::new(roots.clone()))),
+        ("builtin", "read_file") => registry.register(Arc::new(
+            ReadFileTool::new_with_allowed_roots(roots.clone()),
+        )),
         ("builtin", "time_now") => registry.register(Arc::new(TimeNowTool::new())),
+        ("builtin", "webhook_call") => registry.register(Arc::new(WebhookTool::new())),
         ("builtin", other) => bail!("unsupported builtin tool in skeleton mode: {other}"),
         (other, _) => bail!("unsupported tool type in skeleton mode: {other}"),
     }
@@ -237,6 +268,10 @@ fn build_workflows(configs: Option<&[Workflow]>) -> Result<WorkflowRegistry> {
     }
 
     Ok(workflows)
+}
+
+fn capability_roots() -> Result<Vec<PathBuf>> {
+    Ok(vec![env::current_dir()?])
 }
 
 fn resolve_workspace_path(path: &str) -> Result<PathBuf> {

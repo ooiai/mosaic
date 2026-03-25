@@ -1,4 +1,4 @@
-use std::{env, fs, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, env, fs, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
@@ -8,7 +8,8 @@ use mosaic_config::{
     load_mosaic_config, redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
 use mosaic_control_protocol::{
-    GatewayEvent, IngressTrace, RunResponse, SessionDetailDto, SessionSummaryDto,
+    CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest, ExecJobRequest, GatewayEvent,
+    IngressTrace, RunResponse, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
 };
 use mosaic_gateway::{
     GatewayCommand as GatewayControlCommand, GatewayHandle, GatewayRunError, GatewayRunRequest,
@@ -80,6 +81,18 @@ enum Commands {
         #[command(subcommand)]
         command: GatewayCliCommand,
     },
+    Capability {
+        #[arg(long)]
+        attach: Option<String>,
+        #[command(subcommand)]
+        command: CapabilityCommand,
+    },
+    Cron {
+        #[arg(long)]
+        attach: Option<String>,
+        #[command(subcommand)]
+        command: CronCommand,
+    },
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
@@ -117,6 +130,70 @@ enum GatewayCliCommand {
         http: Option<String>,
     },
     Sessions,
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum CapabilityCommand {
+    Doctor,
+    Jobs,
+    Exec {
+        #[command(subcommand)]
+        command: ExecCapabilityCommand,
+    },
+    Webhook {
+        #[command(subcommand)]
+        command: WebhookCapabilityCommand,
+    },
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum ExecCapabilityCommand {
+    Guardrails,
+    Run {
+        command: String,
+        #[arg(long = "arg")]
+        args: Vec<String>,
+        #[arg(long)]
+        cwd: Option<String>,
+        #[arg(long)]
+        session: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum WebhookCapabilityCommand {
+    Test {
+        url: String,
+        #[arg(long)]
+        method: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long = "header")]
+        headers: Vec<String>,
+        #[arg(long)]
+        session: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum CronCommand {
+    List,
+    Register {
+        id: String,
+        schedule: String,
+        input: String,
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        skill: Option<String>,
+        #[arg(long)]
+        workflow: Option<String>,
+    },
+    Trigger {
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -165,6 +242,14 @@ enum DispatchCommand {
     },
     Gateway {
         command: GatewayCliCommand,
+    },
+    Capability {
+        attach: Option<String>,
+        command: CapabilityCommand,
+    },
+    Cron {
+        attach: Option<String>,
+        command: CronCommand,
     },
     Memory {
         command: MemoryCommand,
@@ -215,6 +300,10 @@ impl Cli {
             }
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
             Some(Commands::Gateway { command }) => DispatchCommand::Gateway { command },
+            Some(Commands::Capability { attach, command }) => {
+                DispatchCommand::Capability { attach, command }
+            }
+            Some(Commands::Cron { attach, command }) => DispatchCommand::Cron { attach, command },
             Some(Commands::Memory { command }) => DispatchCommand::Memory { command },
         }
     }
@@ -244,6 +333,8 @@ async fn main() -> Result<()> {
         DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
         DispatchCommand::Model { command } => model_cmd(command),
         DispatchCommand::Gateway { command } => gateway_cmd(command).await,
+        DispatchCommand::Capability { attach, command } => capability_cmd(attach, command).await,
+        DispatchCommand::Cron { attach, command } => cron_cmd(attach, command).await,
         DispatchCommand::Memory { command } => memory_cmd(command),
     }
 }
@@ -680,6 +771,246 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
     }
 }
 
+async fn capability_cmd(attach: Option<String>, command: CapabilityCommand) -> Result<()> {
+    let loaded = ensure_loaded_config(None)?;
+
+    match command {
+        CapabilityCommand::Doctor => {
+            if attach.is_some() {
+                bail!("remote capability doctor is not supported");
+            }
+            let components = bootstrap::build_gateway_components(&loaded.config, None)?;
+            println!("capability doctor:");
+            println!("workspace_root: {}", env::current_dir()?.display());
+            for tool in components.tools.iter() {
+                let meta = tool.metadata();
+                println!(
+                    "{} | kind={} | risk={} | scopes={:?} | timeout_ms={} | retry_limit={} | authorized={} | healthy={} | source={}",
+                    meta.name,
+                    meta.capability.kind.label(),
+                    meta.capability.risk.label(),
+                    meta.capability
+                        .permission_scopes
+                        .iter()
+                        .map(|scope| scope.label())
+                        .collect::<Vec<_>>(),
+                    meta.capability.execution.timeout_ms,
+                    meta.capability.execution.retry_limit,
+                    meta.capability.authorized,
+                    meta.capability.healthy,
+                    meta.source.label(),
+                );
+            }
+            Ok(())
+        }
+        CapabilityCommand::Jobs => {
+            if let Some(url) = attach {
+                let client = GatewayClient::new(url);
+                return print_capability_jobs(&client.list_capability_jobs().await?);
+            }
+            let gateway = build_gateway_handle(&loaded, None)?;
+            print_capability_jobs(&gateway.list_capability_jobs())
+        }
+        CapabilityCommand::Exec { command } => match command {
+            ExecCapabilityCommand::Guardrails => {
+                if attach.is_some() {
+                    bail!("remote exec guardrails are not supported");
+                }
+                println!("exec guardrails:");
+                println!("  allowed_root: {}", env::current_dir()?.display());
+                println!("  permission_scope: local_exec");
+                println!("  timeout_policy: tool metadata controlled");
+                Ok(())
+            }
+            ExecCapabilityCommand::Run {
+                command,
+                args,
+                cwd,
+                session,
+            } => {
+                if let Some(url) = attach {
+                    let client = GatewayClient::new(url);
+                    let job = client
+                        .run_exec_job(ExecJobRequest {
+                            session_id: session,
+                            command,
+                            args,
+                            cwd,
+                        })
+                        .await?;
+                    return print_capability_job(&job);
+                }
+
+                let gateway = build_gateway_handle(&loaded, None)?;
+                let job = gateway
+                    .run_exec_job(ExecJobRequest {
+                        session_id: session,
+                        command,
+                        args,
+                        cwd,
+                    })
+                    .await?;
+                print_capability_job(&job)
+            }
+        },
+        CapabilityCommand::Webhook { command } => match command {
+            WebhookCapabilityCommand::Test {
+                url,
+                method,
+                body,
+                headers,
+                session,
+            } => {
+                let request = WebhookJobRequest {
+                    session_id: session,
+                    url,
+                    method,
+                    body,
+                    headers: parse_header_args(&headers)?,
+                };
+                if let Some(url) = attach {
+                    let client = GatewayClient::new(url);
+                    let job = client.run_webhook_job(request).await?;
+                    return print_capability_job(&job);
+                }
+
+                let gateway = build_gateway_handle(&loaded, None)?;
+                let job = gateway.run_webhook_job(request).await?;
+                print_capability_job(&job)
+            }
+        },
+    }
+}
+
+async fn cron_cmd(attach: Option<String>, command: CronCommand) -> Result<()> {
+    let loaded = ensure_loaded_config(None)?;
+
+    match command {
+        CronCommand::List => {
+            if let Some(url) = attach {
+                let client = GatewayClient::new(url);
+                return print_cron_registrations(&client.list_cron_registrations().await?);
+            }
+            let gateway = build_gateway_handle(&loaded, None)?;
+            let registrations = gateway
+                .list_cron_registrations()?
+                .iter()
+                .map(mosaic_gateway::cron_registration_dto)
+                .collect::<Vec<_>>();
+            print_cron_registrations(&registrations)
+        }
+        CronCommand::Register {
+            id,
+            schedule,
+            input,
+            session,
+            profile,
+            skill,
+            workflow,
+        } => {
+            let request = CronRegistrationRequest {
+                id,
+                schedule,
+                input,
+                session_id: session,
+                profile,
+                skill,
+                workflow,
+            };
+            if let Some(url) = attach {
+                let client = GatewayClient::new(url);
+                let registration = client.register_cron(request).await?;
+                return print_cron_registrations(&[registration]);
+            }
+            let gateway = build_gateway_handle(&loaded, None)?;
+            let registration = gateway.register_cron(request)?;
+            print_cron_registrations(&[mosaic_gateway::cron_registration_dto(&registration)])
+        }
+        CronCommand::Trigger { id } => {
+            if let Some(url) = attach {
+                let client = GatewayClient::new(url);
+                let response = client.trigger_cron(&id).await?;
+                return finish_remote_gateway_run(&loaded, response);
+            }
+            let gateway = build_gateway_handle(&loaded, None)?;
+            let result = gateway.trigger_cron(&id).await?;
+            finish_successful_gateway_run(result)
+        }
+    }
+}
+
+fn print_capability_jobs(jobs: &[CapabilityJobDto]) -> Result<()> {
+    if jobs.is_empty() {
+        println!("no capability jobs found");
+        return Ok(());
+    }
+
+    for job in jobs {
+        print_capability_job(job)?;
+    }
+
+    Ok(())
+}
+
+fn print_capability_job(job: &CapabilityJobDto) -> Result<()> {
+    println!(
+        "{} | name={} | kind={} | risk={} | status={} | session={} | started_at={} | finished_at={:?}",
+        job.id,
+        job.name,
+        job.kind,
+        job.risk,
+        job.status,
+        job.session_id.as_deref().unwrap_or("-"),
+        job.started_at,
+        job.finished_at,
+    );
+    println!("  scopes: {:?}", job.permission_scopes);
+    if let Some(summary) = job.summary.as_deref() {
+        println!("  summary: {}", truncate_for_cli(summary, 240));
+    }
+    if let Some(target) = job.target.as_deref() {
+        println!("  target: {}", target);
+    }
+    if let Some(error) = job.error.as_deref() {
+        println!("  error: {}", truncate_for_cli(error, 240));
+    }
+    Ok(())
+}
+
+fn print_cron_registrations(registrations: &[CronRegistrationDto]) -> Result<()> {
+    if registrations.is_empty() {
+        println!("no cron registrations found");
+        return Ok(());
+    }
+
+    for registration in registrations {
+        println!(
+            "{} | schedule={} | session={} | profile={:?} | skill={:?} | workflow={:?} | last_triggered_at={:?}",
+            registration.id,
+            registration.schedule,
+            registration.session_id.as_deref().unwrap_or("-"),
+            registration.profile,
+            registration.skill,
+            registration.workflow,
+            registration.last_triggered_at,
+        );
+        println!("  input: {}", truncate_for_cli(&registration.input, 240));
+    }
+
+    Ok(())
+}
+
+fn parse_header_args(headers: &[String]) -> Result<BTreeMap<String, String>> {
+    let mut parsed = BTreeMap::new();
+    for header in headers {
+        let Some((name, value)) = header.split_once('=') else {
+            bail!("invalid header '{}'; expected KEY=VALUE", header);
+        };
+        parsed.insert(name.trim().to_owned(), value.trim().to_owned());
+    }
+    Ok(parsed)
+}
+
 fn memory_cmd(command: MemoryCommand) -> Result<()> {
     let _loaded = ensure_loaded_config(None)?;
     let store = local_memory_store()?;
@@ -863,6 +1194,10 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
 summary:"
     );
     println!("  tool_calls: {}", summary.tool_calls);
+    println!(
+        "  capability_invocations: {}",
+        trace.capability_invocations.len()
+    );
     println!("  skill_calls: {}", summary.skill_calls);
     println!("  workflow_steps: {}", trace.step_traces.len());
     println!("  model_selections: {}", trace.model_selections.len());
@@ -912,6 +1247,44 @@ summary:"
         );
         println!("  kept_recent_count: {}", compression.kept_recent_count);
         println!("  summary_preview: {}", compression.summary_preview);
+    }
+
+    if let Some(side_effect_summary) = &trace.side_effect_summary {
+        println!(
+            "
+== side-effect summary =="
+        );
+        println!("  total: {}", side_effect_summary.total);
+        println!("  failed: {}", side_effect_summary.failed);
+        println!("  high_risk: {}", side_effect_summary.high_risk);
+        println!(
+            "  capability_kinds: {:?}",
+            side_effect_summary.capability_kinds
+        );
+    }
+
+    if !trace.capability_invocations.is_empty() {
+        println!(
+            "
+== capability invocations =="
+        );
+
+        for (idx, invocation) in trace.capability_invocations.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  job_id: {}", invocation.job_id);
+            println!("  call_id: {:?}", invocation.call_id);
+            println!("  tool_name: {}", invocation.tool_name);
+            println!("  kind: {}", invocation.kind.label());
+            println!("  risk: {}", invocation.risk.label());
+            println!("  permission_scopes: {:?}", invocation.permission_scopes);
+            println!("  status: {}", invocation.status);
+            println!("  summary: {}", invocation.summary);
+            println!("  target: {:?}", invocation.target);
+            println!("  started_at: {}", invocation.started_at);
+            println!("  finished_at: {:?}", invocation.finished_at);
+            println!("  duration_ms: {:?}", invocation.duration_ms());
+            println!("  error: {:?}", invocation.error);
+        }
     }
 
     if !trace.memory_writes.is_empty() {
@@ -1248,6 +1621,16 @@ fn gateway_event_label(event: &GatewayEvent) -> String {
     match event {
         GatewayEvent::RunSubmitted { profile, .. } => format!("run_submitted profile={profile}"),
         GatewayEvent::Runtime(_) => "runtime_event".to_owned(),
+        GatewayEvent::CapabilityJobUpdated { job } => format!(
+            "capability_job id={} status={} kind={}",
+            job.id, job.status, job.kind
+        ),
+        GatewayEvent::CronUpdated { registration } => {
+            format!(
+                "cron_updated id={} schedule={}",
+                registration.id, registration.schedule
+            )
+        }
         GatewayEvent::SessionUpdated { summary } => {
             format!(
                 "session_updated id={} messages={}",

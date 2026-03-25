@@ -648,6 +648,149 @@ impl App {
                     ),
                 );
             }
+            RunEvent::CapabilityJobQueued {
+                job_id,
+                name,
+                kind,
+                risk,
+                permission_scopes,
+            } => {
+                self.push_activity(
+                    "capability",
+                    &format!("Queued capability job: {} ({}, risk={})", name, kind, risk),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Tool,
+                    "capability",
+                    &format!("Capability queued: {}", name),
+                    &format!(
+                        "job_id={}
+kind={}
+risk={}
+permissions={}",
+                        job_id,
+                        kind,
+                        risk,
+                        permission_scopes.join(", ")
+                    ),
+                );
+            }
+            RunEvent::CapabilityJobStarted { job_id, name } => {
+                self.push_activity("capability", &format!("Capability running: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Tool,
+                    "capability",
+                    &format!("Capability running: {}", name),
+                    &format!("job_id={}", job_id),
+                );
+            }
+            RunEvent::CapabilityJobRetried {
+                job_id,
+                name,
+                attempt,
+                error,
+            } => {
+                self.push_activity(
+                    "capability",
+                    &format!("Capability retry {}: {}", attempt, name),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::System,
+                    "capability",
+                    &format!("Capability retry: {}", name),
+                    &format!(
+                        "job_id={}
+attempt={}
+error={}",
+                        job_id,
+                        attempt,
+                        truncate_for_timeline(&error, 180)
+                    ),
+                );
+            }
+            RunEvent::CapabilityJobFinished {
+                job_id,
+                name,
+                status,
+                summary,
+            } => {
+                self.push_activity(
+                    "capability",
+                    &format!("Capability finished: {} ({})", name, status),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Tool,
+                    "capability",
+                    &format!("Capability finished: {}", name),
+                    &format!(
+                        "job_id={}
+status={}
+summary={}",
+                        job_id,
+                        status,
+                        truncate_for_timeline(&summary, 180)
+                    ),
+                );
+            }
+            RunEvent::CapabilityJobFailed {
+                job_id,
+                name,
+                error,
+            } => {
+                self.runtime_status = "error".to_owned();
+                self.push_activity("capability", &format!("Capability failed: {}", name));
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::System,
+                    "capability",
+                    &format!("Capability failed: {}", name),
+                    &format!(
+                        "job_id={}
+error={}",
+                        job_id,
+                        truncate_for_timeline(&error, 180)
+                    ),
+                );
+            }
+            RunEvent::PermissionCheckFailed {
+                name,
+                call_id,
+                reason,
+            } => {
+                self.runtime_status = "error".to_owned();
+                self.push_activity(
+                    "permission",
+                    &format!("Permission denied for capability: {}", name),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::System,
+                    "permission",
+                    &format!("Permission check failed: {}", name),
+                    &format!(
+                        "call_id={}
+reason={}",
+                        call_id,
+                        truncate_for_timeline(&reason, 180)
+                    ),
+                );
+            }
             RunEvent::FinalAnswerReady => {
                 self.push_activity("runtime", "Final answer ready");
                 if self.is_interactive() {

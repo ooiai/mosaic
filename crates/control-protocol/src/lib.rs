@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use mosaic_inspect::RunTrace;
 use mosaic_runtime::events::RunEvent;
@@ -35,6 +37,68 @@ pub struct RunResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityJobDto {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub risk: String,
+    #[serde(default)]
+    pub permission_scopes: Vec<String>,
+    pub status: String,
+    pub summary: Option<String>,
+    pub target: Option<String>,
+    pub session_id: Option<String>,
+    pub gateway_run_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExecJobRequest {
+    pub session_id: Option<String>,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebhookJobRequest {
+    pub session_id: Option<String>,
+    pub url: String,
+    pub method: Option<String>,
+    pub body: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CronRegistrationDto {
+    pub id: String,
+    pub schedule: String,
+    pub input: String,
+    pub session_id: Option<String>,
+    pub profile: Option<String>,
+    pub skill: Option<String>,
+    pub workflow: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub last_triggered_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CronRegistrationRequest {
+    pub id: String,
+    pub schedule: String,
+    pub input: String,
+    pub session_id: Option<String>,
+    pub profile: Option<String>,
+    pub skill: Option<String>,
+    pub workflow: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InboundMessage {
     pub session_id: Option<String>,
     pub input: String,
@@ -51,6 +115,12 @@ pub enum GatewayEvent {
         ingress: Option<IngressTrace>,
     },
     Runtime(RunEvent),
+    CapabilityJobUpdated {
+        job: CapabilityJobDto,
+    },
+    CronUpdated {
+        registration: CronRegistrationDto,
+    },
     SessionUpdated {
         summary: SessionSummaryDto,
     },
@@ -170,6 +240,32 @@ mod tests {
             serde_json::from_slice(&encoded).expect("submission should deserialize");
 
         assert_eq!(decoded, submission);
+    }
+
+    #[test]
+    fn capability_job_roundtrips_through_json() {
+        let job = CapabilityJobDto {
+            id: "job-1".to_owned(),
+            name: "exec_command".to_owned(),
+            kind: "exec".to_owned(),
+            risk: "high".to_owned(),
+            permission_scopes: vec!["local_exec".to_owned()],
+            status: "success".to_owned(),
+            summary: Some("exec pwd finished with code 0".to_owned()),
+            target: Some("pwd".to_owned()),
+            session_id: Some("demo".to_owned()),
+            gateway_run_id: Some("gateway-run-1".to_owned()),
+            correlation_id: Some("corr-1".to_owned()),
+            started_at: Utc::now(),
+            finished_at: Some(Utc::now()),
+            error: None,
+        };
+
+        let encoded = serde_json::to_vec(&job).expect("job should serialize");
+        let decoded: CapabilityJobDto =
+            serde_json::from_slice(&encoded).expect("job should deserialize");
+
+        assert_eq!(decoded, job);
     }
 
     #[test]

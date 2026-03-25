@@ -444,6 +444,8 @@ fn parse_tool_call_result(value: serde_json::Value) -> Result<ToolResult> {
     Ok(ToolResult {
         content,
         structured,
+        is_error: false,
+        audit: None,
     })
 }
 

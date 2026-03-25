@@ -55,6 +55,39 @@ pub enum RunEvent {
         call_id: String,
         error: String,
     },
+    CapabilityJobQueued {
+        job_id: String,
+        name: String,
+        kind: String,
+        risk: String,
+        permission_scopes: Vec<String>,
+    },
+    CapabilityJobStarted {
+        job_id: String,
+        name: String,
+    },
+    CapabilityJobRetried {
+        job_id: String,
+        name: String,
+        attempt: u8,
+        error: String,
+    },
+    CapabilityJobFinished {
+        job_id: String,
+        name: String,
+        status: String,
+        summary: String,
+    },
+    CapabilityJobFailed {
+        job_id: String,
+        name: String,
+        error: String,
+    },
+    PermissionCheckFailed {
+        name: String,
+        call_id: String,
+        reason: String,
+    },
     FinalAnswerReady,
     RunFinished {
         output_preview: String,

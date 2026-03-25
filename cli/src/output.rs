@@ -60,6 +60,39 @@ fn format_run_event(event: &RunEvent) -> String {
                 name, call_id, error
             )
         }
+        RunEvent::CapabilityJobQueued {
+            name, kind, risk, ..
+        } => format!(
+            "[run] capability queued: {} kind={} risk={}",
+            name, kind, risk
+        ),
+        RunEvent::CapabilityJobStarted { name, job_id } => {
+            format!("[run] capability started: {} (job_id={})", name, job_id)
+        }
+        RunEvent::CapabilityJobRetried {
+            name,
+            attempt,
+            error,
+            ..
+        } => format!(
+            "[run] capability retry: {} attempt={} error={}",
+            name, attempt, error
+        ),
+        RunEvent::CapabilityJobFinished {
+            name,
+            status,
+            summary,
+            ..
+        } => format!(
+            "[run] capability finished: {} status={} summary={}",
+            name, status, summary
+        ),
+        RunEvent::CapabilityJobFailed { name, error, .. } => {
+            format!("[run] capability failed: {} error={}", name, error)
+        }
+        RunEvent::PermissionCheckFailed { name, reason, .. } => {
+            format!("[run] permission check failed: {} reason={}", name, reason)
+        }
         RunEvent::FinalAnswerReady => "[run] final answer ready".to_owned(),
         RunEvent::RunFinished { .. } => "[run] finished".to_owned(),
         RunEvent::RunFailed { error } => format!("[run] failed: {}", error),

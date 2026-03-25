@@ -23,6 +23,7 @@ mosaic-memory = { path = "../crates/memory" }
 mosaic-mcp-core = { path = "../crates/mcp-core" }
 mosaic-provider = { path = "../crates/provider" }
 mosaic-runtime = { path = "../crates/runtime" }
+mosaic-scheduler-core = { path = "../crates/scheduler-core" }
 mosaic-sdk = { path = "../crates/sdk" }
 mosaic-session-core = { path = "../crates/session-core" }
 mosaic-skill-core = { path = "../crates/skill-core" }

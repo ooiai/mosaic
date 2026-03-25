@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, env, sync::Arc};
 use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use mosaic_config::{MosaicConfig, ProviderProfileConfig};
+use mosaic_tool_core::ToolMetadata;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -114,6 +115,18 @@ pub fn validate_step_tools_support(profile: &ProviderProfile, tool_names: &[Stri
 
 pub fn public_error_message(error: &anyhow::Error) -> String {
     redact_provider_message(&error.to_string())
+}
+
+pub fn tool_is_visible_to_model(metadata: &ToolMetadata) -> bool {
+    metadata.capability.authorized && metadata.capability.healthy
+}
+
+pub fn tool_definition_from_metadata(metadata: &ToolMetadata) -> ToolDefinition {
+    ToolDefinition {
+        name: metadata.name.clone(),
+        description: metadata.description.clone(),
+        input_schema: metadata.input_schema.clone(),
+    }
 }
 
 fn redact_provider_message(message: &str) -> String {
@@ -648,10 +661,12 @@ struct ApiFunctionCall {
 mod tests {
     use futures::executor::block_on;
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
+    use mosaic_tool_core::{CapabilityKind, CapabilityMetadata, ToolMetadata};
 
     use super::{
         LlmProvider, Message, MockProvider, ProviderProfileRegistry, Role, SchedulingIntent,
-        SchedulingRequest, ToolDefinition, public_error_message,
+        SchedulingRequest, ToolDefinition, public_error_message, tool_definition_from_metadata,
+        tool_is_visible_to_model,
     };
 
     fn time_tool_definition() -> ToolDefinition {
@@ -684,6 +699,21 @@ mod tests {
                 "required": ["path"],
             }),
         }
+    }
+
+    #[test]
+    fn tool_visibility_requires_authorized_and_healthy_capability() {
+        let visible = ToolMetadata::builtin("echo", "Echo", serde_json::json!({}));
+        let hidden = ToolMetadata::builtin("exec_command", "Exec", serde_json::json!({}))
+            .with_capability(CapabilityMetadata {
+                kind: CapabilityKind::Exec,
+                authorized: false,
+                ..CapabilityMetadata::exec()
+            });
+
+        assert!(tool_is_visible_to_model(&visible));
+        assert!(!tool_is_visible_to_model(&hidden));
+        assert_eq!(tool_definition_from_metadata(&visible).name, "echo");
     }
 
     #[test]

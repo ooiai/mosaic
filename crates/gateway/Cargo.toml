@@ -20,6 +20,7 @@ mosaic-inspect = { path = "../inspect" }
 mosaic-mcp-core = { path = "../mcp-core" }
 mosaic-provider = { path = "../provider" }
 mosaic-runtime = { path = "../runtime" }
+mosaic-scheduler-core = { path = "../scheduler-core" }
 mosaic-session-core = { path = "../session-core" }
 mosaic-skill-core = { path = "../skill-core" }
 mosaic-tool-core = { path = "../tool-core" }

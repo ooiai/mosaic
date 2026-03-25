@@ -23,6 +23,7 @@ mosaic-config = { path = "../config" }
 mosaic-gateway = { path = "../gateway" }
 mosaic-memory = { path = "../memory" }
 mosaic-provider = { path = "../provider" }
+mosaic-scheduler-core = { path = "../scheduler-core" }
 mosaic-session-core = { path = "../session-core" }
 mosaic-skill-core = { path = "../skill-core" }
 mosaic-tool-core = { path = "../tool-core" }

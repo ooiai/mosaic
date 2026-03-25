@@ -1,8 +1,9 @@
 use anyhow::Result;
 use futures::{StreamExt, stream::BoxStream};
 use mosaic_control_protocol::{
-    ErrorResponse, EventStreamEnvelope, HealthResponse, InboundMessage, RunResponse, RunSubmission,
-    SessionDetailDto, SessionSummaryDto,
+    CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest, ErrorResponse,
+    EventStreamEnvelope, ExecJobRequest, HealthResponse, InboundMessage, RunResponse,
+    RunSubmission, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
 };
 
 #[derive(Clone)]
@@ -47,6 +48,37 @@ impl GatewayClient {
 
     pub async fn submit_run(&self, submission: RunSubmission) -> Result<RunResponse> {
         self.post_json("/runs", &submission).await
+    }
+
+    pub async fn list_capability_jobs(&self) -> Result<Vec<CapabilityJobDto>> {
+        self.get_json("/capabilities/jobs").await
+    }
+
+    pub async fn run_exec_job(&self, request: ExecJobRequest) -> Result<CapabilityJobDto> {
+        self.post_json("/capabilities/exec", &request).await
+    }
+
+    pub async fn run_webhook_job(&self, request: WebhookJobRequest) -> Result<CapabilityJobDto> {
+        self.post_json("/capabilities/webhook", &request).await
+    }
+
+    pub async fn list_cron_registrations(&self) -> Result<Vec<CronRegistrationDto>> {
+        self.get_json("/cron").await
+    }
+
+    pub async fn register_cron(
+        &self,
+        request: CronRegistrationRequest,
+    ) -> Result<CronRegistrationDto> {
+        self.post_json("/cron", &request).await
+    }
+
+    pub async fn trigger_cron(&self, id: &str) -> Result<RunResponse> {
+        self.post_json::<RunResponse, serde_json::Value>(
+            &format!("/cron/{id}/trigger"),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     pub async fn submit_webchat(&self, message: InboundMessage) -> Result<RunResponse> {
@@ -181,6 +213,7 @@ mod tests {
     use mosaic_gateway::{GatewayHandle, GatewayRuntimeComponents, http_router};
     use mosaic_memory::{FileMemoryStore, MemoryPolicy};
     use mosaic_provider::{MockProvider, ProviderProfileRegistry};
+    use mosaic_scheduler_core::FileCronStore;
     use mosaic_session_core::FileSessionStore;
     use mosaic_skill_core::SkillRegistry;
     use mosaic_tool_core::{TimeNowTool, ToolRegistry};
@@ -219,6 +252,7 @@ mod tests {
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
                 mcp_manager: None,
+                cron_store: Arc::new(FileCronStore::new(session_root.join("cron"))),
                 runs_dir: std::env::temp_dir(),
             },
         );

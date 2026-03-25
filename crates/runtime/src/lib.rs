@@ -1,13 +1,17 @@
 pub mod events;
 
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::Utc;
 use mosaic_inspect::{
-    CompressionTrace, EffectiveProfileTrace, IngressTrace, MemoryReadTrace, MemoryWriteTrace,
-    ModelSelectionTrace, RunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
+    CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace, IngressTrace,
+    MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace, RunTrace, SkillTrace, ToolTrace,
+    WorkflowStepTrace,
 };
 use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
@@ -15,21 +19,36 @@ use mosaic_memory::{
 };
 use mosaic_provider::{
     LlmProvider, Message, ProviderProfile, ProviderProfileRegistry, Role, SchedulingIntent,
-    SchedulingRequest, ToolDefinition, validate_step_tools_support,
+    SchedulingRequest, ToolDefinition, tool_definition_from_metadata, tool_is_visible_to_model,
+    validate_step_tools_support,
 };
 use mosaic_session_core::{SessionRecord, SessionStore, TranscriptRole, session_title_from_input};
 use mosaic_skill_core::{SkillContext, SkillRegistry};
-use mosaic_tool_core::ToolRegistry;
+use mosaic_tool_core::{CapabilityAudit, ToolMetadata, ToolRegistry};
 use mosaic_workflow::{
     Workflow, WorkflowObserver, WorkflowRegistry, WorkflowRunner, WorkflowStep,
     WorkflowStepExecutor, WorkflowStepKind,
 };
+use uuid::Uuid;
 
 use crate::events::{RunEvent, SharedRunEventSink};
 
 type SharedToolTraceCollector = Arc<Mutex<Vec<ToolTrace>>>;
 type SharedSkillTraceCollector = Arc<Mutex<Vec<SkillTrace>>>;
 type SharedModelSelectionCollector = Arc<Mutex<Vec<ModelSelectionTrace>>>;
+type SharedCapabilityTraceCollector = Arc<Mutex<Vec<CapabilityInvocationTrace>>>;
+
+struct ToolExecutionOutcome {
+    output: String,
+    tool_trace: ToolTrace,
+    capability_trace: CapabilityInvocationTrace,
+}
+
+struct ToolExecutionFailure {
+    error: anyhow::Error,
+    tool_trace: Option<ToolTrace>,
+    capability_trace: Option<CapabilityInvocationTrace>,
+}
 
 pub struct RuntimeContext {
     pub profiles: Arc<ProviderProfileRegistry>,
@@ -360,6 +379,7 @@ impl AgentRuntime {
         let tool_traces = Arc::new(Mutex::new(Vec::new()));
         let skill_traces = Arc::new(Mutex::new(Vec::new()));
         let model_selections = Arc::new(Mutex::new(Vec::new()));
+        let capability_traces = Arc::new(Mutex::new(Vec::new()));
         let runner = WorkflowRunner::new();
         let workflow_input =
             Self::augment_input_with_reference_context(&req.input, &reference_contexts);
@@ -371,6 +391,7 @@ impl AgentRuntime {
                 tool_traces: tool_traces.clone(),
                 skill_traces: skill_traces.clone(),
                 model_selections: model_selections.clone(),
+                capability_traces: capability_traces.clone(),
             };
             let mut observer = RuntimeWorkflowObserver {
                 runtime: self,
@@ -391,6 +412,9 @@ impl AgentRuntime {
         trace
             .model_selections
             .extend(drain_model_selection_collector(&model_selections));
+        for capability_trace in drain_capability_trace_collector(&capability_traces) {
+            trace.add_capability_invocation(capability_trace);
+        }
 
         let output = match workflow_result {
             Ok(result) => result.output,
@@ -478,55 +502,23 @@ impl AgentRuntime {
             if !response.tool_calls.is_empty() {
                 for call in response.tool_calls {
                     let call_id = call.id.clone();
-                    let tool_name = call.name.clone();
-                    let tool_input = call.arguments.clone();
-
-                    self.emit(RunEvent::ToolCalling {
-                        name: tool_name.clone(),
-                        call_id: call_id.clone(),
-                    });
-
-                    let tool = match self.ctx.tools.get(&tool_name) {
-                        Some(tool) => tool,
-                        None => {
-                            let err = anyhow!("tool not found: {}", tool_name);
-                            self.emit(RunEvent::ToolFailed {
-                                name: tool_name,
-                                call_id,
-                                error: err.to_string(),
-                            });
-                            return Err(err);
-                        }
-                    };
-                    let tool_source = tool.metadata().source.clone();
-
-                    trace.tool_calls.push(ToolTrace {
-                        call_id: Some(call_id.clone()),
-                        name: tool_name.clone(),
-                        source: tool_source,
-                        input: tool_input,
-                        output: None,
-                        started_at: Utc::now(),
-                        finished_at: None,
-                    });
-
-                    match tool.call(call.arguments).await {
-                        Ok(result) => {
-                            if let Some(last) = trace.tool_calls.last_mut() {
-                                last.output = Some(result.content.clone());
-                                last.finished_at = Some(Utc::now());
-                            }
-
-                            self.emit(RunEvent::ToolFinished {
-                                name: tool_name.clone(),
-                                call_id: call_id.clone(),
-                            });
+                    match self
+                        .invoke_tool_with_guardrails(
+                            call.name.clone(),
+                            call_id.clone(),
+                            call.arguments.clone(),
+                        )
+                        .await
+                    {
+                        Ok(outcome) => {
+                            trace.tool_calls.push(outcome.tool_trace);
+                            trace.add_capability_invocation(outcome.capability_trace);
 
                             if let Some(session_ref) = session.as_deref_mut() {
                                 self.append_session_message(
                                     session_ref,
                                     TranscriptRole::Tool,
-                                    result.content.clone(),
+                                    outcome.output.clone(),
                                     Some(call_id.clone()),
                                 )?;
                                 messages = self.session_messages_for_provider(
@@ -537,23 +529,19 @@ impl AgentRuntime {
                             } else {
                                 messages.push(Message {
                                     role: Role::Tool,
-                                    content: result.content,
+                                    content: outcome.output,
                                     tool_call_id: Some(call_id),
                                 });
                             }
                         }
-                        Err(err) => {
-                            if let Some(last) = trace.tool_calls.last_mut() {
-                                last.output = Some(format!("[runtime tool failure] {}", err));
-                                last.finished_at = Some(Utc::now());
+                        Err(failure) => {
+                            if let Some(tool_trace) = failure.tool_trace {
+                                trace.tool_calls.push(tool_trace);
                             }
-
-                            self.emit(RunEvent::ToolFailed {
-                                name: tool_name,
-                                call_id,
-                                error: err.to_string(),
-                            });
-                            return Err(err);
+                            if let Some(capability_trace) = failure.capability_trace {
+                                trace.add_capability_invocation(capability_trace);
+                            }
+                            return Err(failure.error);
                         }
                     }
                 }
@@ -587,6 +575,7 @@ impl AgentRuntime {
         input: String,
         tool_defs: Vec<ToolDefinition>,
         tool_traces: &SharedToolTraceCollector,
+        capability_traces: &SharedCapabilityTraceCollector,
     ) -> Result<String> {
         let provider = self.provider_for_profile(profile)?;
         let provider_tools = (!tool_defs.is_empty()).then_some(tool_defs.as_slice());
@@ -617,71 +606,31 @@ impl AgentRuntime {
             if !response.tool_calls.is_empty() {
                 for call in response.tool_calls {
                     let call_id = call.id.clone();
-                    let tool_name = call.name.clone();
-                    let tool_input = call.arguments.clone();
-
-                    self.emit(RunEvent::ToolCalling {
-                        name: tool_name.clone(),
-                        call_id: call_id.clone(),
-                    });
-
-                    let tool = match self.ctx.tools.get(&tool_name) {
-                        Some(tool) => tool,
-                        None => {
-                            let err = anyhow!("tool not found: {}", tool_name);
-                            self.emit(RunEvent::ToolFailed {
-                                name: tool_name,
-                                call_id,
-                                error: err.to_string(),
-                            });
-                            return Err(err);
-                        }
-                    };
-                    let tool_source = tool.metadata().source.clone();
-
-                    push_tool_trace(
-                        tool_traces,
-                        ToolTrace {
-                            call_id: Some(call_id.clone()),
-                            name: tool_name.clone(),
-                            source: tool_source,
-                            input: tool_input,
-                            output: None,
-                            started_at: Utc::now(),
-                            finished_at: None,
-                        },
-                    );
-
-                    match tool.call(call.arguments).await {
-                        Ok(result) => {
-                            update_tool_trace(tool_traces, &call_id, |trace| {
-                                trace.output = Some(result.content.clone());
-                                trace.finished_at = Some(Utc::now());
-                            });
-
-                            self.emit(RunEvent::ToolFinished {
-                                name: tool_name.clone(),
-                                call_id: call_id.clone(),
-                            });
-
+                    match self
+                        .invoke_tool_with_guardrails(
+                            call.name.clone(),
+                            call_id.clone(),
+                            call.arguments.clone(),
+                        )
+                        .await
+                    {
+                        Ok(outcome) => {
+                            push_tool_trace(tool_traces, outcome.tool_trace);
+                            push_capability_trace(capability_traces, outcome.capability_trace);
                             messages.push(Message {
                                 role: Role::Tool,
-                                content: result.content,
+                                content: outcome.output,
                                 tool_call_id: Some(call_id),
                             });
                         }
-                        Err(err) => {
-                            update_tool_trace(tool_traces, &call_id, |trace| {
-                                trace.output = Some(format!("[runtime tool failure] {}", err));
-                                trace.finished_at = Some(Utc::now());
-                            });
-
-                            self.emit(RunEvent::ToolFailed {
-                                name: tool_name,
-                                call_id,
-                                error: err.to_string(),
-                            });
-                            return Err(err);
+                        Err(failure) => {
+                            if let Some(tool_trace) = failure.tool_trace {
+                                push_tool_trace(tool_traces, tool_trace);
+                            }
+                            if let Some(capability_trace) = failure.capability_trace {
+                                push_capability_trace(capability_traces, capability_trace);
+                            }
+                            return Err(failure.error);
                         }
                     }
                 }
@@ -1206,6 +1155,331 @@ Referenced session context:
         }
     }
 
+    async fn invoke_tool_with_guardrails(
+        &self,
+        tool_name: String,
+        call_id: String,
+        tool_input: serde_json::Value,
+    ) -> std::result::Result<ToolExecutionOutcome, ToolExecutionFailure> {
+        self.emit(RunEvent::ToolCalling {
+            name: tool_name.clone(),
+            call_id: call_id.clone(),
+        });
+
+        let tool = match self.ctx.tools.get(&tool_name) {
+            Some(tool) => tool,
+            None => {
+                let error = anyhow!("tool not found: {}", tool_name);
+                self.emit(RunEvent::ToolFailed {
+                    name: tool_name,
+                    call_id,
+                    error: error.to_string(),
+                });
+                return Err(ToolExecutionFailure {
+                    error,
+                    tool_trace: None,
+                    capability_trace: None,
+                });
+            }
+        };
+
+        let metadata = tool.metadata().clone();
+        let started_at = Utc::now();
+        let job_id = Uuid::new_v4().to_string();
+        self.emit(RunEvent::CapabilityJobQueued {
+            job_id: job_id.clone(),
+            name: tool_name.clone(),
+            kind: metadata.capability.kind.label().to_owned(),
+            risk: metadata.capability.risk.label().to_owned(),
+            permission_scopes: Self::permission_scope_labels(&metadata),
+        });
+
+        if !metadata.capability.authorized {
+            let error = anyhow!("tool '{}' is not authorized for execution", tool_name);
+            self.emit(RunEvent::PermissionCheckFailed {
+                name: tool_name.clone(),
+                call_id: call_id.clone(),
+                reason: error.to_string(),
+            });
+            self.emit(RunEvent::CapabilityJobFailed {
+                job_id: job_id.clone(),
+                name: tool_name.clone(),
+                error: error.to_string(),
+            });
+            self.emit(RunEvent::ToolFailed {
+                name: tool_name.clone(),
+                call_id: call_id.clone(),
+                error: error.to_string(),
+            });
+            return Err(self.build_tool_failure(
+                error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None, None,
+                "rejected",
+            ));
+        }
+
+        if !metadata.capability.healthy {
+            let error = anyhow!("tool '{}' is not healthy", tool_name);
+            self.emit(RunEvent::PermissionCheckFailed {
+                name: tool_name.clone(),
+                call_id: call_id.clone(),
+                reason: error.to_string(),
+            });
+            self.emit(RunEvent::CapabilityJobFailed {
+                job_id: job_id.clone(),
+                name: tool_name.clone(),
+                error: error.to_string(),
+            });
+            self.emit(RunEvent::ToolFailed {
+                name: tool_name.clone(),
+                call_id: call_id.clone(),
+                error: error.to_string(),
+            });
+            return Err(self.build_tool_failure(
+                error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None, None,
+                "rejected",
+            ));
+        }
+
+        self.emit(RunEvent::CapabilityJobStarted {
+            job_id: job_id.clone(),
+            name: tool_name.clone(),
+        });
+
+        let attempts = usize::from(metadata.capability.execution.retry_limit) + 1;
+        let timeout = Duration::from_millis(metadata.capability.execution.timeout_ms.max(1));
+
+        for attempt in 1..=attempts {
+            let attempt_result = tokio::time::timeout(timeout, tool.call(tool_input.clone())).await;
+            match attempt_result {
+                Ok(Ok(result)) if !result.is_error => {
+                    let finished_at = Utc::now();
+                    let tool_trace = ToolTrace {
+                        call_id: Some(call_id.clone()),
+                        name: tool_name.clone(),
+                        source: metadata.source.clone(),
+                        input: tool_input,
+                        output: Some(result.content.clone()),
+                        started_at,
+                        finished_at: Some(finished_at),
+                    };
+                    let capability_trace = Self::capability_trace(
+                        &job_id,
+                        &call_id,
+                        &tool_name,
+                        &metadata,
+                        result.audit.as_ref(),
+                        started_at,
+                        finished_at,
+                        "success",
+                        None,
+                        Some(result.content.as_str()),
+                    );
+                    self.emit(RunEvent::CapabilityJobFinished {
+                        job_id: job_id.clone(),
+                        name: tool_name.clone(),
+                        status: "success".to_owned(),
+                        summary: capability_trace.summary.clone(),
+                    });
+                    self.emit(RunEvent::ToolFinished {
+                        name: tool_name,
+                        call_id,
+                    });
+                    return Ok(ToolExecutionOutcome {
+                        output: result.content,
+                        tool_trace,
+                        capability_trace,
+                    });
+                }
+                Ok(Ok(result)) => {
+                    let error = anyhow!(result.content.clone());
+                    if attempt < attempts {
+                        self.emit(RunEvent::CapabilityJobRetried {
+                            job_id: job_id.clone(),
+                            name: tool_name.clone(),
+                            attempt: attempt as u8,
+                            error: error.to_string(),
+                        });
+                        continue;
+                    }
+                    self.emit(RunEvent::CapabilityJobFailed {
+                        job_id: job_id.clone(),
+                        name: tool_name.clone(),
+                        error: error.to_string(),
+                    });
+                    self.emit(RunEvent::ToolFailed {
+                        name: tool_name.clone(),
+                        call_id: call_id.clone(),
+                        error: error.to_string(),
+                    });
+                    return Err(self.build_tool_failure(
+                        error,
+                        job_id,
+                        call_id,
+                        tool_name,
+                        &metadata,
+                        tool_input,
+                        started_at,
+                        Some(result.content),
+                        result.audit.as_ref(),
+                        "failed",
+                    ));
+                }
+                Ok(Err(err)) => {
+                    if attempt < attempts {
+                        self.emit(RunEvent::CapabilityJobRetried {
+                            job_id: job_id.clone(),
+                            name: tool_name.clone(),
+                            attempt: attempt as u8,
+                            error: err.to_string(),
+                        });
+                        continue;
+                    }
+                    self.emit(RunEvent::CapabilityJobFailed {
+                        job_id: job_id.clone(),
+                        name: tool_name.clone(),
+                        error: err.to_string(),
+                    });
+                    self.emit(RunEvent::ToolFailed {
+                        name: tool_name.clone(),
+                        call_id: call_id.clone(),
+                        error: err.to_string(),
+                    });
+                    return Err(self.build_tool_failure(
+                        err, job_id, call_id, tool_name, &metadata, tool_input, started_at, None,
+                        None, "failed",
+                    ));
+                }
+                Err(_) => {
+                    let error = anyhow!(
+                        "tool '{}' timed out after {}ms",
+                        tool_name,
+                        metadata.capability.execution.timeout_ms.max(1)
+                    );
+                    if attempt < attempts {
+                        self.emit(RunEvent::CapabilityJobRetried {
+                            job_id: job_id.clone(),
+                            name: tool_name.clone(),
+                            attempt: attempt as u8,
+                            error: error.to_string(),
+                        });
+                        continue;
+                    }
+                    self.emit(RunEvent::CapabilityJobFailed {
+                        job_id: job_id.clone(),
+                        name: tool_name.clone(),
+                        error: error.to_string(),
+                    });
+                    self.emit(RunEvent::ToolFailed {
+                        name: tool_name.clone(),
+                        call_id: call_id.clone(),
+                        error: error.to_string(),
+                    });
+                    return Err(self.build_tool_failure(
+                        error,
+                        job_id,
+                        call_id,
+                        tool_name,
+                        &metadata,
+                        tool_input,
+                        started_at,
+                        None,
+                        None,
+                        "timed_out",
+                    ));
+                }
+            }
+        }
+
+        unreachable!("tool attempts should always return success or failure")
+    }
+
+    fn build_tool_failure(
+        &self,
+        error: anyhow::Error,
+        job_id: String,
+        call_id: String,
+        tool_name: String,
+        metadata: &ToolMetadata,
+        tool_input: serde_json::Value,
+        started_at: chrono::DateTime<Utc>,
+        output: Option<String>,
+        audit: Option<&CapabilityAudit>,
+        status: &str,
+    ) -> ToolExecutionFailure {
+        let finished_at = Utc::now();
+        let tool_trace = ToolTrace {
+            call_id: Some(call_id.clone()),
+            name: tool_name.clone(),
+            source: metadata.source.clone(),
+            input: tool_input,
+            output: output
+                .clone()
+                .or_else(|| Some(format!("[runtime tool failure] {}", error))),
+            started_at,
+            finished_at: Some(finished_at),
+        };
+        let capability_trace = Self::capability_trace(
+            &job_id,
+            &call_id,
+            &tool_name,
+            metadata,
+            audit,
+            started_at,
+            finished_at,
+            status,
+            Some(error.to_string()),
+            output.as_deref(),
+        );
+
+        ToolExecutionFailure {
+            error,
+            tool_trace: Some(tool_trace),
+            capability_trace: Some(capability_trace),
+        }
+    }
+
+    fn capability_trace(
+        job_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        metadata: &ToolMetadata,
+        audit: Option<&CapabilityAudit>,
+        started_at: chrono::DateTime<Utc>,
+        finished_at: chrono::DateTime<Utc>,
+        status: &str,
+        error: Option<String>,
+        fallback_summary: Option<&str>,
+    ) -> CapabilityInvocationTrace {
+        let summary = audit
+            .map(|audit| audit.side_effect_summary.clone())
+            .or_else(|| fallback_summary.map(|value| Self::truncate_preview(value, 180)))
+            .unwrap_or_else(|| format!("{} {}", tool_name, status));
+
+        CapabilityInvocationTrace {
+            job_id: job_id.to_owned(),
+            call_id: Some(call_id.to_owned()),
+            tool_name: tool_name.to_owned(),
+            kind: metadata.capability.kind.clone(),
+            permission_scopes: metadata.capability.permission_scopes.clone(),
+            risk: metadata.capability.risk.clone(),
+            status: status.to_owned(),
+            summary,
+            target: audit.and_then(|audit| audit.target.clone()),
+            started_at,
+            finished_at: Some(finished_at),
+            error,
+        }
+    }
+
+    fn permission_scope_labels(metadata: &ToolMetadata) -> Vec<String> {
+        metadata
+            .capability
+            .permission_scopes
+            .iter()
+            .map(|scope| scope.label().to_owned())
+            .collect()
+    }
+
     fn collect_tool_definitions(
         &self,
         allowlist: Option<&[String]>,
@@ -1219,25 +1493,21 @@ Referenced session context:
                         .tools
                         .get(name)
                         .ok_or_else(|| anyhow!("tool not found: {}", name))?;
-                    let meta = tool.metadata().clone();
-                    Ok(ToolDefinition {
-                        name: meta.name,
-                        description: meta.description,
-                        input_schema: meta.input_schema,
-                    })
+                    let metadata = tool.metadata();
+                    if !tool_is_visible_to_model(metadata) {
+                        bail!("tool is not authorized or healthy: {}", name);
+                    }
+                    Ok(tool_definition_from_metadata(metadata))
                 })
                 .collect(),
             None => Ok(self
                 .ctx
                 .tools
                 .iter()
-                .map(|tool| {
-                    let meta = tool.metadata().clone();
-                    ToolDefinition {
-                        name: meta.name,
-                        description: meta.description,
-                        input_schema: meta.input_schema,
-                    }
+                .filter_map(|tool| {
+                    let metadata = tool.metadata();
+                    tool_is_visible_to_model(metadata)
+                        .then(|| tool_definition_from_metadata(metadata))
                 })
                 .collect()),
         }
@@ -1250,6 +1520,7 @@ struct RuntimeWorkflowExecutor<'a> {
     tool_traces: SharedToolTraceCollector,
     skill_traces: SharedSkillTraceCollector,
     model_selections: SharedModelSelectionCollector,
+    capability_traces: SharedCapabilityTraceCollector,
 }
 
 impl RuntimeWorkflowExecutor<'_> {
@@ -1316,6 +1587,7 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
                 input,
                 tool_defs,
                 &self.tool_traces,
+                &self.capability_traces,
             )
             .await
     }
@@ -1430,26 +1702,31 @@ fn push_tool_trace(collector: &SharedToolTraceCollector, trace: ToolTrace) {
         .push(trace);
 }
 
-fn update_tool_trace<F>(collector: &SharedToolTraceCollector, call_id: &str, update: F)
-where
-    F: FnOnce(&mut ToolTrace),
-{
-    if let Some(trace) = collector
-        .lock()
-        .expect("tool trace collector should not be poisoned")
-        .iter_mut()
-        .rev()
-        .find(|trace| trace.call_id.as_deref() == Some(call_id) && trace.finished_at.is_none())
-    {
-        update(trace);
-    }
-}
-
 fn drain_tool_trace_collector(collector: &SharedToolTraceCollector) -> Vec<ToolTrace> {
     std::mem::take(
         &mut *collector
             .lock()
             .expect("tool trace collector should not be poisoned"),
+    )
+}
+
+fn push_capability_trace(
+    collector: &SharedCapabilityTraceCollector,
+    trace: CapabilityInvocationTrace,
+) {
+    collector
+        .lock()
+        .expect("capability trace collector should not be poisoned")
+        .push(trace);
+}
+
+fn drain_capability_trace_collector(
+    collector: &SharedCapabilityTraceCollector,
+) -> Vec<CapabilityInvocationTrace> {
+    std::mem::take(
+        &mut *collector
+            .lock()
+            .expect("capability trace collector should not be poisoned"),
     )
 }
 
@@ -1726,6 +2003,8 @@ mod tests {
                     "path": path,
                     "origin": "mcp",
                 })),
+                is_error: false,
+                audit: None,
             })
         }
     }
@@ -1796,6 +2075,12 @@ mod tests {
                 RunEvent::ToolCalling { .. } => "ToolCalling",
                 RunEvent::ToolFinished { .. } => "ToolFinished",
                 RunEvent::ToolFailed { .. } => "ToolFailed",
+                RunEvent::CapabilityJobQueued { .. } => "CapabilityJobQueued",
+                RunEvent::CapabilityJobStarted { .. } => "CapabilityJobStarted",
+                RunEvent::CapabilityJobRetried { .. } => "CapabilityJobRetried",
+                RunEvent::CapabilityJobFinished { .. } => "CapabilityJobFinished",
+                RunEvent::CapabilityJobFailed { .. } => "CapabilityJobFailed",
+                RunEvent::PermissionCheckFailed { .. } => "PermissionCheckFailed",
                 RunEvent::FinalAnswerReady => "FinalAnswerReady",
                 RunEvent::RunFinished { .. } => "RunFinished",
                 RunEvent::RunFailed { .. } => "RunFailed",
@@ -2000,12 +2285,17 @@ mod tests {
         assert_eq!(result.trace.tool_calls.len(), 1);
         assert_eq!(result.trace.session_id.as_deref(), Some("time-demo"));
         assert_eq!(result.trace.tool_calls[0].source, ToolSource::Builtin);
+        assert_eq!(result.trace.capability_invocations.len(), 1);
+        assert_eq!(result.trace.capability_invocations[0].tool_name, "time_now");
         assert_eq!(
             event_names(&sink.snapshot()),
             vec![
                 "RunStarted",
                 "ProviderRequest",
                 "ToolCalling",
+                "CapabilityJobQueued",
+                "CapabilityJobStarted",
+                "CapabilityJobFinished",
                 "ToolFinished",
                 "ProviderRequest",
                 "FinalAnswerReady",

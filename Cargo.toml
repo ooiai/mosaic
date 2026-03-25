@@ -4,6 +4,7 @@ members = [
     "crates/config",
     "crates/control-protocol",
     "crates/session-core",
+    "crates/scheduler-core",
     "crates/provider",
     "crates/tool-core",
     "crates/skill-core",

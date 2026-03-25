@@ -13,3 +13,4 @@ serde.workspace = true
 serde_json.workspace = true
 
 mosaic-config = { path = "../config" }
+mosaic-tool-core = { path = "../tool-core" }

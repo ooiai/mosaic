@@ -1059,6 +1059,7 @@ dependencies = [
  "mosaic-memory",
  "mosaic-provider",
  "mosaic-runtime",
+ "mosaic-scheduler-core",
  "mosaic-sdk",
  "mosaic-session-core",
  "mosaic-skill-core",
@@ -1107,6 +1108,7 @@ dependencies = [
  "mosaic-memory",
  "mosaic-provider",
  "mosaic-runtime",
+ "mosaic-scheduler-core",
  "mosaic-session-core",
  "mosaic-skill-core",
  "mosaic-tool-core",
@@ -1161,6 +1163,7 @@ dependencies = [
  "async-trait",
  "futures",
  "mosaic-config",
+ "mosaic-tool-core",
  "reqwest",
  "serde",
  "serde_json",
@@ -1184,6 +1187,17 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "mosaic-scheduler-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1199,6 +1213,7 @@ dependencies = [
  "mosaic-gateway",
  "mosaic-memory",
  "mosaic-provider",
+ "mosaic-scheduler-core",
  "mosaic-session-core",
  "mosaic-skill-core",
  "mosaic-tool-core",
@@ -1240,8 +1255,11 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "mosaic-scheduler-core",
+ "reqwest",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

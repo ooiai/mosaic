@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use mosaic_tool_core::ToolSource;
+use mosaic_tool_core::{CapabilityKind, PermissionScope, ToolRiskLevel, ToolSource};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -29,6 +29,42 @@ impl ToolTrace {
                 .num_milliseconds()
         })
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CapabilityInvocationTrace {
+    pub job_id: String,
+    pub call_id: Option<String>,
+    pub tool_name: String,
+    pub kind: CapabilityKind,
+    #[serde(default)]
+    pub permission_scopes: Vec<PermissionScope>,
+    pub risk: ToolRiskLevel,
+    pub status: String,
+    pub summary: String,
+    pub target: Option<String>,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+}
+
+impl CapabilityInvocationTrace {
+    pub fn duration_ms(&self) -> Option<i64> {
+        self.finished_at.map(|finished| {
+            finished
+                .signed_duration_since(self.started_at)
+                .num_milliseconds()
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SideEffectSummary {
+    pub total: usize,
+    pub failed: usize,
+    pub high_risk: usize,
+    #[serde(default)]
+    pub capability_kinds: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -168,6 +204,9 @@ pub struct RunTrace {
     #[serde(default)]
     pub tool_calls: Vec<ToolTrace>,
     #[serde(default)]
+    pub capability_invocations: Vec<CapabilityInvocationTrace>,
+    pub side_effect_summary: Option<SideEffectSummary>,
+    #[serde(default)]
     pub skill_calls: Vec<SkillTrace>,
     #[serde(default)]
     pub step_traces: Vec<WorkflowStepTrace>,
@@ -194,6 +233,8 @@ impl RunTrace {
             memory_writes: vec![],
             compression: None,
             tool_calls: vec![],
+            capability_invocations: vec![],
+            side_effect_summary: None,
             skill_calls: vec![],
             step_traces: vec![],
             error: None,
@@ -241,6 +282,36 @@ impl RunTrace {
 
     pub fn bind_compression(&mut self, trace: CompressionTrace) {
         self.compression = Some(trace);
+    }
+
+    pub fn add_capability_invocation(&mut self, trace: CapabilityInvocationTrace) {
+        self.capability_invocations.push(trace);
+        self.side_effect_summary = Some(self.compute_side_effect_summary());
+    }
+
+    fn compute_side_effect_summary(&self) -> SideEffectSummary {
+        let mut capability_kinds = self
+            .capability_invocations
+            .iter()
+            .map(|trace| trace.kind.label().to_owned())
+            .collect::<Vec<_>>();
+        capability_kinds.sort();
+        capability_kinds.dedup();
+
+        SideEffectSummary {
+            total: self.capability_invocations.len(),
+            failed: self
+                .capability_invocations
+                .iter()
+                .filter(|trace| trace.status != "success")
+                .count(),
+            high_risk: self
+                .capability_invocations
+                .iter()
+                .filter(|trace| trace.risk == ToolRiskLevel::High)
+                .count(),
+            capability_kinds,
+        }
     }
 
     pub fn finish_ok(&mut self, output: String) {
@@ -426,6 +497,8 @@ mod tests {
                 started_at,
                 finished_at: Some(started_at + Duration::milliseconds(3)),
             }],
+            capability_invocations: vec![],
+            side_effect_summary: None,
             skill_calls: vec![],
             step_traces: vec![WorkflowStepTrace {
                 name: "draft".to_owned(),
