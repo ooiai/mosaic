@@ -67,7 +67,10 @@ pub struct RunSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RunTrace {
     pub run_id: String,
+    pub gateway_run_id: Option<String>,
+    pub correlation_id: Option<String>,
     pub session_id: Option<String>,
+    pub session_route: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub input: String,
@@ -84,7 +87,10 @@ impl RunTrace {
     pub fn new(input: String) -> Self {
         Self {
             run_id: Uuid::new_v4().to_string(),
+            gateway_run_id: None,
+            correlation_id: None,
             session_id: None,
+            session_route: None,
             started_at: Utc::now(),
             finished_at: None,
             input,
@@ -98,6 +104,17 @@ impl RunTrace {
 
     pub fn bind_session(&mut self, session_id: impl Into<String>) {
         self.session_id = Some(session_id.into());
+    }
+
+    pub fn bind_gateway_context(
+        &mut self,
+        gateway_run_id: impl Into<String>,
+        correlation_id: impl Into<String>,
+        session_route: impl Into<String>,
+    ) {
+        self.gateway_run_id = Some(gateway_run_id.into());
+        self.correlation_id = Some(correlation_id.into());
+        self.session_route = Some(session_route.into());
     }
 
     pub fn bind_effective_profile(&mut self, profile: EffectiveProfileTrace) {
@@ -214,7 +231,10 @@ mod tests {
 
         let trace = RunTrace {
             run_id: "run-1".to_owned(),
+            gateway_run_id: Some("gateway-run-1".to_owned()),
+            correlation_id: Some("corr-1".to_owned()),
             session_id: Some("session-1".to_owned()),
+            session_route: Some("gateway.local/session-1".to_owned()),
             started_at,
             finished_at: Some(finished_at),
             input: "hello".to_owned(),

@@ -969,6 +969,7 @@ dependencies = [
  "anyhow",
  "clap",
  "mosaic-config",
+ "mosaic-gateway",
  "mosaic-inspect",
  "mosaic-provider",
  "mosaic-runtime",
@@ -993,6 +994,20 @@ dependencies = [
 [[package]]
 name = "mosaic-gateway"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "mosaic-config",
+ "mosaic-inspect",
+ "mosaic-provider",
+ "mosaic-runtime",
+ "mosaic-session-core",
+ "mosaic-skill-core",
+ "mosaic-tool-core",
+ "serde",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "mosaic-inspect"
@@ -1088,6 +1103,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "crossterm 0.29.0",
+ "mosaic-gateway",
  "mosaic-runtime",
  "mosaic-session-core",
  "ratatui",

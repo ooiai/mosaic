@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mosaic_runtime::events::RunEvent;
 use mosaic_session_core::{
-    SessionRecord as StoredSessionRecord, TranscriptMessage, TranscriptRole,
+    SessionRecord as StoredSessionRecord, TranscriptMessage, TranscriptRole, session_route_for_id,
 };
 
 use crate::mock;
@@ -30,6 +30,8 @@ pub enum AppAction {
     Continue,
     Quit,
     Submit(String),
+    GatewayConnect,
+    GatewayDisconnect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -320,7 +322,7 @@ impl App {
             view.modified = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
             view.created = session.created_at.format("%Y-%m-%d %H:%M").to_string();
             view.channel = "control".to_owned();
-            view.route = "local.session".to_owned();
+            view.route = session.gateway.route.clone();
             view.runtime = session.provider_type.clone();
             view.model = session.model.clone();
             view.state = state;
@@ -818,8 +820,15 @@ impl App {
         }
 
         let action = if let Some(command) = message.strip_prefix('/') {
-            self.route_command(command.trim());
-            AppAction::Continue
+            let command = command.trim();
+            let external_action = match command {
+                "gateway connect" => Some(AppAction::GatewayConnect),
+                "gateway disconnect" => Some(AppAction::GatewayDisconnect),
+                _ => None,
+            };
+
+            self.route_command(command);
+            external_action.unwrap_or(AppAction::Continue)
         } else if self.is_interactive() {
             if self.runtime_status == "running" {
                 self.push_command_error("A run is already in progress for this session");
@@ -1197,7 +1206,7 @@ impl App {
         );
     }
 
-    fn push_command_error(&mut self, message: impl Into<String>) {
+    pub(crate) fn push_command_error(&mut self, message: impl Into<String>) {
         let message = message.into();
         self.push_activity("command", format!("Rejected command: {message}"));
         self.push_system_entry("Command rejected", message);
@@ -1253,7 +1262,7 @@ fn interactive_session_record(session_id: &str, model: &str) -> SessionRecord {
         modified: current_hhmm(),
         created: current_hhmm(),
         channel: "control".to_owned(),
-        route: "local.session".to_owned(),
+        route: session_route_for_id(session_id),
         runtime: "agent-runtime".to_owned(),
         model: model.to_owned(),
         state: SessionState::Waiting,

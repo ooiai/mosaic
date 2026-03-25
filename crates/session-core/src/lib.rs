@@ -49,7 +49,16 @@ pub struct SessionRecord {
     pub model: String,
     pub last_run_id: Option<String>,
     #[serde(default)]
+    pub gateway: SessionGatewayMetadata,
+    #[serde(default)]
     pub transcript: Vec<TranscriptMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionGatewayMetadata {
+    pub route: String,
+    pub last_gateway_run_id: Option<String>,
+    pub last_correlation_id: Option<String>,
 }
 
 impl SessionRecord {
@@ -60,10 +69,11 @@ impl SessionRecord {
         provider_type: impl Into<String>,
         model: impl Into<String>,
     ) -> Self {
+        let id = id.into();
         let now = Utc::now();
 
         Self {
-            id: id.into(),
+            id: id.clone(),
             title: title.into(),
             created_at: now,
             updated_at: now,
@@ -71,6 +81,11 @@ impl SessionRecord {
             provider_type: provider_type.into(),
             model: model.into(),
             last_run_id: None,
+            gateway: SessionGatewayMetadata {
+                route: session_route_for_id(&id),
+                last_gateway_run_id: None,
+                last_correlation_id: None,
+            },
             transcript: Vec::new(),
         }
     }
@@ -103,6 +118,18 @@ impl SessionRecord {
         self.updated_at = Utc::now();
     }
 
+    pub fn set_gateway_binding(
+        &mut self,
+        route: impl Into<String>,
+        gateway_run_id: impl Into<String>,
+        correlation_id: impl Into<String>,
+    ) {
+        self.gateway.route = route.into();
+        self.gateway.last_gateway_run_id = Some(gateway_run_id.into());
+        self.gateway.last_correlation_id = Some(correlation_id.into());
+        self.updated_at = Utc::now();
+    }
+
     pub fn summary(&self) -> SessionSummary {
         SessionSummary {
             id: self.id.clone(),
@@ -111,11 +138,22 @@ impl SessionRecord {
             provider_profile: self.provider_profile.clone(),
             provider_type: self.provider_type.clone(),
             model: self.model.clone(),
+            session_route: self.effective_gateway_route(),
+            last_gateway_run_id: self.gateway.last_gateway_run_id.clone(),
+            last_correlation_id: self.gateway.last_correlation_id.clone(),
             message_count: self.transcript.len(),
             last_message_preview: self
                 .transcript
                 .last()
                 .map(|message| truncate_preview(&message.content, 120)),
+        }
+    }
+
+    fn effective_gateway_route(&self) -> String {
+        if self.gateway.route.is_empty() {
+            session_route_for_id(&self.id)
+        } else {
+            self.gateway.route.clone()
         }
     }
 }
@@ -128,6 +166,9 @@ pub struct SessionSummary {
     pub provider_profile: String,
     pub provider_type: String,
     pub model: String,
+    pub session_route: String,
+    pub last_gateway_run_id: Option<String>,
+    pub last_correlation_id: Option<String>,
     pub message_count: usize,
     pub last_message_preview: Option<String>,
 }
@@ -195,7 +236,7 @@ impl SessionStore for FileSessionStore {
         }
 
         let content = fs::read_to_string(&path)?;
-        let session = serde_json::from_str::<SessionRecord>(&content)?;
+        let session = normalize_loaded_session(serde_json::from_str::<SessionRecord>(&content)?);
         Ok(Some(session))
     }
 
@@ -218,7 +259,7 @@ impl SessionStore for FileSessionStore {
             }
 
             let content = fs::read_to_string(&path)?;
-            let session = serde_json::from_str::<SessionRecord>(&content)?;
+            let session = normalize_loaded_session(serde_json::from_str::<SessionRecord>(&content)?);
             sessions.push(session.summary());
         }
 
@@ -263,6 +304,14 @@ fn truncate_preview(value: &str, limit: usize) -> String {
     format!("{truncated}...")
 }
 
+fn normalize_loaded_session(mut session: SessionRecord) -> SessionRecord {
+    if session.gateway.route.is_empty() {
+        session.gateway.route = session_route_for_id(&session.id);
+    }
+
+    session
+}
+
 pub fn session_title_from_input(input: &str) -> String {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -270,6 +319,10 @@ pub fn session_title_from_input(input: &str) -> String {
     }
 
     truncate_preview(trimmed, 48)
+}
+
+pub fn session_route_for_id(id: &str) -> String {
+    format!("gateway.local/{id}")
 }
 
 #[cfg(test)]
@@ -311,7 +364,16 @@ mod tests {
         assert_eq!(summary.id, "demo");
         assert_eq!(summary.message_count, 2);
         assert_eq!(summary.last_message_preview.as_deref(), Some("world"));
+        assert_eq!(summary.session_route, session_route_for_id("demo"));
         assert_eq!(session.last_run_id.as_deref(), Some("run-1"));
+    }
+
+    #[test]
+    fn summary_backfills_missing_gateway_route_for_legacy_sessions() {
+        let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+        session.gateway.route.clear();
+
+        assert_eq!(session.summary().session_route, session_route_for_id("demo"));
     }
 
     #[test]

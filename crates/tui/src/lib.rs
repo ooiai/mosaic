@@ -6,7 +6,7 @@ pub mod app;
 pub mod mock;
 pub mod ui;
 
-use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, time::Duration};
 
@@ -15,8 +15,9 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use mosaic_runtime::{AgentRuntime, RunRequest};
+use mosaic_gateway::{GatewayEvent, GatewayHandle, GatewayRunRequest};
 use mosaic_runtime::events::{RunEvent, RunEventSink};
+#[cfg(test)]
 use mosaic_session_core::SessionStore;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::runtime::Handle;
@@ -62,13 +63,11 @@ impl RunEventSink for TuiEventSink {
 
 #[derive(Clone)]
 pub struct InteractiveSessionContext {
-    pub runtime: Arc<AgentRuntime>,
+    pub gateway: GatewayHandle,
     pub runtime_handle: Handle,
     pub event_buffer: TuiEventBuffer,
-    pub session_store: Arc<dyn SessionStore>,
     pub session_id: String,
     pub system: Option<String>,
-    pub runs_dir: PathBuf,
     pub active_profile: String,
     pub active_model: String,
     pub available_profiles: Vec<ProfileOption>,
@@ -175,11 +174,21 @@ fn run_interactive_app(
         context.available_profiles.clone(),
         start_in_resume,
     );
-    refresh_interactive_session(&mut app, context.session_store.as_ref(), &context.session_id);
+    let gateway_link = Arc::new(AtomicBool::new(true));
+    refresh_interactive_session_from_gateway(&mut app, &context.gateway, &context.session_id);
+
+    let event_forwarder = context.runtime_handle.spawn(forward_gateway_runtime_events(
+        context.gateway.subscribe(),
+        context.event_buffer.clone(),
+        gateway_link.clone(),
+        Some(context.session_id.clone()),
+    ));
 
     loop {
         drain_run_events(&mut app, &context.event_buffer);
-        refresh_interactive_session(&mut app, context.session_store.as_ref(), &context.session_id);
+        if gateway_link.load(Ordering::Relaxed) {
+            refresh_interactive_session_from_gateway(&mut app, &context.gateway, &context.session_id);
+        }
 
         terminal.draw(|frame| ui::render(frame, &app))?;
 
@@ -189,7 +198,22 @@ fn run_interactive_app(
                     AppAction::Quit => break,
                     AppAction::Continue => {}
                     AppAction::Submit(input) => {
-                        spawn_interactive_run(&context, app.active_profile().to_owned(), input);
+                        if gateway_link.load(Ordering::Relaxed) {
+                            spawn_interactive_run(&context, app.active_profile().to_owned(), input);
+                        } else {
+                            app.push_command_error("Gateway is disconnected for this TUI session");
+                        }
+                    }
+                    AppAction::GatewayConnect => {
+                        gateway_link.store(true, Ordering::Relaxed);
+                        refresh_interactive_session_from_gateway(
+                            &mut app,
+                            &context.gateway,
+                            &context.session_id,
+                        );
+                    }
+                    AppAction::GatewayDisconnect => {
+                        gateway_link.store(false, Ordering::Relaxed);
                     }
                 },
                 Event::Resize(_, _) => {}
@@ -200,6 +224,8 @@ fn run_interactive_app(
         app.tick();
     }
 
+    event_forwarder.abort();
+
     Ok(())
 }
 
@@ -208,29 +234,72 @@ fn spawn_interactive_run(
     profile: String,
     input: String,
 ) {
-    let runtime = context.runtime.clone();
-    let request = RunRequest {
+    let gateway = context.gateway.clone();
+    let request = GatewayRunRequest {
         system: context.system.clone(),
         input,
         skill: None,
         session_id: Some(context.session_id.clone()),
         profile: Some(profile),
     };
-    let runs_dir = context.runs_dir.clone();
+    let event_buffer = context.event_buffer.clone();
 
     context.runtime_handle.spawn(async move {
-        match runtime.run(request).await {
-            Ok(result) => {
-                let _ = result.trace.save_to_dir(&runs_dir);
+        match gateway.submit_run(request) {
+            Ok(submitted) => {
+                if let Err(err) = submitted.wait().await {
+                    event_buffer.push(RunEvent::RunFailed {
+                        error: err.to_string(),
+                    });
+                }
             }
             Err(err) => {
-                let (_, trace) = err.into_parts();
-                let _ = trace.save_to_dir(&runs_dir);
+                event_buffer.push(RunEvent::RunFailed {
+                    error: err.to_string(),
+                });
             }
         }
     });
 }
 
+async fn forward_gateway_runtime_events(
+    mut receiver: tokio::sync::broadcast::Receiver<mosaic_gateway::GatewayEventEnvelope>,
+    event_buffer: TuiEventBuffer,
+    gateway_link: Arc<AtomicBool>,
+    session_filter: Option<String>,
+) {
+    loop {
+        let Ok(envelope) = receiver.recv().await else {
+            break;
+        };
+
+        if !gateway_link.load(Ordering::Relaxed) {
+            continue;
+        }
+
+        if let Some(session_id) = session_filter.as_deref() {
+            if envelope.session_id.as_deref() != Some(session_id) {
+                continue;
+            }
+        }
+
+        if let GatewayEvent::Runtime(event) = envelope.event {
+            event_buffer.push(event);
+        }
+    }
+}
+
+fn refresh_interactive_session_from_gateway(
+    app: &mut App,
+    gateway: &GatewayHandle,
+    session_id: &str,
+) {
+    if let Ok(Some(session)) = gateway.load_session(session_id) {
+        app.sync_runtime_session(&session);
+    }
+}
+
+#[cfg(test)]
 fn refresh_interactive_session(
     app: &mut App,
     session_store: &dyn SessionStore,

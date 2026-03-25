@@ -1,4 +1,4 @@
-use std::{env, fs, path::{Path, PathBuf}, sync::Arc};
+use std::{env, fs, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
@@ -7,10 +7,14 @@ use mosaic_config::{
     ValidationLevel, doctor_mosaic_config, init_workspace_config, load_from_file,
     load_mosaic_config, redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
+use mosaic_gateway::{
+    GatewayCommand as GatewayControlCommand, GatewayEvent, GatewayHandle, GatewayRunError,
+    GatewayRunRequest, GatewayRunResult,
+};
 use mosaic_inspect::RunTrace;
 use mosaic_provider::ProviderProfileRegistry;
-use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult};
-use mosaic_session_core::{FileSessionStore, SessionStore};
+use mosaic_runtime::events::RunEventSink;
+use mosaic_session_core::SessionSummary;
 
 mod bootstrap;
 mod output;
@@ -59,6 +63,10 @@ enum Commands {
         #[command(subcommand)]
         command: ModelCommand,
     },
+    Gateway {
+        #[command(subcommand)]
+        command: GatewayCliCommand,
+    },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -87,6 +95,15 @@ enum ModelCommand {
     },
 }
 
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum GatewayCliCommand {
+    Serve {
+        #[arg(long, help = "Start the local in-process gateway monitor")]
+        local: bool,
+    },
+    Sessions,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum DispatchCommand {
     Tui {
@@ -113,6 +130,9 @@ enum DispatchCommand {
     },
     Model {
         command: ModelCommand,
+    },
+    Gateway {
+        command: GatewayCliCommand,
     },
 }
 
@@ -147,6 +167,7 @@ impl Cli {
             Some(Commands::Setup { command }) => DispatchCommand::Setup { command },
             Some(Commands::Session { command }) => DispatchCommand::Session { command },
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
+            Some(Commands::Gateway { command }) => DispatchCommand::Gateway { command },
         }
     }
 }
@@ -171,6 +192,7 @@ async fn main() -> Result<()> {
         DispatchCommand::Setup { command } => setup_cmd(command),
         DispatchCommand::Session { command } => session_cmd(command),
         DispatchCommand::Model { command } => model_cmd(command),
+        DispatchCommand::Gateway { command } => gateway_cmd(command).await,
     }
 }
 
@@ -180,23 +202,14 @@ async fn tui_cmd(
     profile: Option<String>,
 ) -> Result<()> {
     let loaded = ensure_loaded_config(profile.clone())?;
-    let session_store_root = resolve_workspace_path(&loaded.config.session_store.root_dir)?;
-    let runs_dir = resolve_workspace_path(&loaded.config.inspect.runs_dir)?;
-    let session_store = Arc::new(FileSessionStore::new(session_store_root));
-    let session_id = resolve_tui_session_id(&session_store, session.as_deref())?;
+    let gateway = build_gateway_handle(&loaded, None)?;
+    let session_id = resolve_tui_session_id(&gateway, session.as_deref())?;
     let active_profile = profile.unwrap_or_else(|| loaded.config.active_profile.clone());
     let active_profile_config = loaded
         .config
         .profiles
         .get(&active_profile)
         .ok_or_else(|| anyhow!("unknown provider profile: {}", active_profile))?;
-    let event_buffer = mosaic_tui::build_tui_event_buffer();
-    let event_sink = mosaic_tui::build_tui_event_sink(event_buffer.clone());
-    let runtime = Arc::new(AgentRuntime::new(bootstrap::build_runtime_context(
-        &loaded.config,
-        None,
-        event_sink,
-    )?));
     let available_profiles = loaded
         .config
         .profiles
@@ -208,13 +221,11 @@ async fn tui_cmd(
         })
         .collect();
     let context = mosaic_tui::InteractiveSessionContext {
-        runtime,
+        gateway,
         runtime_handle: tokio::runtime::Handle::current(),
-        event_buffer,
-        session_store: session_store as Arc<dyn SessionStore>,
+        event_buffer: mosaic_tui::build_tui_event_buffer(),
         session_id,
         system: None,
-        runs_dir,
         active_profile,
         active_model: active_profile_config.model.clone(),
         available_profiles,
@@ -236,29 +247,29 @@ async fn run_cmd(
 ) -> Result<()> {
     let app_cfg = load_from_file(&file)?;
     let loaded = ensure_loaded_config(profile.clone())?;
-    let runs_dir = resolve_workspace_path(&loaded.config.inspect.runs_dir)?;
 
     if tui {
         return run_cmd_with_tui(loaded, app_cfg, skill, session, profile, resume).await;
     }
 
-    let sinks = bootstrap::build_cli_only_sinks();
-    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(
-        &loaded.config,
-        Some(&app_cfg),
-        sinks.event_sink,
-    )?);
-    let outcome = runtime
-        .run(RunRequest {
+    let gateway = build_gateway_handle(&loaded, Some(&app_cfg))?;
+    let forwarder = spawn_gateway_runtime_event_forwarder(
+        gateway.subscribe(),
+        Arc::new(output::CliEventSink),
+    );
+    let outcome = gateway
+        .submit_command(GatewayControlCommand::SubmitRun(GatewayRunRequest {
             system: app_cfg.agent.system,
             input: app_cfg.task.input,
             skill,
             session_id: session,
             profile,
-        })
+        }))?
+        .wait()
         .await;
+    forwarder.abort();
 
-    finish_run_outcome(outcome, &runs_dir)
+    finish_gateway_outcome(outcome)
 }
 
 async fn run_cmd_with_tui(
@@ -269,17 +280,14 @@ async fn run_cmd_with_tui(
     profile: Option<String>,
     resume: bool,
 ) -> Result<()> {
-    let sinks = bootstrap::build_cli_and_tui_sinks();
-    let event_buffer = sinks
-        .tui_buffer
-        .expect("cli+tui sink builder should provide a TUI buffer");
-    let runtime = AgentRuntime::new(bootstrap::build_runtime_context(
-        &loaded.config,
-        Some(&app_cfg),
-        sinks.event_sink,
-    )?);
+    let gateway = build_gateway_handle(&loaded, Some(&app_cfg))?;
+    let event_buffer = mosaic_tui::build_tui_event_buffer();
+    let forwarder = spawn_gateway_runtime_event_forwarder(
+        gateway.subscribe(),
+        mosaic_tui::build_tui_event_sink(event_buffer.clone()),
+    );
 
-    let request = RunRequest {
+    let request = GatewayRunRequest {
         system: app_cfg.agent.system,
         input: app_cfg.task.input,
         skill,
@@ -287,16 +295,17 @@ async fn run_cmd_with_tui(
         profile,
     };
 
-    let runs_dir = resolve_workspace_path(&loaded.config.inspect.runs_dir)?;
-    let runtime_handle = tokio::spawn(async move { runtime.run(request).await });
+    let submitted = gateway.submit_command(GatewayControlCommand::SubmitRun(request))?;
+    let runtime_handle = tokio::spawn(async move { submitted.wait().await });
     let tui_handle = tokio::task::spawn_blocking(move || {
         mosaic_tui::run_until_complete_with_event_buffer(resume, event_buffer)
     });
 
     let runtime_outcome = runtime_handle.await?;
+    forwarder.abort();
     let tui_join = tui_handle.await;
 
-    let run_result = finish_run_outcome(runtime_outcome, &runs_dir);
+    let run_result = finish_gateway_outcome(runtime_outcome);
 
     match (run_result, tui_join) {
         (Err(err), _) => Err(err),
@@ -308,25 +317,36 @@ async fn run_cmd_with_tui(
     }
 }
 
-fn finish_run_outcome(outcome: std::result::Result<RunResult, RunError>, runs_dir: &Path) -> Result<()> {
+fn finish_gateway_outcome(
+    outcome: std::result::Result<GatewayRunResult, GatewayRunError>,
+) -> Result<()> {
     match outcome {
-        Ok(result) => persist_successful_run(result, runs_dir),
-        Err(err) => persist_failed_run(err, runs_dir),
+        Ok(result) => finish_successful_gateway_run(result),
+        Err(err) => finish_failed_gateway_run(err),
     }
 }
 
-fn persist_successful_run(result: RunResult, runs_dir: &Path) -> Result<()> {
-    let path = result.trace.save_to_dir(runs_dir)?;
+fn finish_successful_gateway_run(result: GatewayRunResult) -> Result<()> {
     println!("{}", result.output);
-    println!("saved trace: {}", path.display());
+    println!("saved trace: {}", result.trace_path.display());
+    println!("gateway_run_id: {}", result.gateway_run_id);
+    println!("correlation_id: {}", result.correlation_id);
+    println!("session_route: {}", result.session_route);
     Ok(())
 }
 
-fn persist_failed_run(err: RunError, runs_dir: &Path) -> Result<()> {
-    let (source, trace) = err.into_parts();
-    let path = trace.save_to_dir(runs_dir)?;
+fn finish_failed_gateway_run(err: GatewayRunError) -> Result<()> {
+    let gateway_run_id = err.gateway_run_id().to_owned();
+    let correlation_id = err.correlation_id().to_owned();
+    let session_route = err.session_route().to_owned();
+    let (source, _trace, path) = err.into_parts();
 
-    println!("saved trace: {}", path.display());
+    if !path.as_os_str().is_empty() {
+        println!("saved trace: {}", path.display());
+    }
+    println!("gateway_run_id: {}", gateway_run_id);
+    println!("correlation_id: {}", correlation_id);
+    println!("session_route: {}", session_route);
 
     Err(source)
 }
@@ -378,37 +398,15 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
 
 fn session_cmd(command: SessionCommand) -> Result<()> {
     let loaded = ensure_loaded_config(None)?;
-    let store = FileSessionStore::new(resolve_workspace_path(&loaded.config.session_store.root_dir)?);
+    let gateway = build_gateway_handle(&loaded, None)?;
 
     match command {
         SessionCommand::List => {
-            let sessions = store.list()?;
-
-            if sessions.is_empty() {
-                println!("no sessions found");
-                return Ok(());
-            }
-
-            for session in sessions {
-                println!(
-                    "{} | {} | profile={} | model={} | messages={} | updated_at={}",
-                    session.id,
-                    session.title,
-                    session.provider_profile,
-                    session.model,
-                    session.message_count,
-                    session.updated_at
-                );
-                if let Some(preview) = session.last_message_preview {
-                    println!("  last: {}", preview);
-                }
-            }
-
-            Ok(())
+            print_session_list(&gateway.list_sessions()?)
         }
         SessionCommand::Show { id } => {
-            let session = store
-                .load(&id)?
+            let session = gateway
+                .load_session(&id)?
                 .ok_or_else(|| anyhow!("session not found: {}", id))?;
 
             println!("id: {}", session.id);
@@ -419,6 +417,9 @@ fn session_cmd(command: SessionCommand) -> Result<()> {
             println!("provider_type: {}", session.provider_type);
             println!("model: {}", session.model);
             println!("last_run_id: {:?}", session.last_run_id);
+            println!("session_route: {}", session.gateway.route);
+            println!("last_gateway_run_id: {:?}", session.gateway.last_gateway_run_id);
+            println!("last_correlation_id: {:?}", session.gateway.last_correlation_id);
             println!("message_count: {}", session.transcript.len());
 
             if !session.transcript.is_empty() {
@@ -432,6 +433,57 @@ fn session_cmd(command: SessionCommand) -> Result<()> {
                         message.tool_call_id
                     );
                     println!("  {}", truncate_for_cli(&message.content, 400));
+                }
+            }
+
+            Ok(())
+        }
+    }
+}
+
+async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
+    let loaded = ensure_loaded_config(None)?;
+    let gateway = build_gateway_handle(&loaded, None)?;
+
+    match command {
+        GatewayCliCommand::Sessions => print_session_list(&gateway.list_sessions()?),
+        GatewayCliCommand::Serve { local } => {
+            if !local {
+                bail!("d3 only supports `mosaic gateway serve --local`");
+            }
+
+            let session_count = gateway.list_sessions()?.len();
+            println!("local gateway ready");
+            println!("active_profile: {}", loaded.config.active_profile);
+            println!("sessions: {}", session_count);
+            println!("press Ctrl-C to stop");
+
+            let mut receiver = gateway.subscribe();
+            loop {
+                tokio::select! {
+                    signal = tokio::signal::ctrl_c() => {
+                        signal?;
+                        println!("local gateway stopped");
+                        break;
+                    }
+                    event = receiver.recv() => {
+                        match event {
+                            Ok(envelope) => {
+                                println!(
+                                    "[gateway] run={} corr={} session={} route={} event={}",
+                                    envelope.gateway_run_id,
+                                    envelope.correlation_id,
+                                    envelope.session_id.as_deref().unwrap_or("<none>"),
+                                    envelope.session_route,
+                                    gateway_event_label(&envelope.event),
+                                );
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                                println!("[gateway] lagged {} events", skipped);
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
                 }
             }
 
@@ -502,7 +554,10 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
     let summary = trace.summary();
 
     println!("run_id: {}", trace.run_id);
+    println!("gateway_run_id: {:?}", trace.gateway_run_id);
+    println!("correlation_id: {:?}", trace.correlation_id);
     println!("session_id: {:?}", trace.session_id);
+    println!("session_route: {:?}", trace.session_route);
     println!("status: {}", summary.status);
     println!("started_at: {}", trace.started_at);
     println!("finished_at: {:?}", trace.finished_at);
@@ -588,19 +643,86 @@ fn load_config() -> Result<LoadedMosaicConfig> {
 }
 
 fn resolve_tui_session_id(
-    store: &FileSessionStore,
+    gateway: &GatewayHandle,
     requested: Option<&str>,
 ) -> Result<String> {
     if let Some(session_id) = requested {
         return Ok(session_id.to_owned());
     }
 
-    Ok(store
-        .list()?
+    Ok(gateway
+        .list_sessions()?
         .into_iter()
         .next()
         .map(|session| session.id)
         .unwrap_or_else(|| "default".to_owned()))
+}
+
+fn build_gateway_handle(
+    loaded: &LoadedMosaicConfig,
+    app_cfg: Option<&mosaic_config::AppConfig>,
+) -> Result<GatewayHandle> {
+    bootstrap::build_local_gateway(tokio::runtime::Handle::current(), &loaded.config, app_cfg)
+}
+
+fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
+    if sessions.is_empty() {
+        println!("no sessions found");
+        return Ok(());
+    }
+
+    for session in sessions {
+        println!(
+            "{} | {} | profile={} | model={} | route={} | messages={} | updated_at={} | gateway_run={} | correlation={}",
+            session.id,
+            session.title,
+            session.provider_profile,
+            session.model,
+            session.session_route,
+            session.message_count,
+            session.updated_at,
+            session.last_gateway_run_id.as_deref().unwrap_or("-"),
+            session.last_correlation_id.as_deref().unwrap_or("-"),
+        );
+        if let Some(preview) = session.last_message_preview.as_deref() {
+            println!("  last: {}", preview);
+        }
+    }
+
+    Ok(())
+}
+
+fn spawn_gateway_runtime_event_forwarder(
+    mut receiver: tokio::sync::broadcast::Receiver<mosaic_gateway::GatewayEventEnvelope>,
+    sink: Arc<dyn RunEventSink>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let Ok(envelope) = receiver.recv().await else {
+                break;
+            };
+
+            if let GatewayEvent::Runtime(event) = envelope.event {
+                sink.emit(event);
+            }
+        }
+    })
+}
+
+fn gateway_event_label(event: &GatewayEvent) -> String {
+    match event {
+        GatewayEvent::RunSubmitted { profile, .. } => format!("run_submitted profile={profile}"),
+        GatewayEvent::Runtime(_) => "runtime_event".to_owned(),
+        GatewayEvent::SessionUpdated { summary } => {
+            format!("session_updated id={} messages={}", summary.id, summary.message_count)
+        }
+        GatewayEvent::RunCompleted { output_preview } => {
+            format!("run_completed preview={}", truncate_for_cli(output_preview, 80))
+        }
+        GatewayEvent::RunFailed { error } => {
+            format!("run_failed error={}", truncate_for_cli(error, 80))
+        }
+    }
 }
 
 fn ensure_loaded_config(active_profile_override: Option<String>) -> Result<LoadedMosaicConfig> {
@@ -618,15 +740,6 @@ fn ensure_loaded_config(active_profile_override: Option<String>) -> Result<Loade
 
 fn current_dir() -> Result<PathBuf> {
     env::current_dir().context("failed to resolve current directory")
-}
-
-fn resolve_workspace_path(path: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(path);
-    if path.is_absolute() {
-        return Ok(path);
-    }
-
-    Ok(current_dir()?.join(path))
 }
 
 fn print_config_summary(loaded: &LoadedMosaicConfig) {

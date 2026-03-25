@@ -2,6 +2,7 @@ use std::{env, path::PathBuf, sync::Arc};
 
 use anyhow::{Result, bail};
 use mosaic_config::{AppConfig, MosaicConfig, SkillConfig, ToolConfig};
+use mosaic_gateway::{GatewayHandle, GatewayRuntimeComponents};
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::{
     RuntimeContext,
@@ -11,14 +12,17 @@ use mosaic_session_core::FileSessionStore;
 use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{EchoTool, ReadFileTool, TimeNowTool, ToolRegistry};
 use mosaic_tui::{TuiEventBuffer, build_tui_event_buffer, build_tui_event_sink};
+use tokio::runtime::Handle;
 
 use crate::output::CliEventSink;
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct OutputSinks {
     pub event_sink: SharedRunEventSink,
     pub tui_buffer: Option<TuiEventBuffer>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn build_runtime_context(
     config: &MosaicConfig,
     app_config: Option<&AppConfig>,
@@ -39,6 +43,36 @@ pub fn build_runtime_context(
     })
 }
 
+pub fn build_gateway_components(
+    config: &MosaicConfig,
+    app_config: Option<&AppConfig>,
+) -> Result<GatewayRuntimeComponents> {
+    let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
+    let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
+    let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
+    let tools = Arc::new(build_tools(app_config.map(|cfg| cfg.tools.as_slice()))?);
+    let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
+
+    Ok(GatewayRuntimeComponents {
+        profiles,
+        provider_override: None,
+        session_store: Arc::new(FileSessionStore::new(session_store_root)),
+        tools,
+        skills,
+        runs_dir,
+    })
+}
+
+pub fn build_local_gateway(
+    runtime_handle: Handle,
+    config: &MosaicConfig,
+    app_config: Option<&AppConfig>,
+) -> Result<GatewayHandle> {
+    let components = build_gateway_components(config, app_config)?;
+    Ok(GatewayHandle::new_local(runtime_handle, components))
+}
+
+#[allow(dead_code)]
 pub fn build_cli_only_sinks() -> OutputSinks {
     OutputSinks {
         event_sink: Arc::new(CliEventSink),
@@ -46,6 +80,7 @@ pub fn build_cli_only_sinks() -> OutputSinks {
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn build_cli_and_tui_sinks() -> OutputSinks {
     let buffer = build_tui_event_buffer();
 
@@ -136,7 +171,7 @@ mod tests {
     };
     use mosaic_runtime::events::{NoopEventSink, RunEvent};
 
-    use super::{build_cli_and_tui_sinks, build_runtime_context};
+    use super::{build_cli_and_tui_sinks, build_gateway_components, build_runtime_context};
 
     fn app_config() -> AppConfig {
         AppConfig {
@@ -193,6 +228,19 @@ mod tests {
         assert!(ctx.tools.get("read_file").is_some());
         assert!(ctx.tools.get("time_now").is_some());
         assert!(ctx.skills.get("summarize").is_some());
+    }
+
+    #[test]
+    fn gateway_components_register_builtin_tools_skills_and_paths() {
+        let config = MosaicConfig::default();
+        let components = build_gateway_components(&config, Some(&app_config()))
+            .expect("gateway components should build");
+
+        assert!(components.tools.get("time_now").is_some());
+        assert!(components.tools.get("read_file").is_some());
+        assert!(components.skills.get("summarize").is_some());
+        assert_eq!(components.profiles.active_profile_name(), "mock");
+        assert!(components.runs_dir.ends_with(".mosaic/runs"));
     }
 
     #[test]
