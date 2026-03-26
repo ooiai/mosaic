@@ -1565,13 +1565,14 @@ mod tests {
     }
 
     #[test]
-    fn provider_example_patches_validate_against_defaults() {
+    fn provider_and_deployment_example_patches_validate_against_defaults() {
         let root = repo_root();
         for rel in [
             "examples/providers/openai.yaml",
             "examples/providers/azure.yaml",
             "examples/providers/ollama.yaml",
             "examples/providers/anthropic.yaml",
+            "examples/deployment/production.config.yaml",
         ] {
             let patch = load_config_patch(&root.join(rel)).expect("example patch should load");
             let mut config = MosaicConfig::default();

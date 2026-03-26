@@ -7,13 +7,17 @@ This guide explains how provider configuration works in Mosaic today.
 Mosaic currently validates and runs these provider types:
 
 - `mock`
+- `openai`
+- `azure`
+- `anthropic`
+- `ollama`
 - `openai-compatible`
 
 If you set another value, `mosaic setup validate` will fail.
 
 ## OpenAI
 
-Use the OpenAI API directly through the `openai-compatible` provider type.
+Use the OpenAI API directly through the `openai` provider type.
 
 Example: [examples/providers/openai.yaml](../examples/providers/openai.yaml)
 
@@ -21,7 +25,7 @@ Example: [examples/providers/openai.yaml](../examples/providers/openai.yaml)
 active_profile: openai
 profiles:
   openai:
-    type: openai-compatible
+    type: openai
     model: gpt-5.4-mini
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
@@ -33,9 +37,31 @@ Required environment variable:
 export OPENAI_API_KEY=your_api_key_here
 ```
 
+## Azure OpenAI
+
+Use the native `azure` provider type when you have an Azure OpenAI deployment.
+
+Example: [examples/providers/azure.yaml](../examples/providers/azure.yaml)
+
+```yaml
+active_profile: azure
+profiles:
+  azure:
+    type: azure
+    model: gpt-5.4
+    base_url: https://your-resource.openai.azure.com
+    api_key_env: AZURE_OPENAI_API_KEY
+```
+
+Required environment variable:
+
+```bash
+export AZURE_OPENAI_API_KEY=your_api_key_here
+```
+
 ## Ollama
 
-Ollama works through its OpenAI-compatible endpoint.
+Ollama works through the native `ollama` provider type.
 
 Example: [examples/providers/ollama.yaml](../examples/providers/ollama.yaml)
 
@@ -43,31 +69,24 @@ Example: [examples/providers/ollama.yaml](../examples/providers/ollama.yaml)
 active_profile: ollama
 profiles:
   ollama:
-    type: openai-compatible
-    model: llama3.2
-    base_url: http://127.0.0.1:11434/v1
-    api_key_env: OLLAMA_API_KEY
-```
-
-If your local Ollama endpoint does not require auth, validation still expects `api_key_env`, so set a placeholder:
-
-```bash
-export OLLAMA_API_KEY=ollama
+    type: ollama
+    model: qwen3:14b
+    base_url: http://127.0.0.1:11434
 ```
 
 ## Anthropic
 
-Mosaic does not yet provide a native `anthropic` provider type. If you want to run Anthropic models today, put an OpenAI-compatible bridge or proxy in front of Anthropic and configure Mosaic against that endpoint.
+Mosaic ships a native `anthropic` provider type.
 
 Example: [examples/providers/anthropic.yaml](../examples/providers/anthropic.yaml)
 
 ```yaml
-active_profile: anthropic-proxy
+active_profile: anthropic
 profiles:
-  anthropic-proxy:
-    type: openai-compatible
+  anthropic:
+    type: anthropic
     model: claude-sonnet-4-5
-    base_url: http://127.0.0.1:4000/v1
+    base_url: https://api.anthropic.com/v1
     api_key_env: ANTHROPIC_API_KEY
 ```
 
@@ -75,6 +94,20 @@ Required environment variable:
 
 ```bash
 export ANTHROPIC_API_KEY=your_api_key_here
+```
+
+## OpenAI-compatible
+
+Use `openai-compatible` only when you are targeting a compatible proxy or a vendor endpoint that is not one of the native providers above.
+
+```yaml
+active_profile: gateway-bridge
+profiles:
+  gateway-bridge:
+    type: openai-compatible
+    model: custom-model
+    base_url: https://your-gateway.example/v1
+    api_key_env: COMPAT_API_KEY
 ```
 
 ## Built-in mock provider
@@ -123,3 +156,5 @@ mosaic setup doctor
 ```
 
 If validation fails, read [troubleshooting.md](./troubleshooting.md).
+
+For secret handling and production auth guidance, continue with [security.md](./security.md).

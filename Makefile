@@ -54,9 +54,12 @@ endef
 	uninstall \
 	run \
 	build \
+	package \
 	clean \
 	check \
 	test \
+	smoke \
+	release-check \
 	verify \
 	git-run \
 	git-commit \
@@ -68,7 +71,10 @@ help: ## Show available Make targets.
 	@printf "  make build\n"
 	@printf "  make check\n"
 	@printf "  make test\n"
+	@printf "  make smoke\n"
 	@printf "  make verify\n"
+	@printf "  make release-check\n"
+	@printf "  make package\n"
 	@printf "  make run\n"
 	@printf "  make install\n"
 	@printf "  make install INSTALL_ROOT=/tmp/mosaic-test-root\n"
@@ -82,7 +88,7 @@ help: ## Show available Make targets.
 # Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root
 # Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root INSTALL_FLAGS="--offline --locked"
 install: ## Install the CLI binary from the cli crate.
-	make check
+	$(MAKE) check
 	@if $(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG); then \
 		:; \
 	else \
@@ -110,6 +116,20 @@ run: ## Run the CLI from the workspace.
 build: ## Build the CLI crate.
 	$(CARGO_LINKER_ENV) $(CARGO) build -p $(CLI_PACKAGE)
 
+# Notes: Build a release binary bundle with docs, examples, and env template under dist/.
+# Usage: make package
+package: ## Build a release bundle under dist/.
+	@set -eu; \
+	pkg_dir="dist/$(CLI_BIN)-$$($(GIT) rev-parse --short HEAD)"; \
+	rm -rf "$$pkg_dir" "$$pkg_dir.tar.gz"; \
+	mkdir -p "$$pkg_dir/bin"; \
+	$(CARGO_LINKER_ENV) $(CARGO) build -p $(CLI_PACKAGE) --release; \
+	cp target/release/$(CLI_BIN) "$$pkg_dir/bin/"; \
+	cp README.md LICENSE .env.example "$$pkg_dir/"; \
+	cp -R docs examples "$$pkg_dir/"; \
+	tar -czf "$$pkg_dir.tar.gz" -C dist "$$(basename "$$pkg_dir")"; \
+	printf "Created %s\n" "$$pkg_dir.tar.gz"
+
 # Notes: Remove Cargo build artifacts for the whole workspace.
 # Usage: make clean
 clean: ## Clean workspace build artifacts.
@@ -124,6 +144,18 @@ check: ## Run workspace checks.
 # Usage: make test
 test: ## Run workspace tests.
 	$(CARGO_LINKER_ENV) $(CARGO) test --workspace
+
+# Notes: Run the release smoke path in an isolated temporary workspace.
+# Usage: make smoke
+smoke: ## Run the release smoke script in a temporary workspace.
+	./scripts/release-smoke.sh
+
+# Notes: Run the release checklist gate: docs/artifacts check, workspace verification, and smoke.
+# Usage: make release-check
+release-check: ## Run delivery artifact checks, verify, and smoke.
+	./scripts/verify-delivery-artifacts.sh
+	$(MAKE) verify
+	$(MAKE) smoke
 
 # Notes: Run the default verification chain before handoff.
 # Usage: make verify

@@ -176,6 +176,30 @@ List session summaries from the Gateway:
 mosaic gateway sessions
 ```
 
+List run summaries from the Gateway run registry:
+
+```bash
+mosaic gateway runs
+```
+
+Inspect one stored Gateway run:
+
+```bash
+mosaic gateway show-run <gateway-run-id>
+```
+
+Request cancellation for an active run:
+
+```bash
+mosaic gateway cancel <gateway-run-id>
+```
+
+Retry a terminal run through the same Gateway:
+
+```bash
+mosaic gateway retry <gateway-run-id>
+```
+
 Review recent audit events:
 
 ```bash
@@ -218,94 +242,22 @@ List nodes:
 mosaic node list
 ```
 
-Attach a session to a node:
+## Delivery and Release
+
+Run the repository smoke path before shipping a change:
 
 ```bash
-mosaic node attach laptop --session ops-demo
+make smoke
 ```
 
-Inspect node capabilities:
+Run the full delivery gate:
 
 ```bash
-mosaic node capabilities laptop
+make release-check
 ```
 
-## Automations and State
-
-List capability jobs:
+Build a releasable bundle under `dist/`:
 
 ```bash
-mosaic capability jobs
-```
-
-Show `exec` guardrails:
-
-```bash
-mosaic capability exec guardrails
-```
-
-Run a command through the capability layer:
-
-```bash
-mosaic capability exec run ./script.sh --session ops-demo
-```
-
-Test a webhook call:
-
-```bash
-mosaic capability webhook test http://127.0.0.1:8080 --method GET
-```
-
-List cron registrations:
-
-```bash
-mosaic cron list
-```
-
-Register a cron job:
-
-```bash
-mosaic cron register every-hour "0 * * * *" "status report" --session ops-demo
-```
-
-Trigger one cron job manually:
-
-```bash
-mosaic cron trigger every-hour
-```
-
-List loaded extensions:
-
-```bash
-mosaic extension list
-```
-
-Validate extensions:
-
-```bash
-mosaic extension validate
-```
-
-Reload extensions:
-
-```bash
-mosaic extension reload
-```
-
-List sessions with saved memory:
-
-```bash
-mosaic memory list
-```
-
-Show one session memory view:
-
-```bash
-mosaic memory show ops-demo
-```
-
-Search memory entries:
-
-```bash
-mosaic memory search summary --tag note
+make package
 ```

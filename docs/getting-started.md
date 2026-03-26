@@ -51,7 +51,7 @@ Copy from [examples/providers/openai.yaml](../examples/providers/openai.yaml):
 active_profile: openai
 profiles:
   openai:
-    type: openai-compatible
+    type: openai
     model: gpt-5.4-mini
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
@@ -71,21 +71,39 @@ Copy from [examples/providers/ollama.yaml](../examples/providers/ollama.yaml):
 active_profile: ollama
 profiles:
   ollama:
-    type: openai-compatible
-    model: llama3.2
-    base_url: http://127.0.0.1:11434/v1
-    api_key_env: OLLAMA_API_KEY
+    type: ollama
+    model: qwen3:14b
+    base_url: http://127.0.0.1:11434
 ```
 
-Current validation requires `api_key_env` to be set for `openai-compatible` profiles, so use a placeholder if your local server does not require auth:
+### Anthropic example
+
+Copy from [examples/providers/anthropic.yaml](../examples/providers/anthropic.yaml):
+
+```yaml
+active_profile: anthropic
+profiles:
+  anthropic:
+    type: anthropic
+    model: claude-sonnet-4-5
+    base_url: https://api.anthropic.com/v1
+    api_key_env: ANTHROPIC_API_KEY
+```
+
+Export the key:
 
 ```bash
-export OLLAMA_API_KEY=ollama
+export ANTHROPIC_API_KEY=your_api_key_here
 ```
 
-### Anthropic today
+### Production template and secrets
 
-Mosaic does not yet ship a native Anthropic provider type. Use an OpenAI-compatible bridge or proxy and start from [examples/providers/anthropic.yaml](../examples/providers/anthropic.yaml).
+If you plan to keep Mosaic running as a long-lived service, continue with:
+
+- [`.env.example`](../.env.example)
+- [examples/deployment/production.config.yaml](../examples/deployment/production.config.yaml)
+- [docs/deployment.md](./deployment.md)
+- [docs/security.md](./security.md)
 
 ## 4. Validate and diagnose
 
@@ -98,7 +116,7 @@ mosaic model list
 What success looks like:
 
 - `validation: ok`
-- `doctor: ok`
+- `doctor: ok` or only expected warnings
 - the active profile appears in `mosaic model list`
 
 ## 5. Start the TUI
@@ -160,3 +178,9 @@ mosaic tui
 mosaic session list
 mosaic inspect .mosaic/runs/<run-id>.json
 ```
+
+For a production handoff after the first day, continue with:
+
+- [docs/deployment.md](./deployment.md)
+- [docs/operations.md](./operations.md)
+- [docs/upgrade.md](./upgrade.md)

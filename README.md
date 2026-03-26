@@ -25,6 +25,7 @@ mosaic setup init
 Use one of these examples:
 
 - [examples/providers/openai.yaml](./examples/providers/openai.yaml)
+- [examples/providers/azure.yaml](./examples/providers/azure.yaml)
 - [examples/providers/ollama.yaml](./examples/providers/ollama.yaml)
 - [examples/providers/anthropic.yaml](./examples/providers/anthropic.yaml)
 
@@ -69,6 +70,8 @@ cargo run -p mosaic-cli -- --help
 ```bash
 make build
 make check
+make smoke
+make release-check
 ```
 
 ## First Run Path
@@ -97,7 +100,7 @@ For OpenAI:
 active_profile: openai
 profiles:
   openai:
-    type: openai-compatible
+    type: openai
     model: gpt-5.4-mini
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
@@ -108,6 +111,13 @@ Then export the credential:
 ```bash
 export OPENAI_API_KEY=your_api_key_here
 ```
+
+For a production service install, continue with:
+
+- [`.env.example`](./.env.example)
+- [examples/deployment/production.config.yaml](./examples/deployment/production.config.yaml)
+- [docs/deployment.md](./docs/deployment.md)
+- [docs/security.md](./docs/security.md)
 
 ### 3. Validate and diagnose
 
@@ -147,6 +157,12 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [CLI Reference](./docs/cli.md)
 - [TUI Guide](./docs/tui.md)
 - [Gateway Guide](./docs/gateway.md)
+- [Deployment Guide](./docs/deployment.md)
+- [Operations Guide](./docs/operations.md)
+- [Security Guide](./docs/security.md)
+- [Release Guide](./docs/release.md)
+- [Compatibility Guide](./docs/compatibility.md)
+- [Upgrade Guide](./docs/upgrade.md)
 - [Troubleshooting](./docs/troubleshooting.md)
 
 ## Examples
@@ -156,19 +172,18 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [examples/workflows/](./examples/workflows/)
 - [examples/extensions/](./examples/extensions/)
 - [examples/gateway/](./examples/gateway/)
+- [examples/deployment/](./examples/deployment/)
 
 ## Current Provider Support
 
 Mosaic currently supports these provider modes in the runtime:
 
 - `mock`
+- `openai`
+- `azure`
+- `anthropic`
+- `ollama`
 - `openai-compatible`
-
-That means:
-
-- OpenAI works directly with `type: openai-compatible`
-- Ollama works through its OpenAI-compatible endpoint
-- Anthropic currently needs an OpenAI-compatible bridge or proxy if you want to use it from Mosaic today
 
 Details and examples are in [docs/providers.md](./docs/providers.md).
 
@@ -183,6 +198,8 @@ mosaic tui
 mosaic session list
 mosaic gateway status
 mosaic inspect .mosaic/runs/<run-id>.json
+make smoke
+make release-check
 ```
 
 ## Architecture

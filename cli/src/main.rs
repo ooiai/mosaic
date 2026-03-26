@@ -61,10 +61,19 @@ Docs:
   docs/getting-started.md
   docs/configuration.md
   docs/cli.md
+  docs/deployment.md
+  docs/security.md
+  docs/release.md
 
 Examples:
   examples/providers/openai.yaml
-  examples/workflows/research-brief.yaml";
+  examples/workflows/research-brief.yaml
+  examples/deployment/production.config.yaml
+
+Delivery:
+  make smoke
+  make release-check
+  make package";
 const SETUP_AFTER_HELP: &str = "When to use it:
   Use `setup` before first run, after config edits, or when an operator needs to diagnose why Mosaic will not start cleanly.
 
@@ -3138,7 +3147,12 @@ mod tests {
         assert!(help.contains("mosaic config show"));
         assert!(help.contains("Operator groups"));
         assert!(help.contains("docs/getting-started.md"));
+        assert!(help.contains("docs/deployment.md"));
+        assert!(help.contains("docs/security.md"));
+        assert!(help.contains("docs/release.md"));
         assert!(help.contains("examples/providers/openai.yaml"));
+        assert!(help.contains("examples/deployment/production.config.yaml"));
+        assert!(help.contains("make release-check"));
     }
 
     #[test]
@@ -3154,7 +3168,12 @@ mod tests {
             "mosaic inspect .mosaic/runs/<run-id>.json",
             "docs/getting-started.md",
             "docs/cli.md",
+            "docs/deployment.md",
+            "docs/security.md",
+            "docs/release.md",
             "examples/README.md",
+            "examples/deployment/production.config.yaml",
+            "make release-check",
         ] {
             assert!(readme.contains(required), "README missing {required}");
         }
@@ -3168,6 +3187,8 @@ mod tests {
             "mosaic model list",
             "mosaic tui",
             "mosaic inspect .mosaic/runs/<run-id>.json",
+            "docs/deployment.md",
+            "docs/operations.md",
         ] {
             assert!(
                 getting_started.contains(required),
@@ -3183,10 +3204,53 @@ mod tests {
             "mosaic inspect .mosaic/runs/<run-id>.json --verbose",
             "mosaic inspect .mosaic/runs/<run-id>.json --json",
             "Operator Groupings",
+            "make release-check",
+            "make package",
         ] {
             assert!(
                 cli_reference.contains(required),
                 "cli reference missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn delivery_artifacts_exist_and_env_example_lists_required_variables() {
+        let root = repo_root();
+        for required in [
+            ".env.example",
+            "docs/deployment.md",
+            "docs/operations.md",
+            "docs/security.md",
+            "docs/release.md",
+            "docs/compatibility.md",
+            "docs/upgrade.md",
+            "examples/deployment/README.md",
+            "examples/deployment/production.config.yaml",
+            "examples/deployment/mosaic.service",
+            "scripts/release-smoke.sh",
+            "scripts/verify-delivery-artifacts.sh",
+        ] {
+            assert!(
+                root.join(required).is_file(),
+                "missing delivery artifact {required}"
+            );
+        }
+
+        let env_example =
+            fs::read_to_string(root.join(".env.example")).expect("env example should load");
+        for required in [
+            "MOSAIC_ACTIVE_PROFILE",
+            "MOSAIC_OPERATOR_TOKEN",
+            "MOSAIC_WEBCHAT_SHARED_SECRET",
+            "MOSAIC_TELEGRAM_SECRET_TOKEN",
+            "OPENAI_API_KEY",
+            "AZURE_OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+        ] {
+            assert!(
+                env_example.contains(required),
+                ".env.example missing {required}"
             );
         }
     }
