@@ -6,7 +6,10 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 
-use crate::app::{App, ResumeScope, Surface, TimelineEntry, TimelineKind, matching_commands};
+use crate::app::{
+    App, CommandCategory, InputMode, LOCAL_COMMANDS, ResumeScope, Surface, TimelineEntry,
+    TimelineKind, matching_commands,
+};
 
 pub fn render(frame: &mut Frame<'_>, app: &App) {
     match app.surface {
@@ -23,8 +26,9 @@ fn render_console(frame: &mut Frame<'_>, app: &App) {
     let palette_height = command_palette_height(app);
     let mut constraints = vec![
         Constraint::Length(11),
-        Constraint::Min(8),
+        Constraint::Min(6),
         Constraint::Length(1),
+        Constraint::Length(2),
         Constraint::Length(3),
     ];
     if palette_height > 0 {
@@ -47,7 +51,8 @@ fn render_console(frame: &mut Frame<'_>, app: &App) {
     render_welcome(frame, app, outer[0]);
     render_console_stream(frame, app, outer[1]);
     render_workspace_line(frame, app, outer[2]);
-    render_composer(frame, app, outer[3]);
+    render_operator_status(frame, app, outer[3]);
+    render_composer(frame, app, outer[4]);
     if let Some(area) = palette_area {
         render_command_palette(frame, app, area);
     }
@@ -334,11 +339,26 @@ fn render_console_stream(frame: &mut Frame<'_>, app: &App, area: Rect) {
 fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let path = display_workspace_path(&app.workspace_path);
     let badge = format!(" [/_{}*]", app.workspace_name);
-    let right = format!(
-        "{} ({}) (1x)",
-        display_control_model(&app.control_model),
-        display_runtime_label(&app.runtime_status)
-    );
+    let gateway_label = if app.gateway_connected {
+        "gateway=online"
+    } else {
+        "gateway=paused"
+    };
+    let right = if app.is_interactive() {
+        format!(
+            "session={} profile={} {}",
+            app.session_label(),
+            app.active_profile(),
+            gateway_label
+        )
+    } else {
+        format!(
+            "{} ({}) {}",
+            display_control_model(&app.control_model),
+            display_runtime_label(&app.runtime_status),
+            gateway_label
+        )
+    };
 
     let widget = Paragraph::new(Line::from(vec![
         Span::styled(&path, Style::default().fg(Color::Gray)),
@@ -351,6 +371,39 @@ fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
         Span::styled(&right, Style::default().fg(Color::DarkGray)),
     ]));
     frame.render_widget(widget, area);
+}
+
+fn render_operator_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
+    let mode = app.input_mode();
+    let mode_style = match mode {
+        InputMode::Chat => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        InputMode::Command => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        InputMode::Search => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+    };
+    let gateway_style = if app.gateway_connected {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Yellow)
+    };
+    let lines = vec![
+        Line::from(vec![
+            Span::styled(format!("mode:{}", mode.label()), mode_style),
+            Span::styled("  enter ", Style::default().fg(Color::DarkGray)),
+            Span::raw(app.enter_hint()),
+            Span::styled("  esc ", Style::default().fg(Color::DarkGray)),
+            Span::raw(app.escape_hint()),
+            Span::styled("  gateway ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if app.gateway_connected { "live" } else { "paused" },
+                gateway_style,
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("status ", Style::default().fg(Color::DarkGray)),
+            Span::styled(app.operator_status(), Style::default().fg(Color::Gray)),
+        ]),
+    ];
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), area);
 }
 
 fn startup_environment_line<'a>(app: &'a App) -> Paragraph<'a> {
@@ -479,9 +532,18 @@ fn tile_span(ch: char, color: Color, top: bool) -> Span<'static> {
 
 fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let draft = app.active_draft();
-    let placeholder =
-        "Type @ to mention files, # for issues/PRs, / for commands, or ? for shortcuts";
-    let input = if draft.is_empty() { placeholder } else { draft };
+    let mode = app.input_mode();
+    let badge_style = match mode {
+        InputMode::Chat => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        InputMode::Command => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        InputMode::Search => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+    };
+    let badge_text = format!("[{}]", mode.label());
+    let input = if draft.is_empty() {
+        app.composer_placeholder()
+    } else {
+        draft
+    };
     let input_style = if draft.is_empty() {
         Style::default().fg(Color::DarkGray)
     } else {
@@ -489,7 +551,8 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     };
 
     let widget = Paragraph::new(Line::from(vec![
-        Span::styled("› ", Style::default().fg(Color::Cyan)),
+        Span::styled(badge_text.as_str(), badge_style),
+        Span::raw(" "),
         Span::styled(input, input_style),
     ]))
     .block(
@@ -501,7 +564,7 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(widget, area);
 
     if app.focus == crate::app::Focus::Composer && !app.show_help_overlay {
-        let max_cursor_x = area.right().saturating_sub(2);
+        let max_cursor_x = area.right().saturating_sub(1);
         let cursor_offset = if draft.is_empty() {
             0
         } else {
@@ -509,7 +572,7 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
         };
         let cursor_x = area
             .x
-            .saturating_add(3)
+            .saturating_add(badge_text.chars().count() as u16 + 1)
             .saturating_add(cursor_offset)
             .min(max_cursor_x);
         let cursor_y = area.y.saturating_add(1);
@@ -520,14 +583,9 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
 fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let sections = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(10), Constraint::Length(8)])
+        .constraints([Constraint::Min(10), Constraint::Length(10)])
         .split(area);
-    let hints = "shift+tab switch mode";
-    let request_count = if app.show_console_history {
-        app.active_session().unread
-    } else {
-        0
-    };
+    let hints = "tab focus · shift+tab sessions · / commands · f1 help";
     let left = Paragraph::new(Line::from(vec![Span::styled(
         hints,
         Style::default().fg(Color::DarkGray),
@@ -535,7 +593,7 @@ fn render_footer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     frame.render_widget(left, sections[0]);
 
     let right = Paragraph::new(Line::from(vec![Span::styled(
-        format!("{request_count} reqs."),
+        format!("{} sess.", app.sessions.len()),
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(right, sections[1]);
@@ -546,23 +604,69 @@ fn command_palette_height(app: &App) -> u16 {
         return 0;
     }
 
+    let header_rows = if app.selected_command_match().is_some() {
+        5
+    } else if !app.command_suggestions().is_empty() {
+        4
+    } else {
+        3
+    };
     let rows = matching_commands(app.command_query().unwrap_or_default())
         .len()
-        .clamp(1, 8) as u16;
-    rows + 1
+        .clamp(1, 6) as u16;
+    header_rows + rows
 }
 
 fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let commands = matching_commands(app.command_query().unwrap_or_default());
 
     let mut lines = Vec::new();
+    if let Some(command) = app.selected_command_match() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", command.category.label()),
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(command.usage, Style::default().fg(Color::Cyan)),
+        ]));
+        lines.push(Line::from(Span::styled(
+            command.summary,
+            Style::default().fg(Color::Gray),
+        )));
+        lines.push(Line::from(Span::styled(
+            command.detail,
+            Style::default().fg(Color::DarkGray),
+        )));
+        lines.push(Line::from(""));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "No exact local command match.",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )));
+        if !app.command_suggestions().is_empty() {
+            lines.push(Line::from(Span::styled(
+                format!(
+                    "Try {}",
+                    app.command_suggestions()
+                        .iter()
+                        .take(3)
+                        .map(|spec| spec.command)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                Style::default().fg(Color::Gray),
+            )));
+        }
+        lines.push(Line::from(""));
+    }
+
     if commands.is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "No matching local commands.",
             Style::default().fg(Color::Yellow),
         )]));
     } else {
-        for (index, (command, description)) in commands.iter().enumerate() {
+        for (index, command) in commands.iter().enumerate() {
             let selected = index == app.command_menu_index.min(commands.len().saturating_sub(1));
             let style = if selected {
                 Style::default()
@@ -573,8 +677,8 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
             };
             lines.push(Line::from(vec![
                 Span::styled(if selected { "▎ " } else { "│ " }, style),
-                Span::styled(format!("{:<25}", command), style),
-                Span::styled(description.to_string(), Style::default().fg(Color::Gray)),
+                Span::styled(format!("{:<34}", command.command), style),
+                Span::styled(command.summary, Style::default().fg(Color::Gray)),
             ]));
         }
     }
@@ -592,7 +696,7 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn render_help_overlay(frame: &mut Frame<'_>, app: &App) {
-    let area = centered_rect(frame.area(), 74, 24);
+    let area = centered_rect(frame.area(), 92, 30);
     let mut lines = vec![
         Line::from(vec![Span::styled(
             "Keyboard",
@@ -602,7 +706,7 @@ fn render_help_overlay(frame: &mut Frame<'_>, app: &App) {
         Line::from("  Shift+Tab         open the resume browser from the console"),
         Line::from("  j / k / arrows    move through the active list or stream"),
         Line::from("  r                 open the resume browser"),
-        Line::from("  Enter             send the current draft or select a session"),
+        Line::from("  Enter             follows the current input mode"),
         Line::from("  Ctrl+L            show or hide the activity feed"),
         Line::from("  F1                open or close this help"),
         Line::from("  Esc               leave help, resume, or search"),
@@ -610,32 +714,48 @@ fn render_help_overlay(frame: &mut Frame<'_>, app: &App) {
         Line::from("  Ctrl+C            quit the TUI"),
         Line::from(""),
         Line::from(vec![Span::styled(
-            "Local Commands",
+            "Input Modes",
             Style::default().add_modifier(Modifier::BOLD),
         )]),
-        Line::from("  /help"),
-        Line::from("  /logs"),
-        Line::from("  /gateway connect | /gateway disconnect"),
-        Line::from("  /runtime <status>"),
-        Line::from("  /session state <active|waiting|degraded>"),
-        Line::from("  /session model <name>"),
-        Line::from("  /model list"),
-        Line::from("  /model use <profile>"),
+        Line::from(format!("  chat      Enter => {}", if app.is_interactive() { "send to the active session" } else { "queue a local mock instruction" })),
+        Line::from("  command   Enter => run local slash command, Tab => complete the highlighted command"),
+        Line::from("  search    / inside resume view filters by session id, title, route, channel, or origin"),
+        Line::from(""),
     ];
 
-    if app.is_interactive() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(vec![Span::styled(
-            "Current Runtime",
-            Style::default().add_modifier(Modifier::BOLD),
-        )]));
+    for category in [
+        CommandCategory::Ui,
+        CommandCategory::Gateway,
+        CommandCategory::Session,
+        CommandCategory::Model,
+        CommandCategory::Debug,
+    ] {
+        let commands = LOCAL_COMMANDS
+            .iter()
+            .filter(|command| command.category == category)
+            .map(|command| command.usage)
+            .collect::<Vec<_>>()
+            .join("  ");
         lines.push(Line::from(format!(
-            "  session={}  profile={}  model={}",
-            app.session_label(),
-            app.active_profile(),
-            app.control_model
+            "  {:<8} {}",
+            category.label().to_ascii_uppercase(),
+            commands
         )));
     }
+    lines.push(Line::from(""));
+
+    lines.push(Line::from(vec![Span::styled(
+        "Current Runtime",
+        Style::default().add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(format!(
+        "  session={}  profile={}  next-model={}  current-runtime={}  current-model={}",
+        app.session_label(),
+        app.active_profile(),
+        app.control_model,
+        app.active_session().runtime,
+        app.active_session().model
+    )));
 
     let widget = Paragraph::new(lines)
         .block(
@@ -979,8 +1099,9 @@ mod tests {
         assert!(screen.contains("Describe a task to get started."));
         assert!(screen.contains("Loading environment"));
         assert!(screen.contains("[/_mosaic*]"));
-        assert!(screen.contains("shift+tab switch mode"));
-        assert!(screen.contains("0 reqs."));
+        assert!(screen.contains("mode:chat"));
+        assert!(screen.contains("tab focus · shift+tab sessions · / commands · f1 help"));
+        assert!(screen.contains("sess."));
     }
 
     #[test]
@@ -1025,11 +1146,10 @@ mod tests {
         assert!(screen.contains("▎ /gateway connect"));
         assert!(screen.contains("/gateway connect"));
         assert!(screen.contains("/gateway disconnect"));
-        assert!(screen.contains(
-            "Environment loaded: 1 custom instruction, 1 MCP server, 3 skills, 2 agents"
-        ));
+        assert!(screen.contains("Resume gateway refresh and event streaming"));
+        assert!(screen.contains("/gateway status"));
 
-        let composer_line = line_index(&screen, "› /gate").expect("composer line should render");
+        let composer_line = line_index(&screen, "[command] /gate").expect("composer line should render");
         let palette_line =
             line_index(&screen, "▎ /gateway connect").expect("palette line should render");
         assert!(palette_line > composer_line);

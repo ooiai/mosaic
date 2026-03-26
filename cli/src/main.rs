@@ -46,7 +46,8 @@ const CLI_AFTER_HELP: &str = "Quick start:
   mosaic setup validate
   mosaic setup doctor
   mosaic model list
-  mosaic tui
+  mosaic tui          # main operator console
+  mosaic run <app> --tui   # single-run observer
 
 Docs:
   docs/getting-started.md
@@ -85,7 +86,7 @@ struct Cli {
     log_level: String,
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Plain, help = "Set internal log output format")]
     log_format: LogFormat,
-    #[arg(long, global = true, help = "Start the TUI in resume browser mode")]
+    #[arg(long, global = true, help = "Start the TUI or TUI-backed flow in the session resume browser")]
     resume: bool,
     #[command(subcommand)]
     command: Option<Commands>,
@@ -93,31 +94,31 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Run an app YAML file through the agent runtime.
+    /// Execute one app YAML run. Add --tui to watch a single run in the terminal observer.
     Run {
         file: PathBuf,
         #[arg(long, conflicts_with = "workflow")]
         skill: Option<String>,
         #[arg(long, conflicts_with = "skill")]
         workflow: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Bind this run to a session id so transcript, memory, and routing persist across turns")]
         session: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Override the provider profile used for this run or TUI session")]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Attach this run to a remote HTTP Gateway instead of the local workspace Gateway")]
         attach: Option<String>,
-        #[arg(long, help = "Show the TUI while the run executes the file-backed run")]
+        #[arg(long, help = "Show the terminal observer while this single file-backed run executes; use `mosaic tui` for the long-lived operator console")]
         tui: bool,
     },
     /// Inspect one saved run trace JSON file.
     Inspect { file: PathBuf },
-    /// Start the interactive terminal UI.
+    /// Start the main operator chat console.
     Tui {
-        #[arg(long)]
+        #[arg(long, help = "Resume or create this session as the active operator conversation")]
         session: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Use this provider profile for future turns submitted from the TUI")]
         profile: Option<String>,
-        #[arg(long)]
+        #[arg(long, help = "Attach the operator console to a remote HTTP Gateway instead of the local workspace Gateway")]
         attach: Option<String>,
     },
     /// Initialize and validate workspace configuration.
@@ -2857,6 +2858,19 @@ mod tests {
             .to_path_buf()
     }
 
+
+    fn subcommand_help(name: &str) -> String {
+        let mut command = Cli::command();
+        let subcommand = command
+            .find_subcommand_mut(name)
+            .expect("subcommand should exist");
+        let mut buffer = Vec::new();
+        subcommand
+            .write_long_help(&mut buffer)
+            .expect("subcommand help should render");
+        String::from_utf8(buffer).expect("subcommand help should be utf8")
+    }
+
     #[test]
     fn defaults_to_tui_when_no_subcommand_is_present() {
         let cli = Cli::parse_from(["mosaic"]);
@@ -3186,6 +3200,22 @@ mod tests {
             super::truncate_for_cli("abcdefghijklmnopqrstuvwxyz", 5),
             "abcde..."
         );
+    }
+
+    #[test]
+    fn tui_help_marks_operator_console_entrypoint() {
+        let help = subcommand_help("tui");
+        assert!(help.contains("main operator chat console"));
+        assert!(help.contains("active operator conversation"));
+        assert!(help.contains("remote HTTP Gateway"));
+    }
+
+    #[test]
+    fn run_help_mentions_single_run_observer() {
+        let help = subcommand_help("run");
+        assert!(help.contains("single run in the terminal observer"));
+        assert!(help.contains("long-lived operator console"));
+        assert!(help.contains("Bind this run to a session id"));
     }
 
     #[test]

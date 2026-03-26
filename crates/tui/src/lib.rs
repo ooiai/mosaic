@@ -18,7 +18,7 @@ use crossterm::{
 };
 use mosaic_control_protocol::{
     GatewayEvent, HealthResponse, IngressTrace, ReadinessResponse, SessionDetailDto,
-    TranscriptRoleDto,
+    SessionSummaryDto, TranscriptRoleDto,
 };
 use mosaic_gateway::{GatewayHandle, GatewayRunRequest};
 use mosaic_node_protocol::DEFAULT_STALE_AFTER_SECS;
@@ -27,12 +27,13 @@ use mosaic_sdk::GatewayClient;
 #[cfg(test)]
 use mosaic_session_core::SessionStore;
 use mosaic_session_core::{
-    SessionGatewayMetadata, SessionRecord as StoredSessionRecord, TranscriptMessage, TranscriptRole,
+    SessionGatewayMetadata, SessionRecord as StoredSessionRecord, SessionSummary, TranscriptMessage,
+    TranscriptRole,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::runtime::Handle;
 
-use self::app::{App, AppAction, ProfileOption};
+use self::app::{App, AppAction, ProfileOption, SessionRecord as UiSessionRecord, SessionState};
 
 #[derive(Clone)]
 pub enum InteractiveGateway {
@@ -201,7 +202,12 @@ fn run_interactive_app(
     app.set_gateway_state(None, None);
     app.set_node_state(None, None);
     let gateway_link = Arc::new(AtomicBool::new(true));
-    refresh_interactive_session_from_gateway(&mut app, &context, &context.session_id);
+    let current_session_id = Arc::new(Mutex::new(context.session_id.clone()));
+    refresh_interactive_session_from_gateway(
+        &mut app,
+        &context,
+        current_session_id_value(&current_session_id).as_str(),
+    );
 
     let event_forwarder = match context.gateway.clone() {
         InteractiveGateway::Local(gateway) => {
@@ -209,7 +215,7 @@ fn run_interactive_app(
                 gateway.subscribe(),
                 context.event_buffer.clone(),
                 gateway_link.clone(),
-                Some(context.session_id.clone()),
+                Some(current_session_id.clone()),
             ))
         }
         InteractiveGateway::Remote(client) => {
@@ -217,7 +223,7 @@ fn run_interactive_app(
                 client,
                 context.event_buffer.clone(),
                 gateway_link.clone(),
-                Some(context.session_id.clone()),
+                Some(current_session_id.clone()),
             ))
         }
     };
@@ -225,7 +231,8 @@ fn run_interactive_app(
     loop {
         drain_run_events(&mut app, &context.event_buffer);
         if gateway_link.load(Ordering::Relaxed) {
-            refresh_interactive_session_from_gateway(&mut app, &context, &context.session_id);
+            let session_id = current_session_id_value(&current_session_id);
+            refresh_interactive_session_from_gateway(&mut app, &context, &session_id);
         }
 
         terminal.draw(|frame| ui::render(frame, &app))?;
@@ -237,21 +244,30 @@ fn run_interactive_app(
                     AppAction::Continue => {}
                     AppAction::Submit(input) => {
                         if gateway_link.load(Ordering::Relaxed) {
-                            spawn_interactive_run(&context, app.active_profile().to_owned(), input);
+                            let session_id = current_session_id_value(&current_session_id);
+                            spawn_interactive_run(
+                                &context,
+                                session_id,
+                                app.active_profile().to_owned(),
+                                input,
+                            );
                         } else {
                             app.push_command_error("Gateway is disconnected for this TUI session");
                         }
                     }
                     AppAction::GatewayConnect => {
                         gateway_link.store(true, Ordering::Relaxed);
-                        refresh_interactive_session_from_gateway(
-                            &mut app,
-                            &context,
-                            &context.session_id,
-                        );
+                        let session_id = current_session_id_value(&current_session_id);
+                        refresh_interactive_session_from_gateway(&mut app, &context, &session_id);
                     }
                     AppAction::GatewayDisconnect => {
                         gateway_link.store(false, Ordering::Relaxed);
+                    }
+                    AppAction::SwitchSession(session_id) => {
+                        set_current_session_id(&current_session_id, &session_id);
+                        if gateway_link.load(Ordering::Relaxed) {
+                            refresh_interactive_session_from_gateway(&mut app, &context, &session_id);
+                        }
                     }
                 },
                 Event::Resize(_, _) => {}
@@ -267,7 +283,26 @@ fn run_interactive_app(
     Ok(())
 }
 
-fn spawn_interactive_run(context: &InteractiveSessionContext, profile: String, input: String) {
+fn current_session_id_value(session_id: &Arc<Mutex<String>>) -> String {
+    session_id
+        .lock()
+        .map(|value| value.clone())
+        .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+}
+
+fn set_current_session_id(session_id: &Arc<Mutex<String>>, value: &str) {
+    match session_id.lock() {
+        Ok(mut guard) => *guard = value.to_owned(),
+        Err(poisoned) => *poisoned.into_inner() = value.to_owned(),
+    }
+}
+
+fn spawn_interactive_run(
+    context: &InteractiveSessionContext,
+    session_id: String,
+    profile: String,
+    input: String,
+) {
     let event_buffer = context.event_buffer.clone();
 
     match context.gateway.clone() {
@@ -277,7 +312,7 @@ fn spawn_interactive_run(context: &InteractiveSessionContext, profile: String, i
                 input,
                 skill: None,
                 workflow: None,
-                session_id: Some(context.session_id.clone()),
+                session_id: Some(session_id),
                 profile: Some(profile),
                 ingress: Some(IngressTrace {
                     kind: "local_tui".to_owned(),
@@ -317,7 +352,7 @@ fn spawn_interactive_run(context: &InteractiveSessionContext, profile: String, i
                 input,
                 skill: None,
                 workflow: None,
-                session_id: Some(context.session_id.clone()),
+                session_id: Some(session_id),
                 profile: Some(profile),
                 ingress: Some(IngressTrace {
                     kind: "remote_operator".to_owned(),
@@ -348,7 +383,7 @@ async fn forward_gateway_runtime_events(
     mut receiver: tokio::sync::broadcast::Receiver<mosaic_gateway::GatewayEventEnvelope>,
     event_buffer: TuiEventBuffer,
     gateway_link: Arc<AtomicBool>,
-    session_filter: Option<String>,
+    session_filter: Option<Arc<Mutex<String>>>,
 ) {
     loop {
         let Ok(envelope) = receiver.recv().await else {
@@ -359,8 +394,8 @@ async fn forward_gateway_runtime_events(
             continue;
         }
 
-        if let Some(session_id) = session_filter.as_deref() {
-            if envelope.session_id.as_deref() != Some(session_id) {
+        if let Some(session_id) = session_filter.as_ref().map(current_session_id_value) {
+            if envelope.session_id.as_deref() != Some(session_id.as_str()) {
                 continue;
             }
         }
@@ -378,6 +413,13 @@ fn refresh_interactive_session_from_gateway(
 ) {
     match &context.gateway {
         InteractiveGateway::Local(gateway) => {
+            if let Ok(sessions) = gateway.list_sessions() {
+                let summaries = sessions
+                    .iter()
+                    .map(local_session_summary_to_ui)
+                    .collect::<Vec<_>>();
+                app.sync_session_catalog(summaries, session_id);
+            }
             if let Ok(Some(session)) = gateway.load_session(session_id) {
                 app.sync_runtime_session_with_origin(&session, "Local");
             }
@@ -385,6 +427,13 @@ fn refresh_interactive_session_from_gateway(
             refresh_local_node_state(app, gateway, session_id);
         }
         InteractiveGateway::Remote(client) => {
+            if let Ok(sessions) = context.runtime_handle.block_on(client.list_sessions()) {
+                let summaries = sessions
+                    .iter()
+                    .map(remote_session_summary_to_ui)
+                    .collect::<Vec<_>>();
+                app.sync_session_catalog(summaries, session_id);
+            }
             if let Ok(Some(session)) = context
                 .runtime_handle
                 .block_on(client.get_session(session_id))
@@ -428,7 +477,7 @@ fn refresh_remote_gateway_state(
 }
 
 fn apply_gateway_state(app: &mut App, health: &HealthResponse, readiness: &ReadinessResponse) {
-    app.gateway_connected = health.transport == "online";
+    app.gateway_connected = health.status == "ok" && health.transport != "offline";
     app.set_gateway_state(
         Some(format!(
             "Gateway {} transport={} auth={} deployment={} sessions={}",
@@ -517,7 +566,7 @@ async fn forward_remote_runtime_events(
     client: GatewayClient,
     event_buffer: TuiEventBuffer,
     gateway_link: Arc<AtomicBool>,
-    session_filter: Option<String>,
+    session_filter: Option<Arc<Mutex<String>>>,
 ) {
     let mut stream = match client.subscribe_events().await {
         Ok(stream) => stream,
@@ -545,8 +594,8 @@ async fn forward_remote_runtime_events(
             continue;
         }
 
-        if let Some(session_id) = session_filter.as_deref() {
-            if envelope.session_id.as_deref() != Some(session_id) {
+        if let Some(session_id) = session_filter.as_ref().map(current_session_id_value) {
+            if envelope.session_id.as_deref() != Some(session_id.as_str()) {
                 continue;
             }
         }
@@ -554,6 +603,84 @@ async fn forward_remote_runtime_events(
         if let GatewayEvent::Runtime(event) = envelope.event {
             event_buffer.push(event);
         }
+    }
+}
+
+fn local_session_summary_to_ui(summary: &SessionSummary) -> UiSessionRecord {
+    UiSessionRecord {
+        id: summary.id.clone(),
+        title: summary.title.clone(),
+        origin: "Local".to_owned(),
+        modified: summary.updated_at.format("%Y-%m-%d %H:%M").to_string(),
+        created: summary.updated_at.format("%Y-%m-%d %H:%M").to_string(),
+        channel: summary
+            .channel_context
+            .channel
+            .clone()
+            .unwrap_or_else(|| "control".to_owned()),
+        actor: summary
+            .channel_context
+            .actor_name
+            .clone()
+            .or(summary.channel_context.actor_id.clone()),
+        thread: summary
+            .channel_context
+            .thread_title
+            .clone()
+            .or(summary.channel_context.thread_id.clone()),
+        route: summary.session_route.clone(),
+        runtime: summary.provider_type.clone(),
+        model: summary.model.clone(),
+        state: SessionState::Waiting,
+        unread: 0,
+        draft: String::new(),
+        memory_summary: summary.memory_summary_preview.clone(),
+        compressed_context: None,
+        references: if summary.reference_count == 0 {
+            Vec::new()
+        } else {
+            vec![format!("{} session references", summary.reference_count)]
+        },
+        timeline: Vec::new(),
+    }
+}
+
+fn remote_session_summary_to_ui(summary: &SessionSummaryDto) -> UiSessionRecord {
+    UiSessionRecord {
+        id: summary.id.clone(),
+        title: summary.title.clone(),
+        origin: "Remote".to_owned(),
+        modified: summary.updated_at.format("%Y-%m-%d %H:%M").to_string(),
+        created: summary.updated_at.format("%Y-%m-%d %H:%M").to_string(),
+        channel: summary
+            .channel_context
+            .channel
+            .clone()
+            .unwrap_or_else(|| "control".to_owned()),
+        actor: summary
+            .channel_context
+            .actor_name
+            .clone()
+            .or(summary.channel_context.actor_id.clone()),
+        thread: summary
+            .channel_context
+            .thread_title
+            .clone()
+            .or(summary.channel_context.thread_id.clone()),
+        route: summary.session_route.clone(),
+        runtime: summary.provider_type.clone(),
+        model: summary.model.clone(),
+        state: SessionState::Waiting,
+        unread: 0,
+        draft: String::new(),
+        memory_summary: summary.memory_summary_preview.clone(),
+        compressed_context: None,
+        references: if summary.reference_count == 0 {
+            Vec::new()
+        } else {
+            vec![format!("{} session references", summary.reference_count)]
+        },
+        timeline: Vec::new(),
     }
 }
 
@@ -644,7 +771,8 @@ fn drain_run_events(app: &mut App, event_buffer: &TuiEventBuffer) -> bool {
 mod tests {
     use chrono::Utc;
     use mosaic_control_protocol::{
-        SessionDetailDto, SessionGatewayDto, TranscriptMessageDto, TranscriptRoleDto,
+        HealthResponse, ReadinessResponse, SessionDetailDto, SessionGatewayDto,
+        TranscriptMessageDto, TranscriptRoleDto,
     };
     use mosaic_runtime::events::{RunEvent, RunEventSink};
     use mosaic_session_core::{SessionRecord, SessionStore, SessionSummary, TranscriptRole};
@@ -652,8 +780,8 @@ mod tests {
     use crate::app::{App, Surface};
 
     use super::{
-        TuiEventBuffer, TuiEventSink, build_app, drain_run_events, refresh_interactive_session,
-        remote_session_to_stored,
+        TuiEventBuffer, TuiEventSink, apply_gateway_state, build_app, drain_run_events,
+        refresh_interactive_session, remote_session_to_stored,
     };
 
     struct MemorySessionStore {
@@ -738,6 +866,37 @@ mod tests {
 
         assert_eq!(app.active_session().timeline.len(), 2);
         assert_eq!(app.active_session().title, "Demo");
+    }
+
+    #[test]
+    fn gateway_status_treats_http_sse_transport_as_connected() {
+        let mut app = build_app("/tmp/mosaic".into(), false);
+        let health = HealthResponse {
+            status: "ok".to_owned(),
+            active_profile: "mock".to_owned(),
+            session_count: 1,
+            transport: "http+sse".to_owned(),
+            deployment_profile: "local".to_owned(),
+            auth_mode: "disabled".to_owned(),
+            event_replay_window: 256,
+        };
+        let readiness = ReadinessResponse {
+            status: "ready".to_owned(),
+            transport: "http+sse".to_owned(),
+            deployment_profile: "local".to_owned(),
+            auth_mode: "disabled".to_owned(),
+            session_store_ready: true,
+            audit_ready: true,
+            extension_count: 0,
+            session_count: 1,
+            replay_events_buffered: 0,
+            event_replay_window: 256,
+            slow_consumer_lag_threshold: 32,
+        };
+
+        apply_gateway_state(&mut app, &health, &readiness);
+
+        assert!(app.gateway_connected);
     }
 
     #[test]

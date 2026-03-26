@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mosaic_runtime::events::RunEvent;
@@ -8,27 +8,135 @@ use mosaic_session_core::{
 
 use crate::mock;
 
-pub const LOCAL_COMMANDS: [(&str, &str); 8] = [
-    ("/help", "Show local control command reference"),
-    ("/logs", "Toggle activity feed visibility"),
-    (
-        "/gateway connect",
-        "Resume gateway refresh and event streaming",
-    ),
-    (
-        "/gateway disconnect",
-        "Pause gateway refresh and event streaming",
-    ),
-    ("/runtime <status>", "Set the control runtime status label"),
-    (
-        "/session state|model",
-        "Update the selected session state or model label",
-    ),
-    ("/model list", "Show available runtime profiles"),
-    (
-        "/model use <profile>",
-        "Switch the real runtime profile for next turns",
-    ),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandCategory {
+    Gateway,
+    Session,
+    Model,
+    Ui,
+    Debug,
+}
+
+impl CommandCategory {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Gateway => "gateway",
+            Self::Session => "session",
+            Self::Model => "model",
+            Self::Ui => "ui",
+            Self::Debug => "debug",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandSpec {
+    pub command: &'static str,
+    pub category: CommandCategory,
+    pub summary: &'static str,
+    pub usage: &'static str,
+    pub detail: &'static str,
+}
+
+pub const LOCAL_COMMANDS: [CommandSpec; 14] = [
+    CommandSpec {
+        command: "/help",
+        category: CommandCategory::Ui,
+        summary: "Open the command reference and shortcut guide",
+        usage: "/help",
+        detail: "Lists command categories, keyboard shortcuts, and the current session/runtime bindings.",
+    },
+    CommandSpec {
+        command: "/logs",
+        category: CommandCategory::Ui,
+        summary: "Show or hide the observability feed",
+        usage: "/logs",
+        detail: "Toggles the right-side activity feed so operators can focus on chat or runtime events.",
+    },
+    CommandSpec {
+        command: "/gateway connect",
+        category: CommandCategory::Gateway,
+        summary: "Resume gateway refresh and event streaming",
+        usage: "/gateway connect",
+        detail: "Re-enables session refresh and runtime event delivery for the current TUI attach target.",
+    },
+    CommandSpec {
+        command: "/gateway disconnect",
+        category: CommandCategory::Gateway,
+        summary: "Pause gateway refresh and event streaming",
+        usage: "/gateway disconnect",
+        detail: "Leaves the TUI open but stops live refresh so the operator can inspect a frozen session state.",
+    },
+    CommandSpec {
+        command: "/gateway status",
+        category: CommandCategory::Gateway,
+        summary: "Show the current gateway transport and readiness summary",
+        usage: "/gateway status",
+        detail: "Prints the current gateway transport, readiness, and node summary into the session timeline.",
+    },
+    CommandSpec {
+        command: "/session list",
+        category: CommandCategory::Session,
+        summary: "List sessions currently loaded into the operator console",
+        usage: "/session list",
+        detail: "Shows known local or remote sessions with the current selection marker so operators can jump quickly.",
+    },
+    CommandSpec {
+        command: "/session show",
+        category: CommandCategory::Session,
+        summary: "Explain the selected session route, memory, and references",
+        usage: "/session show",
+        detail: "Prints the active session route, runtime binding, memory summary, compressed context, and references.",
+    },
+    CommandSpec {
+        command: "/session switch <id>",
+        category: CommandCategory::Session,
+        summary: "Switch the active operator conversation",
+        usage: "/session switch <id>",
+        detail: "Moves the composer to another session and refreshes that session from the gateway.",
+    },
+    CommandSpec {
+        command: "/session new <id>",
+        category: CommandCategory::Session,
+        summary: "Create or stage a new session id for the next turn",
+        usage: "/session new <id>",
+        detail: "Adds a new session placeholder immediately; the session is persisted on the next submitted turn.",
+    },
+    CommandSpec {
+        command: "/session state <active|waiting|degraded>",
+        category: CommandCategory::Session,
+        summary: "Override the selected session state label",
+        usage: "/session state <active|waiting|degraded>",
+        detail: "Useful in mock mode or demos when the operator wants to pin a local state marker.",
+    },
+    CommandSpec {
+        command: "/session model <name>",
+        category: CommandCategory::Session,
+        summary: "Override the selected session model label",
+        usage: "/session model <name>",
+        detail: "Adjusts the visible session model label without changing the next-turn runtime profile.",
+    },
+    CommandSpec {
+        command: "/model list",
+        category: CommandCategory::Model,
+        summary: "List runtime profiles available to this TUI session",
+        usage: "/model list",
+        detail: "Prints configured profiles with provider and model so the next turn can be scheduled intentionally.",
+    },
+    CommandSpec {
+        command: "/model use <profile>",
+        category: CommandCategory::Model,
+        summary: "Switch the real runtime profile for future turns",
+        usage: "/model use <profile>",
+        detail: "Updates the active profile used by interactive submissions; the next message will use the new profile.",
+    },
+    CommandSpec {
+        command: "/runtime <status>",
+        category: CommandCategory::Debug,
+        summary: "Set the control runtime status label",
+        usage: "/runtime <status>",
+        detail: "Debug helper for setting the local runtime status badge when working in mock mode or demos.",
+    },
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,12 +146,30 @@ pub enum AppAction {
     Submit(String),
     GatewayConnect,
     GatewayDisconnect,
+    SwitchSession(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
     Mock,
     Interactive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Chat,
+    Command,
+    Search,
+}
+
+impl InputMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Command => "command",
+            Self::Search => "search",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -516,6 +642,7 @@ impl App {
         match event {
             RunEvent::RunStarted { input } => {
                 self.runtime_status = "running".to_owned();
+                self.active_session_mut().state = SessionState::Active;
                 self.push_activity("runtime", "Run started");
                 if self.is_interactive() {
                     return;
@@ -946,6 +1073,7 @@ reason={}",
             }
             RunEvent::RunFinished { output_preview } => {
                 self.runtime_status = "idle".to_owned();
+                self.active_session_mut().state = SessionState::Waiting;
                 self.push_activity("runtime", "Run finished");
                 if self.is_interactive() {
                     return;
@@ -962,6 +1090,7 @@ reason={}",
             }
             RunEvent::RunFailed { error } => {
                 self.runtime_status = "error".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("runtime", "Run failed");
                 if self.is_interactive() {
                     return;
@@ -996,21 +1125,177 @@ reason={}",
         &self.active_session().draft
     }
 
-    pub fn command_query(&self) -> Option<&str> {
-        let query = self.active_draft().strip_prefix('/')?;
-        let end = query.find(char::is_whitespace).unwrap_or(query.len());
-        Some(&query[..end])
+    pub fn input_mode(&self) -> InputMode {
+        if self.surface == Surface::Resume && self.resume_search {
+            InputMode::Search
+        } else if self.active_draft().trim_start().starts_with('/') {
+            InputMode::Command
+        } else {
+            InputMode::Chat
+        }
     }
 
-    pub fn command_matches(&self) -> Vec<(&'static str, &'static str)> {
+    pub fn latest_activity(&self) -> Option<&ActivityEntry> {
+        self.activity.last()
+    }
+
+    pub fn operator_status(&self) -> String {
+        if !self.gateway_connected {
+            return format!(
+                "Gateway paused. /gateway connect resumes refresh for session {}.",
+                self.session_label()
+            );
+        }
+
+        match self.runtime_status.as_str() {
+            "running" => format!(
+                "Assistant pending for session {} via profile {} ({}).",
+                self.session_label(),
+                self.active_profile(),
+                self.control_model
+            ),
+            "error" => self
+                .latest_activity()
+                .map(|entry| format!("Last event [{}] {}", entry.scope, entry.message))
+                .unwrap_or_else(|| "Last run failed. Inspect the activity feed for details.".to_owned()),
+            _ => format!(
+                "Next turn uses profile {} ({}) while the selected session currently shows {} / {}.",
+                self.active_profile(),
+                self.control_model,
+                self.active_session().runtime,
+                self.active_session().model
+            ),
+        }
+    }
+
+    pub fn composer_placeholder(&self) -> &'static str {
+        match self.input_mode() {
+            InputMode::Chat => {
+                "Send a message to the active session. Use / for local commands or Shift+Tab to browse sessions."
+            }
+            InputMode::Command => {
+                "Run a local control command. Tab cycles suggestions and Enter executes the highlighted command."
+            }
+            InputMode::Search => {
+                "Filter sessions by id, title, route, channel, or origin."
+            }
+        }
+    }
+
+    pub fn enter_hint(&self) -> String {
+        match self.surface {
+            Surface::Resume => {
+                if self.resume_search {
+                    "Apply the search filter and keep browsing sessions".to_owned()
+                } else {
+                    format!("Open session {}", self.session_label())
+                }
+            }
+            Surface::Console => match self.input_mode() {
+                InputMode::Chat => {
+                    if self.is_interactive() {
+                        format!("Send to session {}", self.session_label())
+                    } else {
+                        "Queue a local mock instruction".to_owned()
+                    }
+                }
+                InputMode::Command => {
+                    if self.command_menu_should_complete() {
+                        "Complete the highlighted slash command".to_owned()
+                    } else {
+                        "Run the local slash command".to_owned()
+                    }
+                }
+                InputMode::Search => "Apply the search filter".to_owned(),
+            },
+        }
+    }
+
+    pub fn escape_hint(&self) -> &'static str {
+        match self.surface {
+            Surface::Resume => {
+                if self.resume_search {
+                    "leave search"
+                } else {
+                    "back to console"
+                }
+            }
+            Surface::Console => "focus sessions",
+        }
+    }
+
+    pub fn command_query(&self) -> Option<&str> {
+        self.active_draft().trim_start().strip_prefix('/')
+    }
+
+    pub fn command_matches(&self) -> Vec<CommandSpec> {
         matching_commands(self.command_query().unwrap_or_default())
     }
 
-    pub fn selected_command_match(&self) -> Option<(&'static str, &'static str)> {
+    pub fn selected_command_match(&self) -> Option<CommandSpec> {
         let matches = self.command_matches();
         matches
             .get(self.command_menu_index.min(matches.len().saturating_sub(1)))
             .copied()
+    }
+
+    pub fn command_suggestions(&self) -> Vec<CommandSpec> {
+        suggest_commands(self.command_query().unwrap_or_default())
+    }
+
+    pub fn sync_session_catalog(&mut self, mut sessions: Vec<SessionRecord>, selected_session_id: &str) {
+        let default_origin = self
+            .sessions
+            .get(self.selected_session)
+            .map(|session| session.origin.clone())
+            .unwrap_or_else(|| "Local".to_owned());
+        let default_runtime = self
+            .sessions
+            .get(self.selected_session)
+            .map(|session| session.runtime.clone())
+            .unwrap_or_else(|| "agent-runtime".to_owned());
+
+        for session in &mut sessions {
+            if let Some(existing) = self.sessions.iter().find(|candidate| candidate.id == session.id) {
+                session.draft = existing.draft.clone();
+                session.unread = existing.unread;
+                if session.memory_summary.is_none() {
+                    session.memory_summary = existing.memory_summary.clone();
+                }
+                if session.compressed_context.is_none() {
+                    session.compressed_context = existing.compressed_context.clone();
+                }
+                if session.references.is_empty() {
+                    session.references = existing.references.clone();
+                }
+                if session.timeline.is_empty() {
+                    session.timeline = existing.timeline.clone();
+                }
+                if session.actor.is_none() {
+                    session.actor = existing.actor.clone();
+                }
+                if session.thread.is_none() {
+                    session.thread = existing.thread.clone();
+                }
+            }
+        }
+
+        if !sessions.iter().any(|session| session.id == selected_session_id) {
+            let mut placeholder = interactive_session_record(selected_session_id, &self.control_model);
+            placeholder.origin = default_origin;
+            placeholder.runtime = default_runtime;
+            sessions.push(placeholder);
+        }
+
+        self.sessions = sessions;
+        if let Some(index) = self
+            .sessions
+            .iter()
+            .position(|session| session.id == selected_session_id)
+        {
+            self.select_session(index);
+        }
+        self.normalize_resume_scope();
     }
 
     pub fn visible_session_indices(&self) -> Vec<usize> {
@@ -1051,9 +1336,13 @@ reason={}",
             KeyCode::BackTab => self.set_resume_scope(self.resume_scope.previous()),
             KeyCode::Char('/') => self.resume_search = true,
             KeyCode::Enter => {
+                let selected_id = self.active_session().id.clone();
                 self.surface = Surface::Console;
                 self.show_console_history = true;
                 self.focus = Focus::Composer;
+                if self.is_interactive() {
+                    return AppAction::SwitchSession(selected_id);
+                }
             }
             KeyCode::Esc => {
                 self.surface = Surface::Console;
@@ -1198,23 +1487,33 @@ reason={}",
         }
 
         let action = if let Some(command) = message.strip_prefix('/') {
-            let command = command.trim();
-            let external_action = match command {
-                "gateway connect" => Some(AppAction::GatewayConnect),
-                "gateway disconnect" => Some(AppAction::GatewayDisconnect),
-                _ => None,
-            };
-
-            self.route_command(command);
-            external_action.unwrap_or(AppAction::Continue)
+            self.route_command(command.trim())
         } else if self.is_interactive() {
             if self.runtime_status == "running" {
                 self.push_command_error("A run is already in progress for this session");
                 AppAction::Continue
             } else {
+                let session_id = self.session_label().to_owned();
+                let profile = self.active_profile().to_owned();
+                let model = self.control_model.clone();
+                self.runtime_status = "running".to_owned();
+                self.active_session_mut().state = SessionState::Active;
+                self.push_timeline(
+                    TimelineKind::Operator,
+                    "operator",
+                    "Message queued",
+                    &message,
+                );
+                self.push_system_entry(
+                    "Assistant pending",
+                    format!(
+                        "Waiting for session {} to reply via profile {} ({}).",
+                        session_id, profile, model
+                    ),
+                );
                 self.push_activity(
                     "composer",
-                    format!("Submitted message to session {}", self.session_label()),
+                    format!("Submitted message to session {}", session_id),
                 );
                 AppAction::Submit(message.clone())
             }
@@ -1324,6 +1623,28 @@ reason={}",
         }
     }
 
+    fn normalize_resume_scope(&mut self) {
+        if !self.resume_query.is_empty() {
+            return;
+        }
+
+        let has_local = self.sessions.iter().any(|session| session.origin == "Local");
+        let has_remote = self.sessions.iter().any(|session| session.origin == "Remote");
+
+        self.resume_scope = match (has_local, has_remote) {
+            (true, false) => ResumeScope::Local,
+            (false, true) => ResumeScope::Remote,
+            _ => {
+                if self.visible_session_indices().is_empty() {
+                    ResumeScope::All
+                } else {
+                    self.resume_scope
+                }
+            }
+        };
+        self.ensure_selected_session_visible();
+    }
+
     fn session_visible_in_resume(&self, session: &SessionRecord) -> bool {
         let matches_scope = match self.resume_scope {
             ResumeScope::Local => session.origin == "Local",
@@ -1362,8 +1683,7 @@ reason={}",
         self.surface = Surface::Resume;
         self.resume_search = false;
         self.resume_query.clear();
-        self.resume_scope = ResumeScope::Local;
-        self.ensure_selected_session_visible();
+        self.normalize_resume_scope();
     }
 
     fn command_menu_active(&self) -> bool {
@@ -1371,9 +1691,15 @@ reason={}",
     }
 
     fn command_menu_should_complete(&self) -> bool {
-        self.command_menu_active()
-            && self.active_draft().starts_with('/')
-            && !self.active_draft()[1..].chars().any(char::is_whitespace)
+        if !self.command_menu_active() {
+            return false;
+        }
+
+        let Some(command) = self.selected_command_match() else {
+            return false;
+        };
+
+        self.active_draft().trim_end() != command_completion(command.command).trim_end()
     }
 
     fn select_next_command_match(&mut self) {
@@ -1401,86 +1727,149 @@ reason={}",
     }
 
     fn complete_selected_command(&mut self) {
-        let Some((command, _)) = self.selected_command_match() else {
+        let Some(command) = self.selected_command_match() else {
             return;
         };
 
-        self.active_session_mut().draft = format!("{command} ");
+        self.active_session_mut().draft = command_completion(command.command);
         self.command_menu_index = 0;
     }
 
-    fn route_command(&mut self, command: &str) {
+    fn route_command(&mut self, command: &str) -> AppAction {
         let mut parts = command.split_whitespace();
         let Some(name) = parts.next() else {
             self.push_command_error("Usage: /help");
-            return;
+            return AppAction::Continue;
         };
 
         match name {
-            "help" => self.push_help(),
-            "logs" => self.toggle_logs(),
-            "gateway" => self.route_gateway_command(parts.next()),
+            "help" => {
+                self.push_help();
+                AppAction::Continue
+            }
+            "logs" => {
+                self.toggle_logs();
+                AppAction::Continue
+            }
+            "gateway" => self.route_gateway_command(parts.collect()),
             "model" => self.route_model_command(parts.collect()),
             "runtime" => {
                 let status = parts.collect::<Vec<_>>().join(" ");
                 self.set_runtime_status(status.trim());
+                AppAction::Continue
             }
             "session" => self.route_session_command(parts.collect()),
-            _ => self.push_command_error(format!("Unknown command: /{name}")),
+            _ => {
+                self.push_command_error(unknown_command_message(command));
+                AppAction::Continue
+            }
         }
     }
 
-    fn route_model_command(&mut self, args: Vec<&str>) {
+    fn route_model_command(&mut self, args: Vec<&str>) -> AppAction {
         match args.as_slice() {
             ["list"] => {
                 if self.available_profiles.is_empty() {
                     self.push_command_error(
                         "No runtime profiles are available in this TUI session",
                     );
-                    return;
+                    return AppAction::Continue;
                 }
 
                 let profiles = self
                     .available_profiles
                     .iter()
                     .map(|profile| {
-                        if profile.name == self.selected_profile {
-                            format!("* {} ({})", profile.name, profile.model)
+                        let marker = if profile.name == self.selected_profile {
+                            "*"
                         } else {
-                            format!("- {} ({})", profile.name, profile.model)
-                        }
+                            "-"
+                        };
+                        format!(
+                            "{} {} | provider={} | model={}",
+                            marker, profile.name, profile.provider_type, profile.model
+                        )
                     })
                     .collect::<Vec<_>>()
-                    .join("\n");
+                    .join("
+");
 
                 self.push_activity("model", "Listed available runtime profiles.");
                 self.push_system_entry("Runtime profiles", profiles);
+                AppAction::Continue
             }
-            ["use", rest @ ..] if !rest.is_empty() => self.set_active_profile(&rest.join(" ")),
-            _ => self.push_command_error("Usage: /model list | /model use <profile>"),
+            ["use", rest @ ..] if !rest.is_empty() => {
+                self.set_active_profile(&rest.join(" "));
+                AppAction::Continue
+            }
+            _ => {
+                self.push_command_error("Usage: /model list | /model use <profile>");
+                AppAction::Continue
+            }
         }
     }
 
-    fn route_gateway_command(&mut self, action: Option<&str>) {
-        match action {
-            Some("connect") => {
+    fn route_gateway_command(&mut self, args: Vec<&str>) -> AppAction {
+        match args.as_slice() {
+            ["connect"] => {
                 self.gateway_connected = true;
                 self.push_activity("gateway", "Gateway link marked connected in the TUI.");
                 self.push_system_entry(
                     "Gateway link updated",
                     "Gateway refresh and event streaming were resumed by operator command.",
                 );
+                AppAction::GatewayConnect
             }
-            Some("disconnect") => {
+            ["disconnect"] => {
                 self.gateway_connected = false;
                 self.push_activity("gateway", "Gateway link marked disconnected in the TUI.");
                 self.push_system_entry(
                     "Gateway link updated",
                     "Gateway refresh and event streaming were paused by operator command.",
                 );
+                AppAction::GatewayDisconnect
             }
-            _ => self.push_command_error("Usage: /gateway connect|disconnect"),
+            ["status"] => {
+                self.show_gateway_status();
+                AppAction::Continue
+            }
+            _ => {
+                self.push_command_error(
+                    "Usage: /gateway connect | /gateway disconnect | /gateway status",
+                );
+                AppAction::Continue
+            }
         }
+    }
+
+    fn show_gateway_status(&mut self) {
+        let summary = self
+            .gateway_summary
+            .clone()
+            .unwrap_or_else(|| "Gateway summary unavailable".to_owned());
+        let detail = self
+            .gateway_detail
+            .clone()
+            .unwrap_or_else(|| "Gateway readiness detail unavailable".to_owned());
+        let node_summary = self
+            .node_summary
+            .clone()
+            .unwrap_or_else(|| "Node summary unavailable".to_owned());
+        let node_detail = self
+            .node_detail
+            .clone()
+            .unwrap_or_else(|| "Node detail unavailable".to_owned());
+        self.push_activity("gateway", "Displayed gateway transport summary.");
+        self.push_system_entry(
+            "Gateway status",
+            format!(
+                "{}
+{}
+{}
+{}",
+                summary, detail, node_summary, node_detail
+            ),
+        );
     }
 
     fn set_runtime_status(&mut self, status: &str) {
@@ -1497,15 +1886,167 @@ reason={}",
         );
     }
 
-    fn route_session_command(&mut self, args: Vec<&str>) {
+    fn route_session_command(&mut self, args: Vec<&str>) -> AppAction {
         match args.as_slice() {
-            ["state", "active"] => self.set_session_state(SessionState::Active),
-            ["state", "waiting"] => self.set_session_state(SessionState::Waiting),
-            ["state", "degraded"] => self.set_session_state(SessionState::Degraded),
-            ["model", rest @ ..] if !rest.is_empty() => self.set_session_model(&rest.join(" ")),
-            _ => self.push_command_error(
-                "Usage: /session state <active|waiting|degraded> | /session model <name>",
+            ["list"] => {
+                self.show_session_list();
+                AppAction::Continue
+            }
+            ["show"] => {
+                self.show_session_details();
+                AppAction::Continue
+            }
+            ["switch", rest @ ..] if !rest.is_empty() => {
+                self.prepare_session_switch(&rest.join(" "), false)
+            }
+            ["new", rest @ ..] if !rest.is_empty() => {
+                self.prepare_session_switch(&rest.join(" "), true)
+            }
+            ["state", "active"] => {
+                self.set_session_state(SessionState::Active);
+                AppAction::Continue
+            }
+            ["state", "waiting"] => {
+                self.set_session_state(SessionState::Waiting);
+                AppAction::Continue
+            }
+            ["state", "degraded"] => {
+                self.set_session_state(SessionState::Degraded);
+                AppAction::Continue
+            }
+            ["model", rest @ ..] if !rest.is_empty() => {
+                self.set_session_model(&rest.join(" "));
+                AppAction::Continue
+            }
+            _ => {
+                self.push_command_error(
+                    "Usage: /session list | /session show | /session switch <id> | /session new <id> | /session state <active|waiting|degraded> | /session model <name>",
+                );
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn show_session_list(&mut self) {
+        let body = self
+            .sessions
+            .iter()
+            .enumerate()
+            .map(|(index, session)| {
+                let marker = if index == self.selected_session { "*" } else { "-" };
+                format!(
+                    "{} {} | origin={} | route={} | model={} | state={}",
+                    marker,
+                    session.id,
+                    session.origin,
+                    session.route,
+                    session.model,
+                    session.state.label()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("
+");
+        self.push_activity("session", "Displayed operator session list.");
+        self.push_system_entry("Sessions", body);
+    }
+
+    fn show_session_details(&mut self) {
+        let session_id = self.active_session().id.clone();
+        let route = self.active_session().route.clone();
+        let origin = self.active_session().origin.clone();
+        let channel = self.active_session().channel.clone();
+        let runtime = self.active_session().runtime.clone();
+        let model = self.active_session().model.clone();
+        let references = if self.active_session().references.is_empty() {
+            "none".to_owned()
+        } else {
+            self.active_session().references.join(", ")
+        };
+        let memory = self
+            .active_session()
+            .memory_summary
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
+        let compressed = self
+            .active_session()
+            .compressed_context
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
+        let next_profile = self.active_profile().to_owned();
+        let next_model = self.control_model.clone();
+        self.push_activity(
+            "session",
+            format!("Displayed details for session {}.", session_id),
+        );
+        self.push_system_entry(
+            "Session details",
+            format!(
+                "session={}
+route={}
+origin={}
+channel={}
+current runtime={}
+current model={}
+next-turn profile={}
+next-turn model={}
+memory={}
+compressed={}
+references={}",
+                session_id,
+                route,
+                origin,
+                channel,
+                runtime,
+                model,
+                next_profile,
+                next_model,
+                memory,
+                compressed,
+                references
             ),
+        );
+    }
+
+    fn prepare_session_switch(&mut self, session_id: &str, create_if_missing: bool) -> AppAction {
+        let target_index = if let Some(index) = self.sessions.iter().position(|session| session.id == session_id) {
+            index
+        } else if create_if_missing {
+            let mut placeholder = interactive_session_record(session_id, &self.control_model);
+            placeholder.origin = self.active_session().origin.clone();
+            placeholder.runtime = self.active_session().runtime.clone();
+            self.sessions.push(placeholder);
+            self.sessions.len() - 1
+        } else {
+            self.push_command_error(format!(
+                "Unknown session: {}. Use /session list or Shift+Tab to browse.",
+                session_id
+            ));
+            return AppAction::Continue;
+        };
+
+        self.select_session(target_index);
+        self.surface = Surface::Console;
+        self.focus = Focus::Composer;
+        self.show_console_history = true;
+        self.push_activity(
+            "session",
+            format!("Selected session {} in the operator console.", session_id),
+        );
+        self.push_system_entry(
+            "Session selected",
+            format!(
+                "Composer now targets session {}. The next turn will use profile {} ({}).",
+                session_id,
+                self.active_profile(),
+                self.control_model
+            ),
+        );
+
+        if self.is_interactive() {
+            AppAction::SwitchSession(session_id.to_owned())
+        } else {
+            AppAction::Continue
         }
     }
 
@@ -1529,7 +2070,7 @@ reason={}",
         );
         self.push_system_entry(
             "Session model updated",
-            format!("Selected session now targets {model}."),
+            format!("Selected session now shows {model}. Future turns still use the active profile unless it is changed with /model use."),
         );
     }
 
@@ -1546,7 +2087,6 @@ reason={}",
 
         self.selected_profile = option.name.clone();
         self.control_model = option.model.clone();
-        self.active_session_mut().model = option.model.clone();
         self.push_activity(
             "model",
             format!("Interactive runtime profile switched to {}.", option.name),
@@ -1554,8 +2094,12 @@ reason={}",
         self.push_system_entry(
             "Runtime profile updated",
             format!(
-                "Future turns will use profile {} (type={}, model={}).",
-                option.name, option.provider_type, option.model
+                "Future turns will use profile {} (type={}, model={}). The currently selected session still shows {} / {} until the next run completes.",
+                option.name,
+                option.provider_type,
+                option.model,
+                self.active_session().runtime,
+                self.active_session().model
             ),
         );
     }
@@ -1579,11 +2123,44 @@ reason={}",
     }
 
     fn push_help(&mut self) {
+        self.show_help_overlay = true;
+        let mut grouped = BTreeMap::new();
+        for category in [
+            CommandCategory::Ui,
+            CommandCategory::Gateway,
+            CommandCategory::Session,
+            CommandCategory::Model,
+            CommandCategory::Debug,
+        ] {
+            let entries = LOCAL_COMMANDS
+                .iter()
+                .filter(|spec| spec.category == category)
+                .map(|spec| format!("{}  {}", spec.usage, spec.summary))
+                .collect::<Vec<_>>();
+            grouped.insert(category.label(), entries);
+        }
+
+        let mut body = vec![
+            format!("input.chat    Enter => {}", if self.is_interactive() { "send to the active session" } else { "queue a mock instruction" }),
+            "input.command Enter => run local slash command, Tab => complete, Esc => leave command mode".to_owned(),
+            "input.search  / in resume view starts search over session id, title, route, and channel".to_owned(),
+            String::new(),
+        ];
+        for (category, entries) in grouped {
+            body.push(format!("[{category}]"));
+            body.extend(entries);
+            body.push(String::new());
+        }
+        body.push(format!(
+            "current session={} next-profile={} next-model={}",
+            self.session_label(),
+            self.active_profile(),
+            self.control_model
+        ));
+
         self.push_activity("command", "Displayed local control command reference.");
-        self.push_system_entry(
-            "Local command reference",
-            "Available commands:\n/help\n/logs\n/gateway connect\n/gateway disconnect\n/runtime <status>\n/session state <active|waiting|degraded>\n/session model <name>\n/model list\n/model use <profile>",
-        );
+        self.push_system_entry("Local command reference", body.join("
+"));
     }
 
     pub(crate) fn push_command_error(&mut self, message: impl Into<String>) {
@@ -1689,22 +2266,140 @@ fn truncate_for_timeline(value: &str, limit: usize) -> String {
     format!("{truncated}...")
 }
 
-pub fn matching_commands(query: &str) -> Vec<(&'static str, &'static str)> {
-    let trimmed = query.trim().trim_start_matches('/').to_ascii_lowercase();
-    LOCAL_COMMANDS
-        .into_iter()
-        .filter(|(command, _)| {
-            if trimmed.is_empty() {
-                return true;
-            }
+fn command_completion(command: &str) -> String {
+    let tokens = command
+        .split_whitespace()
+        .take_while(|token| !token.starts_with('<'))
+        .collect::<Vec<_>>();
+    if tokens.is_empty() {
+        command.to_owned()
+    } else {
+        format!("{} ", tokens.join(" "))
+    }
+}
 
-            let searchable = command.trim_start_matches('/').to_ascii_lowercase();
-            searchable.starts_with(&trimmed)
-                || searchable
-                    .split_whitespace()
-                    .any(|token| token.starts_with(&trimmed))
+fn unknown_command_message(command: &str) -> String {
+    let suggestions = suggest_commands(command);
+    if suggestions.is_empty() {
+        return format!("Unknown command: /{}", command.trim());
+    }
+
+    format!(
+        "Unknown command: /{}. Did you mean {}?",
+        command.trim(),
+        suggestions
+            .into_iter()
+            .take(3)
+            .map(|spec| spec.command)
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn suggest_commands(query: &str) -> Vec<CommandSpec> {
+    let normalized = normalize_command_text(query);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+
+    let mut scored = LOCAL_COMMANDS
+        .iter()
+        .copied()
+        .map(|spec| {
+            let searchable = command_search_text(spec.command);
+            let score = if searchable.starts_with(&normalized) {
+                0usize
+            } else {
+                edit_distance(&normalized, &searchable)
+            };
+            (score, spec)
         })
+        .collect::<Vec<_>>();
+    scored.sort_by_key(|(score, spec)| (*score, spec.command.len()));
+    scored
+        .into_iter()
+        .filter(|(score, _)| *score <= normalized.len().max(3))
+        .map(|(_, spec)| spec)
         .collect()
+}
+
+pub fn matching_commands(query: &str) -> Vec<CommandSpec> {
+    let normalized = normalize_command_text(query);
+    LOCAL_COMMANDS
+        .iter()
+        .copied()
+        .filter(|spec| command_matches_query(*spec, &normalized))
+        .collect()
+}
+
+fn command_matches_query(spec: CommandSpec, normalized_query: &str) -> bool {
+    if normalized_query.is_empty() {
+        return true;
+    }
+
+    let query_tokens = normalized_query.split_whitespace().collect::<Vec<_>>();
+    let command_tokens = command_search_text(spec.command)
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    if query_tokens.len() == 1 {
+        return command_tokens
+            .iter()
+            .any(|token| token.starts_with(query_tokens[0]));
+    }
+
+    query_tokens.len() <= command_tokens.len()
+        && query_tokens
+            .iter()
+            .zip(command_tokens.iter())
+            .all(|(query, command)| command.starts_with(query))
+}
+
+fn command_search_text(command: &str) -> String {
+    normalize_command_text(command)
+}
+
+fn normalize_command_text(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches('/')
+        .chars()
+        .map(|character| match character {
+            '<' | '>' | '|' => ' ',
+            _ => character.to_ascii_lowercase(),
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn edit_distance(left: &str, right: &str) -> usize {
+    if left.is_empty() {
+        return right.chars().count();
+    }
+    if right.is_empty() {
+        return left.chars().count();
+    }
+
+    let left = left.chars().collect::<Vec<_>>();
+    let right = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right.len()).collect::<Vec<_>>();
+    let mut current = vec![0usize; right.len() + 1];
+
+    for (row, left_char) in left.iter().enumerate() {
+        current[0] = row + 1;
+        for (column, right_char) in right.iter().enumerate() {
+            let substitution_cost = usize::from(left_char != right_char);
+            current[column + 1] = (current[column] + 1)
+                .min(previous[column + 1] + 1)
+                .min(previous[column] + substitution_cost);
+        }
+        previous.clone_from(&current);
+    }
+
+    previous[right.len()]
 }
 
 #[cfg(test)]
@@ -1712,7 +2407,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use mosaic_runtime::events::RunEvent;
 
-    use super::{App, AppAction, Focus, ResumeScope, SessionState, Surface, TimelineKind};
+    use super::{App, AppAction, Focus, InputMode, ResumeScope, SessionState, Surface, TimelineKind};
 
     #[test]
     fn tab_skips_hidden_observability_panel() {
@@ -1790,6 +2485,34 @@ mod tests {
         app.submit_composer();
 
         assert_eq!(app.active_session().state, SessionState::Degraded);
+    }
+
+    #[test]
+    fn interactive_session_new_command_returns_switch_action() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "mock".to_owned(),
+            "mock".to_owned(),
+            Vec::new(),
+            false,
+        );
+        app.active_session_mut().draft = "/session new ops-2".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(action, AppAction::SwitchSession("ops-2".to_owned()));
+        assert_eq!(app.session_label(), "ops-2");
+    }
+
+    #[test]
+    fn slash_input_switches_app_into_command_mode() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/model".to_owned();
+
+        assert_eq!(app.input_mode(), InputMode::Command);
+        assert!(app.enter_hint().contains("Complete"));
+        assert_eq!(app.escape_hint(), "focus sessions");
     }
 
     #[test]
