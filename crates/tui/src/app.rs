@@ -254,6 +254,29 @@ impl SessionState {
     }
 }
 
+fn session_state_from_run_label(status: &str) -> SessionState {
+    match status {
+        "queued" | "running" | "streaming" | "cancel_requested" => SessionState::Active,
+        "failed" | "canceled" => SessionState::Degraded,
+        _ => SessionState::Waiting,
+    }
+}
+
+fn runtime_status_from_run_label(status: &str) -> &'static str {
+    match status {
+        "queued" | "running" => "running",
+        "streaming" => "streaming",
+        "cancel_requested" => "canceling",
+        "failed" => "error",
+        "canceled" => "canceled",
+        _ => "idle",
+    }
+}
+
+fn runtime_status_is_busy(status: &str) -> bool {
+    matches!(status, "running" | "streaming" | "canceling")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimelineKind {
     Operator,
@@ -500,11 +523,9 @@ impl App {
     ) {
         let draft = self.active_session().draft.clone();
         let unread = self.active_session().unread;
-        let state = match self.runtime_status.as_str() {
-            "running" => SessionState::Active,
-            "error" => SessionState::Degraded,
-            _ => SessionState::Waiting,
-        };
+        let run_label = session.run.status.label();
+        let state = session_state_from_run_label(run_label);
+        self.runtime_status = runtime_status_from_run_label(run_label).to_owned();
 
         if let Some(view) = self.sessions.get_mut(self.selected_session) {
             view.id = session.id.clone();
@@ -640,7 +661,7 @@ impl App {
 
     pub fn apply_run_event(&mut self, event: RunEvent) {
         match event {
-            RunEvent::RunStarted { input } => {
+            RunEvent::RunStarted { run_id, input } => {
                 self.runtime_status = "running".to_owned();
                 self.active_session_mut().state = SessionState::Active;
                 self.push_activity("runtime", "Run started");
@@ -651,7 +672,12 @@ impl App {
                     TimelineKind::System,
                     "runtime",
                     "Run started",
-                    &format!("Input: {}", truncate_for_timeline(&input, 180)),
+                    &format!(
+                        "run_id={}
+Input: {}",
+                        run_id,
+                        truncate_for_timeline(&input, 180)
+                    ),
                 );
             }
             RunEvent::WorkflowStarted { name, step_count } => {
@@ -706,6 +732,7 @@ impl App {
                 error,
             } => {
                 self.runtime_status = "error".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("workflow", format!("Step failed: {}.{}", workflow, step));
                 if self.is_interactive() {
                     return;
@@ -759,6 +786,7 @@ impl App {
             }
             RunEvent::SkillFailed { name, error } => {
                 self.runtime_status = "error".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("skill", &format!("Skill failed: {}", name));
                 if self.is_interactive() {
                     return;
@@ -847,6 +875,7 @@ impl App {
                 ..
             } => {
                 self.runtime_status = "error".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity(
                     "provider",
                     &format!(
@@ -901,6 +930,7 @@ impl App {
                 error,
             } => {
                 self.runtime_status = "error".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("tool", &format!("Tool failed: {}", name));
                 if self.is_interactive() {
                     return;
@@ -1018,6 +1048,7 @@ summary={}",
                 error,
             } => {
                 self.runtime_status = "error".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("capability", &format!("Capability failed: {}", name));
                 if self.is_interactive() {
                     return;
@@ -1040,6 +1071,7 @@ error={}",
                 reason,
             } => {
                 self.runtime_status = "error".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity(
                     "permission",
                     &format!("Permission denied for capability: {}", name),
@@ -1059,7 +1091,33 @@ reason={}",
                     ),
                 );
             }
-            RunEvent::FinalAnswerReady => {
+            RunEvent::OutputDelta {
+                run_id,
+                chunk,
+                accumulated_chars,
+            } => {
+                self.runtime_status = "streaming".to_owned();
+                self.active_session_mut().state = SessionState::Active;
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::Agent,
+                    "runtime",
+                    "Output delta",
+                    &format!(
+                        "run_id={}
+chars={}
+chunk={}",
+                        run_id,
+                        accumulated_chars,
+                        truncate_for_timeline(&chunk, 180)
+                    ),
+                );
+            }
+            RunEvent::FinalAnswerReady { run_id } => {
+                self.runtime_status = "streaming".to_owned();
+                self.active_session_mut().state = SessionState::Active;
                 self.push_activity("runtime", "Final answer ready");
                 if self.is_interactive() {
                     return;
@@ -1068,10 +1126,17 @@ reason={}",
                     TimelineKind::Agent,
                     "runtime",
                     "Final answer ready",
-                    "Assistant output is ready to present.",
+                    &format!(
+                        "run_id={}
+Assistant output is ready to present.",
+                        run_id
+                    ),
                 );
             }
-            RunEvent::RunFinished { output_preview } => {
+            RunEvent::RunFinished {
+                run_id,
+                output_preview,
+            } => {
                 self.runtime_status = "idle".to_owned();
                 self.active_session_mut().state = SessionState::Waiting;
                 self.push_activity("runtime", "Run finished");
@@ -1083,12 +1148,18 @@ reason={}",
                     "runtime",
                     "Run finished",
                     &format!(
-                        "Output preview: {}",
+                        "run_id={}
+Output preview: {}",
+                        run_id,
                         truncate_for_timeline(&output_preview, 180)
                     ),
                 );
             }
-            RunEvent::RunFailed { error } => {
+            RunEvent::RunFailed {
+                run_id,
+                error,
+                failure_kind,
+            } => {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("runtime", "Run failed");
@@ -1099,7 +1170,33 @@ reason={}",
                     TimelineKind::System,
                     "runtime",
                     "Run failed",
-                    &truncate_for_timeline(&error, 180),
+                    &format!(
+                        "run_id={}
+failure_kind={}
+error={}",
+                        run_id,
+                        failure_kind.unwrap_or_else(|| "<none>".to_owned()),
+                        truncate_for_timeline(&error, 180)
+                    ),
+                );
+            }
+            RunEvent::RunCanceled { run_id, reason } => {
+                self.runtime_status = "canceled".to_owned();
+                self.active_session_mut().state = SessionState::Degraded;
+                self.push_activity("runtime", "Run canceled");
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::System,
+                    "runtime",
+                    "Run canceled",
+                    &format!(
+                        "run_id={}
+reason={}",
+                        run_id,
+                        truncate_for_timeline(&reason, 180)
+                    ),
                 );
             }
         }
@@ -1154,10 +1251,26 @@ reason={}",
                 self.active_profile(),
                 self.control_model
             ),
+            "streaming" => format!(
+                "Assistant is streaming output for session {} via profile {} ({}).",
+                self.session_label(),
+                self.active_profile(),
+                self.control_model
+            ),
+            "canceling" => format!(
+                "Cancellation requested for session {}. Waiting for the runtime to stop.",
+                self.session_label()
+            ),
             "error" => self
                 .latest_activity()
                 .map(|entry| format!("Last event [{}] {}", entry.scope, entry.message))
-                .unwrap_or_else(|| "Last run failed. Inspect the activity feed for details.".to_owned()),
+                .unwrap_or_else(|| {
+                    "Last run failed. Inspect the activity feed for details.".to_owned()
+                }),
+            "canceled" => self
+                .latest_activity()
+                .map(|entry| format!("Last event [{}] {}", entry.scope, entry.message))
+                .unwrap_or_else(|| "Last run was canceled by the operator.".to_owned()),
             _ => format!(
                 "Next turn uses profile {} ({}) while the selected session currently shows {} / {}.",
                 self.active_profile(),
@@ -1176,9 +1289,7 @@ reason={}",
             InputMode::Command => {
                 "Run a local control command. Tab cycles suggestions and Enter executes the highlighted command."
             }
-            InputMode::Search => {
-                "Filter sessions by id, title, route, channel, or origin."
-            }
+            InputMode::Search => "Filter sessions by id, title, route, channel, or origin.",
         }
     }
 
@@ -1243,7 +1354,11 @@ reason={}",
         suggest_commands(self.command_query().unwrap_or_default())
     }
 
-    pub fn sync_session_catalog(&mut self, mut sessions: Vec<SessionRecord>, selected_session_id: &str) {
+    pub fn sync_session_catalog(
+        &mut self,
+        mut sessions: Vec<SessionRecord>,
+        selected_session_id: &str,
+    ) {
         let default_origin = self
             .sessions
             .get(self.selected_session)
@@ -1256,7 +1371,11 @@ reason={}",
             .unwrap_or_else(|| "agent-runtime".to_owned());
 
         for session in &mut sessions {
-            if let Some(existing) = self.sessions.iter().find(|candidate| candidate.id == session.id) {
+            if let Some(existing) = self
+                .sessions
+                .iter()
+                .find(|candidate| candidate.id == session.id)
+            {
                 session.draft = existing.draft.clone();
                 session.unread = existing.unread;
                 if session.memory_summary.is_none() {
@@ -1280,8 +1399,12 @@ reason={}",
             }
         }
 
-        if !sessions.iter().any(|session| session.id == selected_session_id) {
-            let mut placeholder = interactive_session_record(selected_session_id, &self.control_model);
+        if !sessions
+            .iter()
+            .any(|session| session.id == selected_session_id)
+        {
+            let mut placeholder =
+                interactive_session_record(selected_session_id, &self.control_model);
             placeholder.origin = default_origin;
             placeholder.runtime = default_runtime;
             sessions.push(placeholder);
@@ -1489,7 +1612,7 @@ reason={}",
         let action = if let Some(command) = message.strip_prefix('/') {
             self.route_command(command.trim())
         } else if self.is_interactive() {
-            if self.runtime_status == "running" {
+            if runtime_status_is_busy(&self.runtime_status) {
                 self.push_command_error("A run is already in progress for this session");
                 AppAction::Continue
             } else {
@@ -1628,8 +1751,14 @@ reason={}",
             return;
         }
 
-        let has_local = self.sessions.iter().any(|session| session.origin == "Local");
-        let has_remote = self.sessions.iter().any(|session| session.origin == "Remote");
+        let has_local = self
+            .sessions
+            .iter()
+            .any(|session| session.origin == "Local");
+        let has_remote = self
+            .sessions
+            .iter()
+            .any(|session| session.origin == "Remote");
 
         self.resume_scope = match (has_local, has_remote) {
             (true, false) => ResumeScope::Local,
@@ -1791,8 +1920,10 @@ reason={}",
                         )
                     })
                     .collect::<Vec<_>>()
-                    .join("
-");
+                    .join(
+                        "
+",
+                    );
 
                 self.push_activity("model", "Listed available runtime profiles.");
                 self.push_system_entry("Runtime profiles", profiles);
@@ -1879,6 +2010,7 @@ reason={}",
         }
 
         self.runtime_status = status.to_owned();
+        self.active_session_mut().state = session_state_from_run_label(status);
         self.push_activity("runtime", format!("Runtime status set to {status}."));
         self.push_system_entry(
             "Runtime status updated",
@@ -1933,7 +2065,11 @@ reason={}",
             .iter()
             .enumerate()
             .map(|(index, session)| {
-                let marker = if index == self.selected_session { "*" } else { "-" };
+                let marker = if index == self.selected_session {
+                    "*"
+                } else {
+                    "-"
+                };
                 format!(
                     "{} {} | origin={} | route={} | model={} | state={}",
                     marker,
@@ -1945,8 +2081,10 @@ reason={}",
                 )
             })
             .collect::<Vec<_>>()
-            .join("
-");
+            .join(
+                "
+",
+            );
         self.push_activity("session", "Displayed operator session list.");
         self.push_system_entry("Sessions", body);
     }
@@ -2009,7 +2147,11 @@ references={}",
     }
 
     fn prepare_session_switch(&mut self, session_id: &str, create_if_missing: bool) -> AppAction {
-        let target_index = if let Some(index) = self.sessions.iter().position(|session| session.id == session_id) {
+        let target_index = if let Some(index) = self
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+        {
             index
         } else if create_if_missing {
             let mut placeholder = interactive_session_record(session_id, &self.control_model);
@@ -2159,8 +2301,13 @@ references={}",
         ));
 
         self.push_activity("command", "Displayed local control command reference.");
-        self.push_system_entry("Local command reference", body.join("
-"));
+        self.push_system_entry(
+            "Local command reference",
+            body.join(
+                "
+",
+            ),
+        );
     }
 
     pub(crate) fn push_command_error(&mut self, message: impl Into<String>) {
@@ -2407,7 +2554,9 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use mosaic_runtime::events::RunEvent;
 
-    use super::{App, AppAction, Focus, InputMode, ResumeScope, SessionState, Surface, TimelineKind};
+    use super::{
+        App, AppAction, Focus, InputMode, ResumeScope, SessionState, Surface, TimelineKind,
+    };
 
     #[test]
     fn tab_skips_hidden_observability_panel() {
@@ -2615,6 +2764,7 @@ mod tests {
         let initial_timeline_len = app.active_session().timeline.len();
 
         app.apply_run_event(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
             input: "Explain what happened in the control plane".to_owned(),
         });
 
@@ -2693,6 +2843,7 @@ mod tests {
         app.runtime_status = "running".to_owned();
 
         app.apply_run_event(RunEvent::RunFinished {
+            run_id: "run-1".to_owned(),
             output_preview: "done".to_owned(),
         });
 
@@ -2716,7 +2867,9 @@ mod tests {
         let mut app = App::new("/tmp/mosaic".into());
 
         app.apply_run_event(RunEvent::RunFailed {
+            run_id: "run-1".to_owned(),
             error: "boom".to_owned(),
+            failure_kind: Some("runtime".to_owned()),
         });
 
         assert_eq!(app.runtime_status, "error");

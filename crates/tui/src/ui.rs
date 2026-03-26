@@ -376,9 +376,15 @@ fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
 fn render_operator_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let mode = app.input_mode();
     let mode_style = match mode {
-        InputMode::Chat => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        InputMode::Command => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        InputMode::Search => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        InputMode::Chat => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+        InputMode::Command => Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+        InputMode::Search => Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
     };
     let gateway_style = if app.gateway_connected {
         Style::default().fg(Color::Green)
@@ -394,7 +400,11 @@ fn render_operator_status(frame: &mut Frame<'_>, app: &App, area: Rect) {
             Span::raw(app.escape_hint()),
             Span::styled("  gateway ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                if app.gateway_connected { "live" } else { "paused" },
+                if app.gateway_connected {
+                    "live"
+                } else {
+                    "paused"
+                },
                 gateway_style,
             ),
         ]),
@@ -534,9 +544,15 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
     let draft = app.active_draft();
     let mode = app.input_mode();
     let badge_style = match mode {
-        InputMode::Chat => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        InputMode::Command => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        InputMode::Search => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        InputMode::Chat => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+        InputMode::Command => Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+        InputMode::Search => Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
     };
     let badge_text = format!("[{}]", mode.label());
     let input = if draft.is_empty() {
@@ -625,7 +641,9 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", command.category.label()),
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(command.usage, Style::default().fg(Color::Cyan)),
         ]));
@@ -641,7 +659,9 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
     } else {
         lines.push(Line::from(Span::styled(
             "No exact local command match.",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )));
         if !app.command_suggestions().is_empty() {
             lines.push(Line::from(Span::styled(
@@ -717,9 +737,20 @@ fn render_help_overlay(frame: &mut Frame<'_>, app: &App) {
             "Input Modes",
             Style::default().add_modifier(Modifier::BOLD),
         )]),
-        Line::from(format!("  chat      Enter => {}", if app.is_interactive() { "send to the active session" } else { "queue a local mock instruction" })),
-        Line::from("  command   Enter => run local slash command, Tab => complete the highlighted command"),
-        Line::from("  search    / inside resume view filters by session id, title, route, channel, or origin"),
+        Line::from(format!(
+            "  chat      Enter => {}",
+            if app.is_interactive() {
+                "send to the active session"
+            } else {
+                "queue a local mock instruction"
+            }
+        )),
+        Line::from(
+            "  command   Enter => run local slash command, Tab => complete the highlighted command",
+        ),
+        Line::from(
+            "  search    / inside resume view filters by session id, title, route, channel, or origin",
+        ),
         Line::from(""),
     ];
 
@@ -1149,7 +1180,8 @@ mod tests {
         assert!(screen.contains("Resume gateway refresh and event streaming"));
         assert!(screen.contains("/gateway status"));
 
-        let composer_line = line_index(&screen, "[command] /gate").expect("composer line should render");
+        let composer_line =
+            line_index(&screen, "[command] /gate").expect("composer line should render");
         let palette_line =
             line_index(&screen, "▎ /gateway connect").expect("palette line should render");
         assert!(palette_line > composer_line);

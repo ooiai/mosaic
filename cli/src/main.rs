@@ -16,8 +16,8 @@ use mosaic_config::{
 use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
     ExecJobRequest, GatewayAuditEventDto, GatewayEvent, HealthResponse, IncidentBundleDto,
-    IngressTrace, MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunResponse,
-    SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
+    IngressTrace, MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunDetailDto,
+    RunResponse, RunSummaryDto, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
 };
 use mosaic_extension_core::{ExtensionStatus, ExtensionValidationReport, validate_extension_set};
 use mosaic_gateway::{
@@ -86,6 +86,10 @@ Examples:
   mosaic gateway status
   mosaic gateway serve --local
   mosaic gateway serve --http 127.0.0.1:8080
+  mosaic gateway runs
+  mosaic gateway show-run <gateway-run-id>
+  mosaic gateway cancel <gateway-run-id>
+  mosaic gateway retry <gateway-run-id>
   mosaic gateway incident <run-id>";
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -292,6 +296,16 @@ enum GatewayCliCommand {
         http: Option<String>,
     },
     Sessions,
+    Runs,
+    ShowRun {
+        id: String,
+    },
+    Cancel {
+        id: String,
+    },
+    Retry {
+        id: String,
+    },
     Status,
     Audit {
         #[arg(long, default_value_t = 50)]
@@ -1019,6 +1033,19 @@ async fn session_cmd(attach: Option<String>, command: SessionCommand) -> Result<
             println!("provider_type: {}", session.provider_type);
             println!("model: {}", session.model);
             println!("last_run_id: {:?}", session.last_run_id);
+            println!("run_status: {}", session.run.status.label());
+            println!("current_run_id: {:?}", session.run.current_run_id);
+            println!(
+                "current_gateway_run_id: {:?}",
+                session.run.current_gateway_run_id
+            );
+            println!(
+                "current_correlation_id: {:?}",
+                session.run.current_correlation_id
+            );
+            println!("last_error: {:?}", session.run.last_error);
+            println!("last_failure_kind: {:?}", session.run.last_failure_kind);
+            println!("run_updated_at: {:?}", session.run.updated_at);
             println!("session_route: {}", session.gateway.route);
             println!("channel: {:?}", session.channel_context.channel);
             println!("actor_id: {:?}", session.channel_context.actor_id);
@@ -1085,6 +1112,19 @@ async fn gateway_cmd(attach: Option<String>, command: GatewayCliCommand) -> Resu
             GatewayCliCommand::Sessions => {
                 print_remote_session_list(&client.list_sessions().await?)
             }
+            GatewayCliCommand::Runs => print_run_list(&client.list_runs().await?),
+            GatewayCliCommand::ShowRun { id } => {
+                let run = client
+                    .get_run(&id)
+                    .await?
+                    .ok_or_else(|| anyhow!("run not found: {}", id))?;
+                print_run_detail(&run)
+            }
+            GatewayCliCommand::Cancel { id } => print_run_detail(&client.cancel_run(&id).await?),
+            GatewayCliCommand::Retry { id } => {
+                let result = client.retry_run(&id).await?;
+                finish_remote_gateway_run(&loaded, result)
+            }
             GatewayCliCommand::Status => {
                 let health = client.health().await?;
                 let readiness = client.readiness().await?;
@@ -1108,6 +1148,18 @@ async fn gateway_cmd(attach: Option<String>, command: GatewayCliCommand) -> Resu
     let gateway = build_gateway_handle(&loaded, None)?;
     match command {
         GatewayCliCommand::Sessions => print_session_list(&gateway.list_sessions()?),
+        GatewayCliCommand::Runs => print_run_list(&gateway.list_runs()?),
+        GatewayCliCommand::ShowRun { id } => {
+            let run = gateway
+                .load_run(&id)?
+                .ok_or_else(|| anyhow!("run not found: {}", id))?;
+            print_run_detail(&run)
+        }
+        GatewayCliCommand::Cancel { id } => print_run_detail(&gateway.cancel_run(&id)?),
+        GatewayCliCommand::Retry { id } => {
+            let result = gateway.retry_run(&id)?;
+            finish_gateway_outcome(result.wait().await)
+        }
         GatewayCliCommand::Status => {
             let health = gateway.health();
             let readiness = gateway.readiness();
@@ -1991,6 +2043,104 @@ fn print_gateway_status(
     Ok(())
 }
 
+fn print_run_list(runs: &[RunSummaryDto]) -> Result<()> {
+    println!("run summary:");
+    println!("  total: {}", runs.len());
+    if runs.is_empty() {
+        return Ok(());
+    }
+
+    println!("runs:");
+    for run in runs {
+        println!(
+            "  - {} | status={} | session={} | route={} | profile={} | model={} | retry_of={} | finished_at={}",
+            run.gateway_run_id,
+            run.status.label(),
+            run.session_id.as_deref().unwrap_or("-"),
+            run.session_route,
+            run.effective_profile
+                .as_deref()
+                .or(run.requested_profile.as_deref())
+                .unwrap_or("-"),
+            run.effective_model.as_deref().unwrap_or("-"),
+            run.retry_of.as_deref().unwrap_or("-"),
+            run.finished_at
+                .map(|value| value.to_rfc3339())
+                .unwrap_or_else(|| "-".to_owned()),
+        );
+        println!(
+            "    correlation={} run_id={} provider={} failure_kind={}",
+            run.correlation_id,
+            run.run_id,
+            run.effective_provider_type.as_deref().unwrap_or("-"),
+            run.failure_kind.as_deref().unwrap_or("-"),
+        );
+        println!(
+            "    input={} output={} error={}",
+            truncate_for_cli(&run.input_preview, 120),
+            run.output_preview
+                .as_deref()
+                .map(|value| truncate_for_cli(value, 120))
+                .unwrap_or_else(|| "-".to_owned()),
+            run.error
+                .as_deref()
+                .map(|value| truncate_for_cli(value, 120))
+                .unwrap_or_else(|| "-".to_owned()),
+        );
+    }
+
+    Ok(())
+}
+
+fn print_run_detail(run: &RunDetailDto) -> Result<()> {
+    let summary = &run.summary;
+    println!("gateway_run_id: {}", summary.gateway_run_id);
+    println!("correlation_id: {}", summary.correlation_id);
+    println!("run_id: {}", summary.run_id);
+    println!("status: {}", summary.status.label());
+    println!("session_id: {:?}", summary.session_id);
+    println!("session_route: {}", summary.session_route);
+    println!("requested_profile: {:?}", summary.requested_profile);
+    println!("effective_profile: {:?}", summary.effective_profile);
+    println!(
+        "effective_provider_type: {:?}",
+        summary.effective_provider_type
+    );
+    println!("effective_model: {:?}", summary.effective_model);
+    println!("skill: {:?}", summary.skill);
+    println!("workflow: {:?}", summary.workflow);
+    println!("retry_of: {:?}", summary.retry_of);
+    println!("created_at: {}", summary.created_at);
+    println!("updated_at: {}", summary.updated_at);
+    println!("finished_at: {:?}", summary.finished_at);
+    println!("failure_kind: {:?}", summary.failure_kind);
+    println!("trace_path: {:?}", summary.trace_path);
+    println!("ingress: {:?}", run.ingress);
+    println!("input: {}", truncate_for_cli(&summary.input_preview, 240));
+    println!(
+        "output: {}",
+        run.summary
+            .output_preview
+            .as_deref()
+            .map(|value| truncate_for_cli(value, 240))
+            .unwrap_or_else(|| "-".to_owned())
+    );
+    println!(
+        "error: {}",
+        run.summary
+            .error
+            .as_deref()
+            .map(|value| truncate_for_cli(value, 240))
+            .unwrap_or_else(|| "-".to_owned())
+    );
+    println!("submission_system: {:?}", run.submission.system);
+    println!("submission_skill: {:?}", run.submission.skill);
+    println!("submission_workflow: {:?}", run.submission.workflow);
+    println!("submission_session_id: {:?}", run.submission.session_id);
+    println!("submission_profile: {:?}", run.submission.profile);
+    Ok(())
+}
+
 fn print_gateway_audit_events(events: &[GatewayAuditEventDto]) -> Result<()> {
     if events.is_empty() {
         println!("audit summary:");
@@ -2059,6 +2209,10 @@ fn print_gateway_incident_bundle(bundle: &IncidentBundleDto, path: &Path) -> Res
     println!("trace_run_id: {}", bundle.trace.run_id);
     println!("gateway_run_id: {:?}", bundle.trace.gateway_run_id);
     println!("correlation_id: {:?}", bundle.trace.correlation_id);
+    if let Some(run) = &bundle.run {
+        println!("run_status: {}", run.summary.status.label());
+        println!("run_failure_kind: {:?}", run.summary.failure_kind);
+    }
     println!("audit_events: {}", bundle.audit_events.len());
     println!(
         "metrics: completed_runs={} failed_runs={} audit_events_total={} lagged_events_total={}",
@@ -2129,7 +2283,7 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
     println!("sessions:");
     for session in sessions {
         println!(
-            "  - {} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
+            "  - {} | {} | profile={} | model={} | route={} | messages={} | refs={} | run_status={} | current_run={} | updated_at={} | gateway_run={} | correlation={}",
             session.id,
             session.title,
             session.provider_profile,
@@ -2137,6 +2291,8 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
             session.session_route,
             session.message_count,
             session.reference_count,
+            session.run.status.label(),
+            session.run.current_run_id.as_deref().unwrap_or("-"),
             session.updated_at,
             session.last_gateway_run_id.as_deref().unwrap_or("-"),
             session.last_correlation_id.as_deref().unwrap_or("-"),
@@ -2160,6 +2316,13 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
         }
         if let Some(summary) = session.memory_summary_preview.as_deref() {
             println!("    memory: {}", summary);
+        }
+        if let Some(error) = session.run.last_error.as_deref() {
+            println!(
+                "    run_error(kind={}): {}",
+                session.run.last_failure_kind.as_deref().unwrap_or("-"),
+                truncate_for_cli(error, 160)
+            );
         }
     }
 
@@ -2177,7 +2340,7 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
     println!("sessions:");
     for session in sessions {
         println!(
-            "  - {} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
+            "  - {} | {} | profile={} | model={} | route={} | messages={} | refs={} | run_status={} | current_run={} | updated_at={} | gateway_run={} | correlation={}",
             session.id,
             session.title,
             session.provider_profile,
@@ -2185,6 +2348,8 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
             session.session_route,
             session.message_count,
             session.reference_count,
+            session.run.status.label(),
+            session.run.current_run_id.as_deref().unwrap_or("-"),
             session.updated_at,
             session.last_gateway_run_id.as_deref().unwrap_or("-"),
             session.last_correlation_id.as_deref().unwrap_or("-"),
@@ -2209,6 +2374,13 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
         if let Some(summary) = session.memory_summary_preview.as_deref() {
             println!("    memory: {}", summary);
         }
+        if let Some(error) = session.run.last_error.as_deref() {
+            println!(
+                "    run_error(kind={}): {}",
+                session.run.last_failure_kind.as_deref().unwrap_or("-"),
+                truncate_for_cli(error, 160)
+            );
+        }
     }
 
     Ok(())
@@ -2223,6 +2395,19 @@ fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
     println!("provider_type: {}", session.provider_type);
     println!("model: {}", session.model);
     println!("last_run_id: {:?}", session.last_run_id);
+    println!("run_status: {}", session.run.status.label());
+    println!("current_run_id: {:?}", session.run.current_run_id);
+    println!(
+        "current_gateway_run_id: {:?}",
+        session.run.current_gateway_run_id
+    );
+    println!(
+        "current_correlation_id: {:?}",
+        session.run.current_correlation_id
+    );
+    println!("last_error: {:?}", session.run.last_error);
+    println!("last_failure_kind: {:?}", session.run.last_failure_kind);
+    println!("run_updated_at: {:?}", session.run.updated_at);
     println!("session_route: {}", session.gateway.route);
     println!("channel: {:?}", session.channel_context.channel);
     println!("actor_id: {:?}", session.channel_context.actor_id);
@@ -2394,6 +2579,12 @@ fn gateway_event_label(event: &GatewayEvent) -> String {
     match event {
         GatewayEvent::RunSubmitted { profile, .. } => format!("run_submitted profile={profile}"),
         GatewayEvent::Runtime(_) => "runtime_event".to_owned(),
+        GatewayEvent::RunUpdated { run } => format!(
+            "run_updated id={} status={} failure_kind={}",
+            run.gateway_run_id,
+            run.status.label(),
+            run.failure_kind.as_deref().unwrap_or("-"),
+        ),
         GatewayEvent::CapabilityJobUpdated { job } => format!(
             "capability_job id={} status={} kind={}",
             job.id, job.status, job.kind

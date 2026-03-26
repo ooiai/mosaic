@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
-use mosaic_inspect::RunTrace;
+use mosaic_inspect::{RunLifecycleStatus, RunTrace};
 use mosaic_runtime::events::RunEvent;
 use serde::{Deserialize, Serialize};
 
@@ -40,8 +40,11 @@ pub struct MetricsResponse {
     pub auth_mode: String,
     pub session_count: usize,
     pub capability_job_count: usize,
+    pub queued_run_count: usize,
+    pub running_run_count: usize,
     pub completed_runs_total: u64,
     pub failed_runs_total: u64,
+    pub canceled_runs_total: u64,
     pub capability_jobs_total: u64,
     pub audit_events_total: u64,
     pub auth_denials_total: u64,
@@ -81,6 +84,7 @@ pub struct IncidentBundleDto {
     pub auth_mode: String,
     pub redaction_policy: String,
     pub trace: RunTrace,
+    pub run: Option<RunDetailDto>,
     pub audit_events: Vec<GatewayAuditEventDto>,
     pub metrics: MetricsResponse,
 }
@@ -115,6 +119,39 @@ pub struct RunResponse {
     pub output: String,
     pub trace: RunTrace,
     pub session_summary: Option<SessionSummaryDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunSummaryDto {
+    pub gateway_run_id: String,
+    pub correlation_id: String,
+    pub run_id: String,
+    pub session_id: Option<String>,
+    pub session_route: String,
+    #[serde(default)]
+    pub status: RunLifecycleStatus,
+    pub requested_profile: Option<String>,
+    pub effective_profile: Option<String>,
+    pub effective_provider_type: Option<String>,
+    pub effective_model: Option<String>,
+    pub skill: Option<String>,
+    pub workflow: Option<String>,
+    pub retry_of: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub input_preview: String,
+    pub output_preview: Option<String>,
+    pub error: Option<String>,
+    pub failure_kind: Option<String>,
+    pub trace_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunDetailDto {
+    pub summary: RunSummaryDto,
+    pub ingress: Option<IngressTrace>,
+    pub submission: RunSubmission,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -227,6 +264,9 @@ pub enum GatewayEvent {
         ingress: Option<IngressTrace>,
     },
     Runtime(RunEvent),
+    RunUpdated {
+        run: RunSummaryDto,
+    },
     CapabilityJobUpdated {
         job: CapabilityJobDto,
     },
@@ -272,6 +312,8 @@ pub struct SessionSummaryDto {
     pub session_route: String,
     #[serde(default)]
     pub channel_context: SessionChannelDto,
+    #[serde(default)]
+    pub run: SessionRunDto,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
     pub message_count: usize,
@@ -292,6 +334,8 @@ pub struct SessionDetailDto {
     pub last_run_id: Option<String>,
     #[serde(default)]
     pub channel_context: SessionChannelDto,
+    #[serde(default)]
+    pub run: SessionRunDto,
     pub gateway: SessionGatewayDto,
     pub memory_summary: Option<String>,
     pub compressed_context: Option<String>,
@@ -304,6 +348,18 @@ pub struct SessionGatewayDto {
     pub route: String,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionRunDto {
+    pub current_run_id: Option<String>,
+    pub current_gateway_run_id: Option<String>,
+    pub current_correlation_id: Option<String>,
+    #[serde(default)]
+    pub status: RunLifecycleStatus,
+    pub last_error: Option<String>,
+    pub last_failure_kind: Option<String>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

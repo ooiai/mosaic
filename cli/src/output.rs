@@ -8,7 +8,7 @@ pub struct CliEventSink;
 
 fn format_run_event(event: &RunEvent) -> String {
     match event {
-        RunEvent::RunStarted { .. } => "[run] starting".to_owned(),
+        RunEvent::RunStarted { run_id, .. } => format!("[run] starting run_id={}", run_id),
         RunEvent::WorkflowStarted { name, step_count } => {
             format!("[run] workflow started: {} steps={}", name, step_count)
         }
@@ -127,9 +127,34 @@ fn format_run_event(event: &RunEvent) -> String {
         RunEvent::PermissionCheckFailed { name, reason, .. } => {
             format!("[run] permission check failed: {} reason={}", name, reason)
         }
-        RunEvent::FinalAnswerReady => "[run] final answer ready".to_owned(),
-        RunEvent::RunFinished { .. } => "[run] finished".to_owned(),
-        RunEvent::RunFailed { error } => format!("[run] failed: {}", error),
+        RunEvent::OutputDelta {
+            run_id,
+            chunk,
+            accumulated_chars,
+        } => format!(
+            "[run] streaming: run_id={} chars={} chunk={}",
+            run_id,
+            accumulated_chars,
+            truncate(&single_line(chunk), 48)
+        ),
+        RunEvent::FinalAnswerReady { run_id } => {
+            format!("[run] final answer ready run_id={}", run_id)
+        }
+        RunEvent::RunFinished { run_id, .. } => format!("[run] finished run_id={}", run_id),
+        RunEvent::RunFailed {
+            run_id,
+            error,
+            failure_kind,
+        } => match failure_kind {
+            Some(kind) => format!(
+                "[run] failed run_id={} kind={} error={}",
+                run_id, kind, error
+            ),
+            None => format!("[run] failed run_id={} error={}", run_id, error),
+        },
+        RunEvent::RunCanceled { run_id, reason } => {
+            format!("[run] canceled run_id={} reason={}", run_id, reason)
+        }
     }
 }
 
@@ -332,8 +357,11 @@ pub fn render_gateway_status(
         render_key_value_block(
             "gateway metrics",
             vec![
+                ("queued_runs", metrics.queued_run_count.to_string()),
+                ("running_runs", metrics.running_run_count.to_string()),
                 ("completed_runs", metrics.completed_runs_total.to_string()),
                 ("failed_runs", metrics.failed_runs_total.to_string()),
+                ("canceled_runs", metrics.canceled_runs_total.to_string()),
                 (
                     "capability_jobs_total",
                     metrics.capability_jobs_total.to_string(),
@@ -381,6 +409,11 @@ pub fn render_inspect_report(
                 option_preview(trace.output.as_deref(), 120),
             ),
             ("error", option_preview(trace.error.as_deref(), 120)),
+            ("failure_kind", option_string(summary.failure_kind.clone())),
+            (
+                "lifecycle_status",
+                trace.lifecycle_status.label().to_owned(),
+            ),
         ],
     )];
 
@@ -401,6 +434,8 @@ pub fn render_inspect_report(
             ("active_extensions", summary.active_extensions.to_string()),
             ("used_extensions", summary.used_extensions.to_string()),
             ("compression", yes_no(summary.has_compression).to_owned()),
+            ("output_chunks", summary.output_chunks.to_string()),
+            ("integrity_warnings", summary.integrity_warnings.to_string()),
         ],
     ));
 
@@ -437,6 +472,18 @@ pub fn render_inspect_report(
         ));
     }
 
+    if let Some(failure) = &trace.failure {
+        blocks.push(render_key_value_block(
+            "run failure",
+            vec![
+                ("kind", failure.kind.clone()),
+                ("stage", failure.stage.clone()),
+                ("retryable", failure.retryable.to_string()),
+                ("message", truncate(&failure.message, 160)),
+            ],
+        ));
+    }
+
     if let Some(side_effect_summary) = &trace.side_effect_summary {
         blocks.push(render_key_value_block(
             "side-effect summary",
@@ -458,6 +505,13 @@ pub fn render_inspect_report(
 
     if !verbose {
         return Ok(join_blocks(blocks));
+    }
+
+    if !trace.integrity_warnings.is_empty() {
+        blocks.push(render_list_block(
+            "integrity warnings",
+            trace.integrity_warnings.clone(),
+        ));
     }
 
     if let Some(provider_failure) = &trace.provider_failure {
@@ -1072,10 +1126,15 @@ mod tests {
     #[test]
     fn formats_run_failure_lines() {
         let line = format_run_event(&RunEvent::RunFailed {
+            run_id: "run-1".to_owned(),
             error: "provider failure".to_owned(),
+            failure_kind: Some("provider".to_owned()),
         });
 
-        assert_eq!(line, "[run] failed: provider failure");
+        assert_eq!(
+            line,
+            "[run] failed run_id=run-1 kind=provider error=provider failure"
+        );
     }
 
     #[test]
@@ -1136,6 +1195,10 @@ mod tests {
             input: "hello".to_owned(),
             output: Some("world".to_owned()),
             effective_profile: None,
+            lifecycle_status: mosaic_inspect::RunLifecycleStatus::Success,
+            failure: None,
+            output_chunks: 1,
+            integrity_warnings: Vec::new(),
             provider_failure: None,
             provider_attempts: vec![],
             governance: None,

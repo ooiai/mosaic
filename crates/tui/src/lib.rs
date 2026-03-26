@@ -27,8 +27,8 @@ use mosaic_sdk::GatewayClient;
 #[cfg(test)]
 use mosaic_session_core::SessionStore;
 use mosaic_session_core::{
-    SessionGatewayMetadata, SessionRecord as StoredSessionRecord, SessionSummary, TranscriptMessage,
-    TranscriptRole,
+    SessionGatewayMetadata, SessionRecord as StoredSessionRecord, SessionSummary,
+    TranscriptMessage, TranscriptRole,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::runtime::Handle;
@@ -99,6 +99,14 @@ pub fn build_tui_event_buffer() -> TuiEventBuffer {
 
 pub fn build_tui_event_sink(buffer: TuiEventBuffer) -> Arc<dyn RunEventSink> {
     Arc::new(TuiEventSink::new(buffer))
+}
+
+fn session_state_from_run_label(status: &str) -> SessionState {
+    match status {
+        "queued" | "running" | "streaming" | "cancel_requested" => SessionState::Active,
+        "failed" | "canceled" => SessionState::Degraded,
+        _ => SessionState::Waiting,
+    }
 }
 
 pub fn run(start_in_resume: bool) -> io::Result<()> {
@@ -266,7 +274,11 @@ fn run_interactive_app(
                     AppAction::SwitchSession(session_id) => {
                         set_current_session_id(&current_session_id, &session_id);
                         if gateway_link.load(Ordering::Relaxed) {
-                            refresh_interactive_session_from_gateway(&mut app, &context, &session_id);
+                            refresh_interactive_session_from_gateway(
+                                &mut app,
+                                &context,
+                                &session_id,
+                            );
                         }
                     }
                 },
@@ -312,7 +324,7 @@ fn spawn_interactive_run(
                 input,
                 skill: None,
                 workflow: None,
-                session_id: Some(session_id),
+                session_id: Some(session_id.clone()),
                 profile: Some(profile),
                 ingress: Some(IngressTrace {
                     kind: "local_tui".to_owned(),
@@ -333,13 +345,17 @@ fn spawn_interactive_run(
                     Ok(submitted) => {
                         if let Err(err) = submitted.wait().await {
                             event_buffer.push(RunEvent::RunFailed {
+                                run_id: session_id.clone(),
                                 error: err.to_string(),
+                                failure_kind: Some("gateway".to_owned()),
                             });
                         }
                     }
                     Err(err) => {
                         event_buffer.push(RunEvent::RunFailed {
+                            run_id: session_id.clone(),
                             error: err.to_string(),
+                            failure_kind: Some("gateway".to_owned()),
                         });
                     }
                 }
@@ -352,7 +368,7 @@ fn spawn_interactive_run(
                 input,
                 skill: None,
                 workflow: None,
-                session_id: Some(session_id),
+                session_id: Some(session_id.clone()),
                 profile: Some(profile),
                 ingress: Some(IngressTrace {
                     kind: "remote_operator".to_owned(),
@@ -371,7 +387,9 @@ fn spawn_interactive_run(
             context.runtime_handle.spawn(async move {
                 if let Err(err) = client.submit_run(request).await {
                     event_buffer.push(RunEvent::RunFailed {
+                        run_id: session_id.clone(),
                         error: err.to_string(),
+                        failure_kind: Some("gateway".to_owned()),
                     });
                 }
             });
@@ -572,7 +590,9 @@ async fn forward_remote_runtime_events(
         Ok(stream) => stream,
         Err(err) => {
             event_buffer.push(RunEvent::RunFailed {
+                run_id: "gateway-stream".to_owned(),
                 error: err.to_string(),
+                failure_kind: Some("gateway".to_owned()),
             });
             return;
         }
@@ -584,7 +604,9 @@ async fn forward_remote_runtime_events(
             Ok(None) => break,
             Err(err) => {
                 event_buffer.push(RunEvent::RunFailed {
+                    run_id: "gateway-stream".to_owned(),
                     error: err.to_string(),
+                    failure_kind: Some("gateway".to_owned()),
                 });
                 break;
             }
@@ -631,7 +653,7 @@ fn local_session_summary_to_ui(summary: &SessionSummary) -> UiSessionRecord {
         route: summary.session_route.clone(),
         runtime: summary.provider_type.clone(),
         model: summary.model.clone(),
-        state: SessionState::Waiting,
+        state: session_state_from_run_label(summary.run.status.label()),
         unread: 0,
         draft: String::new(),
         memory_summary: summary.memory_summary_preview.clone(),
@@ -670,7 +692,7 @@ fn remote_session_summary_to_ui(summary: &SessionSummaryDto) -> UiSessionRecord 
         route: summary.session_route.clone(),
         runtime: summary.provider_type.clone(),
         model: summary.model.clone(),
-        state: SessionState::Waiting,
+        state: session_state_from_run_label(summary.run.status.label()),
         unread: 0,
         draft: String::new(),
         memory_summary: summary.memory_summary_preview.clone(),
@@ -698,6 +720,15 @@ fn remote_session_to_stored(session: &SessionDetailDto) -> StoredSessionRecord {
             route: session.gateway.route.clone(),
             last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
             last_correlation_id: session.gateway.last_correlation_id.clone(),
+        },
+        run: mosaic_session_core::SessionRunMetadata {
+            current_run_id: session.run.current_run_id.clone(),
+            current_gateway_run_id: session.run.current_gateway_run_id.clone(),
+            current_correlation_id: session.run.current_correlation_id.clone(),
+            status: session.run.status.clone(),
+            last_error: session.run.last_error.clone(),
+            last_failure_kind: session.run.last_failure_kind.clone(),
+            updated_at: session.run.updated_at,
         },
         channel_context: mosaic_session_core::SessionChannelMetadata {
             ingress_kind: session.channel_context.ingress_kind.clone(),
@@ -756,7 +787,9 @@ fn drain_run_events(app: &mut App, event_buffer: &TuiEventBuffer) -> bool {
     for event in event_buffer.drain() {
         if matches!(
             event,
-            RunEvent::RunFinished { .. } | RunEvent::RunFailed { .. }
+            RunEvent::RunFinished { .. }
+                | RunEvent::RunFailed { .. }
+                | RunEvent::RunCanceled { .. }
         ) {
             saw_terminal_event = true;
         }
@@ -771,7 +804,7 @@ fn drain_run_events(app: &mut App, event_buffer: &TuiEventBuffer) -> bool {
 mod tests {
     use chrono::Utc;
     use mosaic_control_protocol::{
-        HealthResponse, ReadinessResponse, SessionDetailDto, SessionGatewayDto,
+        HealthResponse, ReadinessResponse, SessionDetailDto, SessionGatewayDto, SessionRunDto,
         TranscriptMessageDto, TranscriptRoleDto,
     };
     use mosaic_runtime::events::{RunEvent, RunEventSink};
@@ -815,12 +848,14 @@ mod tests {
         let sink = TuiEventSink::new(buffer.clone());
 
         sink.emit(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
             input: "hello".to_owned(),
         });
 
         assert_eq!(
             buffer.drain(),
             vec![RunEvent::RunStarted {
+                run_id: "run-1".to_owned(),
                 input: "hello".to_owned(),
             }]
         );
@@ -833,9 +868,11 @@ mod tests {
         let buffer = TuiEventBuffer::default();
 
         buffer.push(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
             input: "hello".to_owned(),
         });
         buffer.push(RunEvent::RunFinished {
+            run_id: "run-1".to_owned(),
             output_preview: "done".to_owned(),
         });
 
@@ -911,6 +948,15 @@ mod tests {
             provider_type: "mock".to_owned(),
             model: "mock".to_owned(),
             last_run_id: Some("run-1".to_owned()),
+            run: SessionRunDto {
+                current_run_id: Some("run-1".to_owned()),
+                current_gateway_run_id: Some("gateway-run-1".to_owned()),
+                current_correlation_id: Some("corr-1".to_owned()),
+                status: Default::default(),
+                last_error: None,
+                last_failure_kind: None,
+                updated_at: Some(now),
+            },
             channel_context: mosaic_control_protocol::SessionChannelDto {
                 ingress_kind: Some("telegram_webhook".to_owned()),
                 channel: Some("telegram".to_owned()),

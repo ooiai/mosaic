@@ -11,7 +11,8 @@ use chrono::Utc;
 use mosaic_inspect::{
     CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace, ExtensionTrace,
     ExtensionUsageTrace, IngressTrace, MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace,
-    ProviderAttemptTrace, ProviderFailureTrace, RunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
+    ProviderAttemptTrace, ProviderFailureTrace, RunFailureTrace, RunTrace, SkillTrace, ToolTrace,
+    WorkflowStepTrace,
 };
 use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
@@ -74,6 +75,7 @@ pub struct RuntimeContext {
 }
 
 pub struct RunRequest {
+    pub run_id: Option<String>,
     pub system: Option<String>,
     pub input: String,
     pub skill: Option<String>,
@@ -139,29 +141,140 @@ impl AgentRuntime {
         format!("{truncated}...")
     }
 
+    fn failure_trace(trace: &RunTrace, error: &anyhow::Error) -> RunFailureTrace {
+        if let Some(provider_error) = error.downcast_ref::<ProviderError>() {
+            return RunFailureTrace {
+                kind: "provider".to_owned(),
+                stage: if trace.workflow_name.is_some() {
+                    "workflow_provider"
+                } else {
+                    "provider"
+                }
+                .to_owned(),
+                retryable: provider_error.retryable,
+                message: provider_error.public_message().to_owned(),
+            };
+        }
+
+        if let Some(provider_failure) = trace.provider_failure.as_ref() {
+            return RunFailureTrace {
+                kind: "provider".to_owned(),
+                stage: if trace.workflow_name.is_some() {
+                    "workflow_provider"
+                } else {
+                    "provider"
+                }
+                .to_owned(),
+                retryable: provider_failure.retryable,
+                message: provider_failure.message.clone(),
+            };
+        }
+
+        if trace
+            .capability_invocations
+            .iter()
+            .any(|invocation| invocation.status != "success")
+            || trace.tool_calls.iter().any(|call| call.output.is_some())
+        {
+            return RunFailureTrace {
+                kind: "tool".to_owned(),
+                stage: if trace.workflow_name.is_some() {
+                    "workflow_tool"
+                } else {
+                    "tool"
+                }
+                .to_owned(),
+                retryable: true,
+                message: error.to_string(),
+            };
+        }
+
+        if trace.step_traces.iter().any(|step| step.error.is_some()) {
+            return RunFailureTrace {
+                kind: "workflow".to_owned(),
+                stage: "workflow".to_owned(),
+                retryable: true,
+                message: error.to_string(),
+            };
+        }
+
+        let message = error.to_string();
+        let lower = message.to_ascii_lowercase();
+        let (kind, stage, retryable) =
+            if lower.contains("memory") || lower.contains("compressed context") {
+                ("memory", "memory", true)
+            } else if lower.contains("session") || lower.contains("transcript") {
+                ("session", "session", true)
+            } else if lower.contains("cannot select both skill and workflow")
+                || lower.contains("workflow not found")
+                || lower.contains("skill not found")
+                || lower.contains("unknown provider profile")
+            {
+                ("validation", "validation", false)
+            } else {
+                ("runtime", "runtime", false)
+            };
+
+        RunFailureTrace {
+            kind: kind.to_owned(),
+            stage: stage.to_owned(),
+            retryable,
+            message,
+        }
+    }
+
+    fn emit_output_deltas(&self, trace: &mut RunTrace, output: &str) {
+        let mut chars = output.chars();
+        let mut emitted = 0usize;
+        loop {
+            let chunk: String = chars.by_ref().take(80).collect();
+            if chunk.is_empty() {
+                break;
+            }
+            emitted += chunk.chars().count();
+            trace.record_output_chunk();
+            self.emit(RunEvent::OutputDelta {
+                run_id: trace.run_id.clone(),
+                chunk,
+                accumulated_chars: emitted,
+            });
+        }
+    }
+
     fn fail_run<T>(
         &self,
         mut trace: RunTrace,
         error: anyhow::Error,
     ) -> std::result::Result<T, RunError> {
         let message = error.to_string();
+        let failure = Self::failure_trace(&trace, &error);
 
         warn!(
             run_id = %trace.run_id,
             session_id = ?trace.session_id,
+            failure_kind = %failure.kind,
+            failure_stage = %failure.stage,
             error = %message,
             "runtime run failed"
         );
+        trace.bind_failure(failure.clone());
+        trace.finish_err(message.clone());
         self.emit(RunEvent::RunFailed {
-            error: message.clone(),
+            run_id: trace.run_id.clone(),
+            error: message,
+            failure_kind: Some(failure.kind),
         });
-        trace.finish_err(message);
 
         Err(RunError::new(error, trace))
     }
 
     pub async fn run(&self, req: RunRequest) -> std::result::Result<RunResult, RunError> {
-        let mut trace = RunTrace::new(req.input.clone());
+        let mut trace = RunTrace::new_with_id(
+            req.run_id
+                .clone()
+                .unwrap_or_else(|| Uuid::new_v4().to_string()),
+            req.input.clone(),
+        );
         info!(
             run_id = %trace.run_id,
             session_id = ?req.session_id,
@@ -169,9 +282,6 @@ impl AgentRuntime {
             workflow = ?req.workflow,
             "runtime run started"
         );
-        self.emit(RunEvent::RunStarted {
-            input: trace.input.clone(),
-        });
 
         if req.skill.is_some() && req.workflow.is_some() {
             return self.fail_run(trace, anyhow!("cannot select both skill and workflow"));
@@ -191,6 +301,11 @@ impl AgentRuntime {
             Ok(session) => session,
             Err(err) => return self.fail_run(trace, err),
         };
+        trace.mark_running();
+        self.emit(RunEvent::RunStarted {
+            run_id: trace.run_id.clone(),
+            input: trace.input.clone(),
+        });
 
         let (profile, selection_scope, selection_reason) = if req.skill.is_some() {
             (
@@ -313,8 +428,12 @@ impl AgentRuntime {
             }
         }
 
-        self.emit(RunEvent::FinalAnswerReady);
+        self.emit_output_deltas(&mut trace, &output);
+        self.emit(RunEvent::FinalAnswerReady {
+            run_id: trace.run_id.clone(),
+        });
         self.emit(RunEvent::RunFinished {
+            run_id: trace.run_id.clone(),
             output_preview: Self::truncate_preview(&output, 120),
         });
         trace.finish_ok(output.clone());
@@ -376,8 +495,12 @@ impl AgentRuntime {
             }
         }
 
-        self.emit(RunEvent::FinalAnswerReady);
+        self.emit_output_deltas(&mut trace, &output);
+        self.emit(RunEvent::FinalAnswerReady {
+            run_id: trace.run_id.clone(),
+        });
         self.emit(RunEvent::RunFinished {
+            run_id: trace.run_id.clone(),
             output_preview: Self::truncate_preview(&output, 120),
         });
         trace.finish_ok(output.clone());
@@ -483,8 +606,12 @@ impl AgentRuntime {
             }
         }
 
-        self.emit(RunEvent::FinalAnswerReady);
+        self.emit_output_deltas(&mut trace, &output);
+        self.emit(RunEvent::FinalAnswerReady {
+            run_id: trace.run_id.clone(),
+        });
         self.emit(RunEvent::RunFinished {
+            run_id: trace.run_id.clone(),
             output_preview: Self::truncate_preview(&output, 120),
         });
         trace.finish_ok(output.clone());
@@ -2597,9 +2724,11 @@ mod tests {
                 RunEvent::CapabilityJobFinished { .. } => "CapabilityJobFinished",
                 RunEvent::CapabilityJobFailed { .. } => "CapabilityJobFailed",
                 RunEvent::PermissionCheckFailed { .. } => "PermissionCheckFailed",
-                RunEvent::FinalAnswerReady => "FinalAnswerReady",
+                RunEvent::OutputDelta { .. } => "OutputDelta",
+                RunEvent::FinalAnswerReady { .. } => "FinalAnswerReady",
                 RunEvent::RunFinished { .. } => "RunFinished",
                 RunEvent::RunFailed { .. } => "RunFailed",
+                RunEvent::RunCanceled { .. } => "RunCanceled",
             })
             .collect()
     }
@@ -2640,6 +2769,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("You are helpful.".to_owned()),
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
@@ -2666,6 +2796,7 @@ mod tests {
             vec![
                 "RunStarted",
                 "ProviderRequest",
+                "OutputDelta",
                 "FinalAnswerReady",
                 "RunFinished"
             ]
@@ -2682,6 +2813,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("You are helpful.".to_owned()),
                 input: "hello ingress".to_owned(),
                 skill: None,
@@ -2750,6 +2882,7 @@ mod tests {
 
         runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("You are helpful.".to_owned()),
                 input: "hello".to_owned(),
                 skill: None,
@@ -2763,6 +2896,7 @@ mod tests {
 
         runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("You are helpful.".to_owned()),
                 input: "second turn".to_owned(),
                 skill: None,
@@ -2806,6 +2940,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("Use tools when needed.".to_owned()),
                 input: "What time is it now?".to_owned(),
                 skill: None,
@@ -2834,6 +2969,7 @@ mod tests {
                 "CapabilityJobFinished",
                 "ToolFinished",
                 "ProviderRequest",
+                "OutputDelta",
                 "FinalAnswerReady",
                 "RunFinished",
             ]
@@ -2864,6 +3000,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("Use tools when needed.".to_owned()),
                 input: "Read a file for me.".to_owned(),
                 skill: None,
@@ -2969,6 +3106,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("Use tools when needed.".to_owned()),
                 input: "Read a file for me.".to_owned(),
                 skill: None,
@@ -3036,6 +3174,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: None,
                 input: "Rust async enables efficient concurrency.".to_owned(),
                 skill: None,
@@ -3086,6 +3225,8 @@ mod tests {
                 "SkillFinished",
                 "WorkflowStepFinished",
                 "WorkflowFinished",
+                "OutputDelta",
+                "OutputDelta",
                 "FinalAnswerReady",
                 "RunFinished",
             ]
@@ -3143,6 +3284,7 @@ mod tests {
 
         let err = runtime
             .run(RunRequest {
+                run_id: None,
                 system: None,
                 input: "Need the current time".to_owned(),
                 skill: None,
@@ -3178,6 +3320,7 @@ mod tests {
 
         let err = runtime
             .run(RunRequest {
+                run_id: None,
                 system: None,
                 input: "Explain Mosaic.".to_owned(),
                 skill: None,
@@ -3226,6 +3369,7 @@ mod tests {
 
         let err = runtime
             .run(RunRequest {
+                run_id: None,
                 system: None,
                 input: "boom".to_owned(),
                 skill: Some("explode".to_owned()),
@@ -3270,6 +3414,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: None,
                 input: "Rust async enables concurrency.".to_owned(),
                 skill: Some("summarize".to_owned()),
@@ -3321,6 +3466,7 @@ mod tests {
 
         runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("You are helpful.".to_owned()),
                 input: "first turn".to_owned(),
                 skill: None,
@@ -3334,6 +3480,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("You are helpful.".to_owned()),
                 input: "second turn should reuse compressed context".to_owned(),
                 skill: None,
@@ -3388,6 +3535,7 @@ mod tests {
 
         let result = runtime
             .run(RunRequest {
+                run_id: None,
                 system: Some("You are helpful.".to_owned()),
                 input: "Please use [[session:source-session]] for context".to_owned(),
                 skill: None,

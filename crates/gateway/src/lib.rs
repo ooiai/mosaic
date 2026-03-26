@@ -29,14 +29,14 @@ use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
     ErrorResponse, EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
     GatewayAuditEventDto, GatewayEvent, HealthResponse, InboundMessage, IncidentBundleDto,
-    MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunResponse, RunSubmission,
-    SessionChannelDto, SessionDetailDto, SessionGatewayDto, SessionSummaryDto,
-    TranscriptMessageDto, TranscriptRoleDto, WebhookJobRequest,
+    MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunDetailDto, RunResponse,
+    RunSubmission, RunSummaryDto, SessionChannelDto, SessionDetailDto, SessionGatewayDto,
+    SessionRunDto, SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto, WebhookJobRequest,
 };
 use mosaic_extension_core::{
     ExtensionStatus, ExtensionValidationReport, load_extension_set, validate_extension_set,
 };
-use mosaic_inspect::{ExtensionTrace, GovernanceTrace, IngressTrace, RunTrace};
+use mosaic_inspect::{ExtensionTrace, GovernanceTrace, IngressTrace, RunLifecycleStatus, RunTrace};
 use mosaic_mcp_core::McpServerManager;
 use mosaic_memory::{MemoryPolicy, MemoryStore};
 use mosaic_node_protocol::{FileNodeStore, NodeCapabilityDeclaration, NodeRegistration};
@@ -53,7 +53,7 @@ use mosaic_tool_core::ToolRegistry;
 use mosaic_workflow::WorkflowRegistry;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -187,6 +187,7 @@ impl std::error::Error for GatewayRunError {}
 struct GatewayMetricsState {
     completed_runs_total: u64,
     failed_runs_total: u64,
+    canceled_runs_total: u64,
     capability_jobs_total: u64,
     audit_events_total: u64,
     auth_denials_total: u64,
@@ -239,6 +240,209 @@ struct GatewayAuditLog {
     root: PathBuf,
     capacity: usize,
     events: Mutex<VecDeque<GatewayAuditEventDto>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredRunRecord {
+    gateway_run_id: String,
+    correlation_id: String,
+    run_id: String,
+    session_id: Option<String>,
+    session_route: String,
+    #[serde(default)]
+    status: RunLifecycleStatus,
+    requested_profile: Option<String>,
+    effective_profile: Option<String>,
+    effective_provider_type: Option<String>,
+    effective_model: Option<String>,
+    skill: Option<String>,
+    workflow: Option<String>,
+    retry_of: Option<String>,
+    created_at: chrono::DateTime<Utc>,
+    updated_at: chrono::DateTime<Utc>,
+    finished_at: Option<chrono::DateTime<Utc>>,
+    input_preview: String,
+    output_preview: Option<String>,
+    error: Option<String>,
+    failure_kind: Option<String>,
+    trace_path: Option<String>,
+    ingress: Option<IngressTrace>,
+    submission: RunSubmission,
+}
+
+impl StoredRunRecord {
+    fn new(
+        meta: &GatewayRunMeta,
+        request: &RunSubmission,
+        resolved_profile: Option<String>,
+        retry_of: Option<String>,
+    ) -> Self {
+        let now = Utc::now();
+        Self {
+            gateway_run_id: meta.gateway_run_id.clone(),
+            correlation_id: meta.correlation_id.clone(),
+            run_id: meta.run_id.clone(),
+            session_id: meta.session_id.clone(),
+            session_route: meta.session_route.clone(),
+            status: RunLifecycleStatus::Queued,
+            requested_profile: resolved_profile,
+            effective_profile: None,
+            effective_provider_type: None,
+            effective_model: None,
+            skill: request.skill.clone(),
+            workflow: request.workflow.clone(),
+            retry_of,
+            created_at: now,
+            updated_at: now,
+            finished_at: None,
+            input_preview: truncate_preview(&request.input, 160),
+            output_preview: None,
+            error: None,
+            failure_kind: None,
+            trace_path: None,
+            ingress: request.ingress.clone(),
+            submission: request.clone(),
+        }
+    }
+
+    fn set_status(&mut self, status: RunLifecycleStatus) {
+        self.status = status;
+        self.updated_at = Utc::now();
+        if status.is_terminal() {
+            self.finished_at = Some(self.updated_at);
+        }
+    }
+
+    fn set_error(&mut self, error: Option<String>, failure_kind: Option<String>) {
+        self.error = error;
+        self.failure_kind = failure_kind;
+        self.updated_at = Utc::now();
+    }
+
+    fn update_from_trace(&mut self, trace: &RunTrace, trace_path: Option<&FsPath>) {
+        self.run_id = trace.run_id.clone();
+        self.status = trace.lifecycle_status();
+        self.updated_at = Utc::now();
+        self.finished_at = trace.finished_at;
+        self.output_preview = trace
+            .output
+            .as_deref()
+            .map(|output| truncate_preview(output, 160));
+        self.error = trace.error.clone();
+        self.failure_kind = trace.failure.as_ref().map(|failure| failure.kind.clone());
+        self.trace_path = trace_path.map(|path| path.display().to_string());
+        if let Some(profile) = trace.effective_profile.as_ref() {
+            self.effective_profile = Some(profile.profile.clone());
+            self.effective_provider_type = Some(profile.provider_type.clone());
+            self.effective_model = Some(profile.model.clone());
+        }
+    }
+
+    fn summary_dto(&self) -> RunSummaryDto {
+        RunSummaryDto {
+            gateway_run_id: self.gateway_run_id.clone(),
+            correlation_id: self.correlation_id.clone(),
+            run_id: self.run_id.clone(),
+            session_id: self.session_id.clone(),
+            session_route: self.session_route.clone(),
+            status: self.status,
+            requested_profile: self.requested_profile.clone(),
+            effective_profile: self.effective_profile.clone(),
+            effective_provider_type: self.effective_provider_type.clone(),
+            effective_model: self.effective_model.clone(),
+            skill: self.skill.clone(),
+            workflow: self.workflow.clone(),
+            retry_of: self.retry_of.clone(),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            finished_at: self.finished_at,
+            input_preview: self.input_preview.clone(),
+            output_preview: self.output_preview.clone(),
+            error: self.error.clone(),
+            failure_kind: self.failure_kind.clone(),
+            trace_path: self.trace_path.clone(),
+        }
+    }
+
+    fn detail_dto(&self) -> RunDetailDto {
+        RunDetailDto {
+            summary: self.summary_dto(),
+            ingress: self.ingress.clone(),
+            submission: self.submission.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct GatewayRunStore {
+    root: PathBuf,
+}
+
+impl GatewayRunStore {
+    fn new(runs_dir: PathBuf) -> Self {
+        Self {
+            root: runs_dir.join("registry"),
+        }
+    }
+
+    fn ensure_root(&self) -> Result<()> {
+        fs::create_dir_all(&self.root)?;
+        Ok(())
+    }
+
+    fn path_for(&self, gateway_run_id: &str) -> PathBuf {
+        self.root.join(format!("{gateway_run_id}.json"))
+    }
+
+    fn save(&self, record: &StoredRunRecord) -> Result<()> {
+        self.ensure_root()?;
+        fs::write(
+            self.path_for(&record.gateway_run_id),
+            serde_json::to_vec_pretty(record)?,
+        )?;
+        Ok(())
+    }
+
+    fn load_gateway(&self, gateway_run_id: &str) -> Result<Option<StoredRunRecord>> {
+        let path = self.path_for(gateway_run_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(serde_json::from_str(&fs::read_to_string(path)?)?))
+    }
+
+    fn list(&self) -> Result<Vec<StoredRunRecord>> {
+        self.ensure_root()?;
+        let mut records = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            records.push(serde_json::from_str::<StoredRunRecord>(
+                &fs::read_to_string(path)?,
+            )?);
+        }
+        records.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        Ok(records)
+    }
+
+    fn resolve(&self, identifier: &str) -> Result<Option<StoredRunRecord>> {
+        if let Some(record) = self.load_gateway(identifier)? {
+            return Ok(Some(record));
+        }
+
+        Ok(self
+            .list()?
+            .into_iter()
+            .find(|record| record.correlation_id == identifier || record.run_id == identifier))
+    }
+}
+
+#[derive(Clone)]
+struct ActiveRunHandle {
+    cancel: watch::Sender<bool>,
 }
 
 impl GatewayAuditLog {
@@ -326,6 +530,8 @@ struct GatewayState {
     reload_source: Option<GatewayReloadSource>,
     events: broadcast::Sender<GatewayEventEnvelope>,
     capability_jobs: Arc<Mutex<BTreeMap<String, CapabilityJobDto>>>,
+    run_store: Arc<GatewayRunStore>,
+    active_runs: Mutex<BTreeMap<String, ActiveRunHandle>>,
     replay_window: Mutex<GatewayReplayWindow>,
     audit_log: Arc<GatewayAuditLog>,
     metrics: Mutex<GatewayMetricsState>,
@@ -354,6 +560,7 @@ impl GatewayHandle {
         let replay_capacity = components.audit.event_replay_window.max(1);
         let audit_capacity = replay_capacity.max(256);
         let audit_root = components.audit_root.clone();
+        let runs_dir = components.runs_dir.clone();
         Self {
             inner: Arc::new(GatewayState {
                 runtime_handle,
@@ -361,6 +568,8 @@ impl GatewayHandle {
                 reload_source,
                 events,
                 capability_jobs: Arc::new(Mutex::new(BTreeMap::new())),
+                run_store: Arc::new(GatewayRunStore::new(runs_dir)),
+                active_runs: Mutex::new(BTreeMap::new()),
                 replay_window: Mutex::new(GatewayReplayWindow::new(replay_capacity)),
                 audit_log: Arc::new(GatewayAuditLog::new(audit_root, audit_capacity)),
                 metrics: Mutex::new(GatewayMetricsState::default()),
@@ -442,6 +651,7 @@ impl GatewayHandle {
             .replay_window
             .lock()
             .expect("replay window lock should not be poisoned");
+        let runs = self.inner.run_store.list().unwrap_or_default();
         MetricsResponse {
             transport: "http+sse".to_owned(),
             deployment_profile: components.deployment.profile.clone(),
@@ -457,8 +667,27 @@ impl GatewayHandle {
                 .lock()
                 .expect("capability jobs lock should not be poisoned")
                 .len(),
+            queued_run_count: runs
+                .iter()
+                .filter(|record| {
+                    matches!(
+                        record.status,
+                        RunLifecycleStatus::Queued | RunLifecycleStatus::CancelRequested
+                    )
+                })
+                .count(),
+            running_run_count: runs
+                .iter()
+                .filter(|record| {
+                    matches!(
+                        record.status,
+                        RunLifecycleStatus::Running | RunLifecycleStatus::Streaming
+                    )
+                })
+                .count(),
             completed_runs_total: metrics.completed_runs_total,
             failed_runs_total: metrics.failed_runs_total,
+            canceled_runs_total: metrics.canceled_runs_total,
             capability_jobs_total: metrics.capability_jobs_total,
             audit_events_total: metrics.audit_events_total,
             auth_denials_total: metrics.auth_denials_total,
@@ -495,6 +724,7 @@ impl GatewayHandle {
             },
             audit_events: self.inner.audit_log.incident_events_for(&trace),
             metrics: self.metrics(),
+            run: self.load_run(identifier)?,
             trace,
         };
         let path = self.inner.audit_log.save_incident_bundle(&bundle)?;
@@ -820,9 +1050,96 @@ impl GatewayHandle {
         }
     }
 
+    pub fn list_runs(&self) -> Result<Vec<RunSummaryDto>> {
+        Ok(self
+            .inner
+            .run_store
+            .list()?
+            .into_iter()
+            .map(|record| record.summary_dto())
+            .collect())
+    }
+
+    pub fn load_run(&self, identifier: &str) -> Result<Option<RunDetailDto>> {
+        Ok(self
+            .inner
+            .run_store
+            .resolve(identifier)?
+            .map(|record| record.detail_dto()))
+    }
+
+    pub fn cancel_run(&self, identifier: &str) -> Result<RunDetailDto> {
+        let mut record = self
+            .inner
+            .run_store
+            .resolve(identifier)?
+            .ok_or_else(|| anyhow!("run not found: {identifier}"))?;
+        if record.status.is_terminal() {
+            bail!("run is already terminal: {}", record.gateway_run_id);
+        }
+
+        let handle = self
+            .inner
+            .active_runs
+            .lock()
+            .expect("active run lock should not be poisoned")
+            .get(&record.gateway_run_id)
+            .cloned()
+            .ok_or_else(|| anyhow!("run is not active: {}", record.gateway_run_id))?;
+        let _ = handle.cancel.send(true);
+        record.set_status(RunLifecycleStatus::CancelRequested);
+        record.set_error(
+            Some("cancel requested by operator".to_owned()),
+            Some("canceled".to_owned()),
+        );
+        self.inner.run_store.save(&record)?;
+        sync_session_run_state(
+            self.inner.as_ref(),
+            &record,
+            record.status,
+            Some(record.run_id.clone()),
+            record.error.clone(),
+            record.failure_kind.clone(),
+        );
+        self.record_audit_event(
+            "run.cancel_requested",
+            "accepted",
+            format!("cancel requested for {}", record.gateway_run_id),
+            record.session_id.clone(),
+            Some(record.gateway_run_id.clone()),
+            Some(record.correlation_id.clone()),
+            record.ingress.as_ref(),
+            record.trace_path.clone(),
+            false,
+        );
+        self.emit(run_record_envelope(&record));
+        Ok(record.detail_dto())
+    }
+
+    pub fn retry_run(&self, identifier: &str) -> Result<GatewaySubmittedRun> {
+        let record = self
+            .inner
+            .run_store
+            .resolve(identifier)?
+            .ok_or_else(|| anyhow!("run not found: {identifier}"))?;
+        if !record.status.is_terminal() {
+            bail!("run is still active: {}", record.gateway_run_id);
+        }
+        self.submit_run_with_retry_of(record.submission.clone(), Some(record.gateway_run_id))
+    }
+
     pub fn submit_run(&self, request: GatewayRunRequest) -> Result<GatewaySubmittedRun> {
+        self.submit_run_with_retry_of(request, None)
+    }
+
+    fn submit_run_with_retry_of(
+        &self,
+        request: GatewayRunRequest,
+        retry_of: Option<String>,
+    ) -> Result<GatewaySubmittedRun> {
         let gateway_run_id = Uuid::new_v4().to_string();
         let correlation_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4().to_string();
         let components = self.snapshot_components();
         let session_route =
             self.resolve_session_route(request.session_id.as_deref(), request.ingress.as_ref())?;
@@ -833,10 +1150,22 @@ impl GatewayHandle {
         let meta = GatewayRunMeta {
             gateway_run_id: gateway_run_id.clone(),
             correlation_id: correlation_id.clone(),
+            run_id: run_id.clone(),
             session_id: request.session_id.clone(),
             session_route: session_route.clone(),
             ingress: request.ingress.clone(),
         };
+        let record =
+            StoredRunRecord::new(&meta, &request, Some(resolved_profile.clone()), retry_of);
+        self.inner.run_store.save(&record)?;
+        sync_session_run_state(
+            self.inner.as_ref(),
+            &record,
+            RunLifecycleStatus::Queued,
+            Some(run_id.clone()),
+            None,
+            None,
+        );
 
         self.record_audit_event(
             "run.submitted",
@@ -849,13 +1178,26 @@ impl GatewayHandle {
             Some(session_route.clone()),
             components.audit.redact_inputs,
         );
+        self.emit(run_record_envelope(&record));
         self.emit(meta.envelope(GatewayEvent::RunSubmitted {
             input: request.input.clone(),
             profile: resolved_profile,
             ingress: request.ingress.clone(),
         }));
 
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        self.inner
+            .active_runs
+            .lock()
+            .expect("active run lock should not be poisoned")
+            .insert(
+                gateway_run_id.clone(),
+                ActiveRunHandle { cancel: cancel_tx },
+            );
+
         let state = self.inner.clone();
+        let session_id_for_handle = request.session_id.clone();
+        let request_for_task = request.clone();
         let join = self.inner.runtime_handle.spawn(async move {
             let event_sink: SharedRunEventSink = Arc::new(GatewayRunEventSink {
                 state: state.clone(),
@@ -868,6 +1210,7 @@ impl GatewayHandle {
                 .clone();
             let runtime = AgentRuntime::new(components.runtime_context(event_sink));
             let run_request = RunRequest {
+                run_id: Some(meta.run_id.clone()),
                 system: request.system,
                 input: request.input,
                 skill: request.skill,
@@ -877,13 +1220,22 @@ impl GatewayHandle {
                 ingress: meta.ingress.clone(),
             };
 
-            finalize_run(state, meta, runtime.run(run_request).await)
+            let outcome = tokio::select! {
+                _ = wait_for_cancellation(cancel_rx) => finalize_canceled(state.clone(), meta.clone(), &request_for_task),
+                result = runtime.run(run_request) => finalize_run(state.clone(), meta.clone(), result),
+            };
+            state
+                .active_runs
+                .lock()
+                .expect("active run lock should not be poisoned")
+                .remove(&meta.gateway_run_id);
+            outcome
         });
 
         Ok(GatewaySubmittedRun {
             gateway_run_id,
             correlation_id,
-            session_id: request.session_id,
+            session_id: session_id_for_handle,
             session_route,
             join,
         })
@@ -989,6 +1341,7 @@ impl GatewaySubmittedRun {
 struct GatewayRunMeta {
     gateway_run_id: String,
     correlation_id: String,
+    run_id: String,
     session_id: Option<String>,
     session_route: String,
     ingress: Option<IngressTrace>,
@@ -1005,6 +1358,72 @@ impl GatewayRunMeta {
             event,
         }
     }
+}
+
+fn run_record_envelope(record: &StoredRunRecord) -> GatewayEventEnvelope {
+    GatewayEventEnvelope {
+        gateway_run_id: record.gateway_run_id.clone(),
+        correlation_id: record.correlation_id.clone(),
+        session_id: record.session_id.clone(),
+        session_route: record.session_route.clone(),
+        emitted_at: Utc::now(),
+        event: GatewayEvent::RunUpdated {
+            run: record.summary_dto(),
+        },
+    }
+}
+
+async fn wait_for_cancellation(mut receiver: watch::Receiver<bool>) {
+    loop {
+        if *receiver.borrow() {
+            break;
+        }
+        if receiver.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+fn sync_session_run_state(
+    state: &GatewayState,
+    record: &StoredRunRecord,
+    status: RunLifecycleStatus,
+    run_id: Option<String>,
+    last_error: Option<String>,
+    last_failure_kind: Option<String>,
+) {
+    let Some(session_id) = record.session_id.as_deref() else {
+        return;
+    };
+    let components = state.snapshot_components();
+    let Ok(Some(mut session)) = components.session_store.load(session_id) else {
+        return;
+    };
+    session.set_gateway_binding(
+        record.session_route.clone(),
+        record.gateway_run_id.clone(),
+        record.correlation_id.clone(),
+    );
+    session.set_run_state(
+        status,
+        run_id,
+        Some(record.gateway_run_id.clone()),
+        Some(record.correlation_id.clone()),
+        last_error,
+        last_failure_kind,
+    );
+    let _ = components.session_store.save(&session);
+}
+
+fn update_run_record(
+    state: &GatewayState,
+    gateway_run_id: &str,
+    update: impl FnOnce(&mut StoredRunRecord),
+) -> Option<StoredRunRecord> {
+    let mut record = state.run_store.load_gateway(gateway_run_id).ok()??;
+    update(&mut record);
+    state.run_store.save(&record).ok()?;
+    Some(record)
 }
 
 struct GatewayRunEventSink {
@@ -1033,6 +1452,60 @@ impl RunEventSink for GatewayRunEventSink {
                     .envelope(GatewayEvent::CapabilityJobUpdated { job }),
             );
         }
+
+        let updated_record = match &event {
+            RunEvent::RunStarted { run_id, .. } => {
+                update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
+                    record.run_id = run_id.clone();
+                    record.set_status(RunLifecycleStatus::Running);
+                    record.set_error(None, None);
+                })
+            }
+            RunEvent::OutputDelta { .. } | RunEvent::FinalAnswerReady { .. } => {
+                update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
+                    record.set_status(RunLifecycleStatus::Streaming)
+                })
+            }
+            RunEvent::RunFinished {
+                run_id,
+                output_preview,
+            } => update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
+                record.run_id = run_id.clone();
+                record.set_status(RunLifecycleStatus::Success);
+                record.output_preview = Some(output_preview.clone());
+                record.set_error(None, None);
+            }),
+            RunEvent::RunFailed {
+                run_id,
+                error,
+                failure_kind,
+            } => update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
+                record.run_id = run_id.clone();
+                record.set_status(RunLifecycleStatus::Failed);
+                record.set_error(Some(error.clone()), failure_kind.clone());
+            }),
+            RunEvent::RunCanceled { run_id, reason } => {
+                update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
+                    record.run_id = run_id.clone();
+                    record.set_status(RunLifecycleStatus::Canceled);
+                    record.set_error(Some(reason.clone()), Some("canceled".to_owned()));
+                })
+            }
+            _ => None,
+        };
+
+        if let Some(record) = updated_record {
+            sync_session_run_state(
+                self.state.as_ref(),
+                &record,
+                record.status,
+                Some(record.run_id.clone()),
+                record.error.clone(),
+                record.failure_kind.clone(),
+            );
+            broadcast_envelope(self.state.as_ref(), run_record_envelope(&record));
+        }
+
         broadcast_envelope(
             self.state.as_ref(),
             self.meta.envelope(GatewayEvent::Runtime(event)),
@@ -1400,7 +1873,6 @@ fn finalize_success(
         event_replay_window: components.audit.event_replay_window,
         redact_inputs: components.audit.redact_inputs,
     });
-    let session_summary = update_gateway_session_metadata(&state, &meta);
     let trace_path = trace
         .save_to_dir(&components.runs_dir)
         .map_err(|err| GatewayRunError {
@@ -1411,6 +1883,27 @@ fn finalize_success(
             correlation_id: meta.correlation_id.clone(),
             session_route: meta.session_route.clone(),
         })?;
+    if let Some(record) = update_run_record(state.as_ref(), &meta.gateway_run_id, |record| {
+        record.update_from_trace(&trace, Some(&trace_path));
+    }) {
+        sync_session_run_state(
+            state.as_ref(),
+            &record,
+            RunLifecycleStatus::Success,
+            Some(trace.run_id.clone()),
+            None,
+            None,
+        );
+        broadcast_envelope(state.as_ref(), run_record_envelope(&record));
+    }
+    let session_summary = update_gateway_session_metadata(
+        &state,
+        &meta,
+        Some(trace.run_id.clone()),
+        RunLifecycleStatus::Success,
+        None,
+        None,
+    );
 
     increment_metric(state.as_ref(), |metrics| metrics.completed_runs_total += 1);
     let output_preview = truncate_preview(&result.output, 120);
@@ -1477,7 +1970,6 @@ fn finalize_failure(
         event_replay_window: components.audit.event_replay_window,
         redact_inputs: components.audit.redact_inputs,
     });
-    let session_summary = update_gateway_session_metadata(&state, &meta);
     let trace_path = trace
         .save_to_dir(&components.runs_dir)
         .map_err(|save_err| GatewayRunError {
@@ -1488,6 +1980,28 @@ fn finalize_failure(
             correlation_id: meta.correlation_id.clone(),
             session_route: meta.session_route.clone(),
         })?;
+    let failure_kind = trace.failure.as_ref().map(|failure| failure.kind.clone());
+    if let Some(record) = update_run_record(state.as_ref(), &meta.gateway_run_id, |record| {
+        record.update_from_trace(&trace, Some(&trace_path));
+    }) {
+        sync_session_run_state(
+            state.as_ref(),
+            &record,
+            RunLifecycleStatus::Failed,
+            Some(trace.run_id.clone()),
+            trace.error.clone(),
+            failure_kind.clone(),
+        );
+        broadcast_envelope(state.as_ref(), run_record_envelope(&record));
+    }
+    let session_summary = update_gateway_session_metadata(
+        &state,
+        &meta,
+        Some(trace.run_id.clone()),
+        RunLifecycleStatus::Failed,
+        trace.error.clone(),
+        failure_kind.clone(),
+    );
 
     increment_metric(state.as_ref(), |metrics| metrics.failed_runs_total += 1);
     let public_error = public_error_message(&source);
@@ -1536,9 +2050,112 @@ fn finalize_failure(
     })
 }
 
+fn finalize_canceled(
+    state: Arc<GatewayState>,
+    meta: GatewayRunMeta,
+    request: &RunSubmission,
+) -> Result<GatewayRunResult, GatewayRunError> {
+    let components = state.snapshot_components();
+    let mut trace = RunTrace::new_with_id(meta.run_id.clone(), request.input.clone());
+    if let Some(session_id) = meta.session_id.clone() {
+        trace.bind_session(session_id);
+    }
+    if let Some(ingress) = meta.ingress.clone() {
+        trace.bind_ingress(ingress);
+    }
+    trace.bind_extensions(components.extensions.iter().map(extension_trace).collect());
+    trace.bind_gateway_context(
+        meta.gateway_run_id.clone(),
+        meta.correlation_id.clone(),
+        meta.session_route.clone(),
+    );
+    trace.bind_governance(GovernanceTrace {
+        deployment_profile: components.deployment.profile.clone(),
+        workspace_name: components.deployment.workspace_name.clone(),
+        auth_mode: operator_auth_mode(&components.auth),
+        audit_retention_days: components.audit.retention_days,
+        event_replay_window: components.audit.event_replay_window,
+        redact_inputs: components.audit.redact_inputs,
+    });
+    let cancel_reason = "run canceled by operator".to_owned();
+    trace.finish_canceled(cancel_reason.clone());
+    let trace_path = trace
+        .save_to_dir(&components.runs_dir)
+        .map_err(|save_err| GatewayRunError {
+            source: save_err,
+            trace: trace.clone(),
+            trace_path: PathBuf::new(),
+            gateway_run_id: meta.gateway_run_id.clone(),
+            correlation_id: meta.correlation_id.clone(),
+            session_route: meta.session_route.clone(),
+        })?;
+    if let Some(record) = update_run_record(state.as_ref(), &meta.gateway_run_id, |record| {
+        record.update_from_trace(&trace, Some(&trace_path));
+    }) {
+        sync_session_run_state(
+            state.as_ref(),
+            &record,
+            RunLifecycleStatus::Canceled,
+            Some(trace.run_id.clone()),
+            trace.error.clone(),
+            Some("canceled".to_owned()),
+        );
+        broadcast_envelope(state.as_ref(), run_record_envelope(&record));
+    }
+    let session_summary = update_gateway_session_metadata(
+        &state,
+        &meta,
+        Some(trace.run_id.clone()),
+        RunLifecycleStatus::Canceled,
+        trace.error.clone(),
+        Some("canceled".to_owned()),
+    );
+    increment_metric(state.as_ref(), |metrics| metrics.canceled_runs_total += 1);
+    record_audit_event(
+        state.as_ref(),
+        "run.canceled",
+        "canceled",
+        cancel_reason.clone(),
+        meta.session_id.clone(),
+        Some(meta.gateway_run_id.clone()),
+        Some(meta.correlation_id.clone()),
+        meta.ingress.as_ref(),
+        Some(trace_path.display().to_string()),
+        false,
+    );
+    broadcast_envelope(
+        state.as_ref(),
+        meta.envelope(GatewayEvent::Runtime(RunEvent::RunCanceled {
+            run_id: trace.run_id.clone(),
+            reason: cancel_reason.clone(),
+        })),
+    );
+    if let Some(summary) = session_summary.clone() {
+        broadcast_envelope(
+            state.as_ref(),
+            meta.envelope(GatewayEvent::SessionUpdated {
+                summary: session_summary_dto(&summary),
+            }),
+        );
+    }
+
+    Err(GatewayRunError {
+        source: anyhow!(cancel_reason),
+        trace,
+        trace_path,
+        gateway_run_id: meta.gateway_run_id,
+        correlation_id: meta.correlation_id,
+        session_route: meta.session_route,
+    })
+}
+
 fn update_gateway_session_metadata(
     state: &GatewayState,
     meta: &GatewayRunMeta,
+    run_id: Option<String>,
+    status: RunLifecycleStatus,
+    last_error: Option<String>,
+    last_failure_kind: Option<String>,
 ) -> Option<SessionSummary> {
     let session_id = meta.session_id.as_deref()?;
     let components = state.snapshot_components();
@@ -1547,6 +2164,14 @@ fn update_gateway_session_metadata(
         meta.session_route.clone(),
         meta.gateway_run_id.clone(),
         meta.correlation_id.clone(),
+    );
+    session.set_run_state(
+        status,
+        run_id,
+        Some(meta.gateway_run_id.clone()),
+        Some(meta.correlation_id.clone()),
+        last_error,
+        last_failure_kind,
     );
     components.session_store.save(&session).ok()?;
     Some(session.summary())
@@ -1936,12 +2561,25 @@ pub fn session_summary_dto(summary: &SessionSummary) -> SessionSummaryDto {
         model: summary.model.clone(),
         session_route: summary.session_route.clone(),
         channel_context: session_channel_dto(&summary.channel_context),
+        run: session_run_dto(&summary.run),
         last_gateway_run_id: summary.last_gateway_run_id.clone(),
         last_correlation_id: summary.last_correlation_id.clone(),
         message_count: summary.message_count,
         last_message_preview: summary.last_message_preview.clone(),
         memory_summary_preview: summary.memory_summary_preview.clone(),
         reference_count: summary.reference_count,
+    }
+}
+
+fn session_run_dto(metadata: &mosaic_session_core::SessionRunMetadata) -> SessionRunDto {
+    SessionRunDto {
+        current_run_id: metadata.current_run_id.clone(),
+        current_gateway_run_id: metadata.current_gateway_run_id.clone(),
+        current_correlation_id: metadata.current_correlation_id.clone(),
+        status: metadata.status,
+        last_error: metadata.last_error.clone(),
+        last_failure_kind: metadata.last_failure_kind.clone(),
+        updated_at: metadata.updated_at,
     }
 }
 
@@ -1983,6 +2621,7 @@ pub fn session_detail_dto(session: &SessionRecord) -> SessionDetailDto {
         model: session.model.clone(),
         last_run_id: session.last_run_id.clone(),
         channel_context: session_channel_dto(&session.channel_context),
+        run: session_run_dto(&session.run),
         gateway: SessionGatewayDto {
             route: session.gateway.route.clone(),
             last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
@@ -2046,7 +2685,10 @@ pub fn http_router(gateway: GatewayHandle) -> Router {
         .route("/capabilities/jobs", get(http_list_capability_jobs))
         .route("/capabilities/exec", post(http_exec_capability))
         .route("/capabilities/webhook", post(http_webhook_capability))
-        .route("/runs", post(http_submit_run))
+        .route("/runs", get(http_list_runs).post(http_submit_run))
+        .route("/runs/{id}", get(http_get_run))
+        .route("/runs/{id}/cancel", post(http_cancel_run))
+        .route("/runs/{id}/retry", post(http_retry_run))
         .route("/cron", get(http_list_cron).post(http_register_cron))
         .route("/cron/{id}/trigger", post(http_trigger_cron))
         .route("/audit/events", get(http_audit_events))
@@ -2132,6 +2774,55 @@ async fn http_list_sessions(
         .map(session_summary_dto)
         .collect();
     Ok(Json(sessions))
+}
+
+async fn http_list_runs(
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+) -> HttpResult<Vec<RunSummaryDto>> {
+    authorize_control_request(&state.gateway, &headers, "/runs")?;
+    Ok(Json(
+        state.gateway.list_runs().map_err(http_internal_error)?,
+    ))
+}
+
+async fn http_get_run(
+    AxumPath(id): AxumPath<String>,
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+) -> HttpResult<RunDetailDto> {
+    authorize_control_request(&state.gateway, &headers, "/runs/{id}")?;
+    match state.gateway.load_run(&id).map_err(http_internal_error)? {
+        Some(run) => Ok(Json(run)),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("run not found: {id}"),
+            }),
+        )),
+    }
+}
+
+async fn http_cancel_run(
+    AxumPath(id): AxumPath<String>,
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+) -> HttpResult<RunDetailDto> {
+    authorize_control_request(&state.gateway, &headers, "/runs/{id}/cancel")?;
+    Ok(Json(
+        state.gateway.cancel_run(&id).map_err(http_internal_error)?,
+    ))
+}
+
+async fn http_retry_run(
+    AxumPath(id): AxumPath<String>,
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+) -> HttpResult<RunResponse> {
+    authorize_control_request(&state.gateway, &headers, "/runs/{id}/retry")?;
+    let submitted = state.gateway.retry_run(&id).map_err(http_internal_error)?;
+    let result = submitted.wait().await.map_err(http_run_error)?;
+    Ok(Json(run_response(result)))
 }
 
 async fn http_list_capability_jobs(
@@ -2749,6 +3440,7 @@ workflows:
 
         let mut saw_submitted = false;
         let mut saw_runtime = false;
+        let mut saw_run_updated = false;
         let mut saw_session_updated = false;
         let mut saw_completed = false;
 
@@ -2760,6 +3452,7 @@ workflows:
             match envelope.event {
                 GatewayEvent::RunSubmitted { .. } => saw_submitted = true,
                 GatewayEvent::Runtime(_) => saw_runtime = true,
+                GatewayEvent::RunUpdated { .. } => saw_run_updated = true,
                 GatewayEvent::SessionUpdated { .. } => saw_session_updated = true,
                 GatewayEvent::RunCompleted { .. } => saw_completed = true,
                 GatewayEvent::RunFailed { .. } => {}
@@ -2772,6 +3465,7 @@ workflows:
 
         assert!(saw_submitted);
         assert!(saw_runtime);
+        assert!(saw_run_updated);
         assert!(saw_session_updated);
         assert!(saw_completed);
     }
@@ -3179,7 +3873,7 @@ workflows:
         let _ = wait_handle.wait().await.expect("run should succeed");
 
         assert!(frame.contains("data:"));
-        assert!(frame.contains("RunSubmitted"));
+        assert!(frame.contains("RunUpdated") || frame.contains("RunSubmitted"));
         assert!(frame.contains("events-demo"));
 
         let _ = shutdown.send(());

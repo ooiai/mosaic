@@ -7,7 +7,8 @@ use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
     ErrorResponse, EventStreamEnvelope, ExecJobRequest, GatewayAuditEventDto, HealthResponse,
     InboundMessage, IncidentBundleDto, MetricsResponse, ReadinessResponse, ReplayWindowResponse,
-    RunResponse, RunSubmission, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
+    RunDetailDto, RunResponse, RunSubmission, RunSummaryDto, SessionDetailDto, SessionSummaryDto,
+    WebhookJobRequest,
 };
 
 #[derive(Clone)]
@@ -83,6 +84,39 @@ impl GatewayClient {
         }
 
         Ok(Some(decode_response(response).await?))
+    }
+
+    pub async fn list_runs(&self) -> Result<Vec<RunSummaryDto>> {
+        self.get_json("/runs").await
+    }
+
+    pub async fn get_run(&self, id: &str) -> Result<Option<RunDetailDto>> {
+        let response = self
+            .request(reqwest::Method::GET, &format!("/runs/{id}"))
+            .send()
+            .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+
+        Ok(Some(decode_response(response).await?))
+    }
+
+    pub async fn cancel_run(&self, id: &str) -> Result<RunDetailDto> {
+        self.post_json::<RunDetailDto, serde_json::Value>(
+            &format!("/runs/{id}/cancel"),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    pub async fn retry_run(&self, id: &str) -> Result<RunResponse> {
+        self.post_json::<RunResponse, serde_json::Value>(
+            &format!("/runs/{id}/retry"),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     pub async fn submit_run(&self, submission: RunSubmission) -> Result<RunResponse> {
@@ -400,15 +434,22 @@ mod tests {
         assert_eq!(detail.transcript.len(), 3);
 
         let mut saw_completion = false;
-        for _ in 0..8 {
+        for _ in 0..12 {
             if let Some(envelope) = events
                 .next_event()
                 .await
                 .expect("event stream should continue")
             {
-                if matches!(envelope.event, GatewayEvent::RunCompleted { .. }) {
-                    saw_completion = true;
-                    break;
+                match envelope.event {
+                    GatewayEvent::RunCompleted { .. } => {
+                        saw_completion = true;
+                        break;
+                    }
+                    GatewayEvent::RunUpdated { run } if run.status.is_terminal() => {
+                        saw_completion = true;
+                        break;
+                    }
+                    _ => {}
                 }
             }
         }

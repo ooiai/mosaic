@@ -304,12 +304,14 @@ mod tests {
         let buffer = sinks.tui_buffer.expect("tui buffer should be present");
 
         sinks.event_sink.emit(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
             input: "hello".to_owned(),
         });
 
         assert_eq!(
             buffer.drain(),
             vec![RunEvent::RunStarted {
+                run_id: "run-1".to_owned(),
                 input: "hello".to_owned(),
             }]
         );

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RunEvent {
     RunStarted {
+        run_id: String,
         input: String,
     },
     WorkflowStarted {
@@ -112,12 +113,26 @@ pub enum RunEvent {
         call_id: String,
         reason: String,
     },
-    FinalAnswerReady,
+    OutputDelta {
+        run_id: String,
+        chunk: String,
+        accumulated_chars: usize,
+    },
+    FinalAnswerReady {
+        run_id: String,
+    },
     RunFinished {
+        run_id: String,
         output_preview: String,
     },
     RunFailed {
+        run_id: String,
         error: String,
+        failure_kind: Option<String>,
+    },
+    RunCanceled {
+        run_id: String,
+        reason: String,
     },
 }
 
@@ -219,6 +234,7 @@ mod tests {
             .with_sink(sink_b.clone());
 
         composite.emit(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
             input: "hello".to_owned(),
         });
 
@@ -229,12 +245,18 @@ mod tests {
         assert_eq!(events_b.len(), 1);
 
         match &events_a[0] {
-            RunEvent::RunStarted { input } => assert_eq!(input, "hello"),
+            RunEvent::RunStarted { run_id, input } => {
+                assert_eq!(run_id, "run-1");
+                assert_eq!(input, "hello");
+            }
             other => panic!("unexpected event: {other:?}"),
         }
 
         match &events_b[0] {
-            RunEvent::RunStarted { input } => assert_eq!(input, "hello"),
+            RunEvent::RunStarted { run_id, input } => {
+                assert_eq!(run_id, "run-1");
+                assert_eq!(input, "hello");
+            }
             other => panic!("unexpected event: {other:?}"),
         }
     }

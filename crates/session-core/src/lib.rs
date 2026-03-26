@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
-use mosaic_inspect::IngressTrace;
+use mosaic_inspect::{IngressTrace, RunLifecycleStatus};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,6 +80,8 @@ pub struct SessionRecord {
     #[serde(default)]
     pub channel_context: SessionChannelMetadata,
     #[serde(default)]
+    pub run: SessionRunMetadata,
+    #[serde(default)]
     pub memory: SessionMemoryMetadata,
     #[serde(default)]
     pub references: Vec<SessionReference>,
@@ -104,6 +106,18 @@ pub struct SessionChannelMetadata {
     pub thread_id: Option<String>,
     pub thread_title: Option<String>,
     pub reply_target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionRunMetadata {
+    pub current_run_id: Option<String>,
+    pub current_gateway_run_id: Option<String>,
+    pub current_correlation_id: Option<String>,
+    #[serde(default)]
+    pub status: RunLifecycleStatus,
+    pub last_error: Option<String>,
+    pub last_failure_kind: Option<String>,
+    pub updated_at: Option<DateTime<Utc>>,
 }
 
 impl SessionRecord {
@@ -132,6 +146,7 @@ impl SessionRecord {
                 last_correlation_id: None,
             },
             channel_context: SessionChannelMetadata::default(),
+            run: SessionRunMetadata::default(),
             memory: SessionMemoryMetadata::default(),
             references: Vec::new(),
             transcript: Vec::new(),
@@ -175,6 +190,31 @@ impl SessionRecord {
         self.gateway.route = route.into();
         self.gateway.last_gateway_run_id = Some(gateway_run_id.into());
         self.gateway.last_correlation_id = Some(correlation_id.into());
+        self.updated_at = Utc::now();
+    }
+
+    pub fn set_run_state(
+        &mut self,
+        status: RunLifecycleStatus,
+        run_id: Option<String>,
+        gateway_run_id: Option<String>,
+        correlation_id: Option<String>,
+        last_error: Option<String>,
+        last_failure_kind: Option<String>,
+    ) {
+        self.run.current_run_id = run_id;
+        self.run.current_gateway_run_id = gateway_run_id.clone();
+        self.run.current_correlation_id = correlation_id.clone();
+        self.run.status = status;
+        self.run.last_error = last_error;
+        self.run.last_failure_kind = last_failure_kind;
+        self.run.updated_at = Some(Utc::now());
+        if let Some(gateway_run_id) = gateway_run_id {
+            self.gateway.last_gateway_run_id = Some(gateway_run_id);
+        }
+        if let Some(correlation_id) = correlation_id {
+            self.gateway.last_correlation_id = Some(correlation_id);
+        }
         self.updated_at = Utc::now();
     }
 
@@ -232,6 +272,7 @@ impl SessionRecord {
             model: self.model.clone(),
             session_route: self.effective_gateway_route(),
             channel_context: self.channel_context.clone(),
+            run: self.run.clone(),
             last_gateway_run_id: self.gateway.last_gateway_run_id.clone(),
             last_correlation_id: self.gateway.last_correlation_id.clone(),
             message_count: self.transcript.len(),
@@ -268,6 +309,8 @@ pub struct SessionSummary {
     pub session_route: String,
     #[serde(default)]
     pub channel_context: SessionChannelMetadata,
+    #[serde(default)]
+    pub run: SessionRunMetadata,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
     pub message_count: usize,

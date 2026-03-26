@@ -158,6 +158,47 @@ pub struct ProviderFailureTrace {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RunLifecycleStatus {
+    #[default]
+    Unknown,
+    Queued,
+    Running,
+    Streaming,
+    CancelRequested,
+    Success,
+    Failed,
+    Canceled,
+}
+
+impl RunLifecycleStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Streaming => "streaming",
+            Self::CancelRequested => "cancel_requested",
+            Self::Success => "success",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Success | Self::Failed | Self::Canceled)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RunFailureTrace {
+    pub kind: String,
+    pub stage: String,
+    pub retryable: bool,
+    pub message: String,
+}
+
 impl SkillTrace {
     pub fn duration_ms(&self) -> Option<i64> {
         self.finished_at.map(|finished| {
@@ -250,6 +291,7 @@ pub struct GovernanceTrace {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
     pub status: String,
+    pub failure_kind: Option<String>,
     pub tool_calls: usize,
     pub capability_invocations: usize,
     pub skill_calls: usize,
@@ -260,6 +302,8 @@ pub struct RunSummary {
     pub memory_writes: usize,
     pub active_extensions: usize,
     pub used_extensions: usize,
+    pub output_chunks: usize,
+    pub integrity_warnings: usize,
     pub has_compression: bool,
     pub duration_ms: Option<i64>,
 }
@@ -273,10 +317,16 @@ pub struct RunTrace {
     pub session_route: Option<String>,
     pub ingress: Option<IngressTrace>,
     pub workflow_name: Option<String>,
+    #[serde(default)]
+    pub lifecycle_status: RunLifecycleStatus,
+    #[serde(default)]
+    pub failure: Option<RunFailureTrace>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub input: String,
     pub output: Option<String>,
+    #[serde(default)]
+    pub output_chunks: usize,
     pub effective_profile: Option<EffectiveProfileTrace>,
     pub provider_failure: Option<ProviderFailureTrace>,
     #[serde(default)]
@@ -302,23 +352,32 @@ pub struct RunTrace {
     pub skill_calls: Vec<SkillTrace>,
     #[serde(default)]
     pub step_traces: Vec<WorkflowStepTrace>,
+    #[serde(default)]
+    pub integrity_warnings: Vec<String>,
     pub error: Option<String>,
 }
 
 impl RunTrace {
     pub fn new(input: String) -> Self {
+        Self::new_with_id(Uuid::new_v4().to_string(), input)
+    }
+
+    pub fn new_with_id(run_id: impl Into<String>, input: String) -> Self {
         Self {
-            run_id: Uuid::new_v4().to_string(),
+            run_id: run_id.into(),
             gateway_run_id: None,
             correlation_id: None,
             session_id: None,
             session_route: None,
             ingress: None,
             workflow_name: None,
+            lifecycle_status: RunLifecycleStatus::Queued,
+            failure: None,
             started_at: Utc::now(),
             finished_at: None,
             input,
             output: None,
+            output_chunks: 0,
             effective_profile: None,
             provider_failure: None,
             provider_attempts: vec![],
@@ -334,6 +393,7 @@ impl RunTrace {
             used_extensions: vec![],
             skill_calls: vec![],
             step_traces: vec![],
+            integrity_warnings: vec![],
             error: None,
         }
     }
@@ -386,6 +446,10 @@ impl RunTrace {
         self.provider_failure = Some(failure);
     }
 
+    pub fn bind_failure(&mut self, failure: RunFailureTrace) {
+        self.failure = Some(failure);
+    }
+
     pub fn add_provider_attempt(&mut self, attempt: ProviderAttemptTrace) {
         self.provider_attempts.push(attempt);
     }
@@ -413,6 +477,30 @@ impl RunTrace {
     pub fn add_capability_invocation(&mut self, trace: CapabilityInvocationTrace) {
         self.capability_invocations.push(trace);
         self.side_effect_summary = Some(self.compute_side_effect_summary());
+    }
+
+    pub fn mark_running(&mut self) {
+        self.lifecycle_status = RunLifecycleStatus::Running;
+    }
+
+    pub fn mark_streaming(&mut self) {
+        if !matches!(
+            self.lifecycle_status,
+            RunLifecycleStatus::Canceled | RunLifecycleStatus::Failed | RunLifecycleStatus::Success
+        ) {
+            self.lifecycle_status = RunLifecycleStatus::Streaming;
+        }
+    }
+
+    pub fn mark_cancel_requested(&mut self) {
+        if !self.lifecycle_status.is_terminal() {
+            self.lifecycle_status = RunLifecycleStatus::CancelRequested;
+        }
+    }
+
+    pub fn record_output_chunk(&mut self) {
+        self.output_chunks += 1;
+        self.mark_streaming();
     }
 
     fn compute_side_effect_summary(&self) -> SideEffectSummary {
@@ -444,11 +532,31 @@ impl RunTrace {
         self.finished_at = Some(Utc::now());
         self.output = Some(output);
         self.error = None;
+        self.failure = None;
+        self.lifecycle_status = RunLifecycleStatus::Success;
+        self.integrity_warnings = self.validate_integrity();
     }
 
     pub fn finish_err(&mut self, error: String) {
         self.finished_at = Some(Utc::now());
         self.error = Some(error);
+        if self.lifecycle_status != RunLifecycleStatus::Canceled {
+            self.lifecycle_status = RunLifecycleStatus::Failed;
+        }
+        self.integrity_warnings = self.validate_integrity();
+    }
+
+    pub fn finish_canceled(&mut self, reason: String) {
+        self.finished_at = Some(Utc::now());
+        self.error = Some(reason.clone());
+        self.failure = Some(RunFailureTrace {
+            kind: "canceled".to_owned(),
+            stage: "gateway".to_owned(),
+            retryable: true,
+            message: reason,
+        });
+        self.lifecycle_status = RunLifecycleStatus::Canceled;
+        self.integrity_warnings = self.validate_integrity();
     }
 
     pub fn duration_ms(&self) -> Option<i64> {
@@ -459,19 +567,68 @@ impl RunTrace {
         })
     }
 
-    pub fn status(&self) -> &'static str {
-        if self.error.is_some() {
-            "failed"
-        } else if self.finished_at.is_some() {
-            "success"
-        } else {
-            "running"
+    pub fn lifecycle_status(&self) -> RunLifecycleStatus {
+        if self.lifecycle_status != RunLifecycleStatus::Unknown {
+            return self.lifecycle_status;
         }
+
+        if self.error.is_some() {
+            RunLifecycleStatus::Failed
+        } else if self.finished_at.is_some() {
+            RunLifecycleStatus::Success
+        } else {
+            RunLifecycleStatus::Running
+        }
+    }
+
+    pub fn status(&self) -> &'static str {
+        self.lifecycle_status().label()
+    }
+
+    pub fn validate_integrity(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        let status = self.lifecycle_status();
+        if status.is_terminal() && self.finished_at.is_none() {
+            warnings.push("terminal run is missing finished_at".to_owned());
+        }
+        if matches!(status, RunLifecycleStatus::Success) && self.output.is_none() {
+            warnings.push("successful run is missing output".to_owned());
+        }
+        if matches!(
+            status,
+            RunLifecycleStatus::Failed | RunLifecycleStatus::Canceled
+        ) && self.error.is_none()
+        {
+            warnings.push("failed or canceled run is missing error text".to_owned());
+        }
+        if self.finished_at.is_some()
+            && matches!(
+                status,
+                RunLifecycleStatus::Queued
+                    | RunLifecycleStatus::Running
+                    | RunLifecycleStatus::Streaming
+                    | RunLifecycleStatus::CancelRequested
+            )
+        {
+            warnings.push("finished run still reports a non-terminal lifecycle state".to_owned());
+        }
+        if self.provider_failure.is_some()
+            && self
+                .failure
+                .as_ref()
+                .is_some_and(|failure| failure.kind != "provider")
+        {
+            warnings.push(
+                "provider_failure is present but top-level failure kind is not provider".to_owned(),
+            );
+        }
+        warnings
     }
 
     pub fn summary(&self) -> RunSummary {
         RunSummary {
             status: self.status().to_owned(),
+            failure_kind: self.failure.as_ref().map(|failure| failure.kind.clone()),
             tool_calls: self.tool_calls.len(),
             capability_invocations: self.capability_invocations.len(),
             skill_calls: self.skill_calls.len(),
@@ -482,6 +639,8 @@ impl RunTrace {
             memory_writes: self.memory_writes.len(),
             active_extensions: self.active_extensions.len(),
             used_extensions: self.used_extensions.len(),
+            output_chunks: self.output_chunks,
+            integrity_warnings: self.integrity_warnings.len(),
             has_compression: self.compression.is_some(),
             duration_ms: self.duration_ms(),
         }
@@ -623,6 +782,10 @@ mod tests {
                 supports_tools: true,
                 supports_tool_call_shadow_messages: false,
             }),
+            lifecycle_status: RunLifecycleStatus::Success,
+            failure: None,
+            output_chunks: 1,
+            integrity_warnings: Vec::new(),
             provider_failure: None,
             provider_attempts: vec![],
             governance: Some(GovernanceTrace {
@@ -690,6 +853,8 @@ mod tests {
         assert_eq!(summary.active_extensions, 0);
         assert_eq!(summary.used_extensions, 0);
         assert!(!summary.has_compression);
+        assert_eq!(summary.output_chunks, 1);
+        assert_eq!(summary.integrity_warnings, 0);
         assert_eq!(summary.duration_ms, Some(18));
         assert_eq!(trace.tool_calls[0].duration_ms(), Some(3));
         assert_eq!(trace.step_traces[0].duration_ms(), Some(9));
