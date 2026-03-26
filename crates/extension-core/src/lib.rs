@@ -762,6 +762,33 @@ mod tests {
         path
     }
 
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("extension-core crate should live under crates/")
+            .parent()
+            .expect("repo root should exist")
+            .to_path_buf()
+    }
+
+    #[test]
+    fn example_extension_manifest_validates_from_repo() {
+        let root = repo_root();
+        let mut config = MosaicConfig::default();
+        config.extensions.manifests.push(ExtensionManifestRef {
+            path: "examples/extensions/time-and-summary.yaml".to_owned(),
+            version_pin: Some("0.1.0".to_owned()),
+            enabled: true,
+        });
+
+        let report = validate_extension_set(&config, None, &root);
+        assert!(
+            report.is_ok(),
+            "example extension should validate: {:?}",
+            report.issues
+        );
+    }
+
     #[test]
     fn validation_reports_version_pin_mismatch() {
         let dir = temp_dir("version-pin");

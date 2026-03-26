@@ -1,0 +1,27 @@
+name: time-and-summary
+version: 0.1.0
+description: Example extension manifest with one manifest skill and one workflow.
+schema_version: 1
+tools: []
+skills:
+  - type: manifest
+    name: summarize_notes
+    description: Summarize an operator note without colliding with builtin skills.
+    tools: []
+    system_prompt: null
+    steps:
+      - kind: echo
+        name: draft
+        input: "{{input}}"
+      - kind: summarize
+        name: summarize
+        input: "{{current}}"
+workflows:
+  - name: summarize_operator_note
+    description: Run the example manifest skill on a short operator note
+    steps:
+      - name: summarize
+        kind: skill
+        skill: summarize_notes
+        input: "{{input}}"
+mcp: null

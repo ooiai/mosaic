@@ -1218,6 +1218,52 @@ mod tests {
         path
     }
 
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("config crate should live under crates/")
+            .parent()
+            .expect("repo root should exist")
+            .to_path_buf()
+    }
+
+    #[test]
+    fn provider_example_patches_validate_against_defaults() {
+        let root = repo_root();
+        for rel in [
+            "examples/providers/openai.yaml",
+            "examples/providers/ollama.yaml",
+            "examples/providers/anthropic.yaml",
+        ] {
+            let patch = load_config_patch(&root.join(rel)).expect("example patch should load");
+            let mut config = MosaicConfig::default();
+            merge_patch(&mut config, patch);
+            let report = validate_mosaic_config(&config);
+            assert!(
+                !report.has_errors(),
+                "{rel} should validate without errors: {:?}",
+                report.issues
+            );
+        }
+    }
+
+    #[test]
+    fn workflow_and_gateway_examples_parse_from_disk() {
+        let root = repo_root();
+        let app = load_from_file(root.join("examples/workflows/research-brief.yaml"))
+            .expect("workflow example should load");
+        assert_eq!(
+            app.app.and_then(|app| app.name).as_deref(),
+            Some("research-brief")
+        );
+
+        let payload = fs::read_to_string(root.join("examples/gateway/webchat-message.json"))
+            .expect("gateway payload should load");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("gateway payload should parse as JSON");
+        assert_eq!(parsed["session_id"], "docs-webchat");
+    }
+
     #[test]
     fn loads_yaml_app_config_from_disk() {
         let dir = temp_dir("app-load");

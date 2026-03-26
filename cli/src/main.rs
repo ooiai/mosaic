@@ -39,11 +39,37 @@ use mosaic_tool_core::{ExecTool, ReadFileTool, Tool};
 mod bootstrap;
 mod output;
 
+const CLI_ABOUT: &str = "Self-hosted AI assistant control plane for sessions, the TUI, Gateway routing, and trace inspection.";
+const CLI_AFTER_HELP: &str = "Quick start:
+  mosaic setup init
+  mosaic setup validate
+  mosaic setup doctor
+  mosaic model list
+  mosaic tui
+
+Docs:
+  docs/getting-started.md
+  docs/configuration.md
+  docs/cli.md
+
+Examples:
+  examples/providers/openai.yaml
+  examples/workflows/research-brief.yaml";
+const SETUP_AFTER_HELP: &str = "Examples:
+  mosaic setup init
+  mosaic setup validate
+  mosaic setup doctor";
+const GATEWAY_AFTER_HELP: &str = "Examples:
+  mosaic gateway status
+  mosaic gateway serve --local
+  mosaic gateway serve --http 127.0.0.1:8080
+  mosaic gateway incident <run-id>";
+
 #[derive(Debug, Parser)]
 #[command(name = "mosaic")]
-#[command(version, about = "Mosaic control-plane console and runtime skeleton")]
+#[command(version, about = CLI_ABOUT, after_help = CLI_AFTER_HELP)]
 struct Cli {
-    #[arg(long, global = true, help = "Start the TUI in resume mode")]
+    #[arg(long, global = true, help = "Start the TUI in resume browser mode")]
     resume: bool,
     #[command(subcommand)]
     command: Option<Commands>,
@@ -51,6 +77,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Run an app YAML file through the agent runtime.
     Run {
         file: PathBuf,
         #[arg(long, conflicts_with = "workflow")]
@@ -63,12 +90,12 @@ enum Commands {
         profile: Option<String>,
         #[arg(long)]
         attach: Option<String>,
-        #[arg(long, help = "Show the TUI while the run executes")]
+        #[arg(long, help = "Show the TUI while the run executes the file-backed run")]
         tui: bool,
     },
-    Inspect {
-        file: PathBuf,
-    },
+    /// Inspect one saved run trace JSON file.
+    Inspect { file: PathBuf },
+    /// Start the interactive terminal UI.
     Tui {
         #[arg(long)]
         session: Option<String>,
@@ -77,52 +104,62 @@ enum Commands {
         #[arg(long)]
         attach: Option<String>,
     },
+    /// Initialize and validate workspace configuration.
     Setup {
         #[command(subcommand)]
         command: SetupCommand,
     },
+    /// List sessions or inspect one saved session transcript.
     Session {
         #[arg(long)]
         attach: Option<String>,
         #[command(subcommand)]
         command: SessionCommand,
     },
+    /// List configured provider profiles or switch the active one.
     Model {
         #[command(subcommand)]
         command: ModelCommand,
     },
+    /// Inspect or serve the control-plane Gateway.
     Gateway {
         #[arg(long)]
         attach: Option<String>,
         #[command(subcommand)]
         command: GatewayCliCommand,
     },
+    /// Inspect channel adapter readiness.
     Adapter {
         #[arg(long)]
         attach: Option<String>,
         #[command(subcommand)]
         command: AdapterCommand,
     },
+    /// Manage local or remote device nodes.
     Node {
         #[command(subcommand)]
         command: NodeCliCommand,
     },
+    /// Inspect or trigger high-privilege capability surfaces.
     Capability {
         #[arg(long)]
         attach: Option<String>,
         #[command(subcommand)]
         command: CapabilityCommand,
     },
+    /// Register and trigger scheduled runs.
     Cron {
         #[arg(long)]
         attach: Option<String>,
         #[command(subcommand)]
         command: CronCommand,
     },
+    /// Inspect saved memory summaries and references.
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
     },
+    /// Validate and reload extension manifests.
     Extension {
         #[command(subcommand)]
         command: ExtensionCommand,
@@ -130,6 +167,7 @@ enum Commands {
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
+#[command(after_help = SETUP_AFTER_HELP)]
 enum SetupCommand {
     Init {
         #[arg(long)]
@@ -152,11 +190,12 @@ enum ModelCommand {
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
+#[command(after_help = GATEWAY_AFTER_HELP)]
 enum GatewayCliCommand {
     Serve {
-        #[arg(long, help = "Start the local in-process gateway monitor")]
+        #[arg(long, help = "Start the local in-process Gateway event monitor")]
         local: bool,
-        #[arg(long, help = "Bind the HTTP gateway protocol on host:port")]
+        #[arg(long, help = "Bind the HTTP Gateway control plane on host:port")]
         http: Option<String>,
     },
     Sessions,
@@ -659,6 +698,13 @@ fn finish_successful_gateway_run(result: GatewayRunResult) -> Result<()> {
     println!("gateway_run_id: {}", result.gateway_run_id);
     println!("correlation_id: {}", result.correlation_id);
     println!("session_route: {}", result.session_route);
+
+    let mut next_steps = Vec::new();
+    if let Some(session_id) = result.trace.session_id.as_deref() {
+        next_steps.push(format!("mosaic session show {}", session_id));
+    }
+    next_steps.push(format!("mosaic inspect {}", result.trace_path.display()));
+    print_next_steps(next_steps);
     Ok(())
 }
 
@@ -675,7 +721,30 @@ fn finish_failed_gateway_run(err: GatewayRunError) -> Result<()> {
     println!("correlation_id: {}", correlation_id);
     println!("session_route: {}", session_route);
 
+    if !path.as_os_str().is_empty() {
+        print_next_steps([format!("mosaic inspect {}", path.display())]);
+    }
+
     Err(source)
+}
+
+fn print_next_steps<I, S>(steps: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let collected = steps
+        .into_iter()
+        .map(|step| step.as_ref().to_owned())
+        .collect::<Vec<_>>();
+    if collected.is_empty() {
+        return;
+    }
+
+    println!("next:");
+    for step in collected {
+        println!("  {}", step);
+    }
 }
 
 fn setup_cmd(command: SetupCommand) -> Result<()> {
@@ -684,6 +753,12 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
             let cwd = env::current_dir()?;
             let path = init_workspace_config(&cwd, force)?;
             println!("initialized workspace config: {}", path.display());
+            print_next_steps([
+                "mosaic setup validate",
+                "mosaic setup doctor",
+                "mosaic model list",
+                "mosaic tui",
+            ]);
             Ok(())
         }
         SetupCommand::Validate => {
@@ -693,10 +768,14 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
             print_validation_report(&report);
 
             if report.has_errors() {
-                bail!("configuration validation failed")
+                bail!(
+                    "configuration validation failed
+next: run `mosaic setup doctor` and compare `.mosaic/config.yaml` with `docs/configuration.md`"
+                )
             }
 
             println!("validation: ok");
+            print_next_steps(["mosaic setup doctor", "mosaic model list", "mosaic tui"]);
             Ok(())
         }
         SetupCommand::Doctor => {
@@ -714,10 +793,14 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
             }
 
             if doctor.has_errors() {
-                bail!("configuration doctor found errors")
+                bail!(
+                    "configuration doctor found errors
+next: fix the reported checks, then rerun `mosaic setup doctor`"
+                )
             }
 
             println!("doctor: ok");
+            print_next_steps(["mosaic model list", "mosaic tui", "mosaic gateway status"]);
             Ok(())
         }
     }
@@ -2665,13 +2748,22 @@ fn truncate_for_cli(value: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use std::{fs, path::PathBuf};
+
+    use clap::{CommandFactory, Parser};
     use mosaic_tool_core::ToolSource;
 
     use super::{
         Cli, DispatchCommand, ExtensionCommand, MemoryCommand, ModelCommand, SessionCommand,
         SetupCommand,
     };
+
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("cli crate should live under repo root")
+            .to_path_buf()
+    }
 
     #[test]
     fn defaults_to_tui_when_no_subcommand_is_present() {
@@ -3002,6 +3094,49 @@ mod tests {
             super::truncate_for_cli("abcdefghijklmnopqrstuvwxyz", 5),
             "abcde..."
         );
+    }
+
+    #[test]
+    fn top_level_help_mentions_quick_start_and_docs() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("mosaic setup init"));
+        assert!(help.contains("docs/getting-started.md"));
+        assert!(help.contains("examples/providers/openai.yaml"));
+    }
+
+    #[test]
+    fn readme_and_docs_reference_first_run_commands() {
+        let root = repo_root();
+        let readme = fs::read_to_string(root.join("README.md")).expect("README should load");
+        for required in [
+            "mosaic setup init",
+            "mosaic setup validate",
+            "mosaic setup doctor",
+            "mosaic tui",
+            "mosaic session list",
+            "mosaic inspect .mosaic/runs/<run-id>.json",
+            "docs/getting-started.md",
+            "docs/cli.md",
+            "examples/README.md",
+        ] {
+            assert!(readme.contains(required), "README missing {required}");
+        }
+
+        let getting_started =
+            fs::read_to_string(root.join("docs/getting-started.md")).expect("guide should load");
+        for required in [
+            "mosaic setup init",
+            "mosaic setup validate",
+            "mosaic setup doctor",
+            "mosaic model list",
+            "mosaic tui",
+            "mosaic inspect .mosaic/runs/<run-id>.json",
+        ] {
+            assert!(
+                getting_started.contains(required),
+                "getting-started guide missing {required}"
+            );
+        }
     }
 
     #[test]
