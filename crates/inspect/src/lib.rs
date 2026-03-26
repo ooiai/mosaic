@@ -125,8 +125,32 @@ pub struct EffectiveProfileTrace {
     pub profile: String,
     pub provider_type: String,
     pub model: String,
+    pub base_url: Option<String>,
     pub api_key_env: Option<String>,
     pub api_key_present: bool,
+    pub timeout_ms: u64,
+    pub max_retries: u8,
+    pub supports_tools: bool,
+    pub supports_tool_call_shadow_messages: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderAttemptTrace {
+    pub attempt: u8,
+    pub max_attempts: u8,
+    pub status: String,
+    pub error_kind: Option<String>,
+    pub status_code: Option<u16>,
+    pub retryable: bool,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderFailureTrace {
+    pub kind: String,
+    pub status_code: Option<u16>,
+    pub retryable: bool,
+    pub message: String,
 }
 
 impl SkillTrace {
@@ -238,6 +262,9 @@ pub struct RunTrace {
     pub input: String,
     pub output: Option<String>,
     pub effective_profile: Option<EffectiveProfileTrace>,
+    pub provider_failure: Option<ProviderFailureTrace>,
+    #[serde(default)]
+    pub provider_attempts: Vec<ProviderAttemptTrace>,
     pub governance: Option<GovernanceTrace>,
     #[serde(default)]
     pub model_selections: Vec<ModelSelectionTrace>,
@@ -277,6 +304,8 @@ impl RunTrace {
             input,
             output: None,
             effective_profile: None,
+            provider_failure: None,
+            provider_attempts: vec![],
             governance: None,
             model_selections: vec![],
             memory_reads: vec![],
@@ -335,6 +364,14 @@ impl RunTrace {
 
     pub fn bind_effective_profile(&mut self, profile: EffectiveProfileTrace) {
         self.effective_profile = Some(profile);
+    }
+
+    pub fn bind_provider_failure(&mut self, failure: ProviderFailureTrace) {
+        self.provider_failure = Some(failure);
+    }
+
+    pub fn add_provider_attempt(&mut self, attempt: ProviderAttemptTrace) {
+        self.provider_attempts.push(attempt);
     }
 
     pub fn bind_governance(&mut self, governance: GovernanceTrace) {
@@ -553,9 +590,16 @@ mod tests {
                 profile: "mock".to_owned(),
                 provider_type: "mock".to_owned(),
                 model: "mock".to_owned(),
+                base_url: None,
                 api_key_env: None,
                 api_key_present: false,
+                timeout_ms: 0,
+                max_retries: 0,
+                supports_tools: true,
+                supports_tool_call_shadow_messages: false,
             }),
+            provider_failure: None,
+            provider_attempts: vec![],
             governance: Some(GovernanceTrace {
                 deployment_profile: "local".to_owned(),
                 workspace_name: "test-workspace".to_owned(),

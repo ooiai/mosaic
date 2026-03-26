@@ -648,14 +648,18 @@ impl App {
                 );
             }
             RunEvent::ProviderRequest {
+                provider_type,
+                profile,
+                model,
                 tool_count,
                 message_count,
+                max_attempts,
             } => {
                 self.push_activity(
                     "provider",
                     &format!(
-                        "Completion request dispatched (tools={}, messages={})",
-                        tool_count, message_count
+                        "Provider {} / {} request dispatched (model={}, tools={}, messages={}, attempts={})",
+                        provider_type, profile, model, tool_count, message_count, max_attempts
                     ),
                 );
                 if self.is_interactive() {
@@ -665,7 +669,79 @@ impl App {
                     TimelineKind::System,
                     "provider",
                     "Provider request",
-                    &format!("tools={}, messages={}", tool_count, message_count),
+                    &format!(
+                        "provider={} profile={} model={} tools={} messages={} attempts={}",
+                        provider_type, profile, model, tool_count, message_count, max_attempts
+                    ),
+                );
+            }
+            RunEvent::ProviderRetry {
+                provider_type,
+                profile,
+                model,
+                attempt,
+                max_attempts,
+                kind,
+                error,
+                ..
+            } => {
+                self.push_activity(
+                    "provider",
+                    &format!(
+                        "Provider retry {} / {} (model={}, attempt={}/{}, kind={})",
+                        provider_type, profile, model, attempt, max_attempts, kind
+                    ),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::System,
+                    "provider",
+                    "Provider retry",
+                    &format!(
+                        "provider={} profile={} model={} attempt={}/{} kind={} error={}",
+                        provider_type,
+                        profile,
+                        model,
+                        attempt,
+                        max_attempts,
+                        kind,
+                        truncate_for_timeline(&error, 180)
+                    ),
+                );
+            }
+            RunEvent::ProviderFailed {
+                provider_type,
+                profile,
+                model,
+                kind,
+                error,
+                ..
+            } => {
+                self.runtime_status = "error".to_owned();
+                self.push_activity(
+                    "provider",
+                    &format!(
+                        "Provider failed {} / {} (model={}, kind={})",
+                        provider_type, profile, model, kind
+                    ),
+                );
+                if self.is_interactive() {
+                    return;
+                }
+                self.push_timeline(
+                    TimelineKind::System,
+                    "provider",
+                    "Provider failed",
+                    &format!(
+                        "provider={} profile={} model={} kind={} error={}",
+                        provider_type,
+                        profile,
+                        model,
+                        kind,
+                        truncate_for_timeline(&error, 180)
+                    ),
                 );
             }
             RunEvent::ToolCalling { name, call_id } => {

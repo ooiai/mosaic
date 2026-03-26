@@ -11,6 +11,11 @@ futures.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
 
 mosaic-config = { path = "../config" }
 mosaic-tool-core = { path = "../tool-core" }
+
+[dev-dependencies]
+axum.workspace = true

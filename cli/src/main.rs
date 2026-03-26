@@ -1,13 +1,13 @@
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env, fs, io,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use mosaic_config::{
     ACTIVE_PROFILE_ENV, ConfigSourceKind, DoctorStatus, LoadConfigOptions, LoadedMosaicConfig,
     PolicyConfig, ValidationLevel, doctor_mosaic_config, init_workspace_config, load_from_file,
@@ -35,6 +35,7 @@ use mosaic_runtime::events::RunEventSink;
 use mosaic_sdk::GatewayClient;
 use mosaic_session_core::SessionSummary;
 use mosaic_tool_core::{ExecTool, ReadFileTool, Tool};
+use tracing_subscriber::EnvFilter;
 
 mod bootstrap;
 mod output;
@@ -65,10 +66,25 @@ const GATEWAY_AFTER_HELP: &str = "Examples:
   mosaic gateway serve --http 127.0.0.1:8080
   mosaic gateway incident <run-id>";
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
+enum LogFormat {
+    Plain,
+    Json,
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "mosaic")]
 #[command(version, about = CLI_ABOUT, after_help = CLI_AFTER_HELP)]
 struct Cli {
+    #[arg(
+        long,
+        global = true,
+        default_value = "warn",
+        help = "Set internal log verbosity for stderr output"
+    )]
+    log_level: String,
+    #[arg(long, global = true, value_enum, default_value_t = LogFormat::Plain, help = "Set internal log output format")]
+    log_format: LogFormat,
     #[arg(long, global = true, help = "Start the TUI in resume browser mode")]
     resume: bool,
     #[command(subcommand)]
@@ -444,7 +460,10 @@ impl Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    match Cli::parse().dispatch() {
+    let cli = Cli::parse();
+    init_tracing(&cli.log_level, cli.log_format)?;
+
+    match cli.dispatch() {
         DispatchCommand::Tui {
             resume,
             session,
@@ -472,6 +491,40 @@ async fn main() -> Result<()> {
         DispatchCommand::Cron { attach, command } => cron_cmd(attach, command).await,
         DispatchCommand::Memory { command } => memory_cmd(command),
         DispatchCommand::Extension { command } => extension_cmd(command),
+    }
+}
+
+fn init_tracing(level: &str, format: LogFormat) -> Result<()> {
+    let filter = env::var("MOSAIC_LOG")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("RUST_LOG")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| level.to_owned());
+    let env_filter = EnvFilter::builder().parse_lossy(filter);
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(io::stderr)
+        .with_target(false);
+
+    let result = match format {
+        LogFormat::Plain => builder.try_init(),
+        LogFormat::Json => builder.json().try_init(),
+    };
+
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("global default trace dispatcher has already been set") {
+                Ok(())
+            } else {
+                Err(anyhow!("failed to initialize tracing: {}", message))
+            }
+        }
     }
 }
 
@@ -1710,12 +1763,34 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
     println!("error: {:?}", trace.error);
 
     if let Some(profile) = &trace.effective_profile {
-        println!("\neffective_profile:");
+        println!(
+            "
+effective_profile:"
+        );
         println!("  profile: {}", profile.profile);
         println!("  provider_type: {}", profile.provider_type);
         println!("  model: {}", profile.model);
+        println!("  base_url: {:?}", profile.base_url);
         println!("  api_key_env: {:?}", profile.api_key_env);
         println!("  api_key_present: {}", profile.api_key_present);
+        println!("  timeout_ms: {}", profile.timeout_ms);
+        println!("  max_retries: {}", profile.max_retries);
+        println!("  supports_tools: {}", profile.supports_tools);
+        println!(
+            "  supports_tool_call_shadow_messages: {}",
+            profile.supports_tool_call_shadow_messages
+        );
+    }
+
+    if let Some(provider_failure) = &trace.provider_failure {
+        println!(
+            "
+provider_failure:"
+        );
+        println!("  kind: {}", provider_failure.kind);
+        println!("  status_code: {:?}", provider_failure.status_code);
+        println!("  retryable: {}", provider_failure.retryable);
+        println!("  message: {}", provider_failure.message);
     }
 
     if let Some(ingress) = &trace.ingress {
@@ -1759,6 +1834,7 @@ summary:"
     );
     println!("  skill_calls: {}", summary.skill_calls);
     println!("  workflow_steps: {}", trace.step_traces.len());
+    println!("  provider_attempts: {}", trace.provider_attempts.len());
     println!("  model_selections: {}", trace.model_selections.len());
     println!("  memory_reads: {}", trace.memory_reads.len());
     println!("  memory_writes: {}", trace.memory_writes.len());
@@ -1781,6 +1857,22 @@ summary:"
                 extension.active,
                 extension.error,
             );
+        }
+    }
+
+    if !trace.provider_attempts.is_empty() {
+        println!(
+            "
+== provider attempts =="
+        );
+        for (idx, attempt) in trace.provider_attempts.iter().enumerate() {
+            println!("[{}]", idx + 1);
+            println!("  attempt: {}/{}", attempt.attempt, attempt.max_attempts);
+            println!("  status: {}", attempt.status);
+            println!("  error_kind: {:?}", attempt.error_kind);
+            println!("  status_code: {:?}", attempt.status_code);
+            println!("  retryable: {}", attempt.retryable);
+            println!("  message: {:?}", attempt.message);
         }
     }
 

@@ -11,7 +11,7 @@ use chrono::Utc;
 use mosaic_inspect::{
     CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace, ExtensionTrace,
     ExtensionUsageTrace, IngressTrace, MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace,
-    RunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
+    ProviderAttemptTrace, ProviderFailureTrace, RunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
 };
 use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
@@ -19,9 +19,9 @@ use mosaic_memory::{
 };
 use mosaic_node_protocol::{NodeRouter, NodeToolDispatchOutcome, NodeToolExecutionRequest};
 use mosaic_provider::{
-    LlmProvider, Message, ProviderProfile, ProviderProfileRegistry, Role, SchedulingIntent,
-    SchedulingRequest, ToolDefinition, tool_definition_from_metadata, tool_is_visible_to_model,
-    validate_step_tools_support,
+    LlmProvider, Message, ProviderAttempt, ProviderError, ProviderProfile, ProviderProfileRegistry,
+    ProviderTransportMetadata, Role, SchedulingIntent, SchedulingRequest, ToolDefinition,
+    tool_definition_from_metadata, tool_is_visible_to_model, validate_step_tools_support,
 };
 use mosaic_session_core::{SessionRecord, SessionStore, TranscriptRole, session_title_from_input};
 use mosaic_skill_core::{SkillContext, SkillRegistry};
@@ -30,6 +30,7 @@ use mosaic_workflow::{
     Workflow, WorkflowObserver, WorkflowRegistry, WorkflowRunner, WorkflowStep,
     WorkflowStepExecutor, WorkflowStepKind,
 };
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::events::{RunEvent, SharedRunEventSink};
@@ -145,6 +146,12 @@ impl AgentRuntime {
     ) -> std::result::Result<T, RunError> {
         let message = error.to_string();
 
+        warn!(
+            run_id = %trace.run_id,
+            session_id = ?trace.session_id,
+            error = %message,
+            "runtime run failed"
+        );
         self.emit(RunEvent::RunFailed {
             error: message.clone(),
         });
@@ -155,6 +162,13 @@ impl AgentRuntime {
 
     pub async fn run(&self, req: RunRequest) -> std::result::Result<RunResult, RunError> {
         let mut trace = RunTrace::new(req.input.clone());
+        info!(
+            run_id = %trace.run_id,
+            session_id = ?req.session_id,
+            skill = ?req.skill,
+            workflow = ?req.workflow,
+            "runtime run started"
+        );
         self.emit(RunEvent::RunStarted {
             input: trace.input.clone(),
         });
@@ -230,7 +244,10 @@ impl AgentRuntime {
             &profile,
             selection_reason,
         ));
-        trace.bind_effective_profile(Self::effective_profile_trace(&profile));
+        trace.bind_effective_profile(Self::effective_profile_trace(
+            &profile,
+            &Self::provider_metadata_from_profile(&profile),
+        ));
 
         if let Some(session_ref) = session.as_mut() {
             if let Err(err) = self.rebind_session_profile(session_ref, &profile) {
@@ -485,6 +502,8 @@ impl AgentRuntime {
         trace: &mut RunTrace,
     ) -> Result<String> {
         let provider = self.provider_for_profile(profile)?;
+        let provider_metadata = provider.metadata();
+        trace.bind_effective_profile(Self::effective_profile_trace(profile, &provider_metadata));
         let tool_defs = if profile.capabilities.supports_tools {
             self.collect_tool_definitions(None)?
         } else {
@@ -523,14 +542,49 @@ impl AgentRuntime {
         };
 
         for _ in 0..8 {
+            info!(
+                run_id = %trace.run_id,
+                provider_type = %provider_metadata.provider_type,
+                profile = %profile.name,
+                model = %profile.model,
+                message_count = messages.len(),
+                tool_count = tool_defs.len(),
+                "provider request dispatched"
+            );
             self.emit(RunEvent::ProviderRequest {
+                provider_type: provider_metadata.provider_type.clone(),
+                profile: profile.name.clone(),
+                model: profile.model.clone(),
                 tool_count: tool_defs.len(),
                 message_count: messages.len(),
+                max_attempts: provider_metadata.max_retries.saturating_add(1),
             });
 
-            let response = provider.complete(&messages, provider_tools).await?;
+            let completion = match provider.complete(&messages, provider_tools).await {
+                Ok(completion) => completion,
+                Err(error) => {
+                    self.trace_provider_error(profile, trace, &error);
+                    self.emit_provider_retry_events(profile, &error.attempts);
+                    self.emit(RunEvent::ProviderFailed {
+                        provider_type: profile.provider_type.clone(),
+                        profile: profile.name.clone(),
+                        model: profile.model.clone(),
+                        kind: error.kind_label().to_owned(),
+                        status_code: error.status_code,
+                        retryable: error.retryable,
+                        error: error.public_message().to_owned(),
+                    });
+                    return Err(anyhow::Error::new(error));
+                }
+            };
+            self.trace_provider_attempts(trace, &completion.attempts);
+            self.emit_provider_retry_events(profile, &completion.attempts);
+            let response = completion.response;
 
             if !response.tool_calls.is_empty() {
+                if let Some(shadow) = provider.tool_call_shadow_message(&response.tool_calls) {
+                    messages.push(shadow);
+                }
                 for call in response.tool_calls {
                     let call_id = call.id.clone();
                     match self
@@ -558,18 +612,12 @@ impl AgentRuntime {
                                     outcome.output.clone(),
                                     Some(call_id.clone()),
                                 )?;
-                                messages = self.session_messages_for_provider(
-                                    session_ref,
-                                    reference_contexts,
-                                    trace,
-                                )?;
-                            } else {
-                                messages.push(Message {
-                                    role: Role::Tool,
-                                    content: outcome.output,
-                                    tool_call_id: Some(call_id),
-                                });
                             }
+                            messages.push(Message {
+                                role: Role::Tool,
+                                content: outcome.output,
+                                tool_call_id: Some(call_id),
+                            });
                         }
                         Err(failure) => {
                             if let Some(tool_trace) = failure.tool_trace {
@@ -616,6 +664,7 @@ impl AgentRuntime {
         capability_traces: &SharedCapabilityTraceCollector,
     ) -> Result<String> {
         let provider = self.provider_for_profile(profile)?;
+        let provider_metadata = provider.metadata();
         let provider_tools = (!tool_defs.is_empty()).then_some(tool_defs.as_slice());
         let mut messages = Vec::new();
 
@@ -634,14 +683,47 @@ impl AgentRuntime {
         });
 
         for _ in 0..8 {
+            info!(
+                provider_type = %provider_metadata.provider_type,
+                profile = %profile.name,
+                model = %profile.model,
+                message_count = messages.len(),
+                tool_count = tool_defs.len(),
+                workflow_session_id = ?session_id,
+                "workflow provider request dispatched"
+            );
             self.emit(RunEvent::ProviderRequest {
+                provider_type: provider_metadata.provider_type.clone(),
+                profile: profile.name.clone(),
+                model: profile.model.clone(),
                 tool_count: tool_defs.len(),
                 message_count: messages.len(),
+                max_attempts: provider_metadata.max_retries.saturating_add(1),
             });
 
-            let response = provider.complete(&messages, provider_tools).await?;
+            let completion = match provider.complete(&messages, provider_tools).await {
+                Ok(completion) => completion,
+                Err(error) => {
+                    self.emit_provider_retry_events(profile, &error.attempts);
+                    self.emit(RunEvent::ProviderFailed {
+                        provider_type: profile.provider_type.clone(),
+                        profile: profile.name.clone(),
+                        model: profile.model.clone(),
+                        kind: error.kind_label().to_owned(),
+                        status_code: error.status_code,
+                        retryable: error.retryable,
+                        error: error.public_message().to_owned(),
+                    });
+                    return Err(anyhow::Error::new(error));
+                }
+            };
+            self.emit_provider_retry_events(profile, &completion.attempts);
+            let response = completion.response;
 
             if !response.tool_calls.is_empty() {
+                if let Some(shadow) = provider.tool_call_shadow_message(&response.tool_calls) {
+                    messages.push(shadow);
+                }
                 for call in response.tool_calls {
                     let call_id = call.id.clone();
                     match self
@@ -1227,13 +1309,121 @@ Referenced session context:
         }
     }
 
-    fn effective_profile_trace(profile: &ProviderProfile) -> EffectiveProfileTrace {
+    fn effective_profile_trace(
+        profile: &ProviderProfile,
+        metadata: &ProviderTransportMetadata,
+    ) -> EffectiveProfileTrace {
         EffectiveProfileTrace {
             profile: profile.name.clone(),
             provider_type: profile.provider_type.clone(),
             model: profile.model.clone(),
+            base_url: metadata
+                .base_url
+                .clone()
+                .or_else(|| profile.base_url.clone()),
             api_key_env: profile.api_key_env.clone(),
             api_key_present: profile.api_key_present(),
+            timeout_ms: metadata.timeout_ms,
+            max_retries: metadata.max_retries,
+            supports_tools: profile.capabilities.supports_tools,
+            supports_tool_call_shadow_messages: metadata.supports_tool_call_shadow_messages,
+        }
+    }
+
+    fn provider_metadata_from_profile(profile: &ProviderProfile) -> ProviderTransportMetadata {
+        let (timeout_ms, max_retries, supports_tool_call_shadow_messages) =
+            match profile.provider_type.as_str() {
+                "anthropic" => (60_000, 2, true),
+                "ollama" => (90_000, 1, false),
+                "mock" => (0, 0, false),
+                _ => (45_000, 2, false),
+            };
+
+        let base_url = profile
+            .base_url
+            .clone()
+            .or_else(|| match profile.provider_type.as_str() {
+                "openai" | "openai-compatible" => Some("https://api.openai.com/v1".to_owned()),
+                "anthropic" => Some("https://api.anthropic.com/v1".to_owned()),
+                "ollama" => Some("http://127.0.0.1:11434".to_owned()),
+                _ => None,
+            });
+
+        ProviderTransportMetadata {
+            provider_type: profile.provider_type.clone(),
+            base_url,
+            timeout_ms,
+            max_retries,
+            supports_tool_call_shadow_messages,
+        }
+    }
+
+    fn provider_attempt_trace(attempt: &ProviderAttempt) -> ProviderAttemptTrace {
+        ProviderAttemptTrace {
+            attempt: attempt.attempt,
+            max_attempts: attempt.max_attempts,
+            status: attempt.status.clone(),
+            error_kind: attempt.error_kind.clone(),
+            status_code: attempt.status_code,
+            retryable: attempt.retryable,
+            message: attempt.message.clone(),
+        }
+    }
+
+    fn provider_failure_trace(error: &ProviderError) -> ProviderFailureTrace {
+        ProviderFailureTrace {
+            kind: error.kind_label().to_owned(),
+            status_code: error.status_code,
+            retryable: error.retryable,
+            message: error.public_message().to_owned(),
+        }
+    }
+
+    fn trace_provider_attempts(&self, trace: &mut RunTrace, attempts: &[ProviderAttempt]) {
+        for attempt in attempts {
+            trace.add_provider_attempt(Self::provider_attempt_trace(attempt));
+        }
+    }
+
+    fn trace_provider_error(
+        &self,
+        profile: &ProviderProfile,
+        trace: &mut RunTrace,
+        error: &ProviderError,
+    ) {
+        self.trace_provider_attempts(trace, &error.attempts);
+        trace.bind_provider_failure(Self::provider_failure_trace(error));
+        warn!(
+            run_id = %trace.run_id,
+            provider_type = %profile.provider_type,
+            profile = %profile.name,
+            model = %profile.model,
+            error_kind = %error.kind_label(),
+            status_code = ?error.status_code,
+            retryable = error.retryable,
+            "provider call failed"
+        );
+    }
+
+    fn emit_provider_retry_events(&self, profile: &ProviderProfile, attempts: &[ProviderAttempt]) {
+        for attempt in attempts.iter().filter(|attempt| attempt.status == "retry") {
+            self.emit(RunEvent::ProviderRetry {
+                provider_type: profile.provider_type.clone(),
+                profile: profile.name.clone(),
+                model: profile.model.clone(),
+                attempt: attempt.attempt,
+                max_attempts: attempt.max_attempts,
+                kind: attempt
+                    .error_kind
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                status_code: attempt.status_code,
+                retryable: attempt.retryable,
+                error: attempt
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "provider retry".to_owned()),
+            });
         }
     }
 
@@ -2089,8 +2279,8 @@ mod tests {
         FileNodeStore, NodeCapabilityDeclaration, NodeCommandResultEnvelope, NodeRegistration,
     };
     use mosaic_provider::{
-        CompletionResponse, LlmProvider, Message, MockProvider, ProviderProfileRegistry,
-        ToolDefinition,
+        CompletionResponse, LlmProvider, Message, MockProvider, ProviderCompletion, ProviderError,
+        ProviderProfileRegistry, ProviderTransportMetadata, ToolDefinition,
     };
     use mosaic_session_core::{
         SessionRecord, SessionStore, SessionSummary, TranscriptMessage, TranscriptRole,
@@ -2233,15 +2423,36 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for EmptyProvider {
+        fn metadata(&self) -> ProviderTransportMetadata {
+            ProviderTransportMetadata {
+                provider_type: "mock".to_owned(),
+                base_url: None,
+                timeout_ms: 0,
+                max_retries: 0,
+                supports_tool_call_shadow_messages: false,
+            }
+        }
+
         async fn complete(
             &self,
             _messages: &[Message],
             _tools: Option<&[ToolDefinition]>,
-        ) -> Result<CompletionResponse> {
-            Ok(CompletionResponse {
-                message: None,
-                tool_calls: vec![],
-                finish_reason: Some("stop".to_owned()),
+        ) -> std::result::Result<ProviderCompletion, ProviderError> {
+            Ok(ProviderCompletion {
+                response: CompletionResponse {
+                    message: None,
+                    tool_calls: vec![],
+                    finish_reason: Some("stop".to_owned()),
+                },
+                attempts: vec![mosaic_provider::ProviderAttempt {
+                    attempt: 1,
+                    max_attempts: 1,
+                    status: "success".to_owned(),
+                    error_kind: None,
+                    status_code: None,
+                    retryable: false,
+                    message: None,
+                }],
             })
         }
     }
@@ -2375,6 +2586,8 @@ mod tests {
                 RunEvent::SkillFinished { .. } => "SkillFinished",
                 RunEvent::SkillFailed { .. } => "SkillFailed",
                 RunEvent::ProviderRequest { .. } => "ProviderRequest",
+                RunEvent::ProviderRetry { .. } => "ProviderRetry",
+                RunEvent::ProviderFailed { .. } => "ProviderFailed",
                 RunEvent::ToolCalling { .. } => "ToolCalling",
                 RunEvent::ToolFinished { .. } => "ToolFinished",
                 RunEvent::ToolFailed { .. } => "ToolFailed",

@@ -1,0 +1,7 @@
+active_profile: azure
+profiles:
+  azure:
+    type: azure
+    model: gpt-5.4
+    base_url: https://your-resource.openai.azure.com
+    api_key_env: AZURE_OPENAI_API_KEY

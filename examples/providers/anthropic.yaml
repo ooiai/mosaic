@@ -1,7 +1,7 @@
-active_profile: anthropic-proxy
+active_profile: anthropic
 profiles:
-  anthropic-proxy:
-    type: openai-compatible
+  anthropic:
+    type: anthropic
     model: claude-sonnet-4-5
-    base_url: http://127.0.0.1:4000/v1
+    base_url: https://api.anthropic.com/v1
     api_key_env: ANTHROPIC_API_KEY

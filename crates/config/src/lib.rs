@@ -12,6 +12,81 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const ACTIVE_PROFILE_ENV: &str = "MOSAIC_ACTIVE_PROFILE";
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderType {
+    Mock,
+    OpenAi,
+    Azure,
+    Anthropic,
+    Ollama,
+    OpenAiCompatible,
+}
+
+impl ProviderType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mock => "mock",
+            Self::OpenAi => "openai",
+            Self::Azure => "azure",
+            Self::Anthropic => "anthropic",
+            Self::Ollama => "ollama",
+            Self::OpenAiCompatible => "openai-compatible",
+        }
+    }
+
+    pub fn default_base_url(self) -> Option<&'static str> {
+        match self {
+            Self::Mock => None,
+            Self::OpenAi => Some("https://api.openai.com/v1"),
+            Self::Azure => None,
+            Self::Anthropic => Some("https://api.anthropic.com/v1"),
+            Self::Ollama => Some("http://127.0.0.1:11434"),
+            Self::OpenAiCompatible => Some("https://api.openai.com/v1"),
+        }
+    }
+
+    pub fn requires_api_key(self) -> bool {
+        matches!(
+            self,
+            Self::OpenAi | Self::Azure | Self::Anthropic | Self::OpenAiCompatible
+        )
+    }
+
+    pub fn requires_explicit_base_url(self) -> bool {
+        matches!(self, Self::Azure)
+    }
+}
+
+impl std::fmt::Display for ProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+pub fn parse_provider_type(value: &str) -> Option<ProviderType> {
+    match value {
+        "mock" => Some(ProviderType::Mock),
+        "openai" => Some(ProviderType::OpenAi),
+        "azure" => Some(ProviderType::Azure),
+        "anthropic" => Some(ProviderType::Anthropic),
+        "ollama" => Some(ProviderType::Ollama),
+        "openai-compatible" => Some(ProviderType::OpenAiCompatible),
+        _ => None,
+    }
+}
+
+pub fn supported_provider_types() -> &'static [&'static str] {
+    &[
+        "mock",
+        "openai",
+        "azure",
+        "anthropic",
+        "ollama",
+        "openai-compatible",
+    ]
+}
+
 fn default_true() -> bool {
     true
 }
@@ -730,18 +805,24 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
                 format!("{field_prefix}.type"),
                 "provider type must not be empty",
             );
+            continue;
         }
 
-        if !matches!(profile.provider_type.as_str(), "mock" | "openai-compatible") {
-            report.push(
-                ValidationLevel::Error,
-                format!("{field_prefix}.type"),
-                format!(
-                    "unsupported provider type '{}': expected mock or openai-compatible",
-                    profile.provider_type
-                ),
-            );
-        }
+        let provider_type = match parse_provider_type(&profile.provider_type) {
+            Some(provider_type) => provider_type,
+            None => {
+                report.push(
+                    ValidationLevel::Error,
+                    format!("{field_prefix}.type"),
+                    format!(
+                        "unsupported provider type '{}': expected one of {}",
+                        profile.provider_type,
+                        supported_provider_types().join(", ")
+                    ),
+                );
+                continue;
+            }
+        };
 
         if profile.model.trim().is_empty() {
             report.push(
@@ -751,15 +832,58 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
             );
         }
 
-        if profile.provider_type == "openai-compatible" {
-            match profile.api_key_env.as_deref().map(str::trim) {
-                Some("") | None => report.push(
-                    ValidationLevel::Error,
-                    format!("{field_prefix}.api_key_env"),
-                    "openai-compatible profiles require api_key_env",
-                ),
-                _ => {}
-            }
+        if profile
+            .base_url
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.base_url"),
+                "base_url must not be empty when provided",
+            );
+        }
+
+        if profile
+            .api_key_env
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.api_key_env"),
+                "environment variable name must not be empty when provided",
+            );
+        }
+
+        if provider_type.requires_explicit_base_url()
+            && profile
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.base_url"),
+                format!("{} profiles require base_url", provider_type),
+            );
+        }
+
+        if provider_type.requires_api_key()
+            && profile
+                .api_key_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.api_key_env"),
+                format!("{} profiles require api_key_env", provider_type),
+            );
         }
     }
 
@@ -895,37 +1019,98 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
         checks.push(path_check(&manifest_path, "extension manifest", false));
     }
 
-    if let Some(active_profile) = config.profiles.get(&config.active_profile) {
-        if active_profile.provider_type == "mock" {
+    for (name, profile) in &config.profiles {
+        let Some(provider_type) = parse_provider_type(&profile.provider_type) else {
             checks.push(DoctorCheck {
-                status: DoctorStatus::Ok,
+                status: DoctorStatus::Error,
                 message: format!(
-                    "active profile '{}' uses the mock provider and does not require API credentials",
-                    config.active_profile
+                    "profile '{}' uses unsupported provider type '{}'",
+                    name, profile.provider_type
                 ),
             });
-        } else if let Some(api_key_env) = active_profile.api_key_env.as_deref() {
-            let status = if env::var(api_key_env).is_ok() {
-                DoctorStatus::Ok
-            } else {
-                DoctorStatus::Error
-            };
-            let is_ok = matches!(status, DoctorStatus::Ok);
+            continue;
+        };
 
-            checks.push(DoctorCheck {
-                status,
-                message: if is_ok {
-                    format!(
-                        "active profile '{}' has {} available in the environment",
-                        config.active_profile, api_key_env
-                    )
+        match provider_type {
+            ProviderType::Mock => checks.push(DoctorCheck {
+                status: DoctorStatus::Ok,
+                message: format!(
+                    "profile '{}' uses the mock provider and does not require API credentials",
+                    name
+                ),
+            }),
+            _ => {
+                let configured_base_url = profile
+                    .base_url
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty());
+                match configured_base_url.or_else(|| provider_type.default_base_url()) {
+                    Some(base_url) => checks.push(DoctorCheck {
+                        status: DoctorStatus::Ok,
+                        message: if configured_base_url.is_some() {
+                            format!(
+                                "profile '{}' uses {} base URL {}",
+                                name, provider_type, base_url
+                            )
+                        } else {
+                            format!(
+                                "profile '{}' defaults to {} base URL {}",
+                                name, provider_type, base_url
+                            )
+                        },
+                    }),
+                    None => checks.push(DoctorCheck {
+                        status: DoctorStatus::Error,
+                        message: format!(
+                            "profile '{}' requires an explicit {} base_url",
+                            name, provider_type
+                        ),
+                    }),
+                }
+
+                if provider_type.requires_api_key() {
+                    match profile
+                        .api_key_env
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    {
+                        Some(api_key_env) if env::var(api_key_env).is_ok() => {
+                            checks.push(DoctorCheck {
+                                status: DoctorStatus::Ok,
+                                message: format!(
+                                    "profile '{}' has {} available in the environment",
+                                    name, api_key_env
+                                ),
+                            })
+                        }
+                        Some(api_key_env) => checks.push(DoctorCheck {
+                            status: if name == &config.active_profile {
+                                DoctorStatus::Error
+                            } else {
+                                DoctorStatus::Warning
+                            },
+                            message: format!(
+                                "profile '{}' expects environment variable {} to be set",
+                                name, api_key_env
+                            ),
+                        }),
+                        None => checks.push(DoctorCheck {
+                            status: DoctorStatus::Error,
+                            message: format!(
+                                "profile '{}' is missing api_key_env for {}",
+                                name, provider_type
+                            ),
+                        }),
+                    }
                 } else {
-                    format!(
-                        "active profile '{}' expects environment variable {} to be set",
-                        config.active_profile, api_key_env
-                    )
-                },
-            });
+                    checks.push(DoctorCheck {
+                        status: DoctorStatus::Ok,
+                        message: format!("profile '{}' does not require API credentials", name),
+                    });
+                }
+            }
         }
     }
 
@@ -1137,9 +1322,27 @@ fn default_workspace_name() -> String {
 fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
     BTreeMap::from([
         (
+            "anthropic-sonnet".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "anthropic".to_owned(),
+                model: "claude-sonnet-4-5".to_owned(),
+                base_url: Some("https://api.anthropic.com/v1".to_owned()),
+                api_key_env: Some("ANTHROPIC_API_KEY".to_owned()),
+            },
+        ),
+        (
+            "azure-gpt-5.4".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "azure".to_owned(),
+                model: "gpt-5.4".to_owned(),
+                base_url: Some("https://your-resource.openai.azure.com".to_owned()),
+                api_key_env: Some("AZURE_OPENAI_API_KEY".to_owned()),
+            },
+        ),
+        (
             "gpt-5.4".to_owned(),
             ProviderProfileConfig {
-                provider_type: "openai-compatible".to_owned(),
+                provider_type: "openai".to_owned(),
                 model: "gpt-5.4".to_owned(),
                 base_url: Some("https://api.openai.com/v1".to_owned()),
                 api_key_env: Some("OPENAI_API_KEY".to_owned()),
@@ -1148,7 +1351,7 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
         (
             "gpt-5.4-mini".to_owned(),
             ProviderProfileConfig {
-                provider_type: "openai-compatible".to_owned(),
+                provider_type: "openai".to_owned(),
                 model: "gpt-5.4-mini".to_owned(),
                 base_url: Some("https://api.openai.com/v1".to_owned()),
                 api_key_env: Some("OPENAI_API_KEY".to_owned()),
@@ -1160,6 +1363,15 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 provider_type: "mock".to_owned(),
                 model: "mock".to_owned(),
                 base_url: None,
+                api_key_env: None,
+            },
+        ),
+        (
+            "ollama-qwen3".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "ollama".to_owned(),
+                model: "qwen3:14b".to_owned(),
+                base_url: Some("http://127.0.0.1:11434".to_owned()),
                 api_key_env: None,
             },
         ),
@@ -1232,6 +1444,7 @@ mod tests {
         let root = repo_root();
         for rel in [
             "examples/providers/openai.yaml",
+            "examples/providers/azure.yaml",
             "examples/providers/ollama.yaml",
             "examples/providers/anthropic.yaml",
         ] {
@@ -1447,6 +1660,30 @@ profiles:
                 .issues
                 .iter()
                 .any(|issue| issue.field == "profiles.broken.api_key_env")
+        );
+    }
+
+    #[test]
+    fn validate_reports_missing_azure_base_url() {
+        let mut config = MosaicConfig::default();
+        config.profiles.insert(
+            "azure-broken".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "azure".to_owned(),
+                model: "gpt-5.4".to_owned(),
+                base_url: None,
+                api_key_env: Some("AZURE_OPENAI_API_KEY".to_owned()),
+            },
+        );
+
+        let report = validate_mosaic_config(&config);
+
+        assert!(report.has_errors());
+        assert!(
+            report
+                .issues
+                .iter()
+                .any(|issue| issue.field == "profiles.azure-broken.base_url")
         );
     }
 

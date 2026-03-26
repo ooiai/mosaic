@@ -1,4 +1,5 @@
 use mosaic_runtime::events::{RunEvent, RunEventSink};
+use tracing::info;
 
 pub struct CliEventSink;
 
@@ -36,14 +37,44 @@ fn format_run_event(event: &RunEvent) -> String {
             format!("[run] skill failed: {} error={}", name, error)
         }
         RunEvent::ProviderRequest {
+            provider_type,
+            profile,
+            model,
             tool_count,
             message_count,
+            max_attempts,
         } => {
             format!(
-                "[run] provider=request tools={} messages={}",
-                tool_count, message_count
+                "[run] provider=request provider={} profile={} model={} tools={} messages={} attempts={}",
+                provider_type, profile, model, tool_count, message_count, max_attempts
             )
         }
+        RunEvent::ProviderRetry {
+            provider_type,
+            profile,
+            model,
+            attempt,
+            max_attempts,
+            kind,
+            status_code,
+            error,
+            ..
+        } => format!(
+            "[run] provider retry: provider={} profile={} model={} attempt={}/{} kind={} status={:?} error={}",
+            provider_type, profile, model, attempt, max_attempts, kind, status_code, error
+        ),
+        RunEvent::ProviderFailed {
+            provider_type,
+            profile,
+            model,
+            kind,
+            status_code,
+            error,
+            ..
+        } => format!(
+            "[run] provider failed: provider={} profile={} model={} kind={} status={:?} error={}",
+            provider_type, profile, model, kind, status_code, error
+        ),
         RunEvent::ToolCalling { name, call_id } => {
             format!("[run] calling tool: {} (call_id={})", name, call_id)
         }
@@ -101,7 +132,7 @@ fn format_run_event(event: &RunEvent) -> String {
 
 impl RunEventSink for CliEventSink {
     fn emit(&self, event: RunEvent) {
-        println!("{}", format_run_event(&event));
+        info!(event = %format_run_event(&event), "runtime event");
     }
 }
 
@@ -114,11 +145,38 @@ mod tests {
     #[test]
     fn formats_provider_requests_with_stable_field_order() {
         let line = format_run_event(&RunEvent::ProviderRequest {
+            provider_type: "openai".to_owned(),
+            profile: "gpt-5.4".to_owned(),
+            model: "gpt-5.4".to_owned(),
             tool_count: 2,
             message_count: 3,
+            max_attempts: 3,
         });
 
-        assert_eq!(line, "[run] provider=request tools=2 messages=3");
+        assert_eq!(
+            line,
+            "[run] provider=request provider=openai profile=gpt-5.4 model=gpt-5.4 tools=2 messages=3 attempts=3"
+        );
+    }
+
+    #[test]
+    fn formats_provider_retries_with_attempt_metadata() {
+        let line = format_run_event(&RunEvent::ProviderRetry {
+            provider_type: "openai".to_owned(),
+            profile: "gpt-5.4".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            attempt: 1,
+            max_attempts: 3,
+            kind: "timeout".to_owned(),
+            status_code: Some(504),
+            retryable: true,
+            error: "timed out".to_owned(),
+        });
+
+        assert_eq!(
+            line,
+            "[run] provider retry: provider=openai profile=gpt-5.4 model=gpt-5.4 attempt=1/3 kind=timeout status=Some(504) error=timed out"
+        );
     }
 
     #[test]

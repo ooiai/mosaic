@@ -54,6 +54,7 @@ use mosaic_workflow::WorkflowRegistry;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Handle;
 use tokio::sync::broadcast;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 pub use mosaic_control_protocol::{
@@ -1413,6 +1414,13 @@ fn finalize_success(
 
     increment_metric(state.as_ref(), |metrics| metrics.completed_runs_total += 1);
     let output_preview = truncate_preview(&result.output, 120);
+    info!(
+        gateway_run_id = %meta.gateway_run_id,
+        correlation_id = %meta.correlation_id,
+        session_route = %meta.session_route,
+        trace_run_id = %trace.run_id,
+        "gateway finalized run successfully"
+    );
     record_audit_event(
         state.as_ref(),
         "run.completed",
@@ -1483,6 +1491,14 @@ fn finalize_failure(
 
     increment_metric(state.as_ref(), |metrics| metrics.failed_runs_total += 1);
     let public_error = public_error_message(&source);
+    warn!(
+        gateway_run_id = %meta.gateway_run_id,
+        correlation_id = %meta.correlation_id,
+        session_route = %meta.session_route,
+        trace_run_id = %trace.run_id,
+        error = %public_error,
+        "gateway finalized run with failure"
+    );
     record_audit_event(
         state.as_ref(),
         "run.failed",
