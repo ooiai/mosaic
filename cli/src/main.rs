@@ -1,4 +1,9 @@
-use std::{collections::BTreeMap, env, fs, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    env, fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
@@ -10,8 +15,9 @@ use mosaic_config::{
 };
 use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
-    ExecJobRequest, GatewayEvent, IngressTrace, RunResponse, SessionDetailDto, SessionSummaryDto,
-    WebhookJobRequest,
+    ExecJobRequest, GatewayAuditEventDto, GatewayEvent, HealthResponse, IncidentBundleDto,
+    IngressTrace, MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunResponse,
+    SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
 };
 use mosaic_extension_core::{ExtensionStatus, ExtensionValidationReport, validate_extension_set};
 use mosaic_gateway::{
@@ -86,6 +92,8 @@ enum Commands {
         command: ModelCommand,
     },
     Gateway {
+        #[arg(long)]
+        attach: Option<String>,
         #[command(subcommand)]
         command: GatewayCliCommand,
     },
@@ -152,6 +160,20 @@ enum GatewayCliCommand {
         http: Option<String>,
     },
     Sessions,
+    Status,
+    Audit {
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    Replay {
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    Incident {
+        id: String,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -295,6 +317,7 @@ enum DispatchCommand {
         command: ModelCommand,
     },
     Gateway {
+        attach: Option<String>,
         command: GatewayCliCommand,
     },
     Adapter {
@@ -363,7 +386,9 @@ impl Cli {
                 DispatchCommand::Session { attach, command }
             }
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
-            Some(Commands::Gateway { command }) => DispatchCommand::Gateway { command },
+            Some(Commands::Gateway { attach, command }) => {
+                DispatchCommand::Gateway { attach, command }
+            }
             Some(Commands::Adapter { attach, command }) => {
                 DispatchCommand::Adapter { attach, command }
             }
@@ -401,7 +426,7 @@ async fn main() -> Result<()> {
         DispatchCommand::Setup { command } => setup_cmd(command),
         DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
         DispatchCommand::Model { command } => model_cmd(command),
-        DispatchCommand::Gateway { command } => gateway_cmd(command).await,
+        DispatchCommand::Gateway { attach, command } => gateway_cmd(attach, command).await,
         DispatchCommand::Adapter { attach, command } => adapter_cmd(attach, command).await,
         DispatchCommand::Node { command } => node_cmd(command).await,
         DispatchCommand::Capability { attach, command } => capability_cmd(attach, command).await,
@@ -431,7 +456,7 @@ async fn tui_cmd(
     let (extension_summary, extension_policy_summary, extension_errors) =
         tui_extension_status(&loaded)?;
     let (gateway, session_id, active_profile, active_model) = if let Some(url) = attach {
-        let client = GatewayClient::new(url);
+        let client = gateway_client_from_loaded(&loaded, url);
         let session_id = resolve_remote_tui_session_id(&client, session.as_deref()).await?;
         let session_detail = client.get_session(&session_id).await?;
         let active_profile = profile
@@ -603,7 +628,7 @@ async fn run_cmd_remote(
     profile: Option<String>,
     attach: String,
 ) -> Result<()> {
-    let client = GatewayClient::new(attach.clone());
+    let client = gateway_client_from_loaded(&loaded, attach.clone());
     let response = client
         .submit_run(GatewayRunRequest {
             system: app_cfg.agent.system,
@@ -700,7 +725,8 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
 
 async fn session_cmd(attach: Option<String>, command: SessionCommand) -> Result<()> {
     if let Some(url) = attach {
-        let client = GatewayClient::new(url);
+        let loaded = ensure_loaded_config(None)?;
+        let client = gateway_client_from_loaded(&loaded, url);
 
         return match command {
             SessionCommand::List => print_remote_session_list(&client.list_sessions().await?),
@@ -786,18 +812,71 @@ async fn session_cmd(attach: Option<String>, command: SessionCommand) -> Result<
     }
 }
 
-async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
+async fn gateway_cmd(attach: Option<String>, command: GatewayCliCommand) -> Result<()> {
     let loaded = ensure_loaded_config(None)?;
-    let gateway = build_gateway_handle(&loaded, None)?;
 
+    if let Some(url) = attach {
+        let client = gateway_client_from_loaded(&loaded, url);
+        return match command {
+            GatewayCliCommand::Serve { .. } => {
+                bail!("remote attach does not support `mosaic gateway serve`")
+            }
+            GatewayCliCommand::Sessions => {
+                print_remote_session_list(&client.list_sessions().await?)
+            }
+            GatewayCliCommand::Status => {
+                let health = client.health().await?;
+                let readiness = client.readiness().await?;
+                let metrics = client.metrics().await?;
+                print_gateway_status(&health, &readiness, &metrics)
+            }
+            GatewayCliCommand::Audit { limit } => {
+                print_gateway_audit_events(&client.audit_events(limit).await?)
+            }
+            GatewayCliCommand::Replay { limit } => {
+                print_gateway_replay_window(&client.replay_window(limit).await?)
+            }
+            GatewayCliCommand::Incident { id, out } => {
+                let bundle = client.incident_bundle(&id).await?;
+                let path = save_incident_bundle(&loaded, &bundle, out)?;
+                print_gateway_incident_bundle(&bundle, &path)
+            }
+        };
+    }
+
+    let gateway = build_gateway_handle(&loaded, None)?;
     match command {
         GatewayCliCommand::Sessions => print_session_list(&gateway.list_sessions()?),
+        GatewayCliCommand::Status => {
+            let health = gateway.health();
+            let readiness = gateway.readiness();
+            let metrics = gateway.metrics();
+            print_gateway_status(&health, &readiness, &metrics)
+        }
+        GatewayCliCommand::Audit { limit } => {
+            print_gateway_audit_events(&gateway.audit_events(limit))
+        }
+        GatewayCliCommand::Replay { limit } => {
+            print_gateway_replay_window(&gateway.replay_window(limit))
+        }
+        GatewayCliCommand::Incident { id, out } => {
+            let (bundle, saved_path) = gateway.incident_bundle(&id)?;
+            let path = if let Some(out) = out {
+                fs::write(&out, serde_json::to_string_pretty(&bundle)?)?;
+                out
+            } else {
+                saved_path
+            };
+            print_gateway_incident_bundle(&bundle, &path)
+        }
         GatewayCliCommand::Serve { local, http } => {
             if let Some(bind) = http {
                 let addr: std::net::SocketAddr = bind.parse()?;
                 let session_count = gateway.list_sessions()?.len();
                 println!("http gateway ready");
                 println!("active_profile: {}", loaded.config.active_profile);
+                println!("deployment_profile: {}", loaded.config.deployment.profile);
+                println!("auth_mode: {}", gateway.auth_mode());
                 println!("sessions: {}", session_count);
                 println!("listen: {}", addr);
                 println!("press Ctrl-C to stop");
@@ -817,6 +896,8 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
             let session_count = gateway.list_sessions()?.len();
             println!("local gateway ready");
             println!("active_profile: {}", loaded.config.active_profile);
+            println!("deployment_profile: {}", loaded.config.deployment.profile);
+            println!("auth_mode: {}", gateway.auth_mode());
             println!("sessions: {}", session_count);
             println!("press Ctrl-C to stop");
 
@@ -832,7 +913,7 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
                         match event {
                             Ok(envelope) => {
                                 println!(
-                                    "[gateway] run={} corr={} session={} route={} event={}",
+                                    "[gateway] run={} corr={} session={} route={} event= {}",
                                     envelope.gateway_run_id,
                                     envelope.correlation_id,
                                     envelope.session_id.as_deref().unwrap_or("<none>"),
@@ -856,7 +937,10 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
 
 async fn adapter_cmd(attach: Option<String>, command: AdapterCommand) -> Result<()> {
     let adapters = if let Some(url) = attach {
-        GatewayClient::new(url).list_adapters().await?
+        let loaded = ensure_loaded_config(None)?;
+        gateway_client_from_loaded(&loaded, url)
+            .list_adapters()
+            .await?
     } else {
         let loaded = ensure_loaded_config(None)?;
         let gateway = build_gateway_handle(&loaded, None)?;
@@ -1096,7 +1180,7 @@ async fn capability_cmd(attach: Option<String>, command: CapabilityCommand) -> R
         }
         CapabilityCommand::Jobs => {
             if let Some(url) = attach {
-                let client = GatewayClient::new(url);
+                let client = gateway_client_from_loaded(&loaded, url);
                 return print_capability_jobs(&client.list_capability_jobs().await?);
             }
             let gateway = build_gateway_handle(&loaded, None)?;
@@ -1120,7 +1204,7 @@ async fn capability_cmd(attach: Option<String>, command: CapabilityCommand) -> R
                 session,
             } => {
                 if let Some(url) = attach {
-                    let client = GatewayClient::new(url);
+                    let client = gateway_client_from_loaded(&loaded, url);
                     let job = client
                         .run_exec_job(ExecJobRequest {
                             session_id: session,
@@ -1160,7 +1244,7 @@ async fn capability_cmd(attach: Option<String>, command: CapabilityCommand) -> R
                     headers: parse_header_args(&headers)?,
                 };
                 if let Some(url) = attach {
-                    let client = GatewayClient::new(url);
+                    let client = gateway_client_from_loaded(&loaded, url);
                     let job = client.run_webhook_job(request).await?;
                     return print_capability_job(&job);
                 }
@@ -1179,7 +1263,7 @@ async fn cron_cmd(attach: Option<String>, command: CronCommand) -> Result<()> {
     match command {
         CronCommand::List => {
             if let Some(url) = attach {
-                let client = GatewayClient::new(url);
+                let client = gateway_client_from_loaded(&loaded, url);
                 return print_cron_registrations(&client.list_cron_registrations().await?);
             }
             let gateway = build_gateway_handle(&loaded, None)?;
@@ -1209,7 +1293,7 @@ async fn cron_cmd(attach: Option<String>, command: CronCommand) -> Result<()> {
                 workflow,
             };
             if let Some(url) = attach {
-                let client = GatewayClient::new(url);
+                let client = gateway_client_from_loaded(&loaded, url);
                 let registration = client.register_cron(request).await?;
                 return print_cron_registrations(&[registration]);
             }
@@ -1219,7 +1303,7 @@ async fn cron_cmd(attach: Option<String>, command: CronCommand) -> Result<()> {
         }
         CronCommand::Trigger { id } => {
             if let Some(url) = attach {
-                let client = GatewayClient::new(url);
+                let client = gateway_client_from_loaded(&loaded, url);
                 let response = client.trigger_cron(&id).await?;
                 return finish_remote_gateway_run(&loaded, response);
             }
@@ -1565,6 +1649,22 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
         println!("  gateway_url: {:?}", ingress.gateway_url);
     }
 
+    if let Some(governance) = &trace.governance {
+        println!(
+            "
+governance:"
+        );
+        println!("  deployment_profile: {}", governance.deployment_profile);
+        println!("  workspace_name: {}", governance.workspace_name);
+        println!("  auth_mode: {}", governance.auth_mode);
+        println!(
+            "  audit_retention_days: {}",
+            governance.audit_retention_days
+        );
+        println!("  event_replay_window: {}", governance.event_replay_window);
+        println!("  redact_inputs: {}", governance.redact_inputs);
+    }
+
     println!(
         "
 summary:"
@@ -1718,10 +1818,48 @@ summary:"
         println!("\ncurrent_workspace_config:");
         println!("  active_profile: {}", redacted.active_profile);
         println!(
+            "  deployment: profile={} workspace={}",
+            redacted.deployment.profile, redacted.deployment.workspace_name
+        );
+        println!(
+            "  auth: operator_env={:?} operator_present={} webchat_env={:?} webchat_present={} telegram_env={:?} telegram_present={}",
+            redacted.auth.operator_token_env,
+            redacted.auth.operator_token_present,
+            redacted.auth.webchat_shared_secret_env,
+            redacted.auth.webchat_shared_secret_present,
+            redacted.auth.telegram_secret_token_env,
+            redacted.auth.telegram_secret_token_present
+        );
+        println!(
             "  session_store_root_dir: {}",
             redacted.session_store_root_dir
         );
         println!("  inspect_runs_dir: {}", redacted.inspect_runs_dir);
+        println!(
+            "  audit: root_dir={} retention_days={} replay_window={} redact_inputs={}",
+            redacted.audit.root_dir,
+            redacted.audit.retention_days,
+            redacted.audit.event_replay_window,
+            redacted.audit.redact_inputs
+        );
+        println!(
+            "  observability: metrics={} readiness={} slow_consumer_lag_threshold={}",
+            redacted.observability.enable_metrics,
+            redacted.observability.enable_readiness,
+            redacted.observability.slow_consumer_lag_threshold
+        );
+        println!(
+            "  extension_manifest_count: {}",
+            redacted.extension_manifest_count
+        );
+        println!(
+            "  policies: exec={} webhook={} cron={} mcp={} hot_reload={}",
+            redacted.policies.allow_exec,
+            redacted.policies.allow_webhook,
+            redacted.policies.allow_cron,
+            redacted.policies.allow_mcp,
+            redacted.policies.hot_reload_enabled
+        );
         println!("  profiles:");
         for profile in redacted.profiles {
             println!(
@@ -1849,6 +1987,155 @@ fn build_gateway_handle(
     app_cfg: Option<&mosaic_config::AppConfig>,
 ) -> Result<GatewayHandle> {
     bootstrap::build_local_gateway(tokio::runtime::Handle::current(), loaded, app_cfg)
+}
+
+fn gateway_client_from_loaded(
+    loaded: &LoadedMosaicConfig,
+    url: impl Into<String>,
+) -> GatewayClient {
+    GatewayClient::new(url.into()).with_bearer_token(operator_token_from_loaded(loaded))
+}
+
+fn operator_token_from_loaded(loaded: &LoadedMosaicConfig) -> Option<String> {
+    loaded
+        .config
+        .auth
+        .operator_token_env
+        .as_deref()
+        .and_then(|name| env::var(name).ok())
+        .or_else(|| env::var("MOSAIC_OPERATOR_TOKEN").ok())
+        .or_else(|| env::var("MOSAIC_GATEWAY_TOKEN").ok())
+}
+
+fn save_incident_bundle(
+    loaded: &LoadedMosaicConfig,
+    bundle: &IncidentBundleDto,
+    out: Option<PathBuf>,
+) -> Result<PathBuf> {
+    let path = out.unwrap_or_else(|| {
+        resolve_workspace_relative_path(&loaded.config.audit.root_dir)
+            .unwrap_or_else(|_| PathBuf::from(&loaded.config.audit.root_dir))
+            .join("incidents")
+            .join(format!("{}.json", bundle.identifier))
+    });
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(bundle)?)?;
+    Ok(path)
+}
+
+fn print_gateway_status(
+    health: &HealthResponse,
+    readiness: &ReadinessResponse,
+    metrics: &MetricsResponse,
+) -> Result<()> {
+    println!(
+        "health: status={} active_profile={} deployment={} auth={} sessions={} replay_window={} transport={}",
+        health.status,
+        health.active_profile,
+        health.deployment_profile,
+        health.auth_mode,
+        health.session_count,
+        health.event_replay_window,
+        health.transport,
+    );
+    println!(
+        "readiness: status={} session_store_ready={} audit_ready={} replay_buffered={} slow_consumer_threshold={} extensions={}",
+        readiness.status,
+        readiness.session_store_ready,
+        readiness.audit_ready,
+        readiness.replay_events_buffered,
+        readiness.slow_consumer_lag_threshold,
+        readiness.extension_count,
+    );
+    println!(
+        "metrics: completed_runs={} failed_runs={} capability_jobs_total={} audit_events_total={} auth_denials_total={} lagged_events_total={} open_jobs={}",
+        metrics.completed_runs_total,
+        metrics.failed_runs_total,
+        metrics.capability_jobs_total,
+        metrics.audit_events_total,
+        metrics.auth_denials_total,
+        metrics.broadcast_lag_events_total,
+        metrics.capability_job_count,
+    );
+    Ok(())
+}
+
+fn print_gateway_audit_events(events: &[GatewayAuditEventDto]) -> Result<()> {
+    if events.is_empty() {
+        println!("no audit events found");
+        return Ok(());
+    }
+
+    for event in events {
+        println!(
+            "{} | kind={} | outcome={} | session={} | gateway_run={} | correlation={} | channel={:?} | actor={:?}",
+            event.emitted_at,
+            event.kind,
+            event.outcome,
+            event.session_id.as_deref().unwrap_or("-"),
+            event.gateway_run_id.as_deref().unwrap_or("-"),
+            event.correlation_id.as_deref().unwrap_or("-"),
+            event.channel,
+            event.actor,
+        );
+        println!(
+            "  summary: {}{}",
+            truncate_for_cli(&event.summary, 240),
+            if event.redacted { " [redacted]" } else { "" }
+        );
+        if let Some(target) = event.target.as_deref() {
+            println!("  target: {}", target);
+        }
+    }
+    Ok(())
+}
+
+fn print_gateway_replay_window(replay: &ReplayWindowResponse) -> Result<()> {
+    println!(
+        "replay_window: capacity={} buffered={} dropped_total={}",
+        replay.capacity,
+        replay.events.len(),
+        replay.dropped_events_total,
+    );
+    if replay.events.is_empty() {
+        println!("no replay events captured");
+        return Ok(());
+    }
+    for envelope in &replay.events {
+        println!(
+            "{} | run={} | corr={} | session={} | route={} | event={}",
+            envelope.emitted_at,
+            envelope.gateway_run_id,
+            envelope.correlation_id,
+            envelope.session_id.as_deref().unwrap_or("-"),
+            envelope.session_route,
+            gateway_event_label(&envelope.event),
+        );
+    }
+    Ok(())
+}
+
+fn print_gateway_incident_bundle(bundle: &IncidentBundleDto, path: &Path) -> Result<()> {
+    println!("incident: {}", bundle.identifier);
+    println!("saved_bundle: {}", path.display());
+    println!("generated_at: {}", bundle.generated_at);
+    println!("deployment_profile: {}", bundle.deployment_profile);
+    println!("auth_mode: {}", bundle.auth_mode);
+    println!("redaction_policy: {}", bundle.redaction_policy);
+    println!("trace_run_id: {}", bundle.trace.run_id);
+    println!("gateway_run_id: {:?}", bundle.trace.gateway_run_id);
+    println!("correlation_id: {:?}", bundle.trace.correlation_id);
+    println!("audit_events: {}", bundle.audit_events.len());
+    println!(
+        "metrics: completed_runs={} failed_runs={} audit_events_total={} lagged_events_total={}",
+        bundle.metrics.completed_runs_total,
+        bundle.metrics.failed_runs_total,
+        bundle.metrics.audit_events_total,
+        bundle.metrics.broadcast_lag_events_total,
+    );
+    Ok(())
 }
 
 fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
@@ -2236,10 +2523,48 @@ fn print_config_summary(loaded: &LoadedMosaicConfig) {
     println!("  schema_version: {}", redacted.schema_version);
     println!("  active_profile: {}", redacted.active_profile);
     println!(
+        "  deployment: profile={} workspace={}",
+        redacted.deployment.profile, redacted.deployment.workspace_name
+    );
+    println!(
+        "  auth: operator_env={:?} operator_present={} webchat_env={:?} webchat_present={} telegram_env={:?} telegram_present={}",
+        redacted.auth.operator_token_env,
+        redacted.auth.operator_token_present,
+        redacted.auth.webchat_shared_secret_env,
+        redacted.auth.webchat_shared_secret_present,
+        redacted.auth.telegram_secret_token_env,
+        redacted.auth.telegram_secret_token_present
+    );
+    println!(
         "  session_store_root_dir: {}",
         redacted.session_store_root_dir
     );
     println!("  inspect_runs_dir: {}", redacted.inspect_runs_dir);
+    println!(
+        "  audit: root_dir={} retention_days={} replay_window={} redact_inputs={}",
+        redacted.audit.root_dir,
+        redacted.audit.retention_days,
+        redacted.audit.event_replay_window,
+        redacted.audit.redact_inputs
+    );
+    println!(
+        "  observability: metrics={} readiness={} slow_consumer_lag_threshold={}",
+        redacted.observability.enable_metrics,
+        redacted.observability.enable_readiness,
+        redacted.observability.slow_consumer_lag_threshold
+    );
+    println!(
+        "  extension_manifest_count: {}",
+        redacted.extension_manifest_count
+    );
+    println!(
+        "  policies: exec={} webhook={} cron={} mcp={} hot_reload={}",
+        redacted.policies.allow_exec,
+        redacted.policies.allow_webhook,
+        redacted.policies.allow_cron,
+        redacted.policies.allow_mcp,
+        redacted.policies.hot_reload_enabled
+    );
     println!("  profiles:");
     for profile in redacted.profiles {
         println!(
@@ -2635,6 +2960,7 @@ mod tests {
         assert_eq!(
             cli.dispatch(),
             DispatchCommand::Gateway {
+                attach: None,
                 command: super::GatewayCliCommand::Serve {
                     local: false,
                     http: Some("127.0.0.1:8080".to_owned()),

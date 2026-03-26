@@ -11,10 +11,13 @@ use crate::mock;
 pub const LOCAL_COMMANDS: [(&str, &str); 8] = [
     ("/help", "Show local control command reference"),
     ("/logs", "Toggle activity feed visibility"),
-    ("/gateway connect", "Mark the mock gateway as connected"),
+    (
+        "/gateway connect",
+        "Resume gateway refresh and event streaming",
+    ),
     (
         "/gateway disconnect",
-        "Mark the mock gateway as disconnected",
+        "Pause gateway refresh and event streaming",
     ),
     ("/runtime <status>", "Set the control runtime status label"),
     (
@@ -209,6 +212,8 @@ pub struct App {
     pub extension_summary: Option<String>,
     pub extension_policy_summary: Option<String>,
     pub extension_errors: Vec<String>,
+    pub gateway_summary: Option<String>,
+    pub gateway_detail: Option<String>,
     pub node_summary: Option<String>,
     pub node_detail: Option<String>,
     heartbeat: usize,
@@ -257,6 +262,8 @@ impl App {
             extension_summary: None,
             extension_policy_summary: None,
             extension_errors: Vec::new(),
+            gateway_summary: None,
+            gateway_detail: None,
             node_summary: None,
             node_detail: None,
             heartbeat: 0,
@@ -315,6 +322,8 @@ impl App {
             extension_summary: None,
             extension_policy_summary: None,
             extension_errors: Vec::new(),
+            gateway_summary: None,
+            gateway_detail: None,
             node_summary: None,
             node_detail: None,
             heartbeat: 0,
@@ -338,6 +347,15 @@ impl App {
         self.extension_summary = Some(extension_summary);
         self.extension_policy_summary = Some(extension_policy_summary);
         self.extension_errors = extension_errors;
+    }
+
+    pub fn set_gateway_state(
+        &mut self,
+        gateway_summary: Option<String>,
+        gateway_detail: Option<String>,
+    ) {
+        self.gateway_summary = gateway_summary;
+        self.gateway_detail = gateway_detail;
     }
 
     pub fn set_node_state(&mut self, node_summary: Option<String>, node_detail: Option<String>) {
@@ -1371,18 +1389,18 @@ reason={}",
         match action {
             Some("connect") => {
                 self.gateway_connected = true;
-                self.push_activity("gateway", "Gateway marked connected in the local TUI.");
+                self.push_activity("gateway", "Gateway link marked connected in the TUI.");
                 self.push_system_entry(
                     "Gateway link updated",
-                    "Local mock transport was marked connected by operator command.",
+                    "Gateway refresh and event streaming were resumed by operator command.",
                 );
             }
             Some("disconnect") => {
                 self.gateway_connected = false;
-                self.push_activity("gateway", "Gateway marked disconnected in the local TUI.");
+                self.push_activity("gateway", "Gateway link marked disconnected in the TUI.");
                 self.push_system_entry(
                     "Gateway link updated",
-                    "Local mock transport was marked disconnected by operator command.",
+                    "Gateway refresh and event streaming were paused by operator command.",
                 );
             }
             _ => self.push_command_error("Usage: /gateway connect|disconnect"),

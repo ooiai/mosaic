@@ -13,6 +13,76 @@ pub struct HealthResponse {
     pub active_profile: String,
     pub session_count: usize,
     pub transport: String,
+    pub deployment_profile: String,
+    pub auth_mode: String,
+    pub event_replay_window: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReadinessResponse {
+    pub status: String,
+    pub transport: String,
+    pub deployment_profile: String,
+    pub auth_mode: String,
+    pub session_store_ready: bool,
+    pub audit_ready: bool,
+    pub extension_count: usize,
+    pub session_count: usize,
+    pub replay_events_buffered: usize,
+    pub event_replay_window: usize,
+    pub slow_consumer_lag_threshold: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MetricsResponse {
+    pub transport: String,
+    pub deployment_profile: String,
+    pub auth_mode: String,
+    pub session_count: usize,
+    pub capability_job_count: usize,
+    pub completed_runs_total: u64,
+    pub failed_runs_total: u64,
+    pub capability_jobs_total: u64,
+    pub audit_events_total: u64,
+    pub auth_denials_total: u64,
+    pub broadcast_lag_events_total: u64,
+    pub replay_events_buffered: usize,
+    pub event_replay_window: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GatewayAuditEventDto {
+    pub id: String,
+    pub kind: String,
+    pub outcome: String,
+    pub summary: String,
+    pub actor: Option<String>,
+    pub session_id: Option<String>,
+    pub gateway_run_id: Option<String>,
+    pub correlation_id: Option<String>,
+    pub channel: Option<String>,
+    pub target: Option<String>,
+    pub emitted_at: DateTime<Utc>,
+    pub redacted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReplayWindowResponse {
+    pub capacity: usize,
+    pub dropped_events_total: u64,
+    pub events: Vec<EventStreamEnvelope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IncidentBundleDto {
+    pub identifier: String,
+    pub generated_at: DateTime<Utc>,
+    pub deployment_profile: String,
+    pub auth_mode: String,
+    pub redaction_policy: String,
+    pub trace: RunTrace,
+    pub audit_events: Vec<GatewayAuditEventDto>,
+    pub metrics: MetricsResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -16,7 +16,10 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use mosaic_control_protocol::{GatewayEvent, IngressTrace, SessionDetailDto, TranscriptRoleDto};
+use mosaic_control_protocol::{
+    GatewayEvent, HealthResponse, IngressTrace, ReadinessResponse, SessionDetailDto,
+    TranscriptRoleDto,
+};
 use mosaic_gateway::{GatewayHandle, GatewayRunRequest};
 use mosaic_node_protocol::DEFAULT_STALE_AFTER_SECS;
 use mosaic_runtime::events::{RunEvent, RunEventSink};
@@ -195,6 +198,7 @@ fn run_interactive_app(
         context.extension_policy_summary.clone(),
         context.extension_errors.clone(),
     );
+    app.set_gateway_state(None, None);
     app.set_node_state(None, None);
     let gateway_link = Arc::new(AtomicBool::new(true));
     refresh_interactive_session_from_gateway(&mut app, &context, &context.session_id);
@@ -377,6 +381,7 @@ fn refresh_interactive_session_from_gateway(
             if let Ok(Some(session)) = gateway.load_session(session_id) {
                 app.sync_runtime_session_with_origin(&session, "Local");
             }
+            refresh_local_gateway_state(app, gateway);
             refresh_local_node_state(app, gateway, session_id);
         }
         InteractiveGateway::Remote(client) => {
@@ -387,9 +392,61 @@ fn refresh_interactive_session_from_gateway(
                 let stored = remote_session_to_stored(&session);
                 app.sync_runtime_session_with_origin(&stored, "Remote");
             }
+            refresh_remote_gateway_state(app, context, client);
             app.set_node_state(Some("Nodes remote status unavailable".to_owned()), None);
         }
     }
+}
+
+fn refresh_local_gateway_state(app: &mut App, gateway: &GatewayHandle) {
+    let health = gateway.health();
+    let readiness = gateway.readiness();
+    apply_gateway_state(app, &health, &readiness);
+}
+
+fn refresh_remote_gateway_state(
+    app: &mut App,
+    context: &InteractiveSessionContext,
+    client: &GatewayClient,
+) {
+    match (
+        context.runtime_handle.block_on(client.health()),
+        context.runtime_handle.block_on(client.readiness()),
+    ) {
+        (Ok(health), Ok(readiness)) => apply_gateway_state(app, &health, &readiness),
+        (Err(err), _) | (_, Err(err)) => {
+            app.gateway_connected = false;
+            app.set_gateway_state(
+                Some("Gateway status unavailable".to_owned()),
+                Some(format!(
+                    "Remote control-plane status request failed: {}",
+                    err
+                )),
+            );
+        }
+    }
+}
+
+fn apply_gateway_state(app: &mut App, health: &HealthResponse, readiness: &ReadinessResponse) {
+    app.gateway_connected = health.transport == "online";
+    app.set_gateway_state(
+        Some(format!(
+            "Gateway {} transport={} auth={} deployment={} sessions={}",
+            health.status,
+            health.transport,
+            health.auth_mode,
+            health.deployment_profile,
+            health.session_count,
+        )),
+        Some(format!(
+            "Readiness {} audit={} replay={}/{} lag-threshold={}",
+            readiness.status,
+            readiness.audit_ready,
+            readiness.replay_events_buffered,
+            readiness.event_replay_window,
+            readiness.slow_consumer_lag_threshold,
+        )),
+    );
 }
 
 fn refresh_local_node_state(app: &mut App, gateway: &GatewayHandle, session_id: &str) {

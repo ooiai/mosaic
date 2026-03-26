@@ -100,9 +100,17 @@ pub struct MosaicConfig {
     #[serde(default = "default_profiles")]
     pub profiles: BTreeMap<String, ProviderProfileConfig>,
     #[serde(default)]
+    pub deployment: DeploymentConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
     pub session_store: SessionStoreConfig,
     #[serde(default)]
     pub inspect: InspectConfig,
+    #[serde(default)]
+    pub audit: AuditConfig,
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
     #[serde(default)]
     pub extensions: ExtensionsConfig,
     #[serde(default)]
@@ -115,8 +123,12 @@ impl Default for MosaicConfig {
             schema_version: default_schema_version(),
             active_profile: default_active_profile(),
             profiles: default_profiles(),
+            deployment: DeploymentConfig::default(),
+            auth: AuthConfig::default(),
             session_store: SessionStoreConfig::default(),
             inspect: InspectConfig::default(),
+            audit: AuditConfig::default(),
+            observability: ObservabilityConfig::default(),
             extensions: ExtensionsConfig::default(),
             policies: PolicyConfig::default(),
         }
@@ -130,6 +142,30 @@ pub struct ProviderProfileConfig {
     pub model: String,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeploymentConfig {
+    #[serde(default = "default_deployment_profile")]
+    pub profile: String,
+    #[serde(default = "default_workspace_name")]
+    pub workspace_name: String,
+}
+
+impl Default for DeploymentConfig {
+    fn default() -> Self {
+        Self {
+            profile: default_deployment_profile(),
+            workspace_name: default_workspace_name(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct AuthConfig {
+    pub operator_token_env: Option<String>,
+    pub webchat_shared_secret_env: Option<String>,
+    pub telegram_secret_token_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,6 +192,49 @@ impl Default for InspectConfig {
     fn default() -> Self {
         Self {
             runs_dir: default_runs_root_dir(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuditConfig {
+    #[serde(default = "default_audit_root_dir")]
+    pub root_dir: String,
+    #[serde(default = "default_audit_retention_days")]
+    pub retention_days: u32,
+    #[serde(default = "default_event_replay_window")]
+    pub event_replay_window: usize,
+    #[serde(default = "default_true")]
+    pub redact_inputs: bool,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: default_audit_root_dir(),
+            retention_days: default_audit_retention_days(),
+            event_replay_window: default_event_replay_window(),
+            redact_inputs: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ObservabilityConfig {
+    #[serde(default = "default_true")]
+    pub enable_metrics: bool,
+    #[serde(default = "default_true")]
+    pub enable_readiness: bool,
+    #[serde(default = "default_slow_consumer_lag_threshold")]
+    pub slow_consumer_lag_threshold: usize,
+}
+
+impl Default for ObservabilityConfig {
+    fn default() -> Self {
+        Self {
+            enable_metrics: true,
+            enable_readiness: true,
+            slow_consumer_lag_threshold: default_slow_consumer_lag_threshold(),
         }
     }
 }
@@ -353,12 +432,47 @@ pub struct RedactedPolicyView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedDeploymentView {
+    pub profile: String,
+    pub workspace_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedAuthView {
+    pub operator_token_env: Option<String>,
+    pub operator_token_present: bool,
+    pub webchat_shared_secret_env: Option<String>,
+    pub webchat_shared_secret_present: bool,
+    pub telegram_secret_token_env: Option<String>,
+    pub telegram_secret_token_present: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedAuditView {
+    pub root_dir: String,
+    pub retention_days: u32,
+    pub event_replay_window: usize,
+    pub redact_inputs: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedObservabilityView {
+    pub enable_metrics: bool,
+    pub enable_readiness: bool,
+    pub slow_consumer_lag_threshold: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RedactedMosaicConfig {
     pub schema_version: u32,
     pub active_profile: String,
     pub profiles: Vec<RedactedProfileView>,
+    pub deployment: RedactedDeploymentView,
+    pub auth: RedactedAuthView,
     pub session_store_root_dir: String,
     pub inspect_runs_dir: String,
+    pub audit: RedactedAuditView,
+    pub observability: RedactedObservabilityView,
     pub extension_manifest_count: usize,
     pub policies: RedactedPolicyView,
 }
@@ -369,8 +483,12 @@ struct MosaicConfigPatch {
     pub active_profile: Option<String>,
     #[serde(default)]
     pub profiles: BTreeMap<String, ProviderProfileConfig>,
+    pub deployment: Option<DeploymentConfig>,
+    pub auth: Option<AuthConfig>,
     pub session_store: Option<SessionStoreConfig>,
     pub inspect: Option<InspectConfig>,
+    pub audit: Option<AuditConfig>,
+    pub observability: Option<ObservabilityConfig>,
     pub extensions: Option<ExtensionsConfig>,
     pub policies: Option<PolicyConfig>,
 }
@@ -454,6 +572,7 @@ pub fn init_workspace_config(cwd: impl AsRef<Path>, force: bool) -> Result<PathB
     save_mosaic_config(&path, &config)?;
     fs::create_dir_all(cwd.join(&config.session_store.root_dir))?;
     fs::create_dir_all(cwd.join(&config.inspect.runs_dir))?;
+    fs::create_dir_all(cwd.join(&config.audit.root_dir))?;
     fs::create_dir_all(cwd.join(".mosaic/extensions"))?;
 
     Ok(path)
@@ -540,6 +659,57 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         );
     }
 
+    if config.deployment.profile.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "deployment.profile",
+            "deployment profile must not be empty",
+        );
+    } else if !matches!(
+        config.deployment.profile.as_str(),
+        "local" | "staging" | "production"
+    ) {
+        report.push(
+            ValidationLevel::Error,
+            "deployment.profile",
+            format!(
+                "unsupported deployment profile '{}': expected local, staging, or production",
+                config.deployment.profile
+            ),
+        );
+    }
+
+    if config.deployment.workspace_name.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "deployment.workspace_name",
+            "deployment workspace_name must not be empty",
+        );
+    }
+
+    for (field, value) in [
+        (
+            "auth.operator_token_env",
+            config.auth.operator_token_env.as_deref(),
+        ),
+        (
+            "auth.webchat_shared_secret_env",
+            config.auth.webchat_shared_secret_env.as_deref(),
+        ),
+        (
+            "auth.telegram_secret_token_env",
+            config.auth.telegram_secret_token_env.as_deref(),
+        ),
+    ] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            report.push(
+                ValidationLevel::Error,
+                field,
+                "environment variable name must not be empty when provided",
+            );
+        }
+    }
+
     if !config.profiles.contains_key(&config.active_profile) {
         report.push(
             ValidationLevel::Error,
@@ -609,6 +779,62 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         );
     }
 
+    if config.audit.root_dir.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "audit.root_dir",
+            "audit root directory must not be empty",
+        );
+    }
+
+    if config.audit.retention_days == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "audit.retention_days",
+            "audit retention_days must be greater than zero",
+        );
+    }
+
+    if config.audit.event_replay_window == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "audit.event_replay_window",
+            "audit event_replay_window must be greater than zero",
+        );
+    }
+
+    if config.observability.slow_consumer_lag_threshold == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "observability.slow_consumer_lag_threshold",
+            "observability slow_consumer_lag_threshold must be greater than zero",
+        );
+    }
+
+    if config.deployment.profile == "production"
+        && config
+            .auth
+            .operator_token_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        report.push(
+            ValidationLevel::Error,
+            "auth.operator_token_env",
+            "production deployment requires auth.operator_token_env",
+        );
+    }
+
+    if config.deployment.profile == "production" && !config.audit.redact_inputs {
+        report.push(
+            ValidationLevel::Warning,
+            "audit.redact_inputs",
+            "production deployment should keep audit.redact_inputs enabled",
+        );
+    }
+
     for (idx, manifest) in config.extensions.manifests.iter().enumerate() {
         if manifest.path.trim().is_empty() {
             report.push(
@@ -644,6 +870,25 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
 
     let runs_root = cwd.join(&config.inspect.runs_dir);
     checks.push(path_check(&runs_root, "run trace directory", true));
+
+    let audit_root = cwd.join(&config.audit.root_dir);
+    checks.push(path_check(&audit_root, "audit directory", true));
+
+    checks.push(secret_env_check(
+        config.auth.operator_token_env.as_deref(),
+        "operator auth token",
+        config.deployment.profile == "production",
+    ));
+    checks.push(secret_env_check(
+        config.auth.webchat_shared_secret_env.as_deref(),
+        "webchat ingress shared secret",
+        false,
+    ));
+    checks.push(secret_env_check(
+        config.auth.telegram_secret_token_env.as_deref(),
+        "telegram ingress secret token",
+        false,
+    ));
 
     for manifest in &config.extensions.manifests {
         let manifest_path = cwd.join(&manifest.path);
@@ -708,8 +953,35 @@ pub fn redact_mosaic_config(config: &MosaicConfig) -> RedactedMosaicConfig {
         schema_version: config.schema_version,
         active_profile: config.active_profile.clone(),
         profiles,
+        deployment: RedactedDeploymentView {
+            profile: config.deployment.profile.clone(),
+            workspace_name: config.deployment.workspace_name.clone(),
+        },
+        auth: RedactedAuthView {
+            operator_token_env: config.auth.operator_token_env.clone(),
+            operator_token_present: env_var_present(config.auth.operator_token_env.as_deref()),
+            webchat_shared_secret_env: config.auth.webchat_shared_secret_env.clone(),
+            webchat_shared_secret_present: env_var_present(
+                config.auth.webchat_shared_secret_env.as_deref(),
+            ),
+            telegram_secret_token_env: config.auth.telegram_secret_token_env.clone(),
+            telegram_secret_token_present: env_var_present(
+                config.auth.telegram_secret_token_env.as_deref(),
+            ),
+        },
         session_store_root_dir: config.session_store.root_dir.clone(),
         inspect_runs_dir: config.inspect.runs_dir.clone(),
+        audit: RedactedAuditView {
+            root_dir: config.audit.root_dir.clone(),
+            retention_days: config.audit.retention_days,
+            event_replay_window: config.audit.event_replay_window,
+            redact_inputs: config.audit.redact_inputs,
+        },
+        observability: RedactedObservabilityView {
+            enable_metrics: config.observability.enable_metrics,
+            enable_readiness: config.observability.enable_readiness,
+            slow_consumer_lag_threshold: config.observability.slow_consumer_lag_threshold,
+        },
         extension_manifest_count: config.extensions.manifests.len(),
         policies: RedactedPolicyView {
             allow_exec: config.policies.allow_exec,
@@ -742,6 +1014,14 @@ fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
         config.profiles.extend(patch.profiles);
     }
 
+    if let Some(deployment) = patch.deployment {
+        config.deployment = deployment;
+    }
+
+    if let Some(auth) = patch.auth {
+        config.auth = auth;
+    }
+
     if let Some(session_store) = patch.session_store {
         config.session_store = session_store;
     }
@@ -750,12 +1030,60 @@ fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
         config.inspect = inspect;
     }
 
+    if let Some(audit) = patch.audit {
+        config.audit = audit;
+    }
+
+    if let Some(observability) = patch.observability {
+        config.observability = observability;
+    }
+
     if let Some(extensions) = patch.extensions {
         config.extensions = extensions;
     }
 
     if let Some(policies) = patch.policies {
         config.policies = policies;
+    }
+}
+
+fn env_var_present(name: Option<&str>) -> bool {
+    name.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| env::var(value).is_ok())
+}
+
+fn secret_env_check(env_name: Option<&str>, label: &str, required: bool) -> DoctorCheck {
+    match env_name.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(name) => {
+            if env::var(name).is_ok() {
+                DoctorCheck {
+                    status: DoctorStatus::Ok,
+                    message: format!("{label} is configured via {name}"),
+                }
+            } else {
+                DoctorCheck {
+                    status: if required {
+                        DoctorStatus::Error
+                    } else {
+                        DoctorStatus::Warning
+                    },
+                    message: format!("{label} expects environment variable {name} to be set"),
+                }
+            }
+        }
+        None => DoctorCheck {
+            status: if required {
+                DoctorStatus::Error
+            } else {
+                DoctorStatus::Warning
+            },
+            message: if required {
+                format!("{label} is not configured")
+            } else {
+                format!("{label} is not configured; this surface is currently unauthenticated")
+            },
+        },
     }
 }
 
@@ -798,6 +1126,14 @@ fn default_active_profile() -> String {
     "mock".to_owned()
 }
 
+fn default_deployment_profile() -> String {
+    "local".to_owned()
+}
+
+fn default_workspace_name() -> String {
+    "default".to_owned()
+}
+
 fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
     BTreeMap::from([
         (
@@ -836,6 +1172,22 @@ fn default_session_store_root_dir() -> String {
 
 fn default_runs_root_dir() -> String {
     ".mosaic/runs".to_owned()
+}
+
+fn default_audit_root_dir() -> String {
+    ".mosaic/audit".to_owned()
+}
+
+fn default_audit_retention_days() -> u32 {
+    14
+}
+
+fn default_event_replay_window() -> usize {
+    256
+}
+
+fn default_slow_consumer_lag_threshold() -> usize {
+    32
 }
 
 #[cfg(test)]

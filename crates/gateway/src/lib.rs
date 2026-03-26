@@ -1,9 +1,11 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     convert::Infallible,
     env,
+    fs::{self, OpenOptions},
+    io::Write,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path as FsPath, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -11,26 +13,30 @@ use std::{
 use anyhow::{Result, anyhow, bail};
 use axum::{
     Json, Router,
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{Path as AxumPath, Query, State},
+    http::{HeaderMap, StatusCode},
     response::sse::{Event as SseEvent, KeepAlive, Sse},
     routing::{get, post},
 };
 use chrono::Utc;
 use futures::stream;
 use mosaic_channel_telegram::{TelegramUpdate, normalize_update as normalize_telegram_update};
-use mosaic_config::{AppConfig, LoadConfigOptions, PolicyConfig, load_mosaic_config};
+use mosaic_config::{
+    AppConfig, AuditConfig, AuthConfig, DeploymentConfig, LoadConfigOptions, ObservabilityConfig,
+    PolicyConfig, load_mosaic_config,
+};
 use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
     ErrorResponse, EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
-    GatewayEvent, HealthResponse, InboundMessage, RunResponse, RunSubmission, SessionChannelDto,
-    SessionDetailDto, SessionGatewayDto, SessionSummaryDto, TranscriptMessageDto,
-    TranscriptRoleDto, WebhookJobRequest,
+    GatewayAuditEventDto, GatewayEvent, HealthResponse, InboundMessage, IncidentBundleDto,
+    MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunResponse, RunSubmission,
+    SessionChannelDto, SessionDetailDto, SessionGatewayDto, SessionSummaryDto,
+    TranscriptMessageDto, TranscriptRoleDto, WebhookJobRequest,
 };
 use mosaic_extension_core::{
     ExtensionStatus, ExtensionValidationReport, load_extension_set, validate_extension_set,
 };
-use mosaic_inspect::{ExtensionTrace, IngressTrace, RunTrace};
+use mosaic_inspect::{ExtensionTrace, GovernanceTrace, IngressTrace, RunTrace};
 use mosaic_mcp_core::McpServerManager;
 use mosaic_memory::{MemoryPolicy, MemoryStore};
 use mosaic_node_protocol::{FileNodeStore, NodeCapabilityDeclaration, NodeRegistration};
@@ -54,6 +60,9 @@ pub use mosaic_control_protocol::{
     GatewayEvent as ProtocolGatewayEvent, HealthResponse as GatewayHealthResponse,
 };
 
+const DEFAULT_AUDIT_QUERY_LIMIT: usize = 50;
+const DEFAULT_REPLAY_QUERY_LIMIT: usize = 50;
+
 #[derive(Clone)]
 pub struct GatewayRuntimeComponents {
     pub profiles: Arc<ProviderProfileRegistry>,
@@ -67,9 +76,15 @@ pub struct GatewayRuntimeComponents {
     pub node_store: Arc<FileNodeStore>,
     pub mcp_manager: Option<Arc<McpServerManager>>,
     pub cron_store: Arc<dyn CronStore>,
+    pub workspace_root: PathBuf,
     pub runs_dir: PathBuf,
+    pub audit_root: PathBuf,
     pub extensions: Vec<ExtensionStatus>,
     pub policies: PolicyConfig,
+    pub deployment: DeploymentConfig,
+    pub auth: AuthConfig,
+    pub audit: AuditConfig,
+    pub observability: ObservabilityConfig,
 }
 
 impl GatewayRuntimeComponents {
@@ -167,6 +182,138 @@ impl std::fmt::Display for GatewayRunError {
 
 impl std::error::Error for GatewayRunError {}
 
+#[derive(Debug, Default)]
+struct GatewayMetricsState {
+    completed_runs_total: u64,
+    failed_runs_total: u64,
+    capability_jobs_total: u64,
+    audit_events_total: u64,
+    auth_denials_total: u64,
+    broadcast_lag_events_total: u64,
+}
+
+#[derive(Debug)]
+struct GatewayReplayWindow {
+    capacity: usize,
+    dropped_events_total: u64,
+    events: VecDeque<GatewayEventEnvelope>,
+}
+
+impl GatewayReplayWindow {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            dropped_events_total: 0,
+            events: VecDeque::new(),
+        }
+    }
+
+    fn push(&mut self, envelope: GatewayEventEnvelope) {
+        if self.events.len() == self.capacity {
+            self.events.pop_front();
+            self.dropped_events_total += 1;
+        }
+        self.events.push_back(envelope);
+    }
+
+    fn snapshot(&self, limit: usize) -> ReplayWindowResponse {
+        let mut events = self
+            .events
+            .iter()
+            .rev()
+            .take(limit.max(1))
+            .cloned()
+            .collect::<Vec<_>>();
+        events.reverse();
+        ReplayWindowResponse {
+            capacity: self.capacity,
+            dropped_events_total: self.dropped_events_total,
+            events,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct GatewayAuditLog {
+    root: PathBuf,
+    capacity: usize,
+    events: Mutex<VecDeque<GatewayAuditEventDto>>,
+}
+
+impl GatewayAuditLog {
+    fn new(root: PathBuf, capacity: usize) -> Self {
+        Self {
+            root,
+            capacity: capacity.max(1),
+            events: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    fn ready(&self) -> bool {
+        fs::create_dir_all(&self.root).is_ok()
+    }
+
+    fn append(&self, event: GatewayAuditEventDto) {
+        if fs::create_dir_all(&self.root).is_ok() {
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(self.root.join("events.jsonl"))
+            {
+                let _ = writeln!(
+                    file,
+                    "{}",
+                    serde_json::to_string(&event).unwrap_or_default()
+                );
+            }
+        }
+
+        if let Ok(mut events) = self.events.lock() {
+            if events.len() == self.capacity {
+                events.pop_front();
+            }
+            events.push_back(event);
+        }
+    }
+
+    fn recent(&self, limit: usize) -> Vec<GatewayAuditEventDto> {
+        self.events
+            .lock()
+            .expect("audit events lock should not be poisoned")
+            .iter()
+            .rev()
+            .take(limit.max(1))
+            .cloned()
+            .collect()
+    }
+
+    fn incident_events_for(&self, trace: &RunTrace) -> Vec<GatewayAuditEventDto> {
+        let path = self.root.join("events.jsonl");
+        let content = fs::read_to_string(path).unwrap_or_default();
+        content
+            .lines()
+            .filter_map(|line| serde_json::from_str::<GatewayAuditEventDto>(line).ok())
+            .filter(|event| {
+                matches_identifier(
+                    event.gateway_run_id.as_deref(),
+                    trace.gateway_run_id.as_deref(),
+                ) || matches_identifier(
+                    event.correlation_id.as_deref(),
+                    trace.correlation_id.as_deref(),
+                ) || matches_identifier(event.session_id.as_deref(), trace.session_id.as_deref())
+            })
+            .collect()
+    }
+
+    fn save_incident_bundle(&self, bundle: &IncidentBundleDto) -> Result<PathBuf> {
+        let dir = self.root.join("incidents");
+        fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{}.json", bundle.identifier));
+        fs::write(&path, serde_json::to_string_pretty(bundle)?)?;
+        Ok(path)
+    }
+}
+
 #[derive(Clone)]
 pub struct GatewayHandle {
     inner: Arc<GatewayState>,
@@ -178,6 +325,9 @@ struct GatewayState {
     reload_source: Option<GatewayReloadSource>,
     events: broadcast::Sender<GatewayEventEnvelope>,
     capability_jobs: Arc<Mutex<BTreeMap<String, CapabilityJobDto>>>,
+    replay_window: Mutex<GatewayReplayWindow>,
+    audit_log: Arc<GatewayAuditLog>,
+    metrics: Mutex<GatewayMetricsState>,
 }
 
 impl GatewayState {
@@ -200,6 +350,9 @@ impl GatewayHandle {
         reload_source: Option<GatewayReloadSource>,
     ) -> Self {
         let (events, _) = broadcast::channel(256);
+        let replay_capacity = components.audit.event_replay_window.max(1);
+        let audit_capacity = replay_capacity.max(256);
+        let audit_root = components.audit_root.clone();
         Self {
             inner: Arc::new(GatewayState {
                 runtime_handle,
@@ -207,6 +360,9 @@ impl GatewayHandle {
                 reload_source,
                 events,
                 capability_jobs: Arc::new(Mutex::new(BTreeMap::new())),
+                replay_window: Mutex::new(GatewayReplayWindow::new(replay_capacity)),
+                audit_log: Arc::new(GatewayAuditLog::new(audit_root, audit_capacity)),
+                metrics: Mutex::new(GatewayMetricsState::default()),
             }),
         }
     }
@@ -217,6 +373,131 @@ impl GatewayHandle {
 
     fn snapshot_components(&self) -> GatewayRuntimeComponents {
         self.inner.snapshot_components()
+    }
+
+    pub fn auth_mode(&self) -> String {
+        operator_auth_mode(&self.snapshot_components().auth)
+    }
+
+    pub fn health(&self) -> HealthResponse {
+        let components = self.snapshot_components();
+        HealthResponse {
+            status: "ok".to_owned(),
+            active_profile: components.profiles.active_profile_name().to_owned(),
+            session_count: components
+                .session_store
+                .list()
+                .map(|sessions| sessions.len())
+                .unwrap_or(0),
+            transport: "http+sse".to_owned(),
+            deployment_profile: components.deployment.profile.clone(),
+            auth_mode: operator_auth_mode(&components.auth),
+            event_replay_window: components.audit.event_replay_window,
+        }
+    }
+
+    pub fn readiness(&self) -> ReadinessResponse {
+        let components = self.snapshot_components();
+        let session_store_ready = components.session_store.list().is_ok();
+        let audit_ready = self.inner.audit_log.ready();
+        let auth_ready = auth_state_ready(&components.deployment, &components.auth);
+        let replay_window = self
+            .inner
+            .replay_window
+            .lock()
+            .expect("replay window lock should not be poisoned");
+        ReadinessResponse {
+            status: if session_store_ready && audit_ready && auth_ready {
+                "ready".to_owned()
+            } else {
+                "degraded".to_owned()
+            },
+            transport: "http+sse".to_owned(),
+            deployment_profile: components.deployment.profile.clone(),
+            auth_mode: operator_auth_mode(&components.auth),
+            session_store_ready,
+            audit_ready,
+            extension_count: components.extensions.len(),
+            session_count: components
+                .session_store
+                .list()
+                .map(|sessions| sessions.len())
+                .unwrap_or(0),
+            replay_events_buffered: replay_window.events.len(),
+            event_replay_window: replay_window.capacity,
+            slow_consumer_lag_threshold: components.observability.slow_consumer_lag_threshold,
+        }
+    }
+
+    pub fn metrics(&self) -> MetricsResponse {
+        let components = self.snapshot_components();
+        let metrics = self
+            .inner
+            .metrics
+            .lock()
+            .expect("gateway metrics lock should not be poisoned");
+        let replay_window = self
+            .inner
+            .replay_window
+            .lock()
+            .expect("replay window lock should not be poisoned");
+        MetricsResponse {
+            transport: "http+sse".to_owned(),
+            deployment_profile: components.deployment.profile.clone(),
+            auth_mode: operator_auth_mode(&components.auth),
+            session_count: components
+                .session_store
+                .list()
+                .map(|sessions| sessions.len())
+                .unwrap_or(0),
+            capability_job_count: self
+                .inner
+                .capability_jobs
+                .lock()
+                .expect("capability jobs lock should not be poisoned")
+                .len(),
+            completed_runs_total: metrics.completed_runs_total,
+            failed_runs_total: metrics.failed_runs_total,
+            capability_jobs_total: metrics.capability_jobs_total,
+            audit_events_total: metrics.audit_events_total,
+            auth_denials_total: metrics.auth_denials_total,
+            broadcast_lag_events_total: metrics.broadcast_lag_events_total,
+            replay_events_buffered: replay_window.events.len(),
+            event_replay_window: replay_window.capacity,
+        }
+    }
+
+    pub fn replay_window(&self, limit: usize) -> ReplayWindowResponse {
+        self.inner
+            .replay_window
+            .lock()
+            .expect("replay window lock should not be poisoned")
+            .snapshot(limit)
+    }
+
+    pub fn audit_events(&self, limit: usize) -> Vec<GatewayAuditEventDto> {
+        self.inner.audit_log.recent(limit)
+    }
+
+    pub fn incident_bundle(&self, identifier: &str) -> Result<(IncidentBundleDto, PathBuf)> {
+        let components = self.snapshot_components();
+        let trace = load_incident_trace(&components.runs_dir, identifier)?;
+        let bundle = IncidentBundleDto {
+            identifier: identifier.to_owned(),
+            generated_at: Utc::now(),
+            deployment_profile: components.deployment.profile.clone(),
+            auth_mode: operator_auth_mode(&components.auth),
+            redaction_policy: if components.audit.redact_inputs {
+                "inputs_redacted".to_owned()
+            } else {
+                "full_inputs".to_owned()
+            },
+            audit_events: self.inner.audit_log.incident_events_for(&trace),
+            metrics: self.metrics(),
+            trace,
+        };
+        let path = self.inner.audit_log.save_incident_bundle(&bundle)?;
+        Ok((bundle, path))
     }
 
     pub fn list_extensions(&self) -> Vec<ExtensionStatus> {
@@ -302,9 +583,15 @@ impl GatewayHandle {
             node_store: current.node_store.clone(),
             mcp_manager: extension_set.mcp_manager,
             cron_store: current.cron_store.clone(),
+            workspace_root: current.workspace_root.clone(),
             runs_dir: current.runs_dir.clone(),
+            audit_root: current.audit_root.clone(),
             extensions: extension_set.extensions.clone(),
             policies: extension_set.policies.clone(),
+            deployment: current.deployment.clone(),
+            auth: current.auth.clone(),
+            audit: current.audit.clone(),
+            observability: current.observability.clone(),
         };
 
         *self
@@ -340,7 +627,11 @@ impl GatewayHandle {
     }
 
     pub fn list_adapter_statuses(&self) -> Vec<AdapterStatusDto> {
-        vec![webchat_adapter_status(), telegram_adapter_status()]
+        let auth = self.snapshot_components().auth;
+        vec![
+            webchat_adapter_status(&auth),
+            telegram_adapter_status(&auth),
+        ]
     }
 
     pub fn load_session(&self, id: &str) -> Result<Option<SessionRecord>> {
@@ -531,14 +822,13 @@ impl GatewayHandle {
     pub fn submit_run(&self, request: GatewayRunRequest) -> Result<GatewaySubmittedRun> {
         let gateway_run_id = Uuid::new_v4().to_string();
         let correlation_id = Uuid::new_v4().to_string();
+        let components = self.snapshot_components();
         let session_route =
             self.resolve_session_route(request.session_id.as_deref(), request.ingress.as_ref())?;
-        let resolved_profile = request.profile.clone().unwrap_or_else(|| {
-            self.snapshot_components()
-                .profiles
-                .active_profile_name()
-                .to_owned()
-        });
+        let resolved_profile = request
+            .profile
+            .clone()
+            .unwrap_or_else(|| components.profiles.active_profile_name().to_owned());
         let meta = GatewayRunMeta {
             gateway_run_id: gateway_run_id.clone(),
             correlation_id: correlation_id.clone(),
@@ -547,6 +837,17 @@ impl GatewayHandle {
             ingress: request.ingress.clone(),
         };
 
+        self.record_audit_event(
+            "run.submitted",
+            "accepted",
+            redact_audit_input(&request.input, components.audit.redact_inputs),
+            request.session_id.clone(),
+            Some(gateway_run_id.clone()),
+            Some(correlation_id.clone()),
+            request.ingress.as_ref(),
+            Some(session_route.clone()),
+            components.audit.redact_inputs,
+        );
         self.emit(meta.envelope(GatewayEvent::RunSubmitted {
             input: request.input.clone(),
             profile: resolved_profile,
@@ -556,9 +857,8 @@ impl GatewayHandle {
         let state = self.inner.clone();
         let join = self.inner.runtime_handle.spawn(async move {
             let event_sink: SharedRunEventSink = Arc::new(GatewayRunEventSink {
-                sender: state.events.clone(),
+                state: state.clone(),
                 meta: meta.clone(),
-                jobs: state.capability_jobs.clone(),
             });
             let components = state
                 .components
@@ -589,7 +889,33 @@ impl GatewayHandle {
     }
 
     fn emit(&self, envelope: GatewayEventEnvelope) {
-        let _ = self.inner.events.send(envelope);
+        broadcast_envelope(self.inner.as_ref(), envelope);
+    }
+
+    fn record_audit_event(
+        &self,
+        kind: &str,
+        outcome: &str,
+        summary: String,
+        session_id: Option<String>,
+        gateway_run_id: Option<String>,
+        correlation_id: Option<String>,
+        ingress: Option<&IngressTrace>,
+        target: Option<String>,
+        redacted: bool,
+    ) {
+        record_audit_event(
+            self.inner.as_ref(),
+            kind,
+            outcome,
+            summary,
+            session_id,
+            gateway_run_id,
+            correlation_id,
+            ingress,
+            target,
+            redacted,
+        );
     }
 
     fn resolve_session_route(
@@ -681,22 +1007,35 @@ impl GatewayRunMeta {
 }
 
 struct GatewayRunEventSink {
-    sender: broadcast::Sender<GatewayEventEnvelope>,
+    state: Arc<GatewayState>,
     meta: GatewayRunMeta,
-    jobs: Arc<Mutex<BTreeMap<String, CapabilityJobDto>>>,
 }
 
 impl RunEventSink for GatewayRunEventSink {
     fn emit(&self, event: RunEvent) {
-        if let Some(job) = update_runtime_capability_job(&self.jobs, &self.meta, &event) {
-            let _ = self.sender.send(
+        if let Some(job) =
+            update_runtime_capability_job(&self.state.capability_jobs, &self.meta, &event)
+        {
+            if job.status == "queued" {
+                increment_metric(self.state.as_ref(), |metrics| {
+                    metrics.capability_jobs_total += 1
+                });
+            }
+            maybe_record_capability_job_audit(
+                self.state.as_ref(),
+                &job,
+                self.meta.ingress.as_ref(),
+            );
+            broadcast_envelope(
+                self.state.as_ref(),
                 self.meta
                     .envelope(GatewayEvent::CapabilityJobUpdated { job }),
             );
         }
-        let _ = self
-            .sender
-            .send(self.meta.envelope(GatewayEvent::Runtime(event)));
+        broadcast_envelope(
+            self.state.as_ref(),
+            self.meta.envelope(GatewayEvent::Runtime(event)),
+        );
     }
 }
 
@@ -1000,24 +1339,31 @@ fn store_and_broadcast_capability_job(
         .expect("capability jobs lock should not be poisoned")
         .insert(job.id.clone(), job.clone());
 
-    let _ = state.events.send(GatewayEventEnvelope {
-        gateway_run_id: job
-            .gateway_run_id
-            .clone()
-            .unwrap_or_else(|| format!("capability-{}", job.id)),
-        correlation_id: job
-            .correlation_id
-            .clone()
-            .unwrap_or_else(|| format!("capability-{}", job.id)),
-        session_id: job.session_id.clone(),
-        session_route: job
-            .session_id
-            .as_deref()
-            .map(session_route_for_id)
-            .unwrap_or_else(|| "gateway.local/capabilities".to_owned()),
-        emitted_at: Utc::now(),
-        event: GatewayEvent::CapabilityJobUpdated { job: job.clone() },
-    });
+    if job.status == "queued" {
+        increment_metric(state, |metrics| metrics.capability_jobs_total += 1);
+    }
+    maybe_record_capability_job_audit(state, &job, None);
+    broadcast_envelope(
+        state,
+        GatewayEventEnvelope {
+            gateway_run_id: job
+                .gateway_run_id
+                .clone()
+                .unwrap_or_else(|| format!("capability-{}", job.id)),
+            correlation_id: job
+                .correlation_id
+                .clone()
+                .unwrap_or_else(|| format!("capability-{}", job.id)),
+            session_id: job.session_id.clone(),
+            session_route: job
+                .session_id
+                .as_deref()
+                .map(session_route_for_id)
+                .unwrap_or_else(|| "gateway.local/capabilities".to_owned()),
+            emitted_at: Utc::now(),
+            event: GatewayEvent::CapabilityJobUpdated { job: job.clone() },
+        },
+    );
 
     job
 }
@@ -1038,15 +1384,24 @@ fn finalize_success(
     meta: GatewayRunMeta,
     result: RunResult,
 ) -> Result<GatewayRunResult, GatewayRunError> {
+    let components = state.snapshot_components();
     let mut trace = result.trace;
     trace.bind_gateway_context(
         meta.gateway_run_id.clone(),
         meta.correlation_id.clone(),
         meta.session_route.clone(),
     );
+    trace.bind_governance(GovernanceTrace {
+        deployment_profile: components.deployment.profile.clone(),
+        workspace_name: components.deployment.workspace_name.clone(),
+        auth_mode: operator_auth_mode(&components.auth),
+        audit_retention_days: components.audit.retention_days,
+        event_replay_window: components.audit.event_replay_window,
+        redact_inputs: components.audit.redact_inputs,
+    });
     let session_summary = update_gateway_session_metadata(&state, &meta);
     let trace_path = trace
-        .save_to_dir(&state.snapshot_components().runs_dir)
+        .save_to_dir(&components.runs_dir)
         .map_err(|err| GatewayRunError {
             source: err,
             trace: trace.clone(),
@@ -1056,16 +1411,31 @@ fn finalize_success(
             session_route: meta.session_route.clone(),
         })?;
 
+    increment_metric(state.as_ref(), |metrics| metrics.completed_runs_total += 1);
     let output_preview = truncate_preview(&result.output, 120);
-    let _ = state
-        .events
-        .send(meta.envelope(GatewayEvent::RunCompleted { output_preview }));
+    record_audit_event(
+        state.as_ref(),
+        "run.completed",
+        "success",
+        output_preview.clone(),
+        meta.session_id.clone(),
+        Some(meta.gateway_run_id.clone()),
+        Some(meta.correlation_id.clone()),
+        meta.ingress.as_ref(),
+        Some(trace_path.display().to_string()),
+        false,
+    );
+    broadcast_envelope(
+        state.as_ref(),
+        meta.envelope(GatewayEvent::RunCompleted { output_preview }),
+    );
     if let Some(summary) = session_summary.clone() {
-        let _ = state
-            .events
-            .send(meta.envelope(GatewayEvent::SessionUpdated {
+        broadcast_envelope(
+            state.as_ref(),
+            meta.envelope(GatewayEvent::SessionUpdated {
                 summary: session_summary_dto(&summary),
-            }));
+            }),
+        );
     }
 
     Ok(GatewayRunResult {
@@ -1084,15 +1454,24 @@ fn finalize_failure(
     meta: GatewayRunMeta,
     err: RunError,
 ) -> Result<GatewayRunResult, GatewayRunError> {
+    let components = state.snapshot_components();
     let (source, mut trace) = err.into_parts();
     trace.bind_gateway_context(
         meta.gateway_run_id.clone(),
         meta.correlation_id.clone(),
         meta.session_route.clone(),
     );
+    trace.bind_governance(GovernanceTrace {
+        deployment_profile: components.deployment.profile.clone(),
+        workspace_name: components.deployment.workspace_name.clone(),
+        auth_mode: operator_auth_mode(&components.auth),
+        audit_retention_days: components.audit.retention_days,
+        event_replay_window: components.audit.event_replay_window,
+        redact_inputs: components.audit.redact_inputs,
+    });
     let session_summary = update_gateway_session_metadata(&state, &meta);
     let trace_path = trace
-        .save_to_dir(&state.snapshot_components().runs_dir)
+        .save_to_dir(&components.runs_dir)
         .map_err(|save_err| GatewayRunError {
             source: save_err,
             trace: trace.clone(),
@@ -1102,15 +1481,33 @@ fn finalize_failure(
             session_route: meta.session_route.clone(),
         })?;
 
-    let _ = state.events.send(meta.envelope(GatewayEvent::RunFailed {
-        error: public_error_message(&source),
-    }));
+    increment_metric(state.as_ref(), |metrics| metrics.failed_runs_total += 1);
+    let public_error = public_error_message(&source);
+    record_audit_event(
+        state.as_ref(),
+        "run.failed",
+        "failed",
+        public_error.clone(),
+        meta.session_id.clone(),
+        Some(meta.gateway_run_id.clone()),
+        Some(meta.correlation_id.clone()),
+        meta.ingress.as_ref(),
+        Some(trace_path.display().to_string()),
+        false,
+    );
+    broadcast_envelope(
+        state.as_ref(),
+        meta.envelope(GatewayEvent::RunFailed {
+            error: public_error.clone(),
+        }),
+    );
     if let Some(summary) = session_summary {
-        let _ = state
-            .events
-            .send(meta.envelope(GatewayEvent::SessionUpdated {
+        broadcast_envelope(
+            state.as_ref(),
+            meta.envelope(GatewayEvent::SessionUpdated {
                 summary: session_summary_dto(&summary),
-            }));
+            }),
+        );
     }
 
     Err(GatewayRunError {
@@ -1139,33 +1536,300 @@ fn update_gateway_session_metadata(
     Some(session.summary())
 }
 
-fn webchat_adapter_status() -> AdapterStatusDto {
+#[derive(Debug, Deserialize, Default)]
+struct LimitQuery {
+    limit: Option<usize>,
+}
+
+enum SecretStatus {
+    Disabled,
+    Ready(String),
+    MissingEnv(String),
+}
+
+fn increment_metric(state: &GatewayState, update: impl FnOnce(&mut GatewayMetricsState)) {
+    let mut metrics = state
+        .metrics
+        .lock()
+        .expect("gateway metrics lock should not be poisoned");
+    update(&mut metrics);
+}
+
+fn broadcast_envelope(state: &GatewayState, envelope: GatewayEventEnvelope) {
+    state
+        .replay_window
+        .lock()
+        .expect("replay window lock should not be poisoned")
+        .push(envelope.clone());
+    let _ = state.events.send(envelope);
+}
+
+fn configured_secret_env_name(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn secret_status(env_name: Option<&str>) -> SecretStatus {
+    match configured_secret_env_name(env_name) {
+        Some(name) => match env::var(name) {
+            Ok(value) => SecretStatus::Ready(value),
+            Err(_) => SecretStatus::MissingEnv(name.to_owned()),
+        },
+        None => SecretStatus::Disabled,
+    }
+}
+
+fn operator_auth_mode(auth: &AuthConfig) -> String {
+    match secret_status(auth.operator_token_env.as_deref()) {
+        SecretStatus::Disabled => "disabled".to_owned(),
+        SecretStatus::Ready(_) | SecretStatus::MissingEnv(_) => "required".to_owned(),
+    }
+}
+
+fn auth_state_ready(deployment: &DeploymentConfig, auth: &AuthConfig) -> bool {
+    match secret_status(auth.operator_token_env.as_deref()) {
+        SecretStatus::Disabled => deployment.profile != "production",
+        SecretStatus::Ready(_) => true,
+        SecretStatus::MissingEnv(_) => false,
+    }
+}
+
+fn header_token<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|value| value.to_str().ok())
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    header_token(headers, "authorization")?.strip_prefix("Bearer ")
+}
+
+fn ingress_actor(ingress: Option<&IngressTrace>) -> Option<String> {
+    ingress.and_then(|ingress| {
+        ingress
+            .display_name
+            .clone()
+            .or_else(|| ingress.actor_id.clone())
+            .or_else(|| ingress.source.clone())
+    })
+}
+
+fn redact_audit_input(input: &str, redact: bool) -> String {
+    if redact {
+        "<redacted>".to_owned()
+    } else {
+        truncate_preview(input, 160)
+    }
+}
+
+fn record_audit_event(
+    state: &GatewayState,
+    kind: &str,
+    outcome: &str,
+    summary: String,
+    session_id: Option<String>,
+    gateway_run_id: Option<String>,
+    correlation_id: Option<String>,
+    ingress: Option<&IngressTrace>,
+    target: Option<String>,
+    redacted: bool,
+) {
+    let event = GatewayAuditEventDto {
+        id: Uuid::new_v4().to_string(),
+        kind: kind.to_owned(),
+        outcome: outcome.to_owned(),
+        summary,
+        actor: ingress_actor(ingress),
+        session_id,
+        gateway_run_id,
+        correlation_id,
+        channel: ingress.and_then(|ingress| ingress.channel.clone()),
+        target,
+        emitted_at: Utc::now(),
+        redacted,
+    };
+    state.audit_log.append(event);
+    increment_metric(state, |metrics| metrics.audit_events_total += 1);
+}
+
+fn maybe_record_capability_job_audit(
+    state: &GatewayState,
+    job: &CapabilityJobDto,
+    ingress: Option<&IngressTrace>,
+) {
+    if matches!(job.status.as_str(), "queued" | "success" | "failed") {
+        record_audit_event(
+            state,
+            "capability.job",
+            &job.status,
+            job.summary.clone().unwrap_or_else(|| job.name.clone()),
+            job.session_id.clone(),
+            job.gateway_run_id.clone(),
+            job.correlation_id.clone(),
+            ingress,
+            job.target.clone(),
+            false,
+        );
+    }
+}
+
+fn record_auth_denial(gateway: &GatewayHandle, surface: &str) {
+    increment_metric(gateway.inner.as_ref(), |metrics| {
+        metrics.auth_denials_total += 1
+    });
+    gateway.record_audit_event(
+        "auth.denied",
+        "denied",
+        format!("authorization denied for {surface}"),
+        None,
+        None,
+        None,
+        None,
+        Some(surface.to_owned()),
+        false,
+    );
+}
+
+fn authorize_control_request(
+    gateway: &GatewayHandle,
+    headers: &HeaderMap,
+    surface: &str,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    let components = gateway.snapshot_components();
+    match secret_status(components.auth.operator_token_env.as_deref()) {
+        SecretStatus::Disabled => Ok(()),
+        SecretStatus::Ready(secret) => {
+            if bearer_token(headers) == Some(secret.as_str()) {
+                Ok(())
+            } else {
+                record_auth_denial(gateway, surface);
+                Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse {
+                        error: "operator authorization required".to_owned(),
+                    }),
+                ))
+            }
+        }
+        SecretStatus::MissingEnv(name) => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: format!("configured operator token env is missing: {name}"),
+            }),
+        )),
+    }
+}
+
+fn authorize_shared_secret_request(
+    gateway: &GatewayHandle,
+    headers: &HeaderMap,
+    env_name: Option<&str>,
+    header_name: &str,
+    surface: &str,
+) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    match secret_status(env_name) {
+        SecretStatus::Disabled => Ok(()),
+        SecretStatus::Ready(secret) => {
+            if header_token(headers, header_name) == Some(secret.as_str()) {
+                Ok(())
+            } else {
+                record_auth_denial(gateway, surface);
+                Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(ErrorResponse {
+                        error: format!("{surface} shared secret required"),
+                    }),
+                ))
+            }
+        }
+        SecretStatus::MissingEnv(name) => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: format!("configured shared secret env is missing: {name}"),
+            }),
+        )),
+    }
+}
+
+fn matches_identifier(left: Option<&str>, right: Option<&str>) -> bool {
+    matches!((left, right), (Some(left), Some(right)) if left == right)
+}
+
+fn load_incident_trace(runs_dir: &FsPath, identifier: &str) -> Result<RunTrace> {
+    for entry in fs::read_dir(runs_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let content = fs::read_to_string(&path)?;
+        let trace: RunTrace = serde_json::from_str(&content)?;
+        if trace.run_id == identifier
+            || trace.gateway_run_id.as_deref() == Some(identifier)
+            || trace.correlation_id.as_deref() == Some(identifier)
+        {
+            return Ok(trace);
+        }
+    }
+
+    bail!("incident trace not found: {}", identifier)
+}
+
+fn webchat_adapter_status(auth: &AuthConfig) -> AdapterStatusDto {
+    let shared_secret = secret_status(auth.webchat_shared_secret_env.as_deref());
+    let (status, detail) = match shared_secret {
+        SecretStatus::Disabled => (
+            "ok",
+            "WebChat ingress is ready without an additional shared secret.",
+        ),
+        SecretStatus::Ready(_) => (
+            "ok",
+            "WebChat ingress is ready and protected by X-Mosaic-Shared-Secret.",
+        ),
+        SecretStatus::MissingEnv(_) => (
+            "error",
+            "WebChat ingress secret is configured but the environment variable is missing.",
+        ),
+    };
     AdapterStatusDto {
         name: "webchat".to_owned(),
         channel: "webchat".to_owned(),
         transport: "http".to_owned(),
         ingress_path: "/ingress/webchat".to_owned(),
         outbound_ready: true,
-        status: "ok".to_owned(),
-        detail: "WebChat ingress and operator web surface protocol are ready.".to_owned(),
+        status: status.to_owned(),
+        detail: detail.to_owned(),
     }
 }
 
-fn telegram_adapter_status() -> AdapterStatusDto {
+fn telegram_adapter_status(auth: &AuthConfig) -> AdapterStatusDto {
     let outbound_ready =
         env::var("MOSAIC_TELEGRAM_BOT_TOKEN").is_ok() || env::var("TELEGRAM_BOT_TOKEN").is_ok();
+    let shared_secret = secret_status(auth.telegram_secret_token_env.as_deref());
+    let (status, detail) = match (outbound_ready, shared_secret) {
+        (_, SecretStatus::MissingEnv(_)) => (
+            "error",
+            "Telegram webhook secret is configured but the environment variable is missing.",
+        ),
+        (true, SecretStatus::Ready(_)) => (
+            "ok",
+            "Telegram webhook ingress and replies are ready with secret-token verification.",
+        ),
+        (true, SecretStatus::Disabled) => ("ok", "Telegram webhook ingress and replies are ready."),
+        (false, SecretStatus::Ready(_)) => (
+            "warning",
+            "Telegram ingress is protected, but outbound replies still need TELEGRAM_BOT_TOKEN or MOSAIC_TELEGRAM_BOT_TOKEN.",
+        ),
+        (false, SecretStatus::Disabled) => (
+            "warning",
+            "Telegram ingress is ready, but outbound replies need TELEGRAM_BOT_TOKEN or MOSAIC_TELEGRAM_BOT_TOKEN.",
+        ),
+    };
     AdapterStatusDto {
         name: "telegram".to_owned(),
         channel: "telegram".to_owned(),
         transport: "http-webhook".to_owned(),
         ingress_path: "/ingress/telegram".to_owned(),
         outbound_ready,
-        status: if outbound_ready { "ok" } else { "warning" }.to_owned(),
-        detail: if outbound_ready {
-            "Telegram webhook ingress and reply routing are ready.".to_owned()
-        } else {
-            "Telegram ingress is ready, but outbound replies need TELEGRAM_BOT_TOKEN or MOSAIC_TELEGRAM_BOT_TOKEN.".to_owned()
-        },
+        status: status.to_owned(),
+        detail: detail.to_owned(),
     }
 }
 
@@ -1358,6 +2022,8 @@ type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, Json<ErrorRespons
 pub fn http_router(gateway: GatewayHandle) -> Router {
     Router::new()
         .route("/health", get(http_health))
+        .route("/ready", get(http_ready))
+        .route("/metrics", get(http_metrics))
         .route("/adapters", get(http_list_adapters))
         .route("/sessions", get(http_list_sessions))
         .route("/sessions/{id}", get(http_get_session))
@@ -1367,9 +2033,12 @@ pub fn http_router(gateway: GatewayHandle) -> Router {
         .route("/runs", post(http_submit_run))
         .route("/cron", get(http_list_cron).post(http_register_cron))
         .route("/cron/{id}/trigger", post(http_trigger_cron))
+        .route("/audit/events", get(http_audit_events))
+        .route("/incidents/{id}", get(http_incident_bundle))
         .route("/ingress/webchat", post(http_webchat_ingress))
         .route("/ingress/telegram", post(http_telegram_ingress))
         .route("/events", get(http_events))
+        .route("/events/recent", get(http_recent_events))
         .with_state(GatewayHttpState { gateway })
 }
 
@@ -1393,27 +2062,52 @@ where
 }
 
 async fn http_health(State(state): State<GatewayHttpState>) -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "ok".to_owned(),
-        active_profile: state.gateway.active_profile_name().to_owned(),
-        session_count: state
-            .gateway
-            .list_sessions()
-            .map(|sessions| sessions.len())
-            .unwrap_or(0),
-        transport: "http+sse".to_owned(),
-    })
+    Json(state.gateway.health())
+}
+
+async fn http_ready(State(state): State<GatewayHttpState>) -> HttpResult<ReadinessResponse> {
+    let components = state.gateway.snapshot_components();
+    if !components.observability.enable_readiness {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "readiness endpoint is disabled by config".to_owned(),
+            }),
+        ));
+    }
+    Ok(Json(state.gateway.readiness()))
+}
+
+async fn http_metrics(
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+) -> HttpResult<MetricsResponse> {
+    authorize_control_request(&state.gateway, &headers, "/metrics")?;
+    let components = state.gateway.snapshot_components();
+    if !components.observability.enable_metrics {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorResponse {
+                error: "metrics endpoint is disabled by config".to_owned(),
+            }),
+        ));
+    }
+    Ok(Json(state.gateway.metrics()))
 }
 
 async fn http_list_adapters(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
 ) -> HttpResult<Vec<AdapterStatusDto>> {
+    authorize_control_request(&state.gateway, &headers, "/adapters")?;
     Ok(Json(state.gateway.list_adapter_statuses()))
 }
 
 async fn http_list_sessions(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
 ) -> HttpResult<Vec<SessionSummaryDto>> {
+    authorize_control_request(&state.gateway, &headers, "/sessions")?;
     let sessions = state
         .gateway
         .list_sessions()
@@ -1426,14 +2120,18 @@ async fn http_list_sessions(
 
 async fn http_list_capability_jobs(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
 ) -> HttpResult<Vec<CapabilityJobDto>> {
+    authorize_control_request(&state.gateway, &headers, "/capabilities/jobs")?;
     Ok(Json(state.gateway.list_capability_jobs()))
 }
 
 async fn http_exec_capability(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
     Json(request): Json<ExecJobRequest>,
 ) -> HttpResult<CapabilityJobDto> {
+    authorize_control_request(&state.gateway, &headers, "/capabilities/exec")?;
     let job = state
         .gateway
         .run_exec_job(request)
@@ -1444,8 +2142,10 @@ async fn http_exec_capability(
 
 async fn http_webhook_capability(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
     Json(request): Json<WebhookJobRequest>,
 ) -> HttpResult<CapabilityJobDto> {
+    authorize_control_request(&state.gateway, &headers, "/capabilities/webhook")?;
     let job = state
         .gateway
         .run_webhook_job(request)
@@ -1456,7 +2156,9 @@ async fn http_webhook_capability(
 
 async fn http_list_cron(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
 ) -> HttpResult<Vec<CronRegistrationDto>> {
+    authorize_control_request(&state.gateway, &headers, "/cron")?;
     let registrations = state
         .gateway
         .list_cron_registrations()
@@ -1469,8 +2171,10 @@ async fn http_list_cron(
 
 async fn http_register_cron(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
     Json(request): Json<CronRegistrationRequest>,
 ) -> HttpResult<CronRegistrationDto> {
+    authorize_control_request(&state.gateway, &headers, "/cron")?;
     let registration = state
         .gateway
         .register_cron(request)
@@ -1479,9 +2183,11 @@ async fn http_register_cron(
 }
 
 async fn http_trigger_cron(
-    Path(id): Path<String>,
+    AxumPath(id): AxumPath<String>,
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
 ) -> HttpResult<RunResponse> {
+    authorize_control_request(&state.gateway, &headers, "/cron/trigger")?;
     let result = state
         .gateway
         .trigger_cron(&id)
@@ -1491,9 +2197,11 @@ async fn http_trigger_cron(
 }
 
 async fn http_get_session(
-    Path(id): Path<String>,
+    AxumPath(id): AxumPath<String>,
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
 ) -> HttpResult<SessionDetailDto> {
+    authorize_control_request(&state.gateway, &headers, "/sessions/{id}")?;
     let session = state
         .gateway
         .load_session(&id)
@@ -1511,8 +2219,10 @@ async fn http_get_session(
 
 async fn http_submit_run(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
     Json(mut request): Json<RunSubmission>,
 ) -> HttpResult<RunResponse> {
+    authorize_control_request(&state.gateway, &headers, "/runs")?;
     if request.ingress.is_none() {
         request.ingress = Some(IngressTrace {
             kind: "remote_operator".to_owned(),
@@ -1538,8 +2248,17 @@ async fn http_submit_run(
 
 async fn http_webchat_ingress(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
     Json(message): Json<InboundMessage>,
 ) -> HttpResult<RunResponse> {
+    let auth = state.gateway.snapshot_components().auth;
+    authorize_shared_secret_request(
+        &state.gateway,
+        &headers,
+        auth.webchat_shared_secret_env.as_deref(),
+        "x-mosaic-shared-secret",
+        "webchat ingress",
+    )?;
     let request = RunSubmission {
         system: None,
         input: message.input,
@@ -1575,8 +2294,17 @@ async fn http_webchat_ingress(
 
 async fn http_telegram_ingress(
     State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
     Json(update): Json<TelegramUpdate>,
 ) -> HttpResult<RunResponse> {
+    let auth = state.gateway.snapshot_components().auth;
+    authorize_shared_secret_request(
+        &state.gateway,
+        &headers,
+        auth.telegram_secret_token_env.as_deref(),
+        "x-telegram-bot-api-secret-token",
+        "telegram ingress",
+    )?;
     let submitted = state
         .gateway
         .submit_telegram_update(update)
@@ -1585,28 +2313,77 @@ async fn http_telegram_ingress(
     Ok(Json(run_response(result)))
 }
 
+async fn http_audit_events(
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+    Query(query): Query<LimitQuery>,
+) -> HttpResult<Vec<GatewayAuditEventDto>> {
+    authorize_control_request(&state.gateway, &headers, "/audit/events")?;
+    Ok(Json(state.gateway.audit_events(
+        query.limit.unwrap_or(DEFAULT_AUDIT_QUERY_LIMIT),
+    )))
+}
+
+async fn http_incident_bundle(
+    AxumPath(id): AxumPath<String>,
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+) -> HttpResult<IncidentBundleDto> {
+    authorize_control_request(&state.gateway, &headers, "/incidents/{id}")?;
+    let (bundle, _) = state
+        .gateway
+        .incident_bundle(&id)
+        .map_err(http_internal_error)?;
+    Ok(Json(bundle))
+}
+
 async fn http_events(
     State(state): State<GatewayHttpState>,
-) -> Sse<impl futures::Stream<Item = std::result::Result<SseEvent, Infallible>>> {
+    headers: HeaderMap,
+) -> std::result::Result<
+    Sse<impl futures::Stream<Item = std::result::Result<SseEvent, Infallible>>>,
+    (StatusCode, Json<ErrorResponse>),
+> {
+    authorize_control_request(&state.gateway, &headers, "/events")?;
     let receiver = state.gateway.subscribe();
-    let stream = stream::unfold(receiver, |mut receiver| async move {
-        match receiver.recv().await {
-            Ok(envelope) => {
-                let payload = serde_json::to_string(&envelope)
-                    .unwrap_or_else(|_| "{\"error\":\"failed to encode event\"}".to_owned());
-                Some((Ok(SseEvent::default().data(payload)), receiver))
+    let gateway = state.gateway.clone();
+    let stream = stream::unfold(receiver, move |mut receiver| {
+        let gateway = gateway.clone();
+        async move {
+            match receiver.recv().await {
+                Ok(envelope) => {
+                    let payload = serde_json::to_string(&envelope)
+                        .unwrap_or_else(|_| "{\"error\":\"failed to encode event\"}".to_owned());
+                    Some((Ok(SseEvent::default().data(payload)), receiver))
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    increment_metric(gateway.inner.as_ref(), |metrics| {
+                        metrics.broadcast_lag_events_total += skipped as u64;
+                    });
+                    Some((
+                        Ok(SseEvent::default()
+                            .event("lagged")
+                            .data(skipped.to_string())),
+                        receiver,
+                    ))
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
             }
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => Some((
-                Ok(SseEvent::default()
-                    .event("lagged")
-                    .data(skipped.to_string())),
-                receiver,
-            )),
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
         }
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+async fn http_recent_events(
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+    Query(query): Query<LimitQuery>,
+) -> HttpResult<ReplayWindowResponse> {
+    authorize_control_request(&state.gateway, &headers, "/events/recent")?;
+    Ok(Json(state.gateway.replay_window(
+        query.limit.unwrap_or(DEFAULT_REPLAY_QUERY_LIMIT),
+    )))
 }
 
 fn http_internal_error(error: anyhow::Error) -> (StatusCode, Json<ErrorResponse>) {
@@ -1725,9 +2502,15 @@ mod tests {
                 node_store: test_node_store(),
                 mcp_manager: None,
                 cron_store: test_cron_store(),
+                workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace"),
                 runs_dir: std::env::temp_dir(),
+                audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit"),
                 extensions: Vec::new(),
                 policies: PolicyConfig::default(),
+                deployment: config.deployment.clone(),
+                auth: config.auth.clone(),
+                audit: config.audit.clone(),
+                observability: config.observability.clone(),
             },
         )
     }
@@ -1831,9 +2614,15 @@ workflows:
                 node_store: Arc::new(FileNodeStore::new(root.join(".mosaic/nodes"))),
                 mcp_manager: extension_set.mcp_manager,
                 cron_store,
+                workspace_root: root.to_path_buf(),
                 runs_dir: root.join(".mosaic/runs"),
+                audit_root: root.join(".mosaic/audit"),
                 extensions: extension_set.extensions.clone(),
                 policies: extension_set.policies.clone(),
+                deployment: loaded.config.deployment.clone(),
+                auth: loaded.config.auth.clone(),
+                audit: loaded.config.audit.clone(),
+                observability: loaded.config.observability.clone(),
             },
             Some(GatewayReloadSource {
                 workspace_root: root.to_path_buf(),
@@ -2088,9 +2877,15 @@ workflows:
                 node_store: test_node_store(),
                 mcp_manager: Some(manager),
                 cron_store: test_cron_store(),
+                workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace"),
                 runs_dir: std::env::temp_dir(),
+                audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit"),
                 extensions: Vec::new(),
                 policies: PolicyConfig::default(),
+                deployment: config.deployment.clone(),
+                auth: config.auth.clone(),
+                audit: config.audit.clone(),
+                observability: config.observability.clone(),
             },
         );
 

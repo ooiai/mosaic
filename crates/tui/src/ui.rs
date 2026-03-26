@@ -178,6 +178,12 @@ fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
     if !app.extension_errors.is_empty() {
         detail_height += 1;
     }
+    if app.gateway_summary.is_some() {
+        detail_height += 1;
+    }
+    if app.gateway_detail.is_some() {
+        detail_height += 1;
+    }
     if app.node_summary.is_some() {
         detail_height += 1;
     }
@@ -251,6 +257,18 @@ fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
                 app.session_label()
             )),
         ]));
+        if let Some(summary) = app.gateway_summary.as_deref() {
+            detail_lines.push(Line::from(vec![
+                Span::styled("• ", Style::default().fg(Color::Yellow)),
+                Span::raw(summary.to_owned()),
+            ]));
+        }
+        if let Some(detail) = app.gateway_detail.as_deref() {
+            detail_lines.push(Line::from(vec![
+                Span::styled("• ", Style::default().fg(Color::DarkGray)),
+                Span::raw(detail.to_owned()),
+            ]));
+        }
         if let Some(summary) = app.node_summary.as_deref() {
             detail_lines.push(Line::from(vec![
                 Span::styled("• ", Style::default().fg(Color::Green)),
@@ -288,6 +306,12 @@ fn render_console_stream(frame: &mut Frame<'_>, app: &App, area: Rect) {
             info_height += 1;
         }
         if !app.extension_errors.is_empty() {
+            info_height += 1;
+        }
+        if app.gateway_summary.is_some() {
+            info_height += 1;
+        }
+        if app.gateway_detail.is_some() {
             info_height += 1;
         }
         if app.node_summary.is_some() {
@@ -374,6 +398,20 @@ fn startup_environment_line<'a>(app: &'a App) -> Paragraph<'a> {
                 format!("Extension issue: {}", error),
                 Style::default().fg(Color::Yellow),
             ),
+        ]));
+    }
+
+    if let Some(summary) = app.gateway_summary.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("◦ ", Style::default().fg(Color::Yellow)),
+            Span::styled(summary, Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    if let Some(detail) = app.gateway_detail.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("◦ ", Style::default().fg(Color::Blue)),
+            Span::styled(detail, Style::default().fg(Color::DarkGray)),
         ]));
     }
 

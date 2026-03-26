@@ -134,6 +134,8 @@ fn build_gateway_components_for_workspace(
     let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
     let extension_set = load_extension_set(config, app_config, workspace_root, cron_store.clone())?;
 
+    let audit_root = resolve_workspace_path(&config.audit.root_dir)?;
+
     Ok(GatewayRuntimeComponents {
         profiles,
         provider_override: None,
@@ -146,9 +148,15 @@ fn build_gateway_components_for_workspace(
         node_store: Arc::new(FileNodeStore::new(node_store_root)),
         mcp_manager: extension_set.mcp_manager,
         cron_store,
+        workspace_root: workspace_root.to_path_buf(),
         runs_dir,
+        audit_root,
         extensions: extension_set.extensions,
         policies: extension_set.policies,
+        deployment: config.deployment.clone(),
+        auth: config.auth.clone(),
+        audit: config.audit.clone(),
+        observability: config.observability.clone(),
     })
 }
 

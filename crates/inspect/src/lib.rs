@@ -207,6 +207,16 @@ pub struct ModelSelectionTrace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GovernanceTrace {
+    pub deployment_profile: String,
+    pub workspace_name: String,
+    pub auth_mode: String,
+    pub audit_retention_days: u32,
+    pub event_replay_window: usize,
+    pub redact_inputs: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSummary {
     pub status: String,
     pub tool_calls: usize,
@@ -228,6 +238,7 @@ pub struct RunTrace {
     pub input: String,
     pub output: Option<String>,
     pub effective_profile: Option<EffectiveProfileTrace>,
+    pub governance: Option<GovernanceTrace>,
     #[serde(default)]
     pub model_selections: Vec<ModelSelectionTrace>,
     #[serde(default)]
@@ -266,6 +277,7 @@ impl RunTrace {
             input,
             output: None,
             effective_profile: None,
+            governance: None,
             model_selections: vec![],
             memory_reads: vec![],
             memory_writes: vec![],
@@ -323,6 +335,10 @@ impl RunTrace {
 
     pub fn bind_effective_profile(&mut self, profile: EffectiveProfileTrace) {
         self.effective_profile = Some(profile);
+    }
+
+    pub fn bind_governance(&mut self, governance: GovernanceTrace) {
+        self.governance = Some(governance);
     }
 
     pub fn add_model_selection(&mut self, trace: ModelSelectionTrace) {
@@ -539,6 +555,14 @@ mod tests {
                 model: "mock".to_owned(),
                 api_key_env: None,
                 api_key_present: false,
+            }),
+            governance: Some(GovernanceTrace {
+                deployment_profile: "local".to_owned(),
+                workspace_name: "test-workspace".to_owned(),
+                auth_mode: "open".to_owned(),
+                audit_retention_days: 14,
+                event_replay_window: 256,
+                redact_inputs: true,
             }),
             model_selections: vec![ModelSelectionTrace {
                 scope: "run".to_owned(),

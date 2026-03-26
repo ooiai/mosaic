@@ -1,9 +1,12 @@
+use std::env;
+
 use anyhow::Result;
 use futures::{StreamExt, stream::BoxStream};
 use mosaic_channel_telegram::TelegramUpdate;
 use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
-    ErrorResponse, EventStreamEnvelope, ExecJobRequest, HealthResponse, InboundMessage,
+    ErrorResponse, EventStreamEnvelope, ExecJobRequest, GatewayAuditEventDto, HealthResponse,
+    InboundMessage, IncidentBundleDto, MetricsResponse, ReadinessResponse, ReplayWindowResponse,
     RunResponse, RunSubmission, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
 };
 
@@ -11,6 +14,7 @@ use mosaic_control_protocol::{
 pub struct GatewayClient {
     base_url: String,
     http: reqwest::Client,
+    bearer_token: Option<String>,
 }
 
 impl GatewayClient {
@@ -18,7 +22,17 @@ impl GatewayClient {
         Self {
             base_url: base_url.into().trim_end_matches('/').to_owned(),
             http: reqwest::Client::new(),
+            bearer_token: env::var("MOSAIC_OPERATOR_TOKEN")
+                .ok()
+                .or_else(|| env::var("MOSAIC_GATEWAY_TOKEN").ok()),
         }
+    }
+
+    pub fn with_bearer_token(mut self, token: Option<String>) -> Self {
+        if token.is_some() {
+            self.bearer_token = token;
+        }
+        self
     }
 
     pub fn base_url(&self) -> &str {
@@ -27,6 +41,27 @@ impl GatewayClient {
 
     pub async fn health(&self) -> Result<HealthResponse> {
         self.get_json("/health").await
+    }
+
+    pub async fn readiness(&self) -> Result<ReadinessResponse> {
+        self.get_json("/ready").await
+    }
+
+    pub async fn metrics(&self) -> Result<MetricsResponse> {
+        self.get_json("/metrics").await
+    }
+
+    pub async fn audit_events(&self, limit: usize) -> Result<Vec<GatewayAuditEventDto>> {
+        self.get_json(&format!("/audit/events?limit={limit}")).await
+    }
+
+    pub async fn replay_window(&self, limit: usize) -> Result<ReplayWindowResponse> {
+        self.get_json(&format!("/events/recent?limit={limit}"))
+            .await
+    }
+
+    pub async fn incident_bundle(&self, id: &str) -> Result<IncidentBundleDto> {
+        self.get_json(&format!("/incidents/{id}")).await
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummaryDto>> {
@@ -39,8 +74,7 @@ impl GatewayClient {
 
     pub async fn get_session(&self, id: &str) -> Result<Option<SessionDetailDto>> {
         let response = self
-            .http
-            .get(self.url(&format!("/sessions/{id}")))
+            .request(reqwest::Method::GET, &format!("/sessions/{id}"))
             .send()
             .await?;
 
@@ -95,7 +129,7 @@ impl GatewayClient {
     }
 
     pub async fn subscribe_events(&self) -> Result<GatewayEventStream> {
-        let response = self.http.get(self.url("/events")).send().await?;
+        let response = self.request(reqwest::Method::GET, "/events").send().await?;
         let status = response.status();
         if !status.is_success() {
             let bytes = response.bytes().await?;
@@ -109,7 +143,7 @@ impl GatewayClient {
     }
 
     async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T> {
-        let response = self.http.get(self.url(path)).send().await?;
+        let response = self.request(reqwest::Method::GET, path).send().await?;
         decode_response(response).await
     }
 
@@ -118,8 +152,20 @@ impl GatewayClient {
         path: &str,
         body: &B,
     ) -> Result<T> {
-        let response = self.http.post(self.url(path)).json(body).send().await?;
+        let response = self
+            .request(reqwest::Method::POST, path)
+            .json(body)
+            .send()
+            .await?;
         decode_response(response).await
+    }
+
+    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        let mut builder = self.http.request(method, self.url(path));
+        if let Some(token) = self.bearer_token.as_deref() {
+            builder = builder.bearer_auth(token);
+        }
+        builder
     }
 
     fn url(&self, path: &str) -> String {
@@ -264,9 +310,15 @@ mod tests {
                 node_store: Arc::new(FileNodeStore::new(session_root.join("nodes"))),
                 mcp_manager: None,
                 cron_store: Arc::new(FileCronStore::new(session_root.join("cron"))),
+                workspace_root: session_root.clone(),
                 runs_dir: std::env::temp_dir(),
+                audit_root: session_root.join("audit"),
                 extensions: Vec::new(),
                 policies: mosaic_config::PolicyConfig::default(),
+                deployment: config.deployment.clone(),
+                auth: config.auth.clone(),
+                audit: config.audit.clone(),
+                observability: config.observability.clone(),
             },
         );
 
