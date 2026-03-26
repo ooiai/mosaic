@@ -18,6 +18,7 @@ mosaic-config = { path = "../config" }
 mosaic-control-protocol = { path = "../control-protocol" }
 mosaic-extension-core = { path = "../extension-core" }
 mosaic-memory = { path = "../memory" }
+mosaic-node-protocol = { path = "../node-protocol" }
 mosaic-inspect = { path = "../inspect" }
 mosaic-mcp-core = { path = "../mcp-core" }
 mosaic-provider = { path = "../provider" }

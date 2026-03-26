@@ -157,6 +157,15 @@ impl Default for ToolExecutionPolicy {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct NodeRouteMetadata {
+    pub capability: Option<String>,
+    #[serde(default)]
+    pub prefer_node: bool,
+    #[serde(default)]
+    pub require_node: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityMetadata {
     pub kind: CapabilityKind,
@@ -171,6 +180,8 @@ pub struct CapabilityMetadata {
     pub healthy: bool,
     #[serde(default)]
     pub long_running: bool,
+    #[serde(default)]
+    pub node: NodeRouteMetadata,
 }
 
 impl Default for CapabilityMetadata {
@@ -189,6 +200,7 @@ impl CapabilityMetadata {
             authorized: true,
             healthy: true,
             long_running: false,
+            node: NodeRouteMetadata::default(),
         }
     }
 
@@ -205,6 +217,7 @@ impl CapabilityMetadata {
             authorized: true,
             healthy: true,
             long_running: false,
+            node: NodeRouteMetadata::default(),
         }
     }
 
@@ -221,6 +234,7 @@ impl CapabilityMetadata {
             authorized: true,
             healthy: true,
             long_running: false,
+            node: NodeRouteMetadata::default(),
         }
     }
 
@@ -237,6 +251,7 @@ impl CapabilityMetadata {
             authorized: true,
             healthy: true,
             long_running: false,
+            node: NodeRouteMetadata::default(),
         }
     }
 
@@ -253,6 +268,7 @@ impl CapabilityMetadata {
             authorized: true,
             healthy: true,
             long_running: true,
+            node: NodeRouteMetadata::default(),
         }
     }
 
@@ -265,7 +281,26 @@ impl CapabilityMetadata {
             authorized: false,
             healthy: false,
             long_running: false,
+            node: NodeRouteMetadata::default(),
         }
+    }
+
+    pub fn with_node_route(
+        mut self,
+        capability: impl Into<String>,
+        prefer_node: bool,
+        require_node: bool,
+    ) -> Self {
+        self.node = NodeRouteMetadata {
+            capability: Some(capability.into()),
+            prefer_node,
+            require_node,
+        };
+        self
+    }
+
+    pub fn routes_via_node(&self) -> bool {
+        self.node.capability.is_some()
     }
 }
 
@@ -554,7 +589,11 @@ impl ReadFileTool {
                     "required": ["path"]
                 }),
             )
-            .with_capability(CapabilityMetadata::file_read()),
+            .with_capability(CapabilityMetadata::file_read().with_node_route(
+                "read_file",
+                true,
+                false,
+            )),
             allowed_roots,
         }
     }
@@ -635,7 +674,11 @@ impl ExecTool {
                     "required": ["command"]
                 }),
             )
-            .with_capability(CapabilityMetadata::exec()),
+            .with_capability(CapabilityMetadata::exec().with_node_route(
+                "exec_command",
+                true,
+                false,
+            )),
             allowed_roots,
         }
     }
@@ -1185,6 +1228,26 @@ mod tests {
         assert_eq!(meta.source.label(), "mcp");
         assert_eq!(meta.source.server_name(), Some("filesystem"));
         assert_eq!(meta.source.remote_tool_name(), Some("read_file"));
+    }
+
+    #[test]
+    fn node_routed_tool_metadata_exposes_capability_preferences() {
+        let read_file = ReadFileTool::new_with_allowed_roots(Vec::new());
+        let exec = ExecTool::new(Vec::new());
+
+        assert_eq!(
+            read_file.metadata().capability.node.capability.as_deref(),
+            Some("read_file")
+        );
+        assert!(read_file.metadata().capability.node.prefer_node);
+        assert!(!read_file.metadata().capability.node.require_node);
+
+        assert_eq!(
+            exec.metadata().capability.node.capability.as_deref(),
+            Some("exec_command")
+        );
+        assert!(exec.metadata().capability.node.prefer_node);
+        assert!(!exec.metadata().capability.node.require_node);
     }
 
     #[test]

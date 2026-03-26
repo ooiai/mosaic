@@ -207,6 +207,8 @@ pub struct App {
     pub extension_summary: Option<String>,
     pub extension_policy_summary: Option<String>,
     pub extension_errors: Vec<String>,
+    pub node_summary: Option<String>,
+    pub node_detail: Option<String>,
     heartbeat: usize,
 }
 
@@ -253,6 +255,8 @@ impl App {
             extension_summary: None,
             extension_policy_summary: None,
             extension_errors: Vec::new(),
+            node_summary: None,
+            node_detail: None,
             heartbeat: 0,
         }
     }
@@ -309,6 +313,8 @@ impl App {
             extension_summary: None,
             extension_policy_summary: None,
             extension_errors: Vec::new(),
+            node_summary: None,
+            node_detail: None,
             heartbeat: 0,
         }
     }
@@ -330,6 +336,11 @@ impl App {
         self.extension_summary = Some(extension_summary);
         self.extension_policy_summary = Some(extension_policy_summary);
         self.extension_errors = extension_errors;
+    }
+
+    pub fn set_node_state(&mut self, node_summary: Option<String>, node_detail: Option<String>) {
+        self.node_summary = node_summary;
+        self.node_detail = node_detail;
     }
 
     pub fn sync_runtime_session(&mut self, session: &StoredSessionRecord) {

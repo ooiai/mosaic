@@ -1050,6 +1050,7 @@ name = "mosaic-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "mosaic-config",
  "mosaic-control-protocol",
@@ -1058,6 +1059,7 @@ dependencies = [
  "mosaic-inspect",
  "mosaic-mcp-core",
  "mosaic-memory",
+ "mosaic-node-protocol",
  "mosaic-provider",
  "mosaic-runtime",
  "mosaic-scheduler-core",
@@ -1124,6 +1126,7 @@ dependencies = [
  "mosaic-inspect",
  "mosaic-mcp-core",
  "mosaic-memory",
+ "mosaic-node-protocol",
  "mosaic-provider",
  "mosaic-runtime",
  "mosaic-scheduler-core",
@@ -1174,6 +1177,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-node-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "mosaic-tool-core",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "mosaic-provider"
 version = "0.1.0"
 dependencies = [
@@ -1197,6 +1214,7 @@ dependencies = [
  "mosaic-config",
  "mosaic-inspect",
  "mosaic-memory",
+ "mosaic-node-protocol",
  "mosaic-provider",
  "mosaic-session-core",
  "mosaic-skill-core",
@@ -1230,6 +1248,7 @@ dependencies = [
  "mosaic-control-protocol",
  "mosaic-gateway",
  "mosaic-memory",
+ "mosaic-node-protocol",
  "mosaic-provider",
  "mosaic-scheduler-core",
  "mosaic-session-core",
@@ -1289,6 +1308,7 @@ dependencies = [
  "crossterm 0.29.0",
  "mosaic-control-protocol",
  "mosaic-gateway",
+ "mosaic-node-protocol",
  "mosaic-runtime",
  "mosaic-sdk",
  "mosaic-session-core",

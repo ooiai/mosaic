@@ -31,6 +31,7 @@ use mosaic_extension_core::{
 use mosaic_inspect::{ExtensionTrace, IngressTrace, RunTrace};
 use mosaic_mcp_core::McpServerManager;
 use mosaic_memory::{MemoryPolicy, MemoryStore};
+use mosaic_node_protocol::{FileNodeStore, NodeCapabilityDeclaration, NodeRegistration};
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry, public_error_message};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult, RuntimeContext};
@@ -60,6 +61,7 @@ pub struct GatewayRuntimeComponents {
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
     pub workflows: Arc<WorkflowRegistry>,
+    pub node_store: Arc<FileNodeStore>,
     pub mcp_manager: Option<Arc<McpServerManager>>,
     pub cron_store: Arc<dyn CronStore>,
     pub runs_dir: PathBuf,
@@ -78,6 +80,7 @@ impl GatewayRuntimeComponents {
             tools: self.tools.clone(),
             skills: self.skills.clone(),
             workflows: self.workflows.clone(),
+            node_router: Some(self.node_store.clone()),
             active_extensions: self.extensions.iter().map(extension_trace).collect(),
             event_sink,
         }
@@ -293,6 +296,7 @@ impl GatewayHandle {
             tools: Arc::new(extension_set.tools),
             skills: Arc::new(extension_set.skills),
             workflows: Arc::new(extension_set.workflows),
+            node_store: current.node_store.clone(),
             mcp_manager: extension_set.mcp_manager,
             cron_store: current.cron_store.clone(),
             runs_dir: current.runs_dir.clone(),
@@ -347,6 +351,36 @@ impl GatewayHandle {
             .collect::<Vec<_>>();
         jobs.sort_by(|left, right| right.started_at.cmp(&left.started_at));
         jobs
+    }
+
+    pub fn list_nodes(&self) -> Result<Vec<NodeRegistration>> {
+        self.snapshot_components().node_store.list_nodes()
+    }
+
+    pub fn node_capabilities(&self, node_id: &str) -> Result<Vec<NodeCapabilityDeclaration>> {
+        self.snapshot_components()
+            .node_store
+            .node_capabilities(node_id)
+    }
+
+    pub fn node_affinity(&self, session_id: Option<&str>) -> Result<Option<String>> {
+        Ok(self
+            .snapshot_components()
+            .node_store
+            .affinity_for_session(session_id)?
+            .map(|record| record.node_id))
+    }
+
+    pub fn attach_node(&self, node_id: &str, session_id: Option<&str>) -> Result<()> {
+        let components = self.snapshot_components();
+        if components.node_store.load_node(node_id)?.is_none() {
+            bail!("node not found: {}", node_id);
+        }
+
+        match session_id {
+            Some(session_id) => components.node_store.attach_session(session_id, node_id),
+            None => components.node_store.attach_default(node_id),
+        }
     }
 
     pub fn list_cron_registrations(&self) -> Result<Vec<CronRegistration>> {
@@ -1508,6 +1542,12 @@ mod tests {
         ))
     }
 
+    fn test_node_store() -> Arc<FileNodeStore> {
+        Arc::new(FileNodeStore::new(
+            std::env::temp_dir().join(format!("mosaic-gateway-tests-nodes-{}", Uuid::new_v4())),
+        ))
+    }
+
     fn gateway() -> GatewayHandle {
         let mut config = MosaicConfig::default();
         config.active_profile = "mock".to_owned();
@@ -1538,6 +1578,7 @@ mod tests {
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
+                node_store: test_node_store(),
                 mcp_manager: None,
                 cron_store: test_cron_store(),
                 runs_dir: std::env::temp_dir(),
@@ -1643,6 +1684,7 @@ workflows:
                 tools: Arc::new(extension_set.tools),
                 skills: Arc::new(extension_set.skills),
                 workflows: Arc::new(extension_set.workflows),
+                node_store: Arc::new(FileNodeStore::new(root.join(".mosaic/nodes"))),
                 mcp_manager: extension_set.mcp_manager,
                 cron_store,
                 runs_dir: root.join(".mosaic/runs"),
@@ -1786,6 +1828,90 @@ workflows:
     }
 
     #[tokio::test]
+    async fn gateway_lists_nodes_and_persists_session_affinity() {
+        let gateway = gateway();
+        let node_store = gateway.snapshot_components().node_store.clone();
+        node_store
+            .register_node(&NodeRegistration::new(
+                "node-a",
+                "Headless Node",
+                "file-bus",
+                "headless",
+                vec![NodeCapabilityDeclaration {
+                    name: "read_file".to_owned(),
+                    kind: mosaic_tool_core::CapabilityKind::File,
+                    permission_scopes: vec![mosaic_tool_core::PermissionScope::LocalRead],
+                    risk: mosaic_tool_core::ToolRiskLevel::Low,
+                }],
+            ))
+            .expect("node registration should persist");
+
+        let nodes = gateway.list_nodes().expect("nodes should list");
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].node_id, "node-a");
+
+        gateway
+            .attach_node("node-a", Some("demo"))
+            .expect("node affinity should persist");
+        assert_eq!(
+            gateway
+                .node_affinity(Some("demo"))
+                .expect("node affinity should load"),
+            Some("node-a".to_owned())
+        );
+        assert_eq!(
+            gateway
+                .node_capabilities("node-a")
+                .expect("node capabilities should load")
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_node_store_prefers_online_nodes_when_stale_nodes_exist() {
+        let gateway = gateway();
+        let node_store = gateway.snapshot_components().node_store.clone();
+        let mut stale = NodeRegistration::new(
+            "node-stale",
+            "Stale Node",
+            "file-bus",
+            "headless",
+            vec![NodeCapabilityDeclaration {
+                name: "read_file".to_owned(),
+                kind: mosaic_tool_core::CapabilityKind::File,
+                permission_scopes: vec![mosaic_tool_core::PermissionScope::LocalRead],
+                risk: mosaic_tool_core::ToolRiskLevel::Low,
+            }],
+        );
+        stale.last_heartbeat_at = Utc::now() - chrono::Duration::seconds(60);
+        let fresh = NodeRegistration::new(
+            "node-fresh",
+            "Fresh Node",
+            "file-bus",
+            "headless",
+            vec![NodeCapabilityDeclaration {
+                name: "read_file".to_owned(),
+                kind: mosaic_tool_core::CapabilityKind::File,
+                permission_scopes: vec![mosaic_tool_core::PermissionScope::LocalRead],
+                risk: mosaic_tool_core::ToolRiskLevel::Low,
+            }],
+        );
+        node_store
+            .register_node(&stale)
+            .expect("stale node should persist");
+        node_store
+            .register_node(&fresh)
+            .expect("fresh node should persist");
+
+        let selection = node_store
+            .select_node("read_file", None)
+            .expect("node selection should succeed")
+            .expect("node selection should exist");
+        assert_eq!(selection.registration.node_id, "node-fresh");
+    }
+
+    #[tokio::test]
     async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
         let mut config = MosaicConfig::default();
         config.active_profile = "mock".to_owned();
@@ -1815,6 +1941,7 @@ workflows:
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
+                node_store: test_node_store(),
                 mcp_manager: Some(manager),
                 cron_store: test_cron_store(),
                 runs_dir: std::env::temp_dir(),

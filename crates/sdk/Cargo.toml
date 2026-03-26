@@ -22,6 +22,7 @@ uuid.workspace = true
 mosaic-config = { path = "../config" }
 mosaic-gateway = { path = "../gateway" }
 mosaic-memory = { path = "../memory" }
+mosaic-node-protocol = { path = "../node-protocol" }
 mosaic-provider = { path = "../provider" }
 mosaic-scheduler-core = { path = "../scheduler-core" }
 mosaic-session-core = { path = "../session-core" }

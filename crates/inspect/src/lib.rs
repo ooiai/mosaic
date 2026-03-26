@@ -17,6 +17,12 @@ pub struct ToolTrace {
     pub source: ToolSource,
     pub input: serde_json::Value,
     pub output: Option<String>,
+    #[serde(default)]
+    pub node_id: Option<String>,
+    #[serde(default)]
+    pub capability_route: Option<String>,
+    #[serde(default)]
+    pub disconnect_context: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
 }
@@ -43,6 +49,12 @@ pub struct CapabilityInvocationTrace {
     pub status: String,
     pub summary: String,
     pub target: Option<String>,
+    #[serde(default)]
+    pub node_id: Option<String>,
+    #[serde(default)]
+    pub capability_route: Option<String>,
+    #[serde(default)]
+    pub disconnect_context: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
@@ -467,6 +479,9 @@ mod tests {
             source: ToolSource::Builtin,
             input: serde_json::json!({ "text": "hello" }),
             output: Some("hello".to_owned()),
+            node_id: None,
+            capability_route: None,
+            disconnect_context: None,
             started_at: Utc::now(),
             finished_at: Some(Utc::now()),
         });
@@ -535,6 +550,9 @@ mod tests {
                 source: ToolSource::Builtin,
                 input: serde_json::json!({ "text": "hello" }),
                 output: Some("hello".to_owned()),
+                node_id: None,
+                capability_route: None,
+                disconnect_context: None,
                 started_at,
                 finished_at: Some(started_at + Duration::milliseconds(3)),
             }],

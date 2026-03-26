@@ -12,6 +12,7 @@ members = [
     "crates/mcp-core",
     "crates/inspect",
     "crates/memory",
+    "crates/node-protocol",
     "crates/runtime",
     "crates/sdk",
     "crates/workflow",

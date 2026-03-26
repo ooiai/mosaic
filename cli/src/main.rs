@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, env, fs, path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result, anyhow, bail};
+use chrono::Utc;
 use clap::{Parser, Subcommand};
 use mosaic_config::{
     ACTIVE_PROFILE_ENV, ConfigSourceKind, DoctorStatus, LoadConfigOptions, LoadedMosaicConfig,
@@ -18,10 +19,15 @@ use mosaic_gateway::{
 };
 use mosaic_inspect::RunTrace;
 use mosaic_memory::{FileMemoryStore, MemoryStore};
+use mosaic_node_protocol::{
+    DEFAULT_STALE_AFTER_SECS, FileNodeStore, NodeCapabilityDeclaration, NodeCommandDispatch,
+    NodeCommandResultEnvelope, NodeRegistration,
+};
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::events::RunEventSink;
 use mosaic_sdk::GatewayClient;
 use mosaic_session_core::SessionSummary;
+use mosaic_tool_core::{ExecTool, ReadFileTool, Tool};
 
 mod bootstrap;
 mod output;
@@ -82,6 +88,10 @@ enum Commands {
         #[command(subcommand)]
         command: GatewayCliCommand,
     },
+    Node {
+        #[command(subcommand)]
+        command: NodeCliCommand,
+    },
     Capability {
         #[arg(long)]
         attach: Option<String>,
@@ -135,6 +145,25 @@ enum GatewayCliCommand {
         http: Option<String>,
     },
     Sessions,
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum NodeCliCommand {
+    Serve {
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        label: Option<String>,
+    },
+    List,
+    Attach {
+        node_id: String,
+        #[arg(long)]
+        session: Option<String>,
+    },
+    Capabilities {
+        node_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -255,6 +284,9 @@ enum DispatchCommand {
     Gateway {
         command: GatewayCliCommand,
     },
+    Node {
+        command: NodeCliCommand,
+    },
     Capability {
         attach: Option<String>,
         command: CapabilityCommand,
@@ -315,6 +347,7 @@ impl Cli {
             }
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
             Some(Commands::Gateway { command }) => DispatchCommand::Gateway { command },
+            Some(Commands::Node { command }) => DispatchCommand::Node { command },
             Some(Commands::Capability { attach, command }) => {
                 DispatchCommand::Capability { attach, command }
             }
@@ -349,6 +382,7 @@ async fn main() -> Result<()> {
         DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
         DispatchCommand::Model { command } => model_cmd(command),
         DispatchCommand::Gateway { command } => gateway_cmd(command).await,
+        DispatchCommand::Node { command } => node_cmd(command).await,
         DispatchCommand::Capability { attach, command } => capability_cmd(attach, command).await,
         DispatchCommand::Cron { attach, command } => cron_cmd(attach, command).await,
         DispatchCommand::Memory { command } => memory_cmd(command),
@@ -791,6 +825,199 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
             Ok(())
         }
     }
+}
+
+async fn node_cmd(command: NodeCliCommand) -> Result<()> {
+    match command {
+        NodeCliCommand::Serve { id, label } => serve_local_node(id, label).await,
+        NodeCliCommand::List => {
+            let loaded = ensure_loaded_config(None)?;
+            let gateway = build_gateway_handle(&loaded, None)?;
+            print_node_list(&gateway.list_nodes()?)
+        }
+        NodeCliCommand::Attach { node_id, session } => {
+            let loaded = ensure_loaded_config(None)?;
+            let gateway = build_gateway_handle(&loaded, None)?;
+            gateway.attach_node(&node_id, session.as_deref())?;
+            match session {
+                Some(session) => println!("attached node {} to session {}", node_id, session),
+                None => println!("attached node {} as the default node route", node_id),
+            }
+            Ok(())
+        }
+        NodeCliCommand::Capabilities { node_id } => {
+            let loaded = ensure_loaded_config(None)?;
+            let gateway = build_gateway_handle(&loaded, None)?;
+            match node_id {
+                Some(node_id) => {
+                    print_node_capabilities(&node_id, &gateway.node_capabilities(&node_id)?)
+                }
+                None => {
+                    let nodes = gateway.list_nodes()?;
+                    if nodes.is_empty() {
+                        println!("no nodes found");
+                        return Ok(());
+                    }
+                    for node in nodes {
+                        print_node_capabilities(&node.node_id, &node.capabilities)?;
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+async fn serve_local_node(id: Option<String>, label: Option<String>) -> Result<()> {
+    let node_store = FileNodeStore::new(resolve_workspace_relative_path(".mosaic/nodes")?);
+    let node_id = id.unwrap_or_else(|| "local-headless".to_owned());
+    let label = label.unwrap_or_else(|| "Local Headless Node".to_owned());
+    let (read_file_tool, exec_tool) = build_headless_node_tools()?;
+    let capabilities = vec![
+        tool_node_capability(&read_file_tool),
+        tool_node_capability(&exec_tool),
+    ];
+    let registration = NodeRegistration::new(
+        node_id.clone(),
+        label.clone(),
+        "file-bus",
+        "headless",
+        capabilities,
+    );
+    node_store.register_node(&registration)?;
+    let _ = node_store.heartbeat(&node_id)?;
+
+    println!("headless node ready");
+    println!("node_id: {}", node_id);
+    println!("label: {}", label);
+    println!("transport: file-bus");
+    println!("node_store: {}", node_store.root().display());
+    println!(
+        "capabilities: {:?}",
+        registration
+            .capabilities
+            .iter()
+            .map(|cap| cap.name.as_str())
+            .collect::<Vec<_>>()
+    );
+    println!("press Ctrl-C to stop");
+
+    loop {
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => {
+                signal?;
+                node_store.disconnect_node(&node_id, "operator_shutdown")?;
+                println!("headless node stopped");
+                break;
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                let _ = node_store.heartbeat(&node_id)?;
+                for dispatch in node_store.pending_commands(&node_id)? {
+                    execute_headless_node_dispatch(&node_store, &dispatch, &read_file_tool, &exec_tool).await?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn build_headless_node_tools() -> Result<(ReadFileTool, ExecTool)> {
+    let allowed_root = env::current_dir()?;
+    Ok((
+        ReadFileTool::new_with_allowed_roots(vec![allowed_root.clone()]),
+        ExecTool::new(vec![allowed_root]),
+    ))
+}
+
+fn tool_node_capability(tool: &dyn Tool) -> NodeCapabilityDeclaration {
+    let metadata = tool.metadata();
+    NodeCapabilityDeclaration {
+        name: metadata
+            .capability
+            .node
+            .capability
+            .clone()
+            .unwrap_or_else(|| metadata.name.clone()),
+        kind: metadata.capability.kind.clone(),
+        permission_scopes: metadata.capability.permission_scopes.clone(),
+        risk: metadata.capability.risk.clone(),
+    }
+}
+
+async fn execute_headless_node_dispatch(
+    node_store: &FileNodeStore,
+    dispatch: &NodeCommandDispatch,
+    read_file_tool: &ReadFileTool,
+    exec_tool: &ExecTool,
+) -> Result<()> {
+    let result = match dispatch.capability.as_str() {
+        "read_file" => read_file_tool.call(dispatch.input.clone()).await,
+        "exec_command" => exec_tool.call(dispatch.input.clone()).await,
+        capability => Err(anyhow!("unsupported node capability: {}", capability)),
+    };
+
+    let envelope = match result {
+        Ok(result) => NodeCommandResultEnvelope::success(dispatch, result),
+        Err(err) => NodeCommandResultEnvelope::failure(dispatch, "failed", err.to_string(), None),
+    };
+    node_store.complete_command(&envelope)
+}
+
+fn print_node_list(nodes: &[NodeRegistration]) -> Result<()> {
+    if nodes.is_empty() {
+        println!("no nodes found");
+        return Ok(());
+    }
+
+    for node in nodes {
+        let health = node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS);
+        println!(
+            "{} | health={} | transport={} | platform={} | capabilities={} | last_heartbeat_at={}",
+            node.node_id,
+            health.label(),
+            node.transport,
+            node.platform,
+            node.capabilities
+                .iter()
+                .map(|cap| cap.name.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            node.last_heartbeat_at,
+        );
+        if let Some(reason) = node.last_disconnect_reason.as_deref() {
+            println!("  disconnect_reason: {}", reason);
+        }
+    }
+
+    Ok(())
+}
+
+fn print_node_capabilities(
+    node_id: &str,
+    capabilities: &[NodeCapabilityDeclaration],
+) -> Result<()> {
+    println!("node: {}", node_id);
+    if capabilities.is_empty() {
+        println!("  capabilities: none");
+        return Ok(());
+    }
+
+    for capability in capabilities {
+        println!(
+            "  - {} | kind={} | risk={} | scopes={:?}",
+            capability.name,
+            capability.kind.label(),
+            capability.risk.label(),
+            capability
+                .permission_scopes
+                .iter()
+                .map(|scope| scope.label())
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    Ok(())
 }
 
 async fn capability_cmd(attach: Option<String>, command: CapabilityCommand) -> Result<()> {
@@ -1416,6 +1643,9 @@ summary:"
             println!("  status: {}", invocation.status);
             println!("  summary: {}", invocation.summary);
             println!("  target: {:?}", invocation.target);
+            println!("  node_id: {:?}", invocation.node_id);
+            println!("  capability_route: {:?}", invocation.capability_route);
+            println!("  disconnect_context: {:?}", invocation.disconnect_context);
             println!("  started_at: {}", invocation.started_at);
             println!("  finished_at: {:?}", invocation.finished_at);
             println!("  duration_ms: {:?}", invocation.duration_ms());
@@ -1473,6 +1703,9 @@ summary:"
             if let Some(remote_tool_name) = call.source.remote_tool_name() {
                 println!("  remote_tool_name: {}", remote_tool_name);
             }
+            println!("  node_id: {:?}", call.node_id);
+            println!("  capability_route: {:?}", call.capability_route);
+            println!("  disconnect_context: {:?}", call.disconnect_context);
             println!("  started_at: {}", call.started_at);
             println!("  finished_at: {:?}", call.finished_at);
             println!("  duration_ms: {:?}", call.duration_ms());
@@ -2285,6 +2518,28 @@ mod tests {
                 command: super::GatewayCliCommand::Serve {
                     local: false,
                     http: Some("127.0.0.1:8080".to_owned()),
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn parses_node_subcommands() {
+        let cli = Cli::parse_from(["mosaic", "node", "list"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Node {
+                command: super::NodeCliCommand::List,
+            }
+        );
+
+        let cli = Cli::parse_from(["mosaic", "node", "attach", "node-a", "--session", "demo"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Node {
+                command: super::NodeCliCommand::Attach {
+                    node_id: "node-a".to_owned(),
+                    session: Some("demo".to_owned()),
                 },
             }
         );

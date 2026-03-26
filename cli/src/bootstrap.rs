@@ -10,6 +10,7 @@ use mosaic_extension_core::{ExtensionStatus, load_extension_set};
 use mosaic_gateway::{GatewayHandle, GatewayReloadSource, GatewayRuntimeComponents};
 use mosaic_inspect::ExtensionTrace;
 use mosaic_memory::{FileMemoryStore, MemoryPolicy};
+use mosaic_node_protocol::FileNodeStore;
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::{
     RuntimeContext,
@@ -38,6 +39,7 @@ pub fn build_runtime_context(
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
     let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
     let cron_store_root = resolve_workspace_path(".mosaic/cron")?;
+    let node_store_root = resolve_workspace_path(".mosaic/nodes")?;
     let memory_policy = MemoryPolicy::default();
     let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
     let extension_set = load_extension_set(config, app_config, &env::current_dir()?, cron_store)?;
@@ -51,6 +53,7 @@ pub fn build_runtime_context(
         tools: Arc::new(extension_set.tools),
         skills: Arc::new(extension_set.skills),
         workflows: Arc::new(extension_set.workflows),
+        node_router: Some(Arc::new(FileNodeStore::new(node_store_root))),
         active_extensions: extension_set
             .extensions
             .iter()
@@ -125,6 +128,7 @@ fn build_gateway_components_for_workspace(
     let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
     let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
     let cron_store_root = resolve_workspace_path(".mosaic/cron")?;
+    let node_store_root = resolve_workspace_path(".mosaic/nodes")?;
     let memory_policy = MemoryPolicy::default();
     let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
     let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
@@ -139,6 +143,7 @@ fn build_gateway_components_for_workspace(
         tools: Arc::new(extension_set.tools),
         skills: Arc::new(extension_set.skills),
         workflows: Arc::new(extension_set.workflows),
+        node_store: Arc::new(FileNodeStore::new(node_store_root)),
         mcp_manager: extension_set.mcp_manager,
         cron_store,
         runs_dir,

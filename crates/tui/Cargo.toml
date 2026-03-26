@@ -9,6 +9,7 @@ chrono.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
 mosaic-control-protocol = { path = "../control-protocol" }
+mosaic-node-protocol = { path = "../node-protocol" }
 mosaic-gateway = { path = "../gateway" }
 mosaic-runtime = { path = "../runtime" }
 mosaic-sdk = { path = "../sdk" }

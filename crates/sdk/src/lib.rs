@@ -212,6 +212,7 @@ mod tests {
     use mosaic_control_protocol::{GatewayEvent, InboundMessage, IngressTrace, RunSubmission};
     use mosaic_gateway::{GatewayHandle, GatewayRuntimeComponents, http_router};
     use mosaic_memory::{FileMemoryStore, MemoryPolicy};
+    use mosaic_node_protocol::FileNodeStore;
     use mosaic_provider::{MockProvider, ProviderProfileRegistry};
     use mosaic_scheduler_core::FileCronStore;
     use mosaic_session_core::FileSessionStore;
@@ -251,6 +252,7 @@ mod tests {
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
+                node_store: Arc::new(FileNodeStore::new(session_root.join("nodes"))),
                 mcp_manager: None,
                 cron_store: Arc::new(FileCronStore::new(session_root.join("cron"))),
                 runs_dir: std::env::temp_dir(),

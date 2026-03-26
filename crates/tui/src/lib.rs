@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, time::Duration};
 
+use chrono::Utc;
 use crossterm::{
     event::{self, Event, KeyEventKind},
     execute,
@@ -17,6 +18,7 @@ use crossterm::{
 };
 use mosaic_control_protocol::{GatewayEvent, IngressTrace, SessionDetailDto, TranscriptRoleDto};
 use mosaic_gateway::{GatewayHandle, GatewayRunRequest};
+use mosaic_node_protocol::DEFAULT_STALE_AFTER_SECS;
 use mosaic_runtime::events::{RunEvent, RunEventSink};
 use mosaic_sdk::GatewayClient;
 #[cfg(test)]
@@ -193,6 +195,7 @@ fn run_interactive_app(
         context.extension_policy_summary.clone(),
         context.extension_errors.clone(),
     );
+    app.set_node_state(None, None);
     let gateway_link = Arc::new(AtomicBool::new(true));
     refresh_interactive_session_from_gateway(&mut app, &context, &context.session_id);
 
@@ -366,6 +369,7 @@ fn refresh_interactive_session_from_gateway(
             if let Ok(Some(session)) = gateway.load_session(session_id) {
                 app.sync_runtime_session_with_origin(&session, "Local");
             }
+            refresh_local_node_state(app, gateway, session_id);
         }
         InteractiveGateway::Remote(client) => {
             if let Ok(Some(session)) = context
@@ -375,8 +379,73 @@ fn refresh_interactive_session_from_gateway(
                 let stored = remote_session_to_stored(&session);
                 app.sync_runtime_session_with_origin(&stored, "Remote");
             }
+            app.set_node_state(Some("Nodes remote status unavailable".to_owned()), None);
         }
     }
+}
+
+fn refresh_local_node_state(app: &mut App, gateway: &GatewayHandle, session_id: &str) {
+    let nodes = match gateway.list_nodes() {
+        Ok(nodes) => nodes,
+        Err(err) => {
+            app.set_node_state(Some(format!("Nodes error: {}", err)), None);
+            return;
+        }
+    };
+
+    if nodes.is_empty() {
+        app.set_node_state(Some("Nodes none registered".to_owned()), None);
+        return;
+    }
+
+    let mut online = 0usize;
+    let mut stale = 0usize;
+    let mut offline = 0usize;
+    for node in &nodes {
+        match node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS) {
+            mosaic_node_protocol::NodeHealth::Online => online += 1,
+            mosaic_node_protocol::NodeHealth::Stale => stale += 1,
+            mosaic_node_protocol::NodeHealth::Offline => offline += 1,
+        }
+    }
+
+    let summary = format!(
+        "Nodes online={} stale={} offline={}",
+        online, stale, offline
+    );
+    let detail = match gateway.node_affinity(Some(session_id)) {
+        Ok(Some(node_id)) => nodes
+            .iter()
+            .find(|node| node.node_id == node_id)
+            .map(|node| {
+                format!(
+                    "Session node: {} [{}] caps={}",
+                    node.node_id,
+                    node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS).label(),
+                    node.capabilities
+                        .iter()
+                        .map(|cap| cap.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            })
+            .or_else(|| Some(format!("Session node: {} [missing]", node_id))),
+        Ok(None) => nodes.first().map(|node| {
+            format!(
+                "Default node candidate: {} [{}] caps={}",
+                node.node_id,
+                node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS).label(),
+                node.capabilities
+                    .iter()
+                    .map(|cap| cap.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        }),
+        Err(err) => Some(format!("Node affinity error: {}", err)),
+    };
+
+    app.set_node_state(Some(summary), detail);
 }
 
 async fn forward_remote_runtime_events(

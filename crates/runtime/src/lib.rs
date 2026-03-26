@@ -17,6 +17,7 @@ use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
     summarize_fragments,
 };
+use mosaic_node_protocol::{NodeRouter, NodeToolDispatchOutcome, NodeToolExecutionRequest};
 use mosaic_provider::{
     LlmProvider, Message, ProviderProfile, ProviderProfileRegistry, Role, SchedulingIntent,
     SchedulingRequest, ToolDefinition, tool_definition_from_metadata, tool_is_visible_to_model,
@@ -50,6 +51,13 @@ struct ToolExecutionFailure {
     capability_trace: Option<CapabilityInvocationTrace>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct NodeTraceContext {
+    node_id: Option<String>,
+    capability_route: Option<String>,
+    disconnect_context: Option<String>,
+}
+
 pub struct RuntimeContext {
     pub profiles: Arc<ProviderProfileRegistry>,
     pub provider_override: Option<Arc<dyn LlmProvider>>,
@@ -59,6 +67,7 @@ pub struct RuntimeContext {
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
     pub workflows: Arc<WorkflowRegistry>,
+    pub node_router: Option<Arc<dyn NodeRouter>>,
     pub active_extensions: Vec<ExtensionTrace>,
     pub event_sink: SharedRunEventSink,
 }
@@ -401,6 +410,7 @@ impl AgentRuntime {
             let executor = RuntimeWorkflowExecutor {
                 runtime: self,
                 default_profile: profile,
+                session_id: req.session_id.clone(),
                 tool_traces: tool_traces.clone(),
                 skill_traces: skill_traces.clone(),
                 model_selections: model_selections.clone(),
@@ -517,6 +527,7 @@ impl AgentRuntime {
                     let call_id = call.id.clone();
                     match self
                         .invoke_tool_with_guardrails(
+                            session.as_ref().map(|record| record.id.as_str()),
                             call.name.clone(),
                             call_id.clone(),
                             call.arguments.clone(),
@@ -588,6 +599,7 @@ impl AgentRuntime {
 
     async fn execute_workflow_prompt_step(
         &self,
+        session_id: Option<&str>,
         profile: &ProviderProfile,
         system: Option<String>,
         input: String,
@@ -626,6 +638,7 @@ impl AgentRuntime {
                     let call_id = call.id.clone();
                     match self
                         .invoke_tool_with_guardrails(
+                            session_id,
                             call.name.clone(),
                             call_id.clone(),
                             call.arguments.clone(),
@@ -1213,8 +1226,47 @@ Referenced session context:
         }
     }
 
+    async fn maybe_dispatch_tool_via_node(
+        &self,
+        session_id: Option<&str>,
+        tool_name: &str,
+        tool_input: &serde_json::Value,
+        metadata: &ToolMetadata,
+        timeout: Duration,
+    ) -> Result<NodeToolDispatchOutcome> {
+        let Some(router) = self.ctx.node_router.as_ref() else {
+            return Ok(NodeToolDispatchOutcome::NotHandled);
+        };
+        let Some(capability) = metadata.capability.node.capability.clone() else {
+            return Ok(NodeToolDispatchOutcome::NotHandled);
+        };
+
+        router
+            .dispatch(NodeToolExecutionRequest {
+                session_id: session_id.map(ToOwned::to_owned),
+                tool_name: tool_name.to_owned(),
+                capability,
+                input: tool_input.clone(),
+                timeout,
+            })
+            .await
+    }
+
+    fn node_failure_status(message: &str) -> &'static str {
+        if message.contains("permission denied") {
+            "node_permission_denied"
+        } else if message.contains("node stale") {
+            "node_stale"
+        } else if message.contains("node unavailable") || message.contains("no node is available") {
+            "node_unavailable"
+        } else {
+            "failed"
+        }
+    }
+
     async fn invoke_tool_with_guardrails(
         &self,
+        session_id: Option<&str>,
         tool_name: String,
         call_id: String,
         tool_input: serde_json::Value,
@@ -1271,7 +1323,7 @@ Referenced session context:
             });
             return Err(self.build_tool_failure(
                 error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None, None,
-                "rejected",
+                None, "rejected",
             ));
         }
 
@@ -1294,7 +1346,7 @@ Referenced session context:
             });
             return Err(self.build_tool_failure(
                 error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None, None,
-                "rejected",
+                None, "rejected",
             ));
         }
 
@@ -1306,17 +1358,35 @@ Referenced session context:
         let attempts = usize::from(metadata.capability.execution.retry_limit) + 1;
         let timeout = Duration::from_millis(metadata.capability.execution.timeout_ms.max(1));
 
-        for attempt in 1..=attempts {
-            let attempt_result = tokio::time::timeout(timeout, tool.call(tool_input.clone())).await;
-            match attempt_result {
-                Ok(Ok(result)) if !result.is_error => {
+        if metadata.capability.routes_via_node() {
+            match self
+                .maybe_dispatch_tool_via_node(
+                    session_id,
+                    &tool_name,
+                    &tool_input,
+                    &metadata,
+                    timeout,
+                )
+                .await
+            {
+                Ok(NodeToolDispatchOutcome::Completed(execution)) => {
                     let finished_at = Utc::now();
+                    let node_trace = NodeTraceContext {
+                        node_id: Some(execution.node_id),
+                        capability_route: Some(execution.route),
+                        disconnect_context: execution.disconnect_context,
+                    };
+                    let result = execution.result;
+                    let output = result.content.clone();
                     let tool_trace = ToolTrace {
                         call_id: Some(call_id.clone()),
                         name: tool_name.clone(),
                         source: metadata.source.clone(),
                         input: tool_input,
-                        output: Some(result.content.clone()),
+                        output: Some(output.clone()),
+                        node_id: node_trace.node_id.clone(),
+                        capability_route: node_trace.capability_route.clone(),
+                        disconnect_context: node_trace.disconnect_context.clone(),
                         started_at,
                         finished_at: Some(finished_at),
                     };
@@ -1330,7 +1400,8 @@ Referenced session context:
                         finished_at,
                         "success",
                         None,
-                        Some(result.content.as_str()),
+                        Some(output.as_str()),
+                        Some(&node_trace),
                     );
                     self.emit(RunEvent::CapabilityJobFinished {
                         job_id: job_id.clone(),
@@ -1343,7 +1414,142 @@ Referenced session context:
                         call_id,
                     });
                     return Ok(ToolExecutionOutcome {
-                        output: result.content,
+                        output,
+                        tool_trace,
+                        capability_trace,
+                    });
+                }
+                Ok(NodeToolDispatchOutcome::Failed(node_error)) => {
+                    let status = Self::node_failure_status(&node_error.message);
+                    let error = anyhow!(node_error.message.clone());
+                    let node_trace = NodeTraceContext {
+                        node_id: node_error.node_id,
+                        capability_route: node_error.route,
+                        disconnect_context: node_error.disconnect_context,
+                    };
+                    self.emit(RunEvent::CapabilityJobFailed {
+                        job_id: job_id.clone(),
+                        name: tool_name.clone(),
+                        error: error.to_string(),
+                    });
+                    self.emit(RunEvent::ToolFailed {
+                        name: tool_name.clone(),
+                        call_id: call_id.clone(),
+                        error: error.to_string(),
+                    });
+                    return Err(self.build_tool_failure(
+                        error,
+                        job_id,
+                        call_id,
+                        tool_name,
+                        &metadata,
+                        tool_input,
+                        started_at,
+                        None,
+                        None,
+                        Some(node_trace),
+                        status,
+                    ));
+                }
+                Ok(NodeToolDispatchOutcome::NotHandled) => {
+                    if metadata.capability.node.require_node {
+                        let capability = metadata
+                            .capability
+                            .node
+                            .capability
+                            .as_deref()
+                            .unwrap_or(tool_name.as_str());
+                        let error = anyhow!(
+                            "node route required for capability '{}' but no node is available",
+                            capability
+                        );
+                        self.emit(RunEvent::CapabilityJobFailed {
+                            job_id: job_id.clone(),
+                            name: tool_name.clone(),
+                            error: error.to_string(),
+                        });
+                        self.emit(RunEvent::ToolFailed {
+                            name: tool_name.clone(),
+                            call_id: call_id.clone(),
+                            error: error.to_string(),
+                        });
+                        return Err(self.build_tool_failure(
+                            error,
+                            job_id,
+                            call_id,
+                            tool_name,
+                            &metadata,
+                            tool_input,
+                            started_at,
+                            None,
+                            None,
+                            None,
+                            "node_unavailable",
+                        ));
+                    }
+                }
+                Err(err) => {
+                    self.emit(RunEvent::CapabilityJobFailed {
+                        job_id: job_id.clone(),
+                        name: tool_name.clone(),
+                        error: err.to_string(),
+                    });
+                    self.emit(RunEvent::ToolFailed {
+                        name: tool_name.clone(),
+                        call_id: call_id.clone(),
+                        error: err.to_string(),
+                    });
+                    return Err(self.build_tool_failure(
+                        err, job_id, call_id, tool_name, &metadata, tool_input, started_at, None,
+                        None, None, "failed",
+                    ));
+                }
+            }
+        }
+
+        for attempt in 1..=attempts {
+            let attempt_result = tokio::time::timeout(timeout, tool.call(tool_input.clone())).await;
+            match attempt_result {
+                Ok(Ok(result)) if !result.is_error => {
+                    let finished_at = Utc::now();
+                    let output = result.content.clone();
+                    let tool_trace = ToolTrace {
+                        call_id: Some(call_id.clone()),
+                        name: tool_name.clone(),
+                        source: metadata.source.clone(),
+                        input: tool_input,
+                        output: Some(output.clone()),
+                        node_id: None,
+                        capability_route: None,
+                        disconnect_context: None,
+                        started_at,
+                        finished_at: Some(finished_at),
+                    };
+                    let capability_trace = Self::capability_trace(
+                        &job_id,
+                        &call_id,
+                        &tool_name,
+                        &metadata,
+                        result.audit.as_ref(),
+                        started_at,
+                        finished_at,
+                        "success",
+                        None,
+                        Some(output.as_str()),
+                        None,
+                    );
+                    self.emit(RunEvent::CapabilityJobFinished {
+                        job_id: job_id.clone(),
+                        name: tool_name.clone(),
+                        status: "success".to_owned(),
+                        summary: capability_trace.summary.clone(),
+                    });
+                    self.emit(RunEvent::ToolFinished {
+                        name: tool_name,
+                        call_id,
+                    });
+                    return Ok(ToolExecutionOutcome {
+                        output,
                         tool_trace,
                         capability_trace,
                     });
@@ -1379,6 +1585,7 @@ Referenced session context:
                         started_at,
                         Some(result.content),
                         result.audit.as_ref(),
+                        None,
                         "failed",
                     ));
                 }
@@ -1404,7 +1611,7 @@ Referenced session context:
                     });
                     return Err(self.build_tool_failure(
                         err, job_id, call_id, tool_name, &metadata, tool_input, started_at, None,
-                        None, "failed",
+                        None, None, "failed",
                     ));
                 }
                 Err(_) => {
@@ -1442,6 +1649,7 @@ Referenced session context:
                         started_at,
                         None,
                         None,
+                        None,
                         "timed_out",
                     ));
                 }
@@ -1462,6 +1670,7 @@ Referenced session context:
         started_at: chrono::DateTime<Utc>,
         output: Option<String>,
         audit: Option<&CapabilityAudit>,
+        node_trace: Option<NodeTraceContext>,
         status: &str,
     ) -> ToolExecutionFailure {
         let finished_at = Utc::now();
@@ -1473,6 +1682,13 @@ Referenced session context:
             output: output
                 .clone()
                 .or_else(|| Some(format!("[runtime tool failure] {}", error))),
+            node_id: node_trace.as_ref().and_then(|trace| trace.node_id.clone()),
+            capability_route: node_trace
+                .as_ref()
+                .and_then(|trace| trace.capability_route.clone()),
+            disconnect_context: node_trace
+                .as_ref()
+                .and_then(|trace| trace.disconnect_context.clone()),
             started_at,
             finished_at: Some(finished_at),
         };
@@ -1487,6 +1703,7 @@ Referenced session context:
             status,
             Some(error.to_string()),
             output.as_deref(),
+            node_trace.as_ref(),
         );
 
         ToolExecutionFailure {
@@ -1507,6 +1724,7 @@ Referenced session context:
         status: &str,
         error: Option<String>,
         fallback_summary: Option<&str>,
+        node_trace: Option<&NodeTraceContext>,
     ) -> CapabilityInvocationTrace {
         let summary = audit
             .map(|audit| audit.side_effect_summary.clone())
@@ -1523,6 +1741,9 @@ Referenced session context:
             status: status.to_owned(),
             summary,
             target: audit.and_then(|audit| audit.target.clone()),
+            node_id: node_trace.and_then(|trace| trace.node_id.clone()),
+            capability_route: node_trace.and_then(|trace| trace.capability_route.clone()),
+            disconnect_context: node_trace.and_then(|trace| trace.disconnect_context.clone()),
             started_at,
             finished_at: Some(finished_at),
             error,
@@ -1575,6 +1796,7 @@ Referenced session context:
 struct RuntimeWorkflowExecutor<'a> {
     runtime: &'a AgentRuntime,
     default_profile: ProviderProfile,
+    session_id: Option<String>,
     tool_traces: SharedToolTraceCollector,
     skill_traces: SharedSkillTraceCollector,
     model_selections: SharedModelSelectionCollector,
@@ -1640,6 +1862,7 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
 
         self.runtime
             .execute_workflow_prompt_step(
+                self.session_id.as_deref(),
                 &profile,
                 system.clone(),
                 input,
@@ -1840,6 +2063,7 @@ mod tests {
     use std::{
         collections::BTreeMap,
         sync::{Arc, Mutex},
+        time::Duration,
     };
 
     use crate::events::{NoopEventSink, RunEvent, RunEventSink};
@@ -1848,6 +2072,9 @@ mod tests {
     use mosaic_config::{MosaicConfig, ProviderProfileConfig};
     use mosaic_inspect::IngressTrace;
     use mosaic_memory::{MemoryPolicy, MemorySearchHit, MemoryStore, SessionMemoryRecord};
+    use mosaic_node_protocol::{
+        FileNodeStore, NodeCapabilityDeclaration, NodeCommandResultEnvelope, NodeRegistration,
+    };
     use mosaic_provider::{
         CompletionResponse, LlmProvider, Message, MockProvider, ProviderProfileRegistry,
         ToolDefinition,
@@ -1856,7 +2083,10 @@ mod tests {
         SessionRecord, SessionStore, SessionSummary, TranscriptMessage, TranscriptRole,
     };
     use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
-    use mosaic_tool_core::{TimeNowTool, Tool, ToolMetadata, ToolRegistry, ToolResult, ToolSource};
+    use mosaic_tool_core::{
+        CapabilityKind, PermissionScope, ReadFileTool, TimeNowTool, Tool, ToolMetadata,
+        ToolRegistry, ToolResult, ToolRiskLevel, ToolSource,
+    };
     use mosaic_workflow::{Workflow, WorkflowRegistry, WorkflowStep, WorkflowStepKind};
 
     use super::{AgentRuntime, RunRequest, RuntimeContext};
@@ -2112,6 +2342,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(workflows),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink,
         })
@@ -2380,6 +2611,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
@@ -2414,6 +2646,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
+        let mut config = MosaicConfig::default();
+        config.active_profile = "mock".to_owned();
+        let profiles =
+            ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+        let workspace_root = std::env::temp_dir().join(format!(
+            "mosaic-runtime-node-tests-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+        std::fs::write(workspace_root.join("README.md"), "node-routed contents")
+            .expect("README should be written");
+
+        let mut tools = ToolRegistry::new();
+        tools.register(Arc::new(ReadFileTool::new_with_allowed_roots(vec![
+            workspace_root.clone(),
+        ])));
+        let node_store = Arc::new(FileNodeStore::new(workspace_root.join(".mosaic/nodes")));
+        node_store
+            .register_node(&NodeRegistration::new(
+                "node-a",
+                "Headless Node",
+                "file-bus",
+                "headless",
+                vec![NodeCapabilityDeclaration {
+                    name: "read_file".to_owned(),
+                    kind: CapabilityKind::File,
+                    permission_scopes: vec![PermissionScope::LocalRead],
+                    risk: ToolRiskLevel::Low,
+                }],
+            ))
+            .expect("node registration should persist");
+        node_store
+            .attach_session("node-demo", "node-a")
+            .expect("node affinity should persist");
+
+        let worker_store = node_store.clone();
+        let worker_root = workspace_root.clone();
+        let worker = tokio::spawn(async move {
+            let tool = ReadFileTool::new_with_allowed_roots(vec![worker_root]);
+            loop {
+                let pending = worker_store
+                    .pending_commands("node-a")
+                    .expect("pending commands should load");
+                if let Some(dispatch) = pending.into_iter().next() {
+                    let result = tool
+                        .call(serde_json::json!({
+                            "path": workspace_root.join("README.md").display().to_string(),
+                        }))
+                        .await
+                        .expect("node read_file should succeed");
+                    worker_store
+                        .complete_command(&NodeCommandResultEnvelope::success(&dispatch, result))
+                        .expect("node result should persist");
+                    break;
+                }
+
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+
+        let runtime = AgentRuntime::new(RuntimeContext {
+            profiles: Arc::new(profiles),
+            provider_override: Some(Arc::new(MockProvider)),
+            session_store: Arc::new(MemorySessionStore::default()),
+            memory_store: Arc::new(MemoryMemoryStore::default()),
+            memory_policy: MemoryPolicy::default(),
+            tools: Arc::new(tools),
+            skills: Arc::new(SkillRegistry::new()),
+            workflows: Arc::new(WorkflowRegistry::new()),
+            node_router: Some(node_store.clone()),
+            active_extensions: Vec::new(),
+            event_sink: Arc::new(NoopEventSink),
+        });
+
+        let result = runtime
+            .run(RunRequest {
+                system: Some("Use tools when needed.".to_owned()),
+                input: "Read a file for me.".to_owned(),
+                skill: None,
+                workflow: None,
+                session_id: Some("node-demo".to_owned()),
+                profile: None,
+                ingress: None,
+            })
+            .await
+            .expect("node-routed tool loop should succeed");
+
+        worker.await.expect("node worker should join");
+
+        assert_eq!(result.trace.tool_calls.len(), 1);
+        assert_eq!(
+            result.trace.tool_calls[0].node_id.as_deref(),
+            Some("node-a")
+        );
+        assert_eq!(
+            result.trace.tool_calls[0].capability_route.as_deref(),
+            Some("session_affinity")
+        );
+        assert_eq!(result.trace.capability_invocations.len(), 1);
+        assert_eq!(
+            result.trace.capability_invocations[0].node_id.as_deref(),
+            Some("node-a")
+        );
+        assert_eq!(
+            result.trace.capability_invocations[0]
+                .capability_route
+                .as_deref(),
+            Some("session_affinity")
+        );
+        assert!(result.output.contains("node-routed contents"));
+    }
+
+    #[tokio::test]
     async fn workflow_runs_record_step_trace_and_skill_invocation() {
         let sink = Arc::new(VecEventSink::default());
         let store = Arc::new(MemorySessionStore::default());
@@ -2437,6 +2783,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(skills),
             workflows: Arc::new(workflows),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink: sink.clone(),
         });
@@ -2543,6 +2890,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(workflows),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink: sink.clone(),
         });
@@ -2625,6 +2973,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(skills),
             workflows: Arc::new(WorkflowRegistry::new()),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink: sink.clone(),
         });
@@ -2668,6 +3017,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(skills),
             workflows: Arc::new(WorkflowRegistry::new()),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
@@ -2718,6 +3068,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
@@ -2784,6 +3135,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
+            node_router: None,
             active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
