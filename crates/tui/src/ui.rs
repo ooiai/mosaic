@@ -168,7 +168,16 @@ fn render_resume(frame: &mut Frame<'_>, app: &App) {
 }
 
 fn render_welcome(frame: &mut Frame<'_>, app: &App, area: Rect) {
-    let detail_height = if app.command_query().is_some() { 2 } else { 1 };
+    let mut detail_height = if app.command_query().is_some() { 2 } else { 1 };
+    if app.extension_summary.is_some() {
+        detail_height += 1;
+    }
+    if app.extension_policy_summary.is_some() {
+        detail_height += 1;
+    }
+    if !app.extension_errors.is_empty() {
+        detail_height += 1;
+    }
     let sections = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -253,9 +262,20 @@ fn render_console_stream(frame: &mut Frame<'_>, app: &App, area: Rect) {
             .wrap(Wrap { trim: false });
         frame.render_widget(widget, area);
     } else {
+        let mut info_height = 1;
+        if app.extension_summary.is_some() {
+            info_height += 1;
+        }
+        if app.extension_policy_summary.is_some() {
+            info_height += 1;
+        }
+        if !app.extension_errors.is_empty() {
+            info_height += 1;
+        }
+
         let sections = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .constraints([Constraint::Min(1), Constraint::Length(info_height)])
             .split(area);
 
         frame.render_widget(Paragraph::new(""), sections[0]);
@@ -286,7 +306,7 @@ fn render_workspace_line(frame: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn startup_environment_line<'a>(app: &'a App) -> Paragraph<'a> {
-    let line = if app.is_interactive() {
+    let mut lines = vec![if app.is_interactive() {
         Line::from(vec![
             Span::styled("◦ ", Style::default().fg(Color::Magenta)),
             Span::styled(
@@ -307,9 +327,33 @@ fn startup_environment_line<'a>(app: &'a App) -> Paragraph<'a> {
                 Style::default().fg(Color::DarkGray),
             ),
         ])
-    };
+    }];
 
-    Paragraph::new(line)
+    if let Some(summary) = app.extension_summary.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("◦ ", Style::default().fg(Color::Cyan)),
+            Span::styled(summary, Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    if let Some(summary) = app.extension_policy_summary.as_deref() {
+        lines.push(Line::from(vec![
+            Span::styled("◦ ", Style::default().fg(Color::Blue)),
+            Span::styled(summary, Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    if let Some(error) = app.extension_errors.first() {
+        lines.push(Line::from(vec![
+            Span::styled("◦ ", Style::default().fg(Color::Yellow)),
+            Span::styled(
+                format!("Extension issue: {}", error),
+                Style::default().fg(Color::Yellow),
+            ),
+        ]));
+    }
+
+    Paragraph::new(lines)
 }
 
 fn mosaic_mark_top() -> Line<'static> {
@@ -851,6 +895,23 @@ mod tests {
         assert!(screen.contains("[/_mosaic*]"));
         assert!(screen.contains("shift+tab switch mode"));
         assert!(screen.contains("0 reqs."));
+    }
+
+    #[test]
+    fn startup_canvas_renders_extension_status_lines() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.extension_summary = Some("Extensions builtin.core@1.0.0".to_owned());
+        app.extension_policy_summary =
+            Some("Policies exec=true webhook=true cron=true mcp=true hot_reload=true".to_owned());
+        app.extension_errors = vec!["demo.extension: missing_tool".to_owned()];
+
+        let screen = render_to_text(&app, 140, 32);
+
+        assert!(screen.contains("builtin.core@1.0.0"));
+        assert!(
+            screen.contains("Policies exec=true webhook=true cron=true mcp=true hot_reload=true")
+        );
+        assert!(screen.contains("missing_tool"));
     }
 
     #[test]

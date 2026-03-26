@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const ACTIVE_PROFILE_ENV: &str = "MOSAIC_ACTIVE_PROFILE";
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
     pub app: Option<AppSection>,
@@ -99,6 +103,10 @@ pub struct MosaicConfig {
     pub session_store: SessionStoreConfig,
     #[serde(default)]
     pub inspect: InspectConfig,
+    #[serde(default)]
+    pub extensions: ExtensionsConfig,
+    #[serde(default)]
+    pub policies: PolicyConfig,
 }
 
 impl Default for MosaicConfig {
@@ -109,6 +117,8 @@ impl Default for MosaicConfig {
             profiles: default_profiles(),
             session_store: SessionStoreConfig::default(),
             inspect: InspectConfig::default(),
+            extensions: ExtensionsConfig::default(),
+            policies: PolicyConfig::default(),
         }
     }
 }
@@ -146,6 +156,46 @@ impl Default for InspectConfig {
     fn default() -> Self {
         Self {
             runs_dir: default_runs_root_dir(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ExtensionsConfig {
+    #[serde(default)]
+    pub manifests: Vec<ExtensionManifestRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionManifestRef {
+    pub path: String,
+    pub version_pin: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PolicyConfig {
+    #[serde(default = "default_true")]
+    pub allow_exec: bool,
+    #[serde(default = "default_true")]
+    pub allow_webhook: bool,
+    #[serde(default = "default_true")]
+    pub allow_cron: bool,
+    #[serde(default = "default_true")]
+    pub allow_mcp: bool,
+    #[serde(default = "default_true")]
+    pub hot_reload_enabled: bool,
+}
+
+impl Default for PolicyConfig {
+    fn default() -> Self {
+        Self {
+            allow_exec: true,
+            allow_webhook: true,
+            allow_cron: true,
+            allow_mcp: true,
+            hot_reload_enabled: true,
         }
     }
 }
@@ -294,12 +344,23 @@ pub struct RedactedProfileView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedPolicyView {
+    pub allow_exec: bool,
+    pub allow_webhook: bool,
+    pub allow_cron: bool,
+    pub allow_mcp: bool,
+    pub hot_reload_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RedactedMosaicConfig {
     pub schema_version: u32,
     pub active_profile: String,
     pub profiles: Vec<RedactedProfileView>,
     pub session_store_root_dir: String,
     pub inspect_runs_dir: String,
+    pub extension_manifest_count: usize,
+    pub policies: RedactedPolicyView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -310,6 +371,24 @@ struct MosaicConfigPatch {
     pub profiles: BTreeMap<String, ProviderProfileConfig>,
     pub session_store: Option<SessionStoreConfig>,
     pub inspect: Option<InspectConfig>,
+    pub extensions: Option<ExtensionsConfig>,
+    pub policies: Option<PolicyConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionManifest {
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+    #[serde(default)]
+    pub tools: Vec<ToolConfig>,
+    #[serde(default)]
+    pub skills: Vec<SkillConfig>,
+    #[serde(default)]
+    pub workflows: Vec<Workflow>,
+    pub mcp: Option<McpConfig>,
 }
 
 fn default_skill_input_schema() -> serde_json::Value {
@@ -319,6 +398,12 @@ fn default_skill_input_schema() -> serde_json::Value {
 pub fn load_from_file(path: impl AsRef<Path>) -> Result<AppConfig> {
     let content = fs::read_to_string(path)?;
     let cfg = serde_yaml::from_str::<AppConfig>(&content)?;
+    Ok(cfg)
+}
+
+pub fn load_extension_manifest_from_file(path: impl AsRef<Path>) -> Result<ExtensionManifest> {
+    let content = fs::read_to_string(path)?;
+    let cfg = serde_yaml::from_str::<ExtensionManifest>(&content)?;
     Ok(cfg)
 }
 
@@ -369,6 +454,7 @@ pub fn init_workspace_config(cwd: impl AsRef<Path>, force: bool) -> Result<PathB
     save_mosaic_config(&path, &config)?;
     fs::create_dir_all(cwd.join(&config.session_store.root_dir))?;
     fs::create_dir_all(cwd.join(&config.inspect.runs_dir))?;
+    fs::create_dir_all(cwd.join(".mosaic/extensions"))?;
 
     Ok(path)
 }
@@ -523,6 +609,28 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         );
     }
 
+    for (idx, manifest) in config.extensions.manifests.iter().enumerate() {
+        if manifest.path.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("extensions.manifests.{idx}.path"),
+                "extension manifest path must not be empty",
+            );
+        }
+
+        if manifest
+            .version_pin
+            .as_deref()
+            .is_some_and(|version| version.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("extensions.manifests.{idx}.version_pin"),
+                "extension manifest version_pin must not be empty when provided",
+            );
+        }
+    }
+
     report
 }
 
@@ -536,6 +644,11 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
 
     let runs_root = cwd.join(&config.inspect.runs_dir);
     checks.push(path_check(&runs_root, "run trace directory", true));
+
+    for manifest in &config.extensions.manifests {
+        let manifest_path = cwd.join(&manifest.path);
+        checks.push(path_check(&manifest_path, "extension manifest", false));
+    }
 
     if let Some(active_profile) = config.profiles.get(&config.active_profile) {
         if active_profile.provider_type == "mock" {
@@ -597,6 +710,14 @@ pub fn redact_mosaic_config(config: &MosaicConfig) -> RedactedMosaicConfig {
         profiles,
         session_store_root_dir: config.session_store.root_dir.clone(),
         inspect_runs_dir: config.inspect.runs_dir.clone(),
+        extension_manifest_count: config.extensions.manifests.len(),
+        policies: RedactedPolicyView {
+            allow_exec: config.policies.allow_exec,
+            allow_webhook: config.policies.allow_webhook,
+            allow_cron: config.policies.allow_cron,
+            allow_mcp: config.policies.allow_mcp,
+            hot_reload_enabled: config.policies.hot_reload_enabled,
+        },
     }
 }
 
@@ -627,6 +748,14 @@ fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
 
     if let Some(inspect) = patch.inspect {
         config.inspect = inspect;
+    }
+
+    if let Some(extensions) = patch.extensions {
+        config.extensions = extensions;
+    }
+
+    if let Some(policies) = patch.policies {
+        config.policies = policies;
     }
 }
 
@@ -776,6 +905,65 @@ task:
     }
 
     #[test]
+    fn loads_extension_manifest_and_policy_config() {
+        let dir = temp_dir("extension-load");
+        let workspace = dir.join("workspace.yaml");
+        let manifest = dir.join("demo-extension.yaml");
+
+        fs::write(
+            &workspace,
+            r#"
+extensions:
+  manifests:
+    - path: demo-extension.yaml
+      version_pin: 0.2.0
+policies:
+  allow_exec: false
+  allow_webhook: true
+  allow_cron: true
+  allow_mcp: false
+  hot_reload_enabled: true
+"#,
+        )
+        .expect("workspace config should be written");
+
+        fs::write(
+            &manifest,
+            r#"
+name: demo.extension
+version: 0.2.0
+description: demo manifest
+tools:
+  - type: builtin
+    name: time_now
+skills:
+  - type: builtin
+    name: summarize
+workflows: []
+"#,
+        )
+        .expect("extension manifest should be written");
+
+        let loaded = load_mosaic_config(&LoadConfigOptions {
+            cwd: dir.clone(),
+            user_config_path: None,
+            workspace_config_path: Some(workspace.clone()),
+            overrides: ConfigOverrides::default(),
+        })
+        .expect("workspace config should load");
+        let manifest =
+            load_extension_manifest_from_file(&manifest).expect("extension manifest should parse");
+
+        assert_eq!(loaded.config.extensions.manifests.len(), 1);
+        assert!(!loaded.config.policies.allow_exec);
+        assert!(!loaded.config.policies.allow_mcp);
+        assert_eq!(manifest.name, "demo.extension");
+        assert_eq!(manifest.version, "0.2.0");
+
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn layered_mosaic_config_prefers_workspace_over_user_and_cli_over_env() {
         let dir = temp_dir("layered");
         let user = dir.join("user.yaml");
@@ -897,6 +1085,7 @@ profiles:
         assert!(content.contains("schema_version: 1"));
         assert!(dir.join(".mosaic/sessions").is_dir());
         assert!(dir.join(".mosaic/runs").is_dir());
+        assert!(dir.join(".mosaic/extensions").is_dir());
 
         fs::remove_dir_all(dir).ok();
     }

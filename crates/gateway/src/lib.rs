@@ -17,13 +17,18 @@ use axum::{
 };
 use chrono::Utc;
 use futures::stream;
+use mosaic_config::{AppConfig, LoadConfigOptions, PolicyConfig, load_mosaic_config};
 use mosaic_control_protocol::{
     CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest, ErrorResponse,
-    EventStreamEnvelope, ExecJobRequest, GatewayEvent, HealthResponse, InboundMessage, RunResponse,
-    RunSubmission, SessionDetailDto, SessionGatewayDto, SessionSummaryDto, TranscriptMessageDto,
-    TranscriptRoleDto, WebhookJobRequest,
+    EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto, GatewayEvent,
+    HealthResponse, InboundMessage, RunResponse, RunSubmission, SessionDetailDto,
+    SessionGatewayDto, SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto,
+    WebhookJobRequest,
 };
-use mosaic_inspect::{IngressTrace, RunTrace};
+use mosaic_extension_core::{
+    ExtensionStatus, ExtensionValidationReport, load_extension_set, validate_extension_set,
+};
+use mosaic_inspect::{ExtensionTrace, IngressTrace, RunTrace};
 use mosaic_mcp_core::McpServerManager;
 use mosaic_memory::{MemoryPolicy, MemoryStore};
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry, public_error_message};
@@ -58,6 +63,8 @@ pub struct GatewayRuntimeComponents {
     pub mcp_manager: Option<Arc<McpServerManager>>,
     pub cron_store: Arc<dyn CronStore>,
     pub runs_dir: PathBuf,
+    pub extensions: Vec<ExtensionStatus>,
+    pub policies: PolicyConfig,
 }
 
 impl GatewayRuntimeComponents {
@@ -71,9 +78,24 @@ impl GatewayRuntimeComponents {
             tools: self.tools.clone(),
             skills: self.skills.clone(),
             workflows: self.workflows.clone(),
+            active_extensions: self.extensions.iter().map(extension_trace).collect(),
             event_sink,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct GatewayReloadSource {
+    pub workspace_root: PathBuf,
+    pub workspace_config_path: PathBuf,
+    pub user_config_path: Option<PathBuf>,
+    pub app_config: Option<AppConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GatewayExtensionReloadResult {
+    pub extensions: Vec<ExtensionStatus>,
+    pub policies: PolicyConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,18 +168,37 @@ pub struct GatewayHandle {
 
 struct GatewayState {
     runtime_handle: Handle,
-    components: GatewayRuntimeComponents,
+    components: Mutex<GatewayRuntimeComponents>,
+    reload_source: Option<GatewayReloadSource>,
     events: broadcast::Sender<GatewayEventEnvelope>,
     capability_jobs: Arc<Mutex<BTreeMap<String, CapabilityJobDto>>>,
 }
 
+impl GatewayState {
+    fn snapshot_components(&self) -> GatewayRuntimeComponents {
+        self.components
+            .lock()
+            .expect("gateway components lock should not be poisoned")
+            .clone()
+    }
+}
+
 impl GatewayHandle {
     pub fn new_local(runtime_handle: Handle, components: GatewayRuntimeComponents) -> Self {
+        Self::new_local_with_reload_source(runtime_handle, components, None)
+    }
+
+    pub fn new_local_with_reload_source(
+        runtime_handle: Handle,
+        components: GatewayRuntimeComponents,
+        reload_source: Option<GatewayReloadSource>,
+    ) -> Self {
         let (events, _) = broadcast::channel(256);
         Self {
             inner: Arc::new(GatewayState {
                 runtime_handle,
-                components,
+                components: Mutex::new(components),
+                reload_source,
                 events,
                 capability_jobs: Arc::new(Mutex::new(BTreeMap::new())),
             }),
@@ -168,12 +209,131 @@ impl GatewayHandle {
         self.inner.events.subscribe()
     }
 
+    fn snapshot_components(&self) -> GatewayRuntimeComponents {
+        self.inner.snapshot_components()
+    }
+
+    pub fn list_extensions(&self) -> Vec<ExtensionStatus> {
+        self.snapshot_components().extensions
+    }
+
+    pub fn extension_policies(&self) -> PolicyConfig {
+        self.snapshot_components().policies
+    }
+
+    pub fn validate_extensions(&self) -> Result<ExtensionValidationReport> {
+        let Some(source) = self.inner.reload_source.clone() else {
+            let components = self.snapshot_components();
+            return Ok(ExtensionValidationReport {
+                policies: components.policies,
+                extensions: components.extensions,
+                issues: Vec::new(),
+            });
+        };
+
+        let loaded = load_mosaic_config(&LoadConfigOptions {
+            cwd: source.workspace_root.clone(),
+            user_config_path: source.user_config_path.clone(),
+            workspace_config_path: Some(source.workspace_config_path.clone()),
+            overrides: Default::default(),
+        })?;
+
+        Ok(validate_extension_set(
+            &loaded.config,
+            source.app_config.as_ref(),
+            &source.workspace_root,
+        ))
+    }
+
+    pub fn reload_extensions(&self) -> Result<GatewayExtensionReloadResult> {
+        let source = self.inner.reload_source.clone().ok_or_else(|| {
+            anyhow!("gateway was not initialized with an extension reload source")
+        })?;
+        let loaded = load_mosaic_config(&LoadConfigOptions {
+            cwd: source.workspace_root.clone(),
+            user_config_path: source.user_config_path.clone(),
+            workspace_config_path: Some(source.workspace_config_path.clone()),
+            overrides: Default::default(),
+        })?;
+
+        if !loaded.config.policies.hot_reload_enabled {
+            bail!("extension hot reload is disabled by policy");
+        }
+
+        let current = self.snapshot_components();
+        let extension_set = match load_extension_set(
+            &loaded.config,
+            source.app_config.as_ref(),
+            &source.workspace_root,
+            current.cron_store.clone(),
+        ) {
+            Ok(extension_set) => extension_set,
+            Err(err) => {
+                self.emit(GatewayEventEnvelope {
+                    gateway_run_id: "extensions.reload".to_owned(),
+                    correlation_id: "extensions.reload".to_owned(),
+                    session_id: None,
+                    session_route: "gateway.local/extensions".to_owned(),
+                    emitted_at: Utc::now(),
+                    event: GatewayEvent::ExtensionReloadFailed {
+                        error: err.to_string(),
+                    },
+                });
+                return Err(err);
+            }
+        };
+
+        let profiles = Arc::new(ProviderProfileRegistry::from_config(&loaded.config)?);
+        let updated = GatewayRuntimeComponents {
+            profiles,
+            provider_override: current.provider_override.clone(),
+            session_store: current.session_store.clone(),
+            memory_store: current.memory_store.clone(),
+            memory_policy: current.memory_policy.clone(),
+            tools: Arc::new(extension_set.tools),
+            skills: Arc::new(extension_set.skills),
+            workflows: Arc::new(extension_set.workflows),
+            mcp_manager: extension_set.mcp_manager,
+            cron_store: current.cron_store.clone(),
+            runs_dir: current.runs_dir.clone(),
+            extensions: extension_set.extensions.clone(),
+            policies: extension_set.policies.clone(),
+        };
+
+        *self
+            .inner
+            .components
+            .lock()
+            .expect("gateway components lock should not be poisoned") = updated;
+
+        self.emit(GatewayEventEnvelope {
+            gateway_run_id: "extensions.reload".to_owned(),
+            correlation_id: "extensions.reload".to_owned(),
+            session_id: None,
+            session_route: "gateway.local/extensions".to_owned(),
+            emitted_at: Utc::now(),
+            event: GatewayEvent::ExtensionsReloaded {
+                extensions: extension_set
+                    .extensions
+                    .iter()
+                    .map(extension_status_dto)
+                    .collect(),
+                policies: extension_policy_dto(&extension_set.policies),
+            },
+        });
+
+        Ok(GatewayExtensionReloadResult {
+            extensions: extension_set.extensions,
+            policies: extension_set.policies,
+        })
+    }
+
     pub fn list_sessions(&self) -> Result<Vec<SessionSummary>> {
-        self.inner.components.session_store.list()
+        self.snapshot_components().session_store.list()
     }
 
     pub fn load_session(&self, id: &str) -> Result<Option<SessionRecord>> {
-        self.inner.components.session_store.load(id)
+        self.snapshot_components().session_store.load(id)
     }
 
     pub fn list_capability_jobs(&self) -> Vec<CapabilityJobDto> {
@@ -190,7 +350,7 @@ impl GatewayHandle {
     }
 
     pub fn list_cron_registrations(&self) -> Result<Vec<CronRegistration>> {
-        self.inner.components.cron_store.list()
+        self.snapshot_components().cron_store.list()
     }
 
     pub fn register_cron(&self, request: CronRegistrationRequest) -> Result<CronRegistration> {
@@ -205,7 +365,7 @@ impl GatewayHandle {
             created_at: Utc::now(),
             last_triggered_at: None,
         };
-        self.inner.components.cron_store.save(&registration)?;
+        self.snapshot_components().cron_store.save(&registration)?;
         self.emit(GatewayEventEnvelope {
             gateway_run_id: format!("cron-{}", registration.id),
             correlation_id: format!("cron-{}", registration.id),
@@ -223,8 +383,11 @@ impl GatewayHandle {
         Ok(registration)
     }
 
-    pub fn active_profile_name(&self) -> &str {
-        self.inner.components.profiles.active_profile_name()
+    pub fn active_profile_name(&self) -> String {
+        self.snapshot_components()
+            .profiles
+            .active_profile_name()
+            .to_owned()
     }
 
     pub async fn run_exec_job(&self, request: ExecJobRequest) -> Result<CapabilityJobDto> {
@@ -258,13 +421,12 @@ impl GatewayHandle {
 
     pub async fn trigger_cron(&self, id: &str) -> Result<GatewayRunResult> {
         let mut registration = self
-            .inner
-            .components
+            .snapshot_components()
             .cron_store
             .load(id)?
             .ok_or_else(|| anyhow!("cron not found: {id}"))?;
         registration.mark_triggered();
-        self.inner.components.cron_store.save(&registration)?;
+        self.snapshot_components().cron_store.save(&registration)?;
         self.emit(GatewayEventEnvelope {
             gateway_run_id: format!("cron-trigger-{}", registration.id),
             correlation_id: format!("cron-trigger-{}", registration.id),
@@ -312,8 +474,7 @@ impl GatewayHandle {
         let correlation_id = Uuid::new_v4().to_string();
         let session_route = self.resolve_session_route(request.session_id.as_deref())?;
         let resolved_profile = request.profile.clone().unwrap_or_else(|| {
-            self.inner
-                .components
+            self.snapshot_components()
                 .profiles
                 .active_profile_name()
                 .to_owned()
@@ -339,7 +500,12 @@ impl GatewayHandle {
                 meta: meta.clone(),
                 jobs: state.capability_jobs.clone(),
             });
-            let runtime = AgentRuntime::new(state.components.runtime_context(event_sink));
+            let components = state
+                .components
+                .lock()
+                .expect("gateway components lock should not be poisoned")
+                .clone();
+            let runtime = AgentRuntime::new(components.runtime_context(event_sink));
             let run_request = RunRequest {
                 system: request.system,
                 input: request.input,
@@ -618,7 +784,7 @@ async fn execute_capability_tool(
     input: serde_json::Value,
 ) -> Result<CapabilityJobDto> {
     let tool = state
-        .components
+        .snapshot_components()
         .tools
         .get(tool_name)
         .ok_or_else(|| anyhow!("tool not found: {}", tool_name))?;
@@ -807,7 +973,7 @@ fn finalize_success(
     );
     let session_summary = update_gateway_session_metadata(&state, &meta);
     let trace_path = trace
-        .save_to_dir(&state.components.runs_dir)
+        .save_to_dir(&state.snapshot_components().runs_dir)
         .map_err(|err| GatewayRunError {
             source: err,
             trace: trace.clone(),
@@ -853,7 +1019,7 @@ fn finalize_failure(
     );
     let session_summary = update_gateway_session_metadata(&state, &meta);
     let trace_path = trace
-        .save_to_dir(&state.components.runs_dir)
+        .save_to_dir(&state.snapshot_components().runs_dir)
         .map_err(|save_err| GatewayRunError {
             source: save_err,
             trace: trace.clone(),
@@ -889,13 +1055,14 @@ fn update_gateway_session_metadata(
     meta: &GatewayRunMeta,
 ) -> Option<SessionSummary> {
     let session_id = meta.session_id.as_deref()?;
-    let mut session = state.components.session_store.load(session_id).ok()??;
+    let components = state.snapshot_components();
+    let mut session = components.session_store.load(session_id).ok()??;
     session.set_gateway_binding(
         meta.session_route.clone(),
         meta.gateway_run_id.clone(),
         meta.correlation_id.clone(),
     );
-    state.components.session_store.save(&session).ok()?;
+    components.session_store.save(&session).ok()?;
     Some(session.summary())
 }
 
@@ -906,6 +1073,42 @@ fn truncate_preview(value: &str, limit: usize) -> String {
 
     let truncated: String = value.chars().take(limit).collect();
     format!("{truncated}...")
+}
+
+fn extension_trace(status: &ExtensionStatus) -> ExtensionTrace {
+    ExtensionTrace {
+        name: status.name.clone(),
+        version: status.version.clone(),
+        source: status.source.clone(),
+        enabled: status.enabled,
+        active: status.active,
+        error: status.error.clone(),
+    }
+}
+
+fn extension_status_dto(status: &ExtensionStatus) -> ExtensionStatusDto {
+    ExtensionStatusDto {
+        name: status.name.clone(),
+        version: status.version.clone(),
+        source: status.source.clone(),
+        enabled: status.enabled,
+        active: status.active,
+        tools: status.tools.clone(),
+        skills: status.skills.clone(),
+        workflows: status.workflows.clone(),
+        mcp_servers: status.mcp_servers.clone(),
+        error: status.error.clone(),
+    }
+}
+
+fn extension_policy_dto(policy: &PolicyConfig) -> ExtensionPolicyDto {
+    ExtensionPolicyDto {
+        allow_exec: policy.allow_exec,
+        allow_webhook: policy.allow_webhook,
+        allow_cron: policy.allow_cron,
+        allow_mcp: policy.allow_mcp,
+        hot_reload_enabled: policy.hot_reload_enabled,
+    }
 }
 
 pub fn session_summary_dto(summary: &SessionSummary) -> SessionSummaryDto {
@@ -1252,7 +1455,10 @@ mod tests {
     use std::time::Duration;
 
     use futures::StreamExt;
-    use mosaic_config::{MosaicConfig, ProviderProfileConfig};
+    use mosaic_config::{
+        LoadConfigOptions, MosaicConfig, ProviderProfileConfig, load_mosaic_config,
+    };
+    use mosaic_extension_core::load_extension_set;
     use mosaic_mcp_core::{McpServerManager, McpServerSpec};
     use mosaic_memory::{FileMemoryStore, MemoryPolicy};
     use mosaic_provider::MockProvider;
@@ -1335,6 +1541,8 @@ mod tests {
                 mcp_manager: None,
                 cron_store: test_cron_store(),
                 runs_dir: std::env::temp_dir(),
+                extensions: Vec::new(),
+                policies: PolicyConfig::default(),
             },
         )
     }
@@ -1343,6 +1551,110 @@ mod tests {
         format!(
             "{}/../../scripts/mock_mcp_server.py",
             env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
+    fn extension_workspace_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "mosaic-gateway-extension-tests-{}-{}",
+            name,
+            Uuid::new_v4()
+        ))
+    }
+
+    fn write_extension_workspace_config(root: &std::path::Path, version_pin: &str) {
+        let mosaic_dir = root.join(".mosaic");
+        std::fs::create_dir_all(mosaic_dir.join("extensions"))
+            .expect("extension test directories should be created");
+        std::fs::write(
+            mosaic_dir.join("config.yaml"),
+            format!(
+                "extensions:
+  manifests:
+    - path: .mosaic/extensions/demo-extension.yaml
+      version_pin: {}
+policies:
+  allow_exec: true
+  allow_webhook: true
+  allow_cron: true
+  allow_mcp: true
+  hot_reload_enabled: true
+",
+                version_pin,
+            ),
+        )
+        .expect("workspace config should be written");
+    }
+
+    fn write_extension_manifest(
+        root: &std::path::Path,
+        version: &str,
+        workflow_name: &str,
+        tool_name: &str,
+    ) {
+        std::fs::write(
+            root.join(".mosaic/extensions/demo-extension.yaml"),
+            format!(
+                "name: demo.extension
+version: {}
+description: demo extension
+tools: []
+skills: []
+workflows:
+  - name: {}
+    description: demo workflow
+    steps:
+      - name: ask_time
+        kind: prompt
+        prompt: What time is it?
+        tools:
+          - {}
+",
+                version, workflow_name, tool_name,
+            ),
+        )
+        .expect("extension manifest should be written");
+    }
+
+    fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
+        let workspace_config_path = root.join(".mosaic/config.yaml");
+        let loaded = load_mosaic_config(&LoadConfigOptions {
+            cwd: root.to_path_buf(),
+            user_config_path: None,
+            workspace_config_path: Some(workspace_config_path.clone()),
+            overrides: Default::default(),
+        })
+        .expect("workspace config should load");
+        let profiles = ProviderProfileRegistry::from_config(&loaded.config)
+            .expect("profile registry should build");
+        let cron_store: Arc<dyn CronStore> =
+            Arc::new(FileCronStore::new(root.join(".mosaic/cron")));
+        let extension_set = load_extension_set(&loaded.config, None, root, cron_store.clone())
+            .expect("extension set should load");
+
+        GatewayHandle::new_local_with_reload_source(
+            Handle::current(),
+            GatewayRuntimeComponents {
+                profiles: Arc::new(profiles),
+                provider_override: Some(Arc::new(MockProvider)),
+                session_store: Arc::new(MemorySessionStore::default()),
+                memory_store: Arc::new(FileMemoryStore::new(root.join(".mosaic/memory"))),
+                memory_policy: MemoryPolicy::default(),
+                tools: Arc::new(extension_set.tools),
+                skills: Arc::new(extension_set.skills),
+                workflows: Arc::new(extension_set.workflows),
+                mcp_manager: extension_set.mcp_manager,
+                cron_store,
+                runs_dir: root.join(".mosaic/runs"),
+                extensions: extension_set.extensions.clone(),
+                policies: extension_set.policies.clone(),
+            },
+            Some(GatewayReloadSource {
+                workspace_root: root.to_path_buf(),
+                workspace_config_path,
+                user_config_path: None,
+                app_config: None,
+            }),
         )
     }
 
@@ -1462,6 +1774,8 @@ mod tests {
                 GatewayEvent::RunFailed { .. } => {}
                 GatewayEvent::CapabilityJobUpdated { .. } => {}
                 GatewayEvent::CronUpdated { .. } => {}
+                GatewayEvent::ExtensionsReloaded { .. } => {}
+                GatewayEvent::ExtensionReloadFailed { .. } => {}
             }
         }
 
@@ -1504,13 +1818,14 @@ mod tests {
                 mcp_manager: Some(manager),
                 cron_store: test_cron_store(),
                 runs_dir: std::env::temp_dir(),
+                extensions: Vec::new(),
+                policies: PolicyConfig::default(),
             },
         );
 
         assert_eq!(
             gateway
-                .inner
-                .components
+                .snapshot_components()
                 .mcp_manager
                 .as_ref()
                 .map(|manager| manager.server_count()),
@@ -1518,8 +1833,7 @@ mod tests {
         );
         assert_eq!(
             gateway
-                .inner
-                .components
+                .snapshot_components()
                 .mcp_manager
                 .as_ref()
                 .expect("MCP manager should be retained")
@@ -1670,6 +1984,79 @@ mod tests {
         );
 
         let _ = shutdown.send(());
+    }
+
+    #[tokio::test]
+    async fn reload_extensions_swaps_workflow_registry_and_broadcasts_event() {
+        let root = extension_workspace_dir("reload-ok");
+        write_extension_workspace_config(&root, "0.1.0");
+        write_extension_manifest(&root, "0.1.0", "demo_flow_alpha", "time_now");
+        let gateway = extension_gateway(&root);
+        let mut receiver = gateway.subscribe();
+
+        assert!(
+            gateway
+                .snapshot_components()
+                .workflows
+                .get("demo_flow_alpha")
+                .is_some()
+        );
+
+        write_extension_manifest(&root, "0.1.0", "demo_flow_beta", "time_now");
+        gateway
+            .reload_extensions()
+            .expect("extension reload should succeed");
+
+        let components = gateway.snapshot_components();
+        assert!(components.workflows.get("demo_flow_beta").is_some());
+        assert!(components.workflows.get("demo_flow_alpha").is_none());
+        assert!(
+            components
+                .extensions
+                .iter()
+                .any(|extension| extension.name == "demo.extension")
+        );
+
+        let mut saw_reloaded = false;
+        while let Ok(envelope) = receiver.try_recv() {
+            if matches!(envelope.event, GatewayEvent::ExtensionsReloaded { .. }) {
+                saw_reloaded = true;
+                break;
+            }
+        }
+        assert!(saw_reloaded);
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[tokio::test]
+    async fn reload_extensions_rolls_back_on_failure_and_broadcasts_error() {
+        let root = extension_workspace_dir("reload-fail");
+        write_extension_workspace_config(&root, "0.1.0");
+        write_extension_manifest(&root, "0.1.0", "demo_flow_alpha", "time_now");
+        let gateway = extension_gateway(&root);
+        let mut receiver = gateway.subscribe();
+
+        write_extension_manifest(&root, "0.1.0", "demo_flow_broken", "missing_tool");
+        let error = gateway
+            .reload_extensions()
+            .expect_err("extension reload should fail");
+        assert!(error.to_string().contains("missing_tool"));
+
+        let components = gateway.snapshot_components();
+        assert!(components.workflows.get("demo_flow_alpha").is_some());
+        assert!(components.workflows.get("demo_flow_broken").is_none());
+
+        let mut saw_failure = false;
+        while let Ok(envelope) = receiver.try_recv() {
+            if matches!(envelope.event, GatewayEvent::ExtensionReloadFailed { .. }) {
+                saw_failure = true;
+                break;
+            }
+        }
+        assert!(saw_failure);
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[tokio::test]

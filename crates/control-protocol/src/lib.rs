@@ -99,6 +99,33 @@ pub struct CronRegistrationRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionPolicyDto {
+    pub allow_exec: bool,
+    pub allow_webhook: bool,
+    pub allow_cron: bool,
+    pub allow_mcp: bool,
+    pub hot_reload_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionStatusDto {
+    pub name: String,
+    pub version: String,
+    pub source: String,
+    pub enabled: bool,
+    pub active: bool,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub workflows: Vec<String>,
+    #[serde(default)]
+    pub mcp_servers: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InboundMessage {
     pub session_id: Option<String>,
     pub input: String,
@@ -120,6 +147,13 @@ pub enum GatewayEvent {
     },
     CronUpdated {
         registration: CronRegistrationDto,
+    },
+    ExtensionsReloaded {
+        extensions: Vec<ExtensionStatusDto>,
+        policies: ExtensionPolicyDto,
+    },
+    ExtensionReloadFailed {
+        error: String,
     },
     SessionUpdated {
         summary: SessionSummaryDto,

@@ -1,9 +1,14 @@
-use std::{env, path::PathBuf, sync::Arc};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use anyhow::{Result, bail};
-use mosaic_config::{AppConfig, McpConfig, MosaicConfig, SkillConfig, ToolConfig};
-use mosaic_gateway::{GatewayHandle, GatewayRuntimeComponents};
-use mosaic_mcp_core::{McpServerManager, McpServerSpec};
+use anyhow::Result;
+use mosaic_config::{AppConfig, LoadedMosaicConfig, MosaicConfig};
+use mosaic_extension_core::{ExtensionStatus, load_extension_set};
+use mosaic_gateway::{GatewayHandle, GatewayReloadSource, GatewayRuntimeComponents};
+use mosaic_inspect::ExtensionTrace;
 use mosaic_memory::{FileMemoryStore, MemoryPolicy};
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::{
@@ -12,12 +17,7 @@ use mosaic_runtime::{
 };
 use mosaic_scheduler_core::{CronStore, FileCronStore};
 use mosaic_session_core::FileSessionStore;
-use mosaic_skill_core::{SkillManifest, SkillRegistry, SummarizeSkill};
-use mosaic_tool_core::{
-    CronRegisterTool, EchoTool, ExecTool, ReadFileTool, TimeNowTool, ToolRegistry, WebhookTool,
-};
 use mosaic_tui::{TuiEventBuffer, build_tui_event_buffer, build_tui_event_sink};
-use mosaic_workflow::{Workflow, WorkflowRegistry};
 use tokio::runtime::Handle;
 
 use crate::output::CliEventSink;
@@ -40,13 +40,7 @@ pub fn build_runtime_context(
     let cron_store_root = resolve_workspace_path(".mosaic/cron")?;
     let memory_policy = MemoryPolicy::default();
     let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
-    let (tools, _mcp_manager) = build_tools_with_mcp(
-        app_config.map(|cfg| cfg.tools.as_slice()),
-        app_config.and_then(|cfg| cfg.mcp.as_ref()),
-        cron_store.clone(),
-    )?;
-    let tools = Arc::new(tools);
-    let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
+    let extension_set = load_extension_set(config, app_config, &env::current_dir()?, cron_store)?;
 
     Ok(RuntimeContext {
         profiles,
@@ -54,11 +48,14 @@ pub fn build_runtime_context(
         session_store: Arc::new(FileSessionStore::new(session_store_root)),
         memory_store: Arc::new(FileMemoryStore::new(memory_store_root)),
         memory_policy,
-        tools,
-        skills,
-        workflows: Arc::new(build_workflows(
-            app_config.map(|cfg| cfg.workflows.as_slice()),
-        )?),
+        tools: Arc::new(extension_set.tools),
+        skills: Arc::new(extension_set.skills),
+        workflows: Arc::new(extension_set.workflows),
+        active_extensions: extension_set
+            .extensions
+            .iter()
+            .map(extension_trace)
+            .collect(),
         event_sink,
     })
 }
@@ -67,46 +64,29 @@ pub fn build_gateway_components(
     config: &MosaicConfig,
     app_config: Option<&AppConfig>,
 ) -> Result<GatewayRuntimeComponents> {
-    let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
-    let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
-    let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
-    let cron_store_root = resolve_workspace_path(".mosaic/cron")?;
-    let memory_policy = MemoryPolicy::default();
-    let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
-    let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
-    let (tools, mcp_manager) = build_tools_with_mcp(
-        app_config.map(|cfg| cfg.tools.as_slice()),
-        app_config.and_then(|cfg| cfg.mcp.as_ref()),
-        cron_store.clone(),
-    )?;
-    let tools = Arc::new(tools);
-    let skills = Arc::new(build_skills(app_config.map(|cfg| cfg.skills.as_slice()))?);
-    let workflows = Arc::new(build_workflows(
-        app_config.map(|cfg| cfg.workflows.as_slice()),
-    )?);
-
-    Ok(GatewayRuntimeComponents {
-        profiles,
-        provider_override: None,
-        session_store: Arc::new(FileSessionStore::new(session_store_root)),
-        memory_store: Arc::new(FileMemoryStore::new(memory_store_root)),
-        memory_policy,
-        tools,
-        skills,
-        workflows,
-        mcp_manager,
-        cron_store,
-        runs_dir,
-    })
+    build_gateway_components_for_workspace(config, app_config, &env::current_dir()?)
 }
 
 pub fn build_local_gateway(
     runtime_handle: Handle,
-    config: &MosaicConfig,
+    loaded: &LoadedMosaicConfig,
     app_config: Option<&AppConfig>,
 ) -> Result<GatewayHandle> {
-    let components = build_gateway_components(config, app_config)?;
-    Ok(GatewayHandle::new_local(runtime_handle, components))
+    let workspace_root = env::current_dir()?;
+    let components =
+        build_gateway_components_for_workspace(&loaded.config, app_config, &workspace_root)?;
+    let reload_source = GatewayReloadSource {
+        workspace_root,
+        workspace_config_path: loaded.workspace_config_path.clone(),
+        user_config_path: loaded.user_config_path.clone(),
+        app_config: app_config.cloned(),
+    };
+
+    Ok(GatewayHandle::new_local_with_reload_source(
+        runtime_handle,
+        components,
+        Some(reload_source),
+    ))
 }
 
 #[allow(dead_code)]
@@ -136,142 +116,46 @@ pub fn build_cli_and_tui_sinks() -> OutputSinks {
     }
 }
 
-fn build_tools(
-    configs: Option<&[ToolConfig]>,
-    cron_store: Arc<dyn CronStore>,
-) -> Result<ToolRegistry> {
-    let mut tools = ToolRegistry::new();
+fn build_gateway_components_for_workspace(
+    config: &MosaicConfig,
+    app_config: Option<&AppConfig>,
+    workspace_root: &Path,
+) -> Result<GatewayRuntimeComponents> {
+    let profiles = Arc::new(ProviderProfileRegistry::from_config(config)?);
+    let session_store_root = resolve_workspace_path(&config.session_store.root_dir)?;
+    let memory_store_root = resolve_workspace_path(".mosaic/memory")?;
+    let cron_store_root = resolve_workspace_path(".mosaic/cron")?;
+    let memory_policy = MemoryPolicy::default();
+    let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
+    let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
+    let extension_set = load_extension_set(config, app_config, workspace_root, cron_store.clone())?;
 
-    match configs {
-        Some(configs) => {
-            for tool in configs {
-                register_tool(&mut tools, tool, cron_store.clone())?;
-            }
-        }
-        None => {
-            let roots = capability_roots()?;
-            tools.register(Arc::new(CronRegisterTool::new(cron_store.clone())));
-            tools.register(Arc::new(EchoTool::new()));
-            tools.register(Arc::new(ExecTool::new(roots.clone())));
-            tools.register(Arc::new(ReadFileTool::new_with_allowed_roots(roots)));
-            tools.register(Arc::new(TimeNowTool::new()));
-            tools.register(Arc::new(WebhookTool::new()));
-        }
-    }
-
-    Ok(tools)
+    Ok(GatewayRuntimeComponents {
+        profiles,
+        provider_override: None,
+        session_store: Arc::new(FileSessionStore::new(session_store_root)),
+        memory_store: Arc::new(FileMemoryStore::new(memory_store_root)),
+        memory_policy,
+        tools: Arc::new(extension_set.tools),
+        skills: Arc::new(extension_set.skills),
+        workflows: Arc::new(extension_set.workflows),
+        mcp_manager: extension_set.mcp_manager,
+        cron_store,
+        runs_dir,
+        extensions: extension_set.extensions,
+        policies: extension_set.policies,
+    })
 }
 
-fn build_tools_with_mcp(
-    tool_configs: Option<&[ToolConfig]>,
-    mcp_config: Option<&McpConfig>,
-    cron_store: Arc<dyn CronStore>,
-) -> Result<(ToolRegistry, Option<Arc<McpServerManager>>)> {
-    let mut tools = build_tools(tool_configs, cron_store)?;
-    let mcp_manager = build_mcp_manager(mcp_config)?;
-
-    if let Some(manager) = &mcp_manager {
-        manager.register_tools(&mut tools)?;
+fn extension_trace(status: &ExtensionStatus) -> ExtensionTrace {
+    ExtensionTrace {
+        name: status.name.clone(),
+        version: status.version.clone(),
+        source: status.source.clone(),
+        enabled: status.enabled,
+        active: status.active,
+        error: status.error.clone(),
     }
-
-    Ok((tools, mcp_manager))
-}
-
-fn build_mcp_manager(config: Option<&McpConfig>) -> Result<Option<Arc<McpServerManager>>> {
-    let Some(config) = config else {
-        return Ok(None);
-    };
-
-    if config.servers.is_empty() {
-        return Ok(None);
-    }
-
-    let specs = config
-        .servers
-        .iter()
-        .map(|server| McpServerSpec {
-            name: server.name.clone(),
-            command: server.command.clone(),
-            args: server.args.clone(),
-        })
-        .collect::<Vec<_>>();
-
-    Ok(Some(Arc::new(McpServerManager::start(&specs)?)))
-}
-
-fn register_tool(
-    registry: &mut ToolRegistry,
-    tool: &ToolConfig,
-    cron_store: Arc<dyn CronStore>,
-) -> Result<()> {
-    let roots = capability_roots()?;
-
-    match (tool.tool_type.as_str(), tool.name.as_str()) {
-        ("builtin", "cron_register") => {
-            registry.register(Arc::new(CronRegisterTool::new(cron_store)))
-        }
-        ("builtin", "echo") => registry.register(Arc::new(EchoTool::new())),
-        ("builtin", "exec_command") => registry.register(Arc::new(ExecTool::new(roots.clone()))),
-        ("builtin", "read_file") => registry.register(Arc::new(
-            ReadFileTool::new_with_allowed_roots(roots.clone()),
-        )),
-        ("builtin", "time_now") => registry.register(Arc::new(TimeNowTool::new())),
-        ("builtin", "webhook_call") => registry.register(Arc::new(WebhookTool::new())),
-        ("builtin", other) => bail!("unsupported builtin tool in skeleton mode: {other}"),
-        (other, _) => bail!("unsupported tool type in skeleton mode: {other}"),
-    }
-
-    Ok(())
-}
-
-fn build_skills(configs: Option<&[SkillConfig]>) -> Result<SkillRegistry> {
-    let mut skills = SkillRegistry::new();
-
-    match configs {
-        Some(configs) => {
-            for skill in configs {
-                match (skill.skill_type.as_str(), skill.name.as_str()) {
-                    ("builtin", "summarize") => skills.register(Arc::new(SummarizeSkill)),
-                    ("manifest", _) => skills.register_manifest(SkillManifest {
-                        name: skill.name.clone(),
-                        description: skill
-                            .description
-                            .clone()
-                            .unwrap_or_else(|| format!("manifest skill {}", skill.name)),
-                        input_schema: skill.input_schema.clone(),
-                        tools: skill.tools.clone(),
-                        system_prompt: skill.system_prompt.clone(),
-                        steps: skill.steps.clone(),
-                    }),
-                    ("builtin", other) => {
-                        bail!("unsupported builtin skill in skeleton mode: {other}")
-                    }
-                    (other, _) => bail!("unsupported skill type in skeleton mode: {other}"),
-                }
-            }
-        }
-        None => {
-            skills.register(Arc::new(SummarizeSkill));
-        }
-    }
-
-    Ok(skills)
-}
-
-fn build_workflows(configs: Option<&[Workflow]>) -> Result<WorkflowRegistry> {
-    let mut workflows = WorkflowRegistry::new();
-
-    if let Some(configs) = configs {
-        for workflow in configs {
-            workflows.register(workflow.clone());
-        }
-    }
-
-    Ok(workflows)
-}
-
-fn capability_roots() -> Result<Vec<PathBuf>> {
-    Ok(vec![env::current_dir()?])
 }
 
 fn resolve_workspace_path(path: &str) -> Result<PathBuf> {
@@ -288,8 +172,8 @@ mod tests {
     use std::sync::Arc;
 
     use mosaic_config::{
-        AgentConfig, AppConfig, McpConfig, McpServerConfig, MosaicConfig, ProviderConfig,
-        SkillConfig, TaskConfig, ToolConfig,
+        AgentConfig, AppConfig, McpConfig, McpServerConfig, MosaicConfig, PolicyConfig,
+        ProviderConfig, SkillConfig, TaskConfig, ToolConfig,
     };
     use mosaic_runtime::events::{NoopEventSink, RunEvent};
 
@@ -366,6 +250,8 @@ mod tests {
         assert!(ctx.skills.get("summarize").is_some());
         assert!(ctx.workflows.is_empty());
         assert_eq!(ctx.profiles.active_profile_name(), "mock");
+        assert_eq!(ctx.active_extensions.len(), 1);
+        assert_eq!(ctx.active_extensions[0].name, "app.inline");
     }
 
     #[test]
@@ -378,6 +264,8 @@ mod tests {
         assert!(ctx.tools.get("time_now").is_some());
         assert!(ctx.skills.get("summarize").is_some());
         assert!(ctx.workflows.is_empty());
+        assert_eq!(ctx.active_extensions.len(), 1);
+        assert_eq!(ctx.active_extensions[0].name, "builtin.core");
     }
 
     #[test]
@@ -392,6 +280,9 @@ mod tests {
         assert!(components.workflows.is_empty());
         assert_eq!(components.profiles.active_profile_name(), "mock");
         assert!(components.runs_dir.ends_with(".mosaic/runs"));
+        assert_eq!(components.extensions.len(), 1);
+        assert_eq!(components.extensions[0].name, "app.inline");
+        assert_eq!(components.policies, PolicyConfig::default());
     }
 
     #[test]
@@ -418,6 +309,11 @@ mod tests {
             .expect("gateway components with MCP should build");
 
         assert!(components.tools.get("mcp.filesystem.read_file").is_some());
+        assert_eq!(components.extensions.len(), 1);
+        assert_eq!(
+            components.extensions[0].mcp_servers,
+            vec!["filesystem".to_owned()]
+        );
         assert_eq!(
             components
                 .mcp_manager

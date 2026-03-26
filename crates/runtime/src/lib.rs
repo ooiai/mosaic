@@ -9,9 +9,9 @@ use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::Utc;
 use mosaic_inspect::{
-    CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace, IngressTrace,
-    MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace, RunTrace, SkillTrace, ToolTrace,
-    WorkflowStepTrace,
+    CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace, ExtensionTrace,
+    ExtensionUsageTrace, IngressTrace, MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace,
+    RunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
 };
 use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
@@ -59,6 +59,7 @@ pub struct RuntimeContext {
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
     pub workflows: Arc<WorkflowRegistry>,
+    pub active_extensions: Vec<ExtensionTrace>,
     pub event_sink: SharedRunEventSink,
 }
 
@@ -161,6 +162,7 @@ impl AgentRuntime {
         if let Some(ingress) = req.ingress.clone() {
             trace.bind_ingress(ingress);
         }
+        trace.bind_extensions(self.ctx.active_extensions.clone());
 
         let mut session = match self.load_session(&req, &base_profile, &mut trace) {
             Ok(session) => session,
@@ -316,6 +318,12 @@ impl AgentRuntime {
             }
         }
 
+        if let Some(skill) = self.ctx.skills.get(&skill_name) {
+            if let Some(usage) = Self::skill_extension_usage(skill.metadata()) {
+                trace.record_extension_usage(usage);
+            }
+        }
+
         let output = match self
             .execute_skill_for_trace(skill_name.clone(), skill_input, &mut trace)
             .await
@@ -359,6 +367,11 @@ impl AgentRuntime {
             Some(workflow) => workflow.clone(),
             None => return self.fail_run(trace, anyhow!("workflow not found: {}", workflow_name)),
         };
+        if let Some(metadata) = self.ctx.workflows.metadata(&workflow_name) {
+            if let Some(usage) = Self::workflow_extension_usage(metadata) {
+                trace.record_extension_usage(usage);
+            }
+        }
         let reference_contexts =
             match self.resolve_cross_session_contexts(session.as_mut(), &req.input, &mut trace) {
                 Ok(contexts) => contexts,
@@ -511,6 +524,11 @@ impl AgentRuntime {
                         .await
                     {
                         Ok(outcome) => {
+                            if let Some(tool) = self.ctx.tools.get(&call.name) {
+                                if let Some(usage) = Self::tool_extension_usage(tool.metadata()) {
+                                    trace.record_extension_usage(usage);
+                                }
+                            }
                             trace.tool_calls.push(outcome.tool_trace);
                             trace.add_capability_invocation(outcome.capability_trace);
 
@@ -755,6 +773,46 @@ impl AgentRuntime {
                 Err(err)
             }
         }
+    }
+
+    fn tool_extension_usage(metadata: &ToolMetadata) -> Option<ExtensionUsageTrace> {
+        Some(ExtensionUsageTrace {
+            name: metadata.extension.clone()?,
+            version: metadata
+                .version
+                .clone()
+                .unwrap_or_else(|| "unknown".to_owned()),
+            component_kind: "tool".to_owned(),
+            component_name: metadata.name.clone(),
+        })
+    }
+
+    fn skill_extension_usage(
+        metadata: &mosaic_skill_core::SkillMetadata,
+    ) -> Option<ExtensionUsageTrace> {
+        Some(ExtensionUsageTrace {
+            name: metadata.extension.clone()?,
+            version: metadata
+                .version
+                .clone()
+                .unwrap_or_else(|| "unknown".to_owned()),
+            component_kind: "skill".to_owned(),
+            component_name: metadata.name.clone(),
+        })
+    }
+
+    fn workflow_extension_usage(
+        metadata: &mosaic_workflow::WorkflowMetadata,
+    ) -> Option<ExtensionUsageTrace> {
+        Some(ExtensionUsageTrace {
+            name: metadata.extension.clone()?,
+            version: metadata
+                .version
+                .clone()
+                .unwrap_or_else(|| "unknown".to_owned()),
+            component_kind: "workflow".to_owned(),
+            component_name: metadata.name.clone(),
+        })
     }
 
     fn provider_for_profile(&self, profile: &ProviderProfile) -> Result<Arc<dyn LlmProvider>> {
@@ -2054,6 +2112,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(workflows),
+            active_extensions: Vec::new(),
             event_sink,
         })
     }
@@ -2321,6 +2380,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
+            active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
 
@@ -2377,6 +2437,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(skills),
             workflows: Arc::new(workflows),
+            active_extensions: Vec::new(),
             event_sink: sink.clone(),
         });
 
@@ -2482,6 +2543,7 @@ mod tests {
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(workflows),
+            active_extensions: Vec::new(),
             event_sink: sink.clone(),
         });
 
@@ -2563,6 +2625,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(skills),
             workflows: Arc::new(WorkflowRegistry::new()),
+            active_extensions: Vec::new(),
             event_sink: sink.clone(),
         });
 
@@ -2605,6 +2668,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(skills),
             workflows: Arc::new(WorkflowRegistry::new()),
+            active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
 
@@ -2654,6 +2718,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
+            active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
 
@@ -2719,6 +2784,7 @@ mod tests {
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
+            active_extensions: Vec::new(),
             event_sink: Arc::new(NoopEventSink),
         });
 

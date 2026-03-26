@@ -82,6 +82,9 @@ pub struct InteractiveSessionContext {
     pub active_profile: String,
     pub active_model: String,
     pub available_profiles: Vec<ProfileOption>,
+    pub extension_summary: String,
+    pub extension_policy_summary: String,
+    pub extension_errors: Vec<String>,
 }
 
 pub fn build_tui_event_buffer() -> TuiEventBuffer {
@@ -184,6 +187,11 @@ fn run_interactive_app(
         context.active_model.clone(),
         context.available_profiles.clone(),
         start_in_resume,
+    );
+    app.set_extension_state(
+        context.extension_summary.clone(),
+        context.extension_policy_summary.clone(),
+        context.extension_errors.clone(),
     );
     let gateway_link = Arc::new(AtomicBool::new(true));
     refresh_interactive_session_from_gateway(&mut app, &context, &context.session_id);

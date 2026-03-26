@@ -254,6 +254,8 @@ mod tests {
                 mcp_manager: None,
                 cron_store: Arc::new(FileCronStore::new(session_root.join("cron"))),
                 runs_dir: std::env::temp_dir(),
+                extensions: Vec::new(),
+                policies: mosaic_config::PolicyConfig::default(),
             },
         );
 

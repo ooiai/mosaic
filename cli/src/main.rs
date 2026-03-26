@@ -4,13 +4,14 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use mosaic_config::{
     ACTIVE_PROFILE_ENV, ConfigSourceKind, DoctorStatus, LoadConfigOptions, LoadedMosaicConfig,
-    ValidationLevel, doctor_mosaic_config, init_workspace_config, load_from_file,
+    PolicyConfig, ValidationLevel, doctor_mosaic_config, init_workspace_config, load_from_file,
     load_mosaic_config, redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
 use mosaic_control_protocol::{
     CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest, ExecJobRequest, GatewayEvent,
     IngressTrace, RunResponse, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
 };
+use mosaic_extension_core::{ExtensionStatus, ExtensionValidationReport, validate_extension_set};
 use mosaic_gateway::{
     GatewayCommand as GatewayControlCommand, GatewayHandle, GatewayRunError, GatewayRunRequest,
     GatewayRunResult,
@@ -96,6 +97,10 @@ enum Commands {
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
+    },
+    Extension {
+        #[command(subcommand)]
+        command: ExtensionCommand,
     },
 }
 
@@ -209,6 +214,13 @@ enum MemoryCommand {
     },
 }
 
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum ExtensionCommand {
+    List,
+    Validate,
+    Reload,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum DispatchCommand {
     Tui {
@@ -253,6 +265,9 @@ enum DispatchCommand {
     },
     Memory {
         command: MemoryCommand,
+    },
+    Extension {
+        command: ExtensionCommand,
     },
 }
 
@@ -305,6 +320,7 @@ impl Cli {
             }
             Some(Commands::Cron { attach, command }) => DispatchCommand::Cron { attach, command },
             Some(Commands::Memory { command }) => DispatchCommand::Memory { command },
+            Some(Commands::Extension { command }) => DispatchCommand::Extension { command },
         }
     }
 }
@@ -336,6 +352,7 @@ async fn main() -> Result<()> {
         DispatchCommand::Capability { attach, command } => capability_cmd(attach, command).await,
         DispatchCommand::Cron { attach, command } => cron_cmd(attach, command).await,
         DispatchCommand::Memory { command } => memory_cmd(command),
+        DispatchCommand::Extension { command } => extension_cmd(command),
     }
 }
 
@@ -356,6 +373,8 @@ async fn tui_cmd(
             provider_type: profile.provider_type.clone(),
         })
         .collect();
+    let (extension_summary, extension_policy_summary, extension_errors) =
+        tui_extension_status(&loaded)?;
     let (gateway, session_id, active_profile, active_model) = if let Some(url) = attach {
         let client = GatewayClient::new(url);
         let session_id = resolve_remote_tui_session_id(&client, session.as_deref()).await?;
@@ -414,6 +433,9 @@ async fn tui_cmd(
         active_profile,
         active_model,
         available_profiles,
+        extension_summary,
+        extension_policy_summary,
+        extension_errors,
     };
 
     tokio::task::spawn_blocking(move || mosaic_tui::run_interactive_session(resume, context))
@@ -1092,6 +1114,87 @@ entries:"
     }
 }
 
+fn extension_cmd(command: ExtensionCommand) -> Result<()> {
+    let loaded = ensure_loaded_config(None)?;
+    let gateway = build_gateway_handle(&loaded, None)?;
+
+    match command {
+        ExtensionCommand::List => {
+            print_extension_snapshot(&gateway.list_extensions(), &gateway.extension_policies());
+            Ok(())
+        }
+        ExtensionCommand::Validate => {
+            let report = gateway.validate_extensions()?;
+            print_extension_validation_report(&report);
+            if report.is_ok() {
+                Ok(())
+            } else {
+                bail!("extension validation failed")
+            }
+        }
+        ExtensionCommand::Reload => {
+            let result = gateway.reload_extensions()?;
+            println!("extension reload succeeded");
+            print_extension_snapshot(&result.extensions, &result.policies);
+            Ok(())
+        }
+    }
+}
+
+fn print_extension_snapshot(extensions: &[ExtensionStatus], policies: &PolicyConfig) {
+    print_extension_policy_summary(policies);
+
+    if extensions.is_empty() {
+        println!("extensions: none");
+        return;
+    }
+
+    println!("extensions:");
+    for extension in extensions {
+        println!(
+            "- {}@{} | source={} | enabled={} | active={} | tools={} | skills={} | workflows={} | mcp_servers={} | error={}",
+            extension.name,
+            extension.version,
+            extension.source,
+            extension.enabled,
+            extension.active,
+            extension.tools.len(),
+            extension.skills.len(),
+            extension.workflows.len(),
+            extension.mcp_servers.len(),
+            extension.error.as_deref().unwrap_or("<none>"),
+        );
+    }
+}
+
+fn print_extension_validation_report(report: &ExtensionValidationReport) {
+    print_extension_snapshot(&report.extensions, &report.policies);
+
+    if report.issues.is_empty() {
+        println!("validation: ok");
+        return;
+    }
+
+    println!("validation: failed");
+    for issue in &report.issues {
+        match issue.extension.as_deref() {
+            Some(extension) => println!("- {}: {}", extension, issue.message),
+            None => println!("- {}", issue.message),
+        }
+    }
+}
+
+fn print_extension_policy_summary(policies: &PolicyConfig) {
+    println!(
+        "policies: exec={} webhook={} cron={} mcp={} hot_reload={}",
+        policies.allow_exec,
+        policies.allow_webhook,
+        policies.allow_cron,
+        policies.allow_mcp,
+        policies.hot_reload_enabled,
+    );
+}
+
 fn model_cmd(command: ModelCommand) -> Result<()> {
     match command {
         ModelCommand::List => {
@@ -1203,7 +1306,40 @@ summary:"
     println!("  model_selections: {}", trace.model_selections.len());
     println!("  memory_reads: {}", trace.memory_reads.len());
     println!("  memory_writes: {}", trace.memory_writes.len());
+    println!("  active_extensions: {}", trace.active_extensions.len());
+    println!("  used_extensions: {}", trace.used_extensions.len());
     println!("  compression: {}", trace.compression.is_some());
+
+    if !trace.active_extensions.is_empty() {
+        println!(
+            "
+== active extensions =="
+        );
+        for extension in &trace.active_extensions {
+            println!(
+                "{}@{} | source={} | enabled={} | active={} | error={:?}",
+                extension.name,
+                extension.version,
+                extension.source,
+                extension.enabled,
+                extension.active,
+                extension.error,
+            );
+        }
+    }
+
+    if !trace.used_extensions.is_empty() {
+        println!(
+            "
+== used extensions =="
+        );
+        for usage in &trace.used_extensions {
+            println!(
+                "{}@{} | {}:{}",
+                usage.name, usage.version, usage.component_kind, usage.component_name,
+            );
+        }
+    }
 
     if !trace.model_selections.is_empty() {
         println!(
@@ -1433,7 +1569,7 @@ fn build_gateway_handle(
     loaded: &LoadedMosaicConfig,
     app_cfg: Option<&mosaic_config::AppConfig>,
 ) -> Result<GatewayHandle> {
-    bootstrap::build_local_gateway(tokio::runtime::Handle::current(), &loaded.config, app_cfg)
+    bootstrap::build_local_gateway(tokio::runtime::Handle::current(), loaded, app_cfg)
 }
 
 fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
@@ -1578,6 +1714,49 @@ fn local_memory_store() -> Result<FileMemoryStore> {
     )?))
 }
 
+fn tui_extension_status(loaded: &LoadedMosaicConfig) -> Result<(String, String, Vec<String>)> {
+    let report = validate_extension_set(&loaded.config, None, &env::current_dir()?);
+    let extension_summary = summarize_extension_names(&report.extensions);
+    let policy_summary = format!(
+        "Policies exec={} webhook={} cron={} mcp={} hot_reload={}",
+        report.policies.allow_exec,
+        report.policies.allow_webhook,
+        report.policies.allow_cron,
+        report.policies.allow_mcp,
+        report.policies.hot_reload_enabled,
+    );
+    let errors = report
+        .issues
+        .iter()
+        .map(|issue| match issue.extension.as_deref() {
+            Some(extension) => format!("{}: {}", extension, issue.message),
+            None => issue.message.clone(),
+        })
+        .collect();
+
+    Ok((extension_summary, policy_summary, errors))
+}
+
+fn summarize_extension_names(extensions: &[ExtensionStatus]) -> String {
+    if extensions.is_empty() {
+        return "Extensions none".to_owned();
+    }
+
+    let preview = extensions
+        .iter()
+        .take(3)
+        .map(|extension| format!("{}@{}", extension.name, extension.version))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let remaining = extensions.len().saturating_sub(3);
+
+    if remaining == 0 {
+        format!("Extensions {}", preview)
+    } else {
+        format!("Extensions {} (+{} more)", preview, remaining)
+    }
+}
+
 fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
     IngressTrace {
         kind: "local_cli".to_owned(),
@@ -1629,6 +1808,26 @@ fn gateway_event_label(event: &GatewayEvent) -> String {
             format!(
                 "cron_updated id={} schedule={}",
                 registration.id, registration.schedule
+            )
+        }
+        GatewayEvent::ExtensionsReloaded {
+            extensions,
+            policies,
+        } => {
+            format!(
+                "extensions_reloaded count={} exec={} webhook={} cron={} mcp={} hot_reload={}",
+                extensions.len(),
+                policies.allow_exec,
+                policies.allow_webhook,
+                policies.allow_cron,
+                policies.allow_mcp,
+                policies.hot_reload_enabled,
+            )
+        }
+        GatewayEvent::ExtensionReloadFailed { error } => {
+            format!(
+                "extension_reload_failed error={}",
+                truncate_for_cli(error, 80)
             )
         }
         GatewayEvent::SessionUpdated { summary } => {
@@ -1791,7 +1990,10 @@ mod tests {
     use clap::Parser;
     use mosaic_tool_core::ToolSource;
 
-    use super::{Cli, DispatchCommand, MemoryCommand, ModelCommand, SessionCommand, SetupCommand};
+    use super::{
+        Cli, DispatchCommand, ExtensionCommand, MemoryCommand, ModelCommand, SessionCommand,
+        SetupCommand,
+    };
 
     #[test]
     fn defaults_to_tui_when_no_subcommand_is_present() {
@@ -2039,6 +2241,17 @@ mod tests {
                     query: "summary".to_owned(),
                     tag: Some("note".to_owned()),
                 },
+            }
+        );
+    }
+
+    #[test]
+    fn parses_extension_subcommands() {
+        let cli = Cli::parse_from(["mosaic", "extension", "reload"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Extension {
+                command: ExtensionCommand::Reload,
             }
         );
     }

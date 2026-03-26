@@ -204,6 +204,9 @@ pub struct App {
     pub control_model: String,
     pub selected_profile: String,
     pub available_profiles: Vec<ProfileOption>,
+    pub extension_summary: Option<String>,
+    pub extension_policy_summary: Option<String>,
+    pub extension_errors: Vec<String>,
     heartbeat: usize,
 }
 
@@ -247,6 +250,9 @@ impl App {
             control_model: "gpt-5.4-control".to_owned(),
             selected_profile: "gpt-5.4-control".to_owned(),
             available_profiles: Vec::new(),
+            extension_summary: None,
+            extension_policy_summary: None,
+            extension_errors: Vec::new(),
             heartbeat: 0,
         }
     }
@@ -300,6 +306,9 @@ impl App {
             control_model: model,
             selected_profile: profile,
             available_profiles,
+            extension_summary: None,
+            extension_policy_summary: None,
+            extension_errors: Vec::new(),
             heartbeat: 0,
         }
     }
@@ -310,6 +319,17 @@ impl App {
 
     pub fn active_profile(&self) -> &str {
         &self.selected_profile
+    }
+
+    pub fn set_extension_state(
+        &mut self,
+        extension_summary: String,
+        extension_policy_summary: String,
+        extension_errors: Vec<String>,
+    ) {
+        self.extension_summary = Some(extension_summary);
+        self.extension_policy_summary = Some(extension_policy_summary);
+        self.extension_errors = extension_errors;
     }
 
     pub fn sync_runtime_session(&mut self, session: &StoredSessionRecord) {

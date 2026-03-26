@@ -67,6 +67,24 @@ pub struct SideEffectSummary {
     pub capability_kinds: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionTrace {
+    pub name: String,
+    pub version: String,
+    pub source: String,
+    pub enabled: bool,
+    pub active: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionUsageTrace {
+    pub name: String,
+    pub version: String,
+    pub component_kind: String,
+    pub component_name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillTrace {
     pub name: String,
@@ -207,6 +225,10 @@ pub struct RunTrace {
     pub capability_invocations: Vec<CapabilityInvocationTrace>,
     pub side_effect_summary: Option<SideEffectSummary>,
     #[serde(default)]
+    pub active_extensions: Vec<ExtensionTrace>,
+    #[serde(default)]
+    pub used_extensions: Vec<ExtensionUsageTrace>,
+    #[serde(default)]
     pub skill_calls: Vec<SkillTrace>,
     #[serde(default)]
     pub step_traces: Vec<WorkflowStepTrace>,
@@ -235,6 +257,8 @@ impl RunTrace {
             tool_calls: vec![],
             capability_invocations: vec![],
             side_effect_summary: None,
+            active_extensions: vec![],
+            used_extensions: vec![],
             skill_calls: vec![],
             step_traces: vec![],
             error: None,
@@ -258,6 +282,23 @@ impl RunTrace {
 
     pub fn bind_ingress(&mut self, ingress: IngressTrace) {
         self.ingress = Some(ingress);
+    }
+
+    pub fn bind_extensions(&mut self, extensions: Vec<ExtensionTrace>) {
+        self.active_extensions = extensions;
+    }
+
+    pub fn record_extension_usage(&mut self, usage: ExtensionUsageTrace) {
+        let duplicate = self.used_extensions.iter().any(|existing| {
+            existing.name == usage.name
+                && existing.version == usage.version
+                && existing.component_kind == usage.component_kind
+                && existing.component_name == usage.component_name
+        });
+
+        if !duplicate {
+            self.used_extensions.push(usage);
+        }
     }
 
     pub fn bind_workflow(&mut self, workflow_name: impl Into<String>) {
@@ -499,6 +540,8 @@ mod tests {
             }],
             capability_invocations: vec![],
             side_effect_summary: None,
+            active_extensions: vec![],
+            used_extensions: vec![],
             skill_calls: vec![],
             step_traces: vec![WorkflowStepTrace {
                 name: "draft".to_owned(),

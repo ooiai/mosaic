@@ -1053,6 +1053,7 @@ dependencies = [
  "clap",
  "mosaic-config",
  "mosaic-control-protocol",
+ "mosaic-extension-core",
  "mosaic-gateway",
  "mosaic-inspect",
  "mosaic-mcp-core",
@@ -1094,6 +1095,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-extension-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "mosaic-config",
+ "mosaic-mcp-core",
+ "mosaic-scheduler-core",
+ "mosaic-skill-core",
+ "mosaic-tool-core",
+ "mosaic-workflow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mosaic-gateway"
 version = "0.1.0"
 dependencies = [
@@ -1103,6 +1120,7 @@ dependencies = [
  "futures",
  "mosaic-config",
  "mosaic-control-protocol",
+ "mosaic-extension-core",
  "mosaic-inspect",
  "mosaic-mcp-core",
  "mosaic-memory",
