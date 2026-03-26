@@ -16,6 +16,17 @@ pub struct HealthResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AdapterStatusDto {
+    pub name: String,
+    pub channel: String,
+    pub transport: String,
+    pub ingress_path: String,
+    pub outbound_ready: bool,
+    pub status: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunSubmission {
     pub system: Option<String>,
     pub input: String,
@@ -131,6 +142,10 @@ pub struct InboundMessage {
     pub input: String,
     pub profile: Option<String>,
     pub display_name: Option<String>,
+    pub actor_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub thread_title: Option<String>,
+    pub reply_target: Option<String>,
     pub ingress: Option<IngressTrace>,
 }
 
@@ -185,6 +200,8 @@ pub struct SessionSummaryDto {
     pub provider_type: String,
     pub model: String,
     pub session_route: String,
+    #[serde(default)]
+    pub channel_context: SessionChannelDto,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
     pub message_count: usize,
@@ -203,6 +220,8 @@ pub struct SessionDetailDto {
     pub provider_type: String,
     pub model: String,
     pub last_run_id: Option<String>,
+    #[serde(default)]
+    pub channel_context: SessionChannelDto,
     pub gateway: SessionGatewayDto,
     pub memory_summary: Option<String>,
     pub compressed_context: Option<String>,
@@ -215,6 +234,18 @@ pub struct SessionGatewayDto {
     pub route: String,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionChannelDto {
+    pub ingress_kind: Option<String>,
+    pub channel: Option<String>,
+    pub source: Option<String>,
+    pub actor_id: Option<String>,
+    pub actor_name: Option<String>,
+    pub thread_id: Option<String>,
+    pub thread_title: Option<String>,
+    pub reply_target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -265,6 +296,10 @@ mod tests {
                 source: Some("mosaic-cli".to_owned()),
                 remote_addr: None,
                 display_name: None,
+                actor_id: None,
+                thread_id: None,
+                thread_title: None,
+                reply_target: None,
                 gateway_url: Some("http://127.0.0.1:8080".to_owned()),
             }),
         };
@@ -319,6 +354,10 @@ mod tests {
                     source: Some("browser".to_owned()),
                     remote_addr: None,
                     display_name: Some("guest".to_owned()),
+                    actor_id: Some("guest-1".to_owned()),
+                    thread_id: Some("room-7".to_owned()),
+                    thread_title: Some("Launch Room".to_owned()),
+                    reply_target: Some("webchat:guest-1".to_owned()),
                     gateway_url: None,
                 }),
             },

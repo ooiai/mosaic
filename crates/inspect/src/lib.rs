@@ -113,6 +113,10 @@ pub struct IngressTrace {
     pub source: Option<String>,
     pub remote_addr: Option<String>,
     pub display_name: Option<String>,
+    pub actor_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub thread_title: Option<String>,
+    pub reply_target: Option<String>,
     pub gateway_url: Option<String>,
 }
 
@@ -454,6 +458,10 @@ mod tests {
             source: Some("mosaic-cli".to_owned()),
             remote_addr: None,
             display_name: None,
+            actor_id: None,
+            thread_id: None,
+            thread_title: None,
+            reply_target: None,
             gateway_url: Some("http://127.0.0.1:8080".to_owned()),
         });
         trace.add_memory_read(MemoryReadTrace {
@@ -606,6 +614,10 @@ mod tests {
             source: Some("browser".to_owned()),
             remote_addr: Some("127.0.0.1".to_owned()),
             display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            thread_id: Some("room-7".to_owned()),
+            thread_title: Some("Launch Room".to_owned()),
+            reply_target: Some("webchat:guest-1".to_owned()),
             gateway_url: None,
         });
 

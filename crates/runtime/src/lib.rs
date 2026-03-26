@@ -197,6 +197,10 @@ impl AgentRuntime {
             };
             let scheduled = match self.ctx.profiles.schedule(SchedulingRequest {
                 requested_profile: requested_profile.clone(),
+                channel: req
+                    .ingress
+                    .as_ref()
+                    .and_then(|ingress| ingress.channel.clone()),
                 intent: scheduling_intent,
                 estimated_context_chars: req.input.chars().count()
                     + session
@@ -411,6 +415,10 @@ impl AgentRuntime {
                 runtime: self,
                 default_profile: profile,
                 session_id: req.session_id.clone(),
+                ingress_channel: req
+                    .ingress
+                    .as_ref()
+                    .and_then(|ingress| ingress.channel.clone()),
                 tool_traces: tool_traces.clone(),
                 skill_traces: skill_traces.clone(),
                 model_selections: model_selections.clone(),
@@ -863,6 +871,9 @@ impl AgentRuntime {
             profile.provider_type.clone(),
             profile.model.clone(),
         );
+        if let Some(ingress) = req.ingress.as_ref() {
+            session.bind_ingress_context(ingress);
+        }
         session.set_last_run_id(trace.run_id.clone());
 
         if session.transcript.is_empty() {
@@ -1797,6 +1808,7 @@ struct RuntimeWorkflowExecutor<'a> {
     runtime: &'a AgentRuntime,
     default_profile: ProviderProfile,
     session_id: Option<String>,
+    ingress_channel: Option<String>,
     tool_traces: SharedToolTraceCollector,
     skill_traces: SharedSkillTraceCollector,
     model_selections: SharedModelSelectionCollector,
@@ -1819,6 +1831,7 @@ impl RuntimeWorkflowExecutor<'_> {
 
         let scheduled = self.runtime.ctx.profiles.schedule(SchedulingRequest {
             requested_profile: profile.clone().or(Some(self.default_profile.name.clone())),
+            channel: self.ingress_channel.clone(),
             intent: SchedulingIntent::WorkflowStep,
             estimated_context_chars: input.chars().count(),
             requires_tools: !tools.is_empty(),
@@ -2468,6 +2481,10 @@ mod tests {
                     source: Some("mosaic-cli".to_owned()),
                     remote_addr: Some("127.0.0.1".to_owned()),
                     display_name: Some("operator".to_owned()),
+                    actor_id: Some("operator-1".to_owned()),
+                    thread_id: Some("incident-7".to_owned()),
+                    thread_title: Some("Incident 7".to_owned()),
+                    reply_target: Some("cli:operator-1".to_owned()),
                     gateway_url: Some("http://127.0.0.1:8080".to_owned()),
                 }),
             })
@@ -2490,6 +2507,22 @@ mod tests {
                 .as_ref()
                 .and_then(|ingress| ingress.gateway_url.as_deref()),
             Some("http://127.0.0.1:8080")
+        );
+        assert_eq!(
+            result
+                .trace
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.actor_id.as_deref()),
+            Some("operator-1")
+        );
+        assert_eq!(
+            result
+                .trace
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.thread_id.as_deref()),
+            Some("incident-7")
         );
     }
 

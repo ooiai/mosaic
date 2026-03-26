@@ -91,6 +91,7 @@ pub enum SchedulingIntent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SchedulingRequest {
     pub requested_profile: Option<String>,
+    pub channel: Option<String>,
     pub intent: SchedulingIntent,
     pub estimated_context_chars: usize,
     pub requires_tools: bool,
@@ -127,6 +128,16 @@ pub fn tool_definition_from_metadata(metadata: &ToolMetadata) -> ToolDefinition 
         description: metadata.description.clone(),
         input_schema: metadata.input_schema.clone(),
     }
+}
+
+fn channel_policy_profile(
+    candidates: &[ProviderProfile],
+    channel: &str,
+) -> Option<ProviderProfile> {
+    candidates
+        .iter()
+        .find(|profile| profile.name == channel)
+        .cloned()
 }
 
 fn redact_provider_message(message: &str) -> String {
@@ -230,6 +241,15 @@ impl ProviderProfileRegistry {
 
         if candidates.is_empty() {
             bail!("no provider profiles satisfy the requested runtime constraints");
+        }
+
+        if let Some(channel) = request.channel.as_deref() {
+            if let Some(profile) = channel_policy_profile(&candidates, channel) {
+                return Ok(ScheduledProfile {
+                    profile,
+                    reason: format!("channel_policy:{}", channel),
+                });
+            }
         }
 
         let active = self.active_profile().clone();
@@ -893,6 +913,7 @@ mod tests {
         let scheduled = registry
             .schedule(SchedulingRequest {
                 requested_profile: None,
+                channel: None,
                 intent: SchedulingIntent::Summary,
                 estimated_context_chars: 2_000,
                 requires_tools: false,
@@ -910,6 +931,7 @@ mod tests {
         let scheduled = registry
             .schedule(SchedulingRequest {
                 requested_profile: None,
+                channel: None,
                 intent: SchedulingIntent::InteractiveRun,
                 estimated_context_chars: 40_000,
                 requires_tools: false,
@@ -918,6 +940,46 @@ mod tests {
 
         assert_eq!(scheduled.profile.name, "large");
         assert_eq!(scheduled.reason, "expanded_context_window");
+    }
+
+    #[test]
+    fn channel_policy_prefers_matching_channel_profile() {
+        let mut config = MosaicConfig::default();
+        config.profiles.clear();
+        config.active_profile = "mini".to_owned();
+        config.profiles.insert(
+            "mini".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "mock".to_owned(),
+                model: "gpt-5.4-mini".to_owned(),
+                base_url: None,
+                api_key_env: None,
+            },
+        );
+        config.profiles.insert(
+            "telegram".to_owned(),
+            ProviderProfileConfig {
+                provider_type: "mock".to_owned(),
+                model: "gpt-5.4".to_owned(),
+                base_url: None,
+                api_key_env: None,
+            },
+        );
+        let registry =
+            ProviderProfileRegistry::from_config(&config).expect("registry should build");
+
+        let scheduled = registry
+            .schedule(SchedulingRequest {
+                requested_profile: None,
+                channel: Some("telegram".to_owned()),
+                intent: SchedulingIntent::InteractiveRun,
+                estimated_context_chars: 200,
+                requires_tools: false,
+            })
+            .expect("channel schedule should succeed");
+
+        assert_eq!(scheduled.profile.name, "telegram");
+        assert_eq!(scheduled.reason, "channel_policy:telegram");
     }
 
     #[test]

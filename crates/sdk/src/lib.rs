@@ -1,9 +1,10 @@
 use anyhow::Result;
 use futures::{StreamExt, stream::BoxStream};
+use mosaic_channel_telegram::TelegramUpdate;
 use mosaic_control_protocol::{
-    CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest, ErrorResponse,
-    EventStreamEnvelope, ExecJobRequest, HealthResponse, InboundMessage, RunResponse,
-    RunSubmission, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
+    AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
+    ErrorResponse, EventStreamEnvelope, ExecJobRequest, HealthResponse, InboundMessage,
+    RunResponse, RunSubmission, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
 };
 
 #[derive(Clone)]
@@ -30,6 +31,10 @@ impl GatewayClient {
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionSummaryDto>> {
         self.get_json("/sessions").await
+    }
+
+    pub async fn list_adapters(&self) -> Result<Vec<AdapterStatusDto>> {
+        self.get_json("/adapters").await
     }
 
     pub async fn get_session(&self, id: &str) -> Result<Option<SessionDetailDto>> {
@@ -83,6 +88,10 @@ impl GatewayClient {
 
     pub async fn submit_webchat(&self, message: InboundMessage) -> Result<RunResponse> {
         self.post_json("/ingress/webchat", &message).await
+    }
+
+    pub async fn submit_telegram(&self, update: TelegramUpdate) -> Result<RunResponse> {
+        self.post_json("/ingress/telegram", &update).await
     }
 
     pub async fn subscribe_events(&self) -> Result<GatewayEventStream> {
@@ -304,13 +313,17 @@ mod tests {
                     source: Some("mosaic-cli".to_owned()),
                     remote_addr: None,
                     display_name: None,
+                    actor_id: None,
+                    thread_id: None,
+                    thread_title: None,
+                    reply_target: None,
                     gateway_url: Some(base_url.clone()),
                 }),
             })
             .await
             .expect("remote run should succeed");
 
-        assert_eq!(response.session_route, "gateway.local/remote-demo");
+        assert_eq!(response.session_route, "gateway.channel/cli/remote-demo");
         assert_eq!(
             response
                 .trace
@@ -330,6 +343,8 @@ mod tests {
             .await
             .expect("session detail should succeed")
             .expect("session should exist");
+        assert_eq!(detail.gateway.route, "gateway.channel/cli/remote-demo");
+        assert_eq!(detail.channel_context.channel.as_deref(), Some("cli"));
         assert_eq!(detail.transcript.len(), 3);
 
         let mut saw_completion = false;
@@ -361,6 +376,10 @@ mod tests {
                 input: "hello from webchat".to_owned(),
                 profile: None,
                 display_name: Some("guest".to_owned()),
+                actor_id: Some("guest-1".to_owned()),
+                thread_id: Some("room-7".to_owned()),
+                thread_title: Some("Launch Room".to_owned()),
+                reply_target: Some("webchat:guest-1".to_owned()),
                 ingress: None,
             })
             .await

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "cli",
+    "crates/channel-telegram",
     "crates/config",
     "crates/extension-core",
     "crates/control-protocol",

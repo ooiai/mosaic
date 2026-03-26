@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeMap,
     convert::Infallible,
+    env,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -17,13 +18,14 @@ use axum::{
 };
 use chrono::Utc;
 use futures::stream;
+use mosaic_channel_telegram::{TelegramUpdate, normalize_update as normalize_telegram_update};
 use mosaic_config::{AppConfig, LoadConfigOptions, PolicyConfig, load_mosaic_config};
 use mosaic_control_protocol::{
-    CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest, ErrorResponse,
-    EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto, GatewayEvent,
-    HealthResponse, InboundMessage, RunResponse, RunSubmission, SessionDetailDto,
-    SessionGatewayDto, SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto,
-    WebhookJobRequest,
+    AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
+    ErrorResponse, EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
+    GatewayEvent, HealthResponse, InboundMessage, RunResponse, RunSubmission, SessionChannelDto,
+    SessionDetailDto, SessionGatewayDto, SessionSummaryDto, TranscriptMessageDto,
+    TranscriptRoleDto, WebhookJobRequest,
 };
 use mosaic_extension_core::{
     ExtensionStatus, ExtensionValidationReport, load_extension_set, validate_extension_set,
@@ -37,7 +39,8 @@ use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{AgentRuntime, RunError, RunRequest, RunResult, RuntimeContext};
 use mosaic_scheduler_core::{CronRegistration, CronStore};
 use mosaic_session_core::{
-    SessionRecord, SessionStore, SessionSummary, TranscriptRole, session_route_for_id,
+    SessionChannelMetadata, SessionRecord, SessionStore, SessionSummary, TranscriptRole,
+    session_route_for_id,
 };
 use mosaic_skill_core::SkillRegistry;
 use mosaic_tool_core::ToolRegistry;
@@ -336,6 +339,10 @@ impl GatewayHandle {
         self.snapshot_components().session_store.list()
     }
 
+    pub fn list_adapter_statuses(&self) -> Vec<AdapterStatusDto> {
+        vec![webchat_adapter_status(), telegram_adapter_status()]
+    }
+
     pub fn load_session(&self, id: &str) -> Result<Option<SessionRecord>> {
         self.snapshot_components().session_store.load(id)
     }
@@ -453,6 +460,20 @@ impl GatewayHandle {
         .await
     }
 
+    pub fn submit_telegram_update(&self, update: TelegramUpdate) -> Result<GatewaySubmittedRun> {
+        let normalized = normalize_telegram_update(update)?;
+        let ingress = normalized.ingress();
+        self.submit_run(RunSubmission {
+            system: None,
+            input: normalized.input,
+            skill: None,
+            workflow: None,
+            session_id: Some(normalized.session_id),
+            profile: None,
+            ingress: Some(ingress),
+        })
+    }
+
     pub async fn trigger_cron(&self, id: &str) -> Result<GatewayRunResult> {
         let mut registration = self
             .snapshot_components()
@@ -489,6 +510,10 @@ impl GatewayHandle {
                 source: Some(registration.id.clone()),
                 remote_addr: None,
                 display_name: None,
+                actor_id: None,
+                thread_id: None,
+                thread_title: None,
+                reply_target: None,
                 gateway_url: None,
             }),
         })?
@@ -506,7 +531,8 @@ impl GatewayHandle {
     pub fn submit_run(&self, request: GatewayRunRequest) -> Result<GatewaySubmittedRun> {
         let gateway_run_id = Uuid::new_v4().to_string();
         let correlation_id = Uuid::new_v4().to_string();
-        let session_route = self.resolve_session_route(request.session_id.as_deref())?;
+        let session_route =
+            self.resolve_session_route(request.session_id.as_deref(), request.ingress.as_ref())?;
         let resolved_profile = request.profile.clone().unwrap_or_else(|| {
             self.snapshot_components()
                 .profiles
@@ -566,15 +592,28 @@ impl GatewayHandle {
         let _ = self.inner.events.send(envelope);
     }
 
-    fn resolve_session_route(&self, session_id: Option<&str>) -> Result<String> {
+    fn resolve_session_route(
+        &self,
+        session_id: Option<&str>,
+        ingress: Option<&IngressTrace>,
+    ) -> Result<String> {
         match session_id {
-            Some(id) => Ok(self
-                .load_session(id)?
-                .and_then(|session| {
-                    (!session.gateway.route.is_empty()).then_some(session.gateway.route)
-                })
-                .unwrap_or_else(|| session_route_for_id(id))),
-            None => Ok("gateway.local/ephemeral".to_owned()),
+            Some(id) => {
+                if let Some(session) = self.load_session(id)? {
+                    let current = if session.gateway.route.is_empty() {
+                        session_route_for_id(id)
+                    } else {
+                        session.gateway.route
+                    };
+                    if current != session_route_for_id(id) || ingress.is_none() {
+                        return Ok(current);
+                    }
+                }
+
+                Ok(ingress_route(Some(id), ingress).unwrap_or_else(|| session_route_for_id(id)))
+            }
+            None => Ok(ingress_route(None, ingress)
+                .unwrap_or_else(|| "gateway.local/ephemeral".to_owned())),
         }
     }
 }
@@ -1100,6 +1139,68 @@ fn update_gateway_session_metadata(
     Some(session.summary())
 }
 
+fn webchat_adapter_status() -> AdapterStatusDto {
+    AdapterStatusDto {
+        name: "webchat".to_owned(),
+        channel: "webchat".to_owned(),
+        transport: "http".to_owned(),
+        ingress_path: "/ingress/webchat".to_owned(),
+        outbound_ready: true,
+        status: "ok".to_owned(),
+        detail: "WebChat ingress and operator web surface protocol are ready.".to_owned(),
+    }
+}
+
+fn telegram_adapter_status() -> AdapterStatusDto {
+    let outbound_ready =
+        env::var("MOSAIC_TELEGRAM_BOT_TOKEN").is_ok() || env::var("TELEGRAM_BOT_TOKEN").is_ok();
+    AdapterStatusDto {
+        name: "telegram".to_owned(),
+        channel: "telegram".to_owned(),
+        transport: "http-webhook".to_owned(),
+        ingress_path: "/ingress/telegram".to_owned(),
+        outbound_ready,
+        status: if outbound_ready { "ok" } else { "warning" }.to_owned(),
+        detail: if outbound_ready {
+            "Telegram webhook ingress and reply routing are ready.".to_owned()
+        } else {
+            "Telegram ingress is ready, but outbound replies need TELEGRAM_BOT_TOKEN or MOSAIC_TELEGRAM_BOT_TOKEN.".to_owned()
+        },
+    }
+}
+
+fn ingress_route(session_id: Option<&str>, ingress: Option<&IngressTrace>) -> Option<String> {
+    let ingress = ingress?;
+    let channel = ingress.channel.as_deref().unwrap_or(ingress.kind.as_str());
+    let target = ingress
+        .reply_target
+        .as_deref()
+        .or(ingress.actor_id.as_deref())
+        .or(session_id)?;
+    let mut route = format!(
+        "gateway.channel/{}/{}",
+        route_segment(channel),
+        route_segment(target)
+    );
+    if let Some(thread_id) = ingress.thread_id.as_deref() {
+        route.push_str("/thread/");
+        route.push_str(&route_segment(thread_id));
+    }
+    Some(route)
+}
+
+fn route_segment(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            normalized.push(ch);
+        } else {
+            normalized.push('-');
+        }
+    }
+    normalized.trim_matches('-').to_owned()
+}
+
 fn truncate_preview(value: &str, limit: usize) -> String {
     if value.chars().count() <= limit {
         return value.to_owned();
@@ -1154,12 +1255,26 @@ pub fn session_summary_dto(summary: &SessionSummary) -> SessionSummaryDto {
         provider_type: summary.provider_type.clone(),
         model: summary.model.clone(),
         session_route: summary.session_route.clone(),
+        channel_context: session_channel_dto(&summary.channel_context),
         last_gateway_run_id: summary.last_gateway_run_id.clone(),
         last_correlation_id: summary.last_correlation_id.clone(),
         message_count: summary.message_count,
         last_message_preview: summary.last_message_preview.clone(),
         memory_summary_preview: summary.memory_summary_preview.clone(),
         reference_count: summary.reference_count,
+    }
+}
+
+fn session_channel_dto(metadata: &SessionChannelMetadata) -> SessionChannelDto {
+    SessionChannelDto {
+        ingress_kind: metadata.ingress_kind.clone(),
+        channel: metadata.channel.clone(),
+        source: metadata.source.clone(),
+        actor_id: metadata.actor_id.clone(),
+        actor_name: metadata.actor_name.clone(),
+        thread_id: metadata.thread_id.clone(),
+        thread_title: metadata.thread_title.clone(),
+        reply_target: metadata.reply_target.clone(),
     }
 }
 
@@ -1187,6 +1302,7 @@ pub fn session_detail_dto(session: &SessionRecord) -> SessionDetailDto {
         provider_type: session.provider_type.clone(),
         model: session.model.clone(),
         last_run_id: session.last_run_id.clone(),
+        channel_context: session_channel_dto(&session.channel_context),
         gateway: SessionGatewayDto {
             route: session.gateway.route.clone(),
             last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
@@ -1242,6 +1358,7 @@ type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, Json<ErrorRespons
 pub fn http_router(gateway: GatewayHandle) -> Router {
     Router::new()
         .route("/health", get(http_health))
+        .route("/adapters", get(http_list_adapters))
         .route("/sessions", get(http_list_sessions))
         .route("/sessions/{id}", get(http_get_session))
         .route("/capabilities/jobs", get(http_list_capability_jobs))
@@ -1251,6 +1368,7 @@ pub fn http_router(gateway: GatewayHandle) -> Router {
         .route("/cron", get(http_list_cron).post(http_register_cron))
         .route("/cron/{id}/trigger", post(http_trigger_cron))
         .route("/ingress/webchat", post(http_webchat_ingress))
+        .route("/ingress/telegram", post(http_telegram_ingress))
         .route("/events", get(http_events))
         .with_state(GatewayHttpState { gateway })
 }
@@ -1285,6 +1403,12 @@ async fn http_health(State(state): State<GatewayHttpState>) -> Json<HealthRespon
             .unwrap_or(0),
         transport: "http+sse".to_owned(),
     })
+}
+
+async fn http_list_adapters(
+    State(state): State<GatewayHttpState>,
+) -> HttpResult<Vec<AdapterStatusDto>> {
+    Ok(Json(state.gateway.list_adapter_statuses()))
 }
 
 async fn http_list_sessions(
@@ -1396,6 +1520,10 @@ async fn http_submit_run(
             source: Some("mosaic-sdk".to_owned()),
             remote_addr: None,
             display_name: None,
+            actor_id: None,
+            thread_id: None,
+            thread_title: None,
+            reply_target: None,
             gateway_url: None,
         });
     }
@@ -1429,6 +1557,10 @@ async fn http_webchat_ingress(
             source: Some("webchat-ingress".to_owned()),
             remote_addr: None,
             display_name: message.display_name,
+            actor_id: message.actor_id,
+            thread_id: message.thread_id,
+            thread_title: message.thread_title,
+            reply_target: message.reply_target,
             gateway_url: None,
         })),
     };
@@ -1436,6 +1568,18 @@ async fn http_webchat_ingress(
     let submitted = state
         .gateway
         .submit_run(request)
+        .map_err(http_internal_error)?;
+    let result = submitted.wait().await.map_err(http_run_error)?;
+    Ok(Json(run_response(result)))
+}
+
+async fn http_telegram_ingress(
+    State(state): State<GatewayHttpState>,
+    Json(update): Json<TelegramUpdate>,
+) -> HttpResult<RunResponse> {
+    let submitted = state
+        .gateway
+        .submit_telegram_update(update)
         .map_err(http_internal_error)?;
     let result = submitted.wait().await.map_err(http_run_error)?;
     Ok(Json(run_response(result)))
@@ -2045,6 +2189,8 @@ workflows:
             .expect("sessions should deserialize");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, "http-demo");
+        assert_eq!(sessions[0].session_route, "gateway.channel/api/http-demo");
+        assert_eq!(sessions[0].channel_context.channel.as_deref(), Some("api"));
 
         let detail_response = client
             .get(format!("{base_url}/sessions/http-demo"))
@@ -2057,7 +2203,8 @@ workflows:
             .await
             .expect("session detail should deserialize");
         assert_eq!(detail.id, "http-demo");
-        assert_eq!(detail.gateway.route, "gateway.local/http-demo");
+        assert_eq!(detail.gateway.route, "gateway.channel/api/http-demo");
+        assert_eq!(detail.channel_context.channel.as_deref(), Some("api"));
         assert_eq!(detail.transcript.len(), 3);
 
         let _ = shutdown.send(());
@@ -2078,6 +2225,10 @@ workflows:
                 input: "hello from browser".to_owned(),
                 profile: None,
                 display_name: Some("guest".to_owned()),
+                actor_id: Some("guest-1".to_owned()),
+                thread_id: Some("room-7".to_owned()),
+                thread_title: Some("Launch Room".to_owned()),
+                reply_target: Some("webchat:guest-1".to_owned()),
                 ingress: None,
             })
             .send()

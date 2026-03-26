@@ -13,6 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 mosaic-control-protocol = { path = "../control-protocol" }
+mosaic-channel-telegram = { path = "../channel-telegram" }
 
 [dev-dependencies]
 axum.workspace = true

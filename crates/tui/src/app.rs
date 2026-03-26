@@ -161,6 +161,8 @@ pub struct SessionRecord {
     pub modified: String,
     pub created: String,
     pub channel: String,
+    pub actor: Option<String>,
+    pub thread: Option<String>,
     pub route: String,
     pub runtime: String,
     pub model: String,
@@ -366,7 +368,21 @@ impl App {
             view.origin = origin.to_owned();
             view.modified = session.updated_at.format("%Y-%m-%d %H:%M").to_string();
             view.created = session.created_at.format("%Y-%m-%d %H:%M").to_string();
-            view.channel = "control".to_owned();
+            view.channel = session
+                .channel_context
+                .channel
+                .clone()
+                .unwrap_or_else(|| "control".to_owned());
+            view.actor = session
+                .channel_context
+                .actor_name
+                .clone()
+                .or(session.channel_context.actor_id.clone());
+            view.thread = session
+                .channel_context
+                .thread_title
+                .clone()
+                .or(session.channel_context.thread_id.clone());
             view.route = session.gateway.route.clone();
             view.runtime = session.provider_type.clone();
             view.model = session.model.clone();
@@ -1532,6 +1548,8 @@ fn interactive_session_record(session_id: &str, model: &str) -> SessionRecord {
         modified: current_hhmm(),
         created: current_hhmm(),
         channel: "control".to_owned(),
+        actor: None,
+        thread: None,
         route: session_route_for_id(session_id),
         runtime: "agent-runtime".to_owned(),
         model: model.to_owned(),

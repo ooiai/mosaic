@@ -15,6 +15,7 @@ tokio.workspace = true
 uuid.workspace = true
 
 mosaic-config = { path = "../config" }
+mosaic-channel-telegram = { path = "../channel-telegram" }
 mosaic-control-protocol = { path = "../control-protocol" }
 mosaic-extension-core = { path = "../extension-core" }
 mosaic-memory = { path = "../memory" }
@@ -31,4 +32,5 @@ mosaic-workflow = { path = "../workflow" }
 
 [dev-dependencies]
 mosaic-config = { path = "../config" }
+mosaic-channel-telegram = { path = "../channel-telegram" }
 reqwest.workspace = true

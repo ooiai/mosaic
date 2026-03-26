@@ -1046,12 +1046,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mosaic-channel-telegram"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "mosaic-inspect",
+ "serde",
+]
+
+[[package]]
 name = "mosaic-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "mosaic-channel-telegram",
  "mosaic-config",
  "mosaic-control-protocol",
  "mosaic-extension-core",
@@ -1120,6 +1130,7 @@ dependencies = [
  "axum",
  "chrono",
  "futures",
+ "mosaic-channel-telegram",
  "mosaic-config",
  "mosaic-control-protocol",
  "mosaic-extension-core",
@@ -1244,6 +1255,7 @@ dependencies = [
  "axum",
  "bytes",
  "futures",
+ "mosaic-channel-telegram",
  "mosaic-config",
  "mosaic-control-protocol",
  "mosaic-gateway",
@@ -1268,6 +1280,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "mosaic-inspect",
  "serde",
  "serde_json",
 ]

@@ -9,8 +9,9 @@ use mosaic_config::{
     load_mosaic_config, redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
 use mosaic_control_protocol::{
-    CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest, ExecJobRequest, GatewayEvent,
-    IngressTrace, RunResponse, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
+    AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
+    ExecJobRequest, GatewayEvent, IngressTrace, RunResponse, SessionDetailDto, SessionSummaryDto,
+    WebhookJobRequest,
 };
 use mosaic_extension_core::{ExtensionStatus, ExtensionValidationReport, validate_extension_set};
 use mosaic_gateway::{
@@ -88,6 +89,12 @@ enum Commands {
         #[command(subcommand)]
         command: GatewayCliCommand,
     },
+    Adapter {
+        #[arg(long)]
+        attach: Option<String>,
+        #[command(subcommand)]
+        command: AdapterCommand,
+    },
     Node {
         #[command(subcommand)]
         command: NodeCliCommand,
@@ -145,6 +152,12 @@ enum GatewayCliCommand {
         http: Option<String>,
     },
     Sessions,
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum AdapterCommand {
+    Status,
+    Doctor,
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -284,6 +297,10 @@ enum DispatchCommand {
     Gateway {
         command: GatewayCliCommand,
     },
+    Adapter {
+        attach: Option<String>,
+        command: AdapterCommand,
+    },
     Node {
         command: NodeCliCommand,
     },
@@ -347,6 +364,9 @@ impl Cli {
             }
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
             Some(Commands::Gateway { command }) => DispatchCommand::Gateway { command },
+            Some(Commands::Adapter { attach, command }) => {
+                DispatchCommand::Adapter { attach, command }
+            }
             Some(Commands::Node { command }) => DispatchCommand::Node { command },
             Some(Commands::Capability { attach, command }) => {
                 DispatchCommand::Capability { attach, command }
@@ -382,6 +402,7 @@ async fn main() -> Result<()> {
         DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
         DispatchCommand::Model { command } => model_cmd(command),
         DispatchCommand::Gateway { command } => gateway_cmd(command).await,
+        DispatchCommand::Adapter { attach, command } => adapter_cmd(attach, command).await,
         DispatchCommand::Node { command } => node_cmd(command).await,
         DispatchCommand::Capability { attach, command } => capability_cmd(attach, command).await,
         DispatchCommand::Cron { attach, command } => cron_cmd(attach, command).await,
@@ -712,6 +733,12 @@ async fn session_cmd(attach: Option<String>, command: SessionCommand) -> Result<
             println!("model: {}", session.model);
             println!("last_run_id: {:?}", session.last_run_id);
             println!("session_route: {}", session.gateway.route);
+            println!("channel: {:?}", session.channel_context.channel);
+            println!("actor_id: {:?}", session.channel_context.actor_id);
+            println!("actor_name: {:?}", session.channel_context.actor_name);
+            println!("thread_id: {:?}", session.channel_context.thread_id);
+            println!("thread_title: {:?}", session.channel_context.thread_title);
+            println!("reply_target: {:?}", session.channel_context.reply_target);
             println!(
                 "last_gateway_run_id: {:?}",
                 session.gateway.last_gateway_run_id
@@ -824,6 +851,21 @@ async fn gateway_cmd(command: GatewayCliCommand) -> Result<()> {
 
             Ok(())
         }
+    }
+}
+
+async fn adapter_cmd(attach: Option<String>, command: AdapterCommand) -> Result<()> {
+    let adapters = if let Some(url) = attach {
+        GatewayClient::new(url).list_adapters().await?
+    } else {
+        let loaded = ensure_loaded_config(None)?;
+        let gateway = build_gateway_handle(&loaded, None)?;
+        gateway.list_adapter_statuses()
+    };
+
+    match command {
+        AdapterCommand::Status => print_adapter_statuses(&adapters),
+        AdapterCommand::Doctor => print_adapter_doctor(&adapters),
     }
 }
 
@@ -1516,6 +1558,10 @@ fn inspect_cmd(file: PathBuf) -> Result<()> {
         println!("  source: {:?}", ingress.source);
         println!("  remote_addr: {:?}", ingress.remote_addr);
         println!("  display_name: {:?}", ingress.display_name);
+        println!("  actor_id: {:?}", ingress.actor_id);
+        println!("  thread_id: {:?}", ingress.thread_id);
+        println!("  thread_title: {:?}", ingress.thread_title);
+        println!("  reply_target: {:?}", ingress.reply_target);
         println!("  gateway_url: {:?}", ingress.gateway_url);
     }
 
@@ -1805,6 +1851,38 @@ fn build_gateway_handle(
     bootstrap::build_local_gateway(tokio::runtime::Handle::current(), loaded, app_cfg)
 }
 
+fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
+    if adapters.is_empty() {
+        println!("no adapters found");
+        return Ok(());
+    }
+
+    for adapter in adapters {
+        println!(
+            "{} | channel={} | transport={} | path={} | status={} | outbound_ready={}",
+            adapter.name,
+            adapter.channel,
+            adapter.transport,
+            adapter.ingress_path,
+            adapter.status,
+            adapter.outbound_ready,
+        );
+        println!("  {}", adapter.detail);
+    }
+
+    Ok(())
+}
+
+fn print_adapter_doctor(adapters: &[AdapterStatusDto]) -> Result<()> {
+    println!("adapter doctor:");
+    print_adapter_statuses(adapters)?;
+    if adapters.iter().any(|adapter| adapter.status == "error") {
+        bail!("adapter doctor found errors");
+    }
+    println!("adapter doctor: ok");
+    Ok(())
+}
+
 fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
     if sessions.is_empty() {
         println!("no sessions found");
@@ -1824,6 +1902,20 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
             session.updated_at,
             session.last_gateway_run_id.as_deref().unwrap_or("-"),
             session.last_correlation_id.as_deref().unwrap_or("-"),
+        );
+        println!(
+            "  channel={:?} actor={:?} thread={:?}",
+            session.channel_context.channel,
+            session
+                .channel_context
+                .actor_name
+                .as_ref()
+                .or(session.channel_context.actor_id.as_ref()),
+            session
+                .channel_context
+                .thread_title
+                .as_ref()
+                .or(session.channel_context.thread_id.as_ref()),
         );
         if let Some(preview) = session.last_message_preview.as_deref() {
             println!("  last: {}", preview);
@@ -1856,6 +1948,20 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
             session.last_gateway_run_id.as_deref().unwrap_or("-"),
             session.last_correlation_id.as_deref().unwrap_or("-"),
         );
+        println!(
+            "  channel={:?} actor={:?} thread={:?}",
+            session.channel_context.channel,
+            session
+                .channel_context
+                .actor_name
+                .as_ref()
+                .or(session.channel_context.actor_id.as_ref()),
+            session
+                .channel_context
+                .thread_title
+                .as_ref()
+                .or(session.channel_context.thread_id.as_ref()),
+        );
         if let Some(preview) = session.last_message_preview.as_deref() {
             println!("  last: {}", preview);
         }
@@ -1877,6 +1983,12 @@ fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
     println!("model: {}", session.model);
     println!("last_run_id: {:?}", session.last_run_id);
     println!("session_route: {}", session.gateway.route);
+    println!("channel: {:?}", session.channel_context.channel);
+    println!("actor_id: {:?}", session.channel_context.actor_id);
+    println!("actor_name: {:?}", session.channel_context.actor_name);
+    println!("thread_id: {:?}", session.channel_context.thread_id);
+    println!("thread_title: {:?}", session.channel_context.thread_title);
+    println!("reply_target: {:?}", session.channel_context.reply_target);
     println!(
         "last_gateway_run_id: {:?}",
         session.gateway.last_gateway_run_id
@@ -1997,6 +2109,10 @@ fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
         source: Some("mosaic-cli".to_owned()),
         remote_addr: None,
         display_name: None,
+        actor_id: None,
+        thread_id: None,
+        thread_title: None,
+        reply_target: None,
         gateway_url,
     }
 }
@@ -2008,6 +2124,10 @@ fn remote_cli_ingress(gateway_url: &str) -> IngressTrace {
         source: Some("mosaic-cli".to_owned()),
         remote_addr: None,
         display_name: None,
+        actor_id: None,
+        thread_id: None,
+        thread_title: None,
+        reply_target: None,
         gateway_url: Some(gateway_url.to_owned()),
     }
 }

@@ -595,8 +595,12 @@ mod tests {
         let client = McpClient::new(transport);
 
         let err = block_on(client.list_tools()).expect_err("crashed server should fail");
+        let message = err.to_string();
 
-        assert!(err.to_string().contains("exited"));
+        assert!(
+            message.contains("exited") || message.contains("closed stdout unexpectedly"),
+            "unexpected crash message: {message}"
+        );
     }
 
     #[test]

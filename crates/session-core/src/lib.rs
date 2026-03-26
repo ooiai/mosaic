@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
+use mosaic_inspect::IngressTrace;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -77,6 +78,8 @@ pub struct SessionRecord {
     #[serde(default)]
     pub gateway: SessionGatewayMetadata,
     #[serde(default)]
+    pub channel_context: SessionChannelMetadata,
+    #[serde(default)]
     pub memory: SessionMemoryMetadata,
     #[serde(default)]
     pub references: Vec<SessionReference>,
@@ -89,6 +92,18 @@ pub struct SessionGatewayMetadata {
     pub route: String,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct SessionChannelMetadata {
+    pub ingress_kind: Option<String>,
+    pub channel: Option<String>,
+    pub source: Option<String>,
+    pub actor_id: Option<String>,
+    pub actor_name: Option<String>,
+    pub thread_id: Option<String>,
+    pub thread_title: Option<String>,
+    pub reply_target: Option<String>,
 }
 
 impl SessionRecord {
@@ -116,6 +131,7 @@ impl SessionRecord {
                 last_gateway_run_id: None,
                 last_correlation_id: None,
             },
+            channel_context: SessionChannelMetadata::default(),
             memory: SessionMemoryMetadata::default(),
             references: Vec::new(),
             transcript: Vec::new(),
@@ -162,6 +178,18 @@ impl SessionRecord {
         self.updated_at = Utc::now();
     }
 
+    pub fn bind_ingress_context(&mut self, ingress: &IngressTrace) {
+        self.channel_context.ingress_kind = Some(ingress.kind.clone());
+        self.channel_context.channel = ingress.channel.clone();
+        self.channel_context.source = ingress.source.clone();
+        self.channel_context.actor_id = ingress.actor_id.clone();
+        self.channel_context.actor_name = ingress.display_name.clone();
+        self.channel_context.thread_id = ingress.thread_id.clone();
+        self.channel_context.thread_title = ingress.thread_title.clone();
+        self.channel_context.reply_target = ingress.reply_target.clone();
+        self.updated_at = Utc::now();
+    }
+
     pub fn set_memory_state(
         &mut self,
         latest_summary: Option<String>,
@@ -203,6 +231,7 @@ impl SessionRecord {
             provider_type: self.provider_type.clone(),
             model: self.model.clone(),
             session_route: self.effective_gateway_route(),
+            channel_context: self.channel_context.clone(),
             last_gateway_run_id: self.gateway.last_gateway_run_id.clone(),
             last_correlation_id: self.gateway.last_correlation_id.clone(),
             message_count: self.transcript.len(),
@@ -237,6 +266,8 @@ pub struct SessionSummary {
     pub provider_type: String,
     pub model: String,
     pub session_route: String,
+    #[serde(default)]
+    pub channel_context: SessionChannelMetadata,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
     pub message_count: usize,
@@ -430,6 +461,18 @@ mod tests {
         let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
         session.append_message(TranscriptRole::User, "hello", None);
         session.append_message(TranscriptRole::Assistant, "world", None);
+        session.bind_ingress_context(&IngressTrace {
+            kind: "webchat".to_owned(),
+            channel: Some("webchat".to_owned()),
+            source: Some("browser".to_owned()),
+            remote_addr: None,
+            display_name: Some("Guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            thread_id: Some("room-7".to_owned()),
+            thread_title: Some("Launch Room".to_owned()),
+            reply_target: Some("webchat:guest-1".to_owned()),
+            gateway_url: None,
+        });
         session.set_last_run_id("run-1");
         session.set_memory_state(
             Some("Summary for demo".to_owned()),
@@ -444,6 +487,9 @@ mod tests {
         assert_eq!(summary.id, "demo");
         assert_eq!(summary.message_count, 2);
         assert_eq!(summary.last_message_preview.as_deref(), Some("world"));
+        assert_eq!(summary.channel_context.channel.as_deref(), Some("webchat"));
+        assert_eq!(summary.channel_context.actor_id.as_deref(), Some("guest-1"));
+        assert_eq!(summary.channel_context.thread_id.as_deref(), Some("room-7"));
         assert_eq!(summary.session_route, session_route_for_id("demo"));
         assert_eq!(
             summary.memory_summary_preview.as_deref(),

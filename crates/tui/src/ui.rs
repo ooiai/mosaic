@@ -637,6 +637,16 @@ fn console_lines(app: &App) -> Vec<Line<'_>> {
         ]),
     ];
 
+    if session.actor.is_some() || session.thread.is_some() {
+        lines.push(Line::from(vec![
+            Span::styled("Actor ", Style::default().fg(Color::DarkGray)),
+            Span::raw(session.actor.as_deref().unwrap_or("-")),
+            Span::raw("  "),
+            Span::styled("Thread ", Style::default().fg(Color::DarkGray)),
+            Span::raw(session.thread.as_deref().unwrap_or("-")),
+        ]));
+    }
+
     if let Some(summary) = session.memory_summary.as_deref() {
         lines.push(Line::from(vec![
             Span::styled("Summary ", Style::default().fg(Color::DarkGray)),
