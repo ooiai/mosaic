@@ -1,82 +1,94 @@
 # CLI Reference
 
-This document groups the operator-facing commands you are most likely to use.
+This reference is organized around the operator tasks you actually perform with Mosaic.
 
-## Global help
+## Global Help
+
+Use this when you need the full command map and the high-level operator groupings.
 
 ```bash
 mosaic --help
 ```
 
-## Setup and configuration
+## Operator Groupings
 
-Initialize the workspace:
+- `setup` and `config`: bootstrap the workspace, validate it, and explain the merged config.
+- `tui`, `run`, `session`, and `model`: operate conversations and provider routing.
+- `inspect`: explain one saved run trace.
+- `gateway`, `adapter`, and `node`: operate the control plane and its edges.
+- `capability`, `cron`, `extension`, and `memory`: operate automations, plugins, and stored state.
+
+## Setup and Config
+
+Initialize the workspace the first time:
 
 ```bash
 mosaic setup init
 ```
 
-Regenerate the template if you want to overwrite an existing config:
+Overwrite an existing generated template:
 
 ```bash
 mosaic setup init --force
 ```
 
-Validate config:
+Validate the merged config:
 
 ```bash
 mosaic setup validate
 ```
 
-Run doctor checks:
+Run the categorized doctor checks:
 
 ```bash
 mosaic setup doctor
 ```
 
-## Models
-
-List configured profiles:
+Show the merged redacted config that Mosaic will actually run:
 
 ```bash
-mosaic model list
+mosaic config show
 ```
 
-Switch the active profile in the workspace config:
+Show only the config source stack and precedence:
 
 ```bash
-mosaic model use openai
+mosaic config sources
 ```
 
-## TUI
+Emit the merged config as machine-readable JSON:
 
-Start the local interactive TUI:
+```bash
+mosaic config show --json
+```
+
+## Conversations and Models
+
+Start the long-lived operator console:
 
 ```bash
 mosaic tui
 ```
 
-Start the TUI on a specific session or profile:
+Resume or create a specific operator conversation:
 
 ```bash
 mosaic tui --session support --profile openai
 ```
 
-Attach the TUI to a remote Gateway:
+Attach the operator console to a remote Gateway:
 
 ```bash
 mosaic tui --attach http://127.0.0.1:8080 --session remote-demo
 ```
 
-## File-based runs
-
-Run an app config file:
+Run one file-backed job without entering the long-lived console:
 
 ```bash
 mosaic run examples/time-now-agent.yaml
 ```
 
-Run with an explicit session:
+Run with persisted session routing and memory:
 
 ```bash
 mosaic run examples/time-now-agent.yaml --session docs-demo
@@ -88,35 +100,59 @@ Force a workflow entrypoint:
 mosaic run examples/workflows/research-brief.yaml --workflow research_brief
 ```
 
-Run against a remote Gateway:
+Watch a single run in the terminal observer:
 
 ```bash
-mosaic run examples/time-now-agent.yaml --attach http://127.0.0.1:8080 --session remote-demo
+mosaic run examples/time-now-agent.yaml --tui
 ```
 
-## Sessions and traces
-
-List sessions:
+List stored sessions:
 
 ```bash
 mosaic session list
 ```
 
-Show one session:
+Inspect one session transcript and routing state:
 
 ```bash
 mosaic session show docs-demo
 ```
 
-Inspect one trace file:
+List configured provider profiles:
+
+```bash
+mosaic model list
+```
+
+Switch the active provider profile in workspace config:
+
+```bash
+mosaic model use openai
+```
+
+## Inspect and Incident Response
+
+Show the default run summary for one saved trace:
 
 ```bash
 mosaic inspect .mosaic/runs/<run-id>.json
 ```
 
-## Gateway
+Expand the trace into provider, tool, workflow, memory, and governance detail:
 
-Show local status:
+```bash
+mosaic inspect .mosaic/runs/<run-id>.json --verbose
+```
+
+Emit the saved trace as machine-readable JSON:
+
+```bash
+mosaic inspect .mosaic/runs/<run-id>.json --json
+```
+
+## Gateway, Adapters, and Nodes
+
+Show local Gateway health, readiness, and metrics:
 
 ```bash
 mosaic gateway status
@@ -128,7 +164,7 @@ Serve the HTTP control plane:
 mosaic gateway serve --http 127.0.0.1:8080
 ```
 
-Watch the local in-process monitor:
+Watch the local in-process Gateway monitor:
 
 ```bash
 mosaic gateway serve --local
@@ -140,25 +176,23 @@ List session summaries from the Gateway:
 mosaic gateway sessions
 ```
 
-View audit events:
+Review recent audit events:
 
 ```bash
 mosaic gateway audit --limit 20
 ```
 
-View replay window contents:
+Review the replay window:
 
 ```bash
 mosaic gateway replay --limit 20
 ```
 
-Export an incident bundle:
+Export an incident bundle for one run:
 
 ```bash
 mosaic gateway incident <run-id>
 ```
-
-## Adapters
 
 Show adapter status:
 
@@ -171,54 +205,6 @@ Run adapter doctor:
 ```bash
 mosaic adapter doctor
 ```
-
-## Capabilities
-
-List capability job state:
-
-```bash
-mosaic capability jobs
-```
-
-Show guardrails for `exec`:
-
-```bash
-mosaic capability exec guardrails
-```
-
-Run a small command through the capability layer:
-
-```bash
-mosaic capability exec run ./script.sh --session ops-demo
-```
-
-Test a webhook call:
-
-```bash
-mosaic capability webhook test http://127.0.0.1:8080 --method GET
-```
-
-## Cron
-
-List cron registrations:
-
-```bash
-mosaic cron list
-```
-
-Register a cron job:
-
-```bash
-mosaic cron register every-hour "0 * * * *" "status report" --session ops-demo
-```
-
-Trigger one manually:
-
-```bash
-mosaic cron trigger every-hour
-```
-
-## Nodes
 
 Start a local node:
 
@@ -244,9 +230,69 @@ Inspect node capabilities:
 mosaic node capabilities laptop
 ```
 
-## Memory
+## Automations and State
 
-List sessions with memory:
+List capability jobs:
+
+```bash
+mosaic capability jobs
+```
+
+Show `exec` guardrails:
+
+```bash
+mosaic capability exec guardrails
+```
+
+Run a command through the capability layer:
+
+```bash
+mosaic capability exec run ./script.sh --session ops-demo
+```
+
+Test a webhook call:
+
+```bash
+mosaic capability webhook test http://127.0.0.1:8080 --method GET
+```
+
+List cron registrations:
+
+```bash
+mosaic cron list
+```
+
+Register a cron job:
+
+```bash
+mosaic cron register every-hour "0 * * * *" "status report" --session ops-demo
+```
+
+Trigger one cron job manually:
+
+```bash
+mosaic cron trigger every-hour
+```
+
+List loaded extensions:
+
+```bash
+mosaic extension list
+```
+
+Validate extensions:
+
+```bash
+mosaic extension validate
+```
+
+Reload extensions:
+
+```bash
+mosaic extension reload
+```
+
+List sessions with saved memory:
 
 ```bash
 mosaic memory list
@@ -258,28 +304,8 @@ Show one session memory view:
 mosaic memory show ops-demo
 ```
 
-Search memory:
+Search memory entries:
 
 ```bash
-mosaic memory search deploy --tag note
-```
-
-## Extensions
-
-List extension status:
-
-```bash
-mosaic extension list
-```
-
-Validate manifests:
-
-```bash
-mosaic extension validate
-```
-
-Reload manifests:
-
-```bash
-mosaic extension reload
+mosaic memory search summary --tag note
 ```

@@ -1,3 +1,6 @@
+use anyhow::Result;
+use mosaic_config::{DoctorReport, LoadedMosaicConfig, RedactedMosaicConfig, ValidationReport};
+use mosaic_inspect::RunTrace;
 use mosaic_runtime::events::{RunEvent, RunEventSink};
 use tracing::info;
 
@@ -136,11 +139,870 @@ impl RunEventSink for CliEventSink {
     }
 }
 
+pub fn render_next_steps<I, S>(steps: I) -> String
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let collected = steps
+        .into_iter()
+        .map(|step| step.as_ref().trim().to_owned())
+        .filter(|step| !step.is_empty())
+        .collect::<Vec<_>>();
+    if collected.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::from("next:\n");
+    for step in collected {
+        out.push_str(&format!("  {}\n", step));
+    }
+    out
+}
+
+pub fn render_config_sources(loaded: &LoadedMosaicConfig) -> String {
+    let rows = vec![
+        ("active_profile", loaded.config.active_profile.clone()),
+        ("source_layers", loaded.sources.len().to_string()),
+        (
+            "workspace_config",
+            loaded.workspace_config_path.display().to_string(),
+        ),
+        (
+            "user_config",
+            loaded
+                .user_config_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_owned()),
+        ),
+    ];
+    let source_lines = loaded
+        .sources
+        .iter()
+        .enumerate()
+        .map(|(idx, source)| {
+            format!(
+                "{}. {} | {}",
+                idx + 1,
+                config_source_label(&source.kind),
+                source.detail
+            )
+        })
+        .collect::<Vec<_>>();
+
+    join_blocks([
+        render_key_value_block("config source summary", rows),
+        render_list_block("config sources", source_lines),
+        render_list_block(
+            "config precedence",
+            vec![
+                "Later layers override earlier ones.".to_owned(),
+                "Order: defaults -> user -> workspace -> env -> cli.".to_owned(),
+            ],
+        ),
+    ])
+}
+
+pub fn render_config_show(loaded: &LoadedMosaicConfig, validation: &ValidationReport) -> String {
+    let redacted = mosaic_config::redact_mosaic_config(&loaded.config);
+    render_redacted_config(&redacted, validation, Some(&loaded.workspace_config_path))
+}
+
+pub fn render_doctor_report(doctor: &DoctorReport) -> String {
+    let summary = doctor.summary();
+    let status = if doctor.has_errors() {
+        "issues found"
+    } else if summary.warnings > 0 || !doctor.validation.issues.is_empty() {
+        "attention needed"
+    } else {
+        "ok"
+    };
+    let category_lines = summary
+        .categories
+        .iter()
+        .map(|entry| {
+            format!(
+                "{} | ok={} warning={} error={}",
+                entry.category.label(),
+                entry.ok,
+                entry.warnings,
+                entry.errors,
+            )
+        })
+        .collect::<Vec<_>>();
+    let check_lines = doctor
+        .checks
+        .iter()
+        .map(|check| {
+            format!(
+                "[{}] {}: {}",
+                doctor_status_label(&check.status),
+                check.category.label(),
+                check.message,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut blocks = vec![render_key_value_block(
+        "doctor summary",
+        vec![
+            ("status", status.to_owned()),
+            (
+                "validation_errors",
+                validation_error_count(&doctor.validation).to_string(),
+            ),
+            (
+                "validation_warnings",
+                validation_warning_count(&doctor.validation).to_string(),
+            ),
+            ("checks", doctor.checks.len().to_string()),
+            ("ok", summary.ok.to_string()),
+            ("warnings", summary.warnings.to_string()),
+            ("errors", summary.errors.to_string()),
+        ],
+    )];
+
+    if !category_lines.is_empty() {
+        blocks.push(render_list_block("doctor categories", category_lines));
+    }
+
+    if !doctor.validation.issues.is_empty() {
+        let validation_lines = doctor
+            .validation
+            .issues
+            .iter()
+            .map(|issue| {
+                format!(
+                    "[{}] {}: {}",
+                    validation_level_label(&issue.level),
+                    issue.field,
+                    issue.message,
+                )
+            })
+            .collect::<Vec<_>>();
+        blocks.push(render_list_block("validation issues", validation_lines));
+    }
+
+    if !check_lines.is_empty() {
+        blocks.push(render_list_block("doctor checks", check_lines));
+    }
+
+    join_blocks(blocks)
+}
+
+pub fn render_gateway_status(
+    health: &mosaic_control_protocol::HealthResponse,
+    readiness: &mosaic_control_protocol::ReadinessResponse,
+    metrics: &mosaic_control_protocol::MetricsResponse,
+) -> String {
+    join_blocks([
+        render_key_value_block(
+            "gateway summary",
+            vec![
+                ("status", health.status.clone()),
+                ("active_profile", health.active_profile.clone()),
+                ("deployment_profile", health.deployment_profile.clone()),
+                ("auth_mode", health.auth_mode.clone()),
+                ("transport", health.transport.clone()),
+                ("sessions", health.session_count.to_string()),
+                ("replay_window", health.event_replay_window.to_string()),
+            ],
+        ),
+        render_key_value_block(
+            "gateway readiness",
+            vec![
+                ("status", readiness.status.clone()),
+                (
+                    "session_store_ready",
+                    readiness.session_store_ready.to_string(),
+                ),
+                ("audit_ready", readiness.audit_ready.to_string()),
+                (
+                    "replay_events_buffered",
+                    readiness.replay_events_buffered.to_string(),
+                ),
+                (
+                    "slow_consumer_threshold",
+                    readiness.slow_consumer_lag_threshold.to_string(),
+                ),
+                ("extensions", readiness.extension_count.to_string()),
+            ],
+        ),
+        render_key_value_block(
+            "gateway metrics",
+            vec![
+                ("completed_runs", metrics.completed_runs_total.to_string()),
+                ("failed_runs", metrics.failed_runs_total.to_string()),
+                (
+                    "capability_jobs_total",
+                    metrics.capability_jobs_total.to_string(),
+                ),
+                ("audit_events_total", metrics.audit_events_total.to_string()),
+                ("auth_denials_total", metrics.auth_denials_total.to_string()),
+                (
+                    "lagged_events_total",
+                    metrics.broadcast_lag_events_total.to_string(),
+                ),
+                ("open_jobs", metrics.capability_job_count.to_string()),
+            ],
+        ),
+    ])
+}
+
+pub fn render_inspect_report(
+    trace: &RunTrace,
+    workspace: Option<&RedactedMosaicConfig>,
+    verbose: bool,
+) -> Result<String> {
+    let summary = trace.summary();
+    let mut blocks = vec![render_key_value_block(
+        "run summary",
+        vec![
+            ("run_id", trace.run_id.clone()),
+            ("status", summary.status.clone()),
+            ("duration_ms", option_i64(summary.duration_ms)),
+            (
+                "gateway_run_id",
+                option_string(trace.gateway_run_id.clone()),
+            ),
+            (
+                "correlation_id",
+                option_string(trace.correlation_id.clone()),
+            ),
+            ("session_id", option_string(trace.session_id.clone())),
+            ("session_route", option_string(trace.session_route.clone())),
+            ("workflow_name", option_string(trace.workflow_name.clone())),
+            ("started_at", trace.started_at.to_rfc3339()),
+            ("finished_at", option_datetime(trace.finished_at)),
+            ("input_preview", truncate(&trace.input, 120)),
+            (
+                "output_preview",
+                option_preview(trace.output.as_deref(), 120),
+            ),
+            ("error", option_preview(trace.error.as_deref(), 120)),
+        ],
+    )];
+
+    blocks.push(render_key_value_block(
+        "run activity",
+        vec![
+            ("tool_calls", summary.tool_calls.to_string()),
+            (
+                "capability_invocations",
+                summary.capability_invocations.to_string(),
+            ),
+            ("skill_calls", summary.skill_calls.to_string()),
+            ("workflow_steps", summary.workflow_steps.to_string()),
+            ("provider_attempts", summary.provider_attempts.to_string()),
+            ("model_selections", summary.model_selections.to_string()),
+            ("memory_reads", summary.memory_reads.to_string()),
+            ("memory_writes", summary.memory_writes.to_string()),
+            ("active_extensions", summary.active_extensions.to_string()),
+            ("used_extensions", summary.used_extensions.to_string()),
+            ("compression", yes_no(summary.has_compression).to_owned()),
+        ],
+    ));
+
+    if let Some(profile) = &trace.effective_profile {
+        blocks.push(render_key_value_block(
+            "effective profile",
+            vec![
+                ("profile", profile.profile.clone()),
+                ("provider_type", profile.provider_type.clone()),
+                ("model", profile.model.clone()),
+                ("base_url", option_string(profile.base_url.clone())),
+                ("api_key_env", option_string(profile.api_key_env.clone())),
+                ("api_key_present", profile.api_key_present.to_string()),
+                ("timeout_ms", profile.timeout_ms.to_string()),
+                ("max_retries", profile.max_retries.to_string()),
+                ("supports_tools", profile.supports_tools.to_string()),
+            ],
+        ));
+    }
+
+    if let Some(ingress) = &trace.ingress {
+        blocks.push(render_key_value_block(
+            "ingress",
+            vec![
+                ("kind", ingress.kind.clone()),
+                ("channel", option_string(ingress.channel.clone())),
+                ("source", option_string(ingress.source.clone())),
+                ("actor_id", option_string(ingress.actor_id.clone())),
+                ("display_name", option_string(ingress.display_name.clone())),
+                ("thread_id", option_string(ingress.thread_id.clone())),
+                ("reply_target", option_string(ingress.reply_target.clone())),
+                ("gateway_url", option_string(ingress.gateway_url.clone())),
+            ],
+        ));
+    }
+
+    if let Some(side_effect_summary) = &trace.side_effect_summary {
+        blocks.push(render_key_value_block(
+            "side-effect summary",
+            vec![
+                ("total", side_effect_summary.total.to_string()),
+                ("failed", side_effect_summary.failed.to_string()),
+                ("high_risk", side_effect_summary.high_risk.to_string()),
+                (
+                    "capability_kinds",
+                    if side_effect_summary.capability_kinds.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        side_effect_summary.capability_kinds.join(", ")
+                    },
+                ),
+            ],
+        ));
+    }
+
+    if !verbose {
+        return Ok(join_blocks(blocks));
+    }
+
+    if let Some(provider_failure) = &trace.provider_failure {
+        blocks.push(render_key_value_block(
+            "provider failure",
+            vec![
+                ("kind", provider_failure.kind.clone()),
+                ("status_code", option_u16(provider_failure.status_code)),
+                ("retryable", provider_failure.retryable.to_string()),
+                ("message", provider_failure.message.clone()),
+            ],
+        ));
+    }
+
+    if let Some(governance) = &trace.governance {
+        blocks.push(render_key_value_block(
+            "governance",
+            vec![
+                ("deployment_profile", governance.deployment_profile.clone()),
+                ("workspace_name", governance.workspace_name.clone()),
+                ("auth_mode", governance.auth_mode.clone()),
+                (
+                    "audit_retention_days",
+                    governance.audit_retention_days.to_string(),
+                ),
+                (
+                    "event_replay_window",
+                    governance.event_replay_window.to_string(),
+                ),
+                ("redact_inputs", governance.redact_inputs.to_string()),
+            ],
+        ));
+    }
+
+    if !trace.active_extensions.is_empty() {
+        blocks.push(render_list_block(
+            "active extensions",
+            trace
+                .active_extensions
+                .iter()
+                .map(|extension| {
+                    format!(
+                        "{}@{} | source={} | enabled={} | active={} | error={}",
+                        extension.name,
+                        extension.version,
+                        extension.source,
+                        extension.enabled,
+                        extension.active,
+                        option_string(extension.error.clone()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if !trace.used_extensions.is_empty() {
+        blocks.push(render_list_block(
+            "used extensions",
+            trace
+                .used_extensions
+                .iter()
+                .map(|usage| {
+                    format!(
+                        "{}@{} | {}:{}",
+                        usage.name, usage.version, usage.component_kind, usage.component_name
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if !trace.provider_attempts.is_empty() {
+        blocks.push(render_list_block(
+            "provider attempts",
+            trace
+                .provider_attempts
+                .iter()
+                .map(|attempt| format!(
+                    "attempt={}/{} | status={} | error_kind={} | status_code={} | retryable={} | message={}",
+                    attempt.attempt,
+                    attempt.max_attempts,
+                    attempt.status,
+                    option_string(attempt.error_kind.clone()),
+                    option_u16(attempt.status_code),
+                    attempt.retryable,
+                    option_string(attempt.message.clone()),
+                ))
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if !trace.model_selections.is_empty() {
+        blocks.push(render_list_block(
+            "model selections",
+            trace
+                .model_selections
+                .iter()
+                .map(|selection| format!(
+                    "scope={} | requested={} | selected_profile={} | selected_model={} | reason={} | context_window_chars={} | budget_tier={}",
+                    selection.scope,
+                    option_string(selection.requested_profile.clone()),
+                    selection.selected_profile,
+                    selection.selected_model,
+                    selection.reason,
+                    selection.context_window_chars,
+                    selection.budget_tier,
+                ))
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if !trace.memory_reads.is_empty() {
+        blocks.push(render_list_block(
+            "memory reads",
+            trace
+                .memory_reads
+                .iter()
+                .map(|read| {
+                    format!(
+                        "session={} | source={} | tags={} | preview={}",
+                        read.session_id,
+                        read.source,
+                        tags_or_none(&read.tags),
+                        truncate(&read.preview, 160),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if let Some(compression) = &trace.compression {
+        blocks.push(render_key_value_block(
+            "compression",
+            vec![
+                (
+                    "original_message_count",
+                    compression.original_message_count.to_string(),
+                ),
+                (
+                    "kept_recent_count",
+                    compression.kept_recent_count.to_string(),
+                ),
+                (
+                    "summary_preview",
+                    truncate(&compression.summary_preview, 160),
+                ),
+            ],
+        ));
+    }
+
+    if !trace.capability_invocations.is_empty() {
+        blocks.push(render_list_block(
+            "capability invocations",
+            trace
+                .capability_invocations
+                .iter()
+                .map(|invocation| format!(
+                    "job_id={} | tool={} | kind={} | risk={} | status={} | scopes={} | target={} | node_id={} | route={} | duration_ms={} | error={} | summary={}",
+                    invocation.job_id,
+                    invocation.tool_name,
+                    invocation.kind.label(),
+                    invocation.risk.label(),
+                    invocation.status,
+                    if invocation.permission_scopes.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        invocation
+                            .permission_scopes
+                            .iter()
+                            .map(|scope| scope.label().to_owned())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    },
+                    option_string(invocation.target.clone()),
+                    option_string(invocation.node_id.clone()),
+                    option_string(invocation.capability_route.clone()),
+                    option_i64(invocation.duration_ms()),
+                    option_string(invocation.error.clone()),
+                    truncate(&invocation.summary, 120),
+                ))
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if !trace.memory_writes.is_empty() {
+        blocks.push(render_list_block(
+            "memory writes",
+            trace
+                .memory_writes
+                .iter()
+                .map(|write| {
+                    format!(
+                        "session={} | kind={} | tags={} | preview={}",
+                        write.session_id,
+                        write.kind,
+                        tags_or_none(&write.tags),
+                        truncate(&write.preview, 160),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if let Some(workspace) = workspace {
+        blocks.push(render_redacted_config(
+            workspace,
+            &ValidationReport::default(),
+            None,
+        ));
+    }
+
+    if !trace.tool_calls.is_empty() {
+        let mut lines = Vec::new();
+        for call in &trace.tool_calls {
+            let input = serde_json::to_string_pretty(&call.input)?;
+            lines.push(format!(
+                "call_id={} | name={} | source={} | server={} | remote_tool={} | node_id={} | route={} | duration_ms={} | input={} | output_preview={}",
+                option_string(call.call_id.clone()),
+                call.name,
+                call.source.label(),
+                option_str(call.source.server_name()),
+                option_str(call.source.remote_tool_name()),
+                option_string(call.node_id.clone()),
+                option_string(call.capability_route.clone()),
+                option_i64(call.duration_ms()),
+                single_line(&input),
+                option_preview(call.output.as_deref(), 120),
+            ));
+        }
+        blocks.push(render_list_block("tool calls", lines));
+    }
+
+    if !trace.skill_calls.is_empty() {
+        let mut lines = Vec::new();
+        for call in &trace.skill_calls {
+            let input = serde_json::to_string_pretty(&call.input)?;
+            lines.push(format!(
+                "name={} | duration_ms={} | input={} | output_preview={}",
+                call.name,
+                option_i64(call.duration_ms()),
+                single_line(&input),
+                option_preview(call.output.as_deref(), 120),
+            ));
+        }
+        blocks.push(render_list_block("skill calls", lines));
+    }
+
+    if !trace.step_traces.is_empty() {
+        blocks.push(render_list_block(
+            "workflow steps",
+            trace
+                .step_traces
+                .iter()
+                .map(|step| format!(
+                    "name={} | kind={} | status={} | duration_ms={} | input_preview={} | output_preview={} | error={}",
+                    step.name,
+                    step.kind,
+                    step.status(),
+                    option_i64(step.duration_ms()),
+                    truncate(&step.input, 120),
+                    option_preview(step.output.as_deref(), 120),
+                    option_preview(step.error.as_deref(), 120),
+                ))
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    Ok(join_blocks(blocks))
+}
+
+fn render_redacted_config(
+    redacted: &RedactedMosaicConfig,
+    validation: &ValidationReport,
+    workspace_path: Option<&std::path::Path>,
+) -> String {
+    let mut blocks = vec![render_key_value_block(
+        "config summary",
+        vec![
+            ("schema_version", redacted.schema_version.to_string()),
+            ("active_profile", redacted.active_profile.clone()),
+            ("profile_count", redacted.profiles.len().to_string()),
+            (
+                "validation_errors",
+                validation_error_count(validation).to_string(),
+            ),
+            (
+                "validation_warnings",
+                validation_warning_count(validation).to_string(),
+            ),
+            (
+                "workspace_config",
+                workspace_path
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "<not-loaded>".to_owned()),
+            ),
+        ],
+    )];
+
+    blocks.push(render_key_value_block(
+        "deployment",
+        vec![
+            ("profile", redacted.deployment.profile.clone()),
+            ("workspace_name", redacted.deployment.workspace_name.clone()),
+        ],
+    ));
+    blocks.push(render_key_value_block(
+        "storage",
+        vec![
+            (
+                "session_store_root_dir",
+                redacted.session_store_root_dir.clone(),
+            ),
+            ("inspect_runs_dir", redacted.inspect_runs_dir.clone()),
+            ("audit_root_dir", redacted.audit.root_dir.clone()),
+            (
+                "audit_retention_days",
+                redacted.audit.retention_days.to_string(),
+            ),
+            (
+                "event_replay_window",
+                redacted.audit.event_replay_window.to_string(),
+            ),
+            ("redact_inputs", redacted.audit.redact_inputs.to_string()),
+        ],
+    ));
+    blocks.push(render_key_value_block(
+        "auth",
+        vec![
+            (
+                "operator_token_env",
+                option_string(redacted.auth.operator_token_env.clone()),
+            ),
+            (
+                "operator_token_present",
+                redacted.auth.operator_token_present.to_string(),
+            ),
+            (
+                "webchat_secret_env",
+                option_string(redacted.auth.webchat_shared_secret_env.clone()),
+            ),
+            (
+                "webchat_secret_present",
+                redacted.auth.webchat_shared_secret_present.to_string(),
+            ),
+            (
+                "telegram_secret_env",
+                option_string(redacted.auth.telegram_secret_token_env.clone()),
+            ),
+            (
+                "telegram_secret_present",
+                redacted.auth.telegram_secret_token_present.to_string(),
+            ),
+        ],
+    ));
+    blocks.push(render_key_value_block(
+        "observability",
+        vec![
+            ("metrics", redacted.observability.enable_metrics.to_string()),
+            (
+                "readiness",
+                redacted.observability.enable_readiness.to_string(),
+            ),
+            (
+                "slow_consumer_lag_threshold",
+                redacted
+                    .observability
+                    .slow_consumer_lag_threshold
+                    .to_string(),
+            ),
+        ],
+    ));
+    blocks.push(render_key_value_block(
+        "policies",
+        vec![
+            ("allow_exec", redacted.policies.allow_exec.to_string()),
+            ("allow_webhook", redacted.policies.allow_webhook.to_string()),
+            ("allow_cron", redacted.policies.allow_cron.to_string()),
+            ("allow_mcp", redacted.policies.allow_mcp.to_string()),
+            (
+                "hot_reload_enabled",
+                redacted.policies.hot_reload_enabled.to_string(),
+            ),
+            (
+                "extension_manifest_count",
+                redacted.extension_manifest_count.to_string(),
+            ),
+        ],
+    ));
+    blocks.push(render_list_block(
+        "profiles",
+        redacted
+            .profiles
+            .iter()
+            .map(|profile| {
+                format!(
+                    "{} | type={} | model={} | base_url={} | api_key_env={} | api_key_present={}",
+                    profile.name,
+                    profile.provider_type,
+                    profile.model,
+                    option_string(profile.base_url.clone()),
+                    option_string(profile.api_key_env.clone()),
+                    profile.api_key_present,
+                )
+            })
+            .collect::<Vec<_>>(),
+    ));
+
+    join_blocks(blocks)
+}
+
+fn render_key_value_block(title: &str, rows: Vec<(&str, String)>) -> String {
+    let mut out = format!("{}:\n", title);
+    for (label, value) in rows {
+        out.push_str(&format!("  {}: {}\n", label, value));
+    }
+    out.trim_end().to_owned()
+}
+
+fn render_list_block(title: &str, rows: Vec<String>) -> String {
+    let mut out = format!("{}:\n", title);
+    if rows.is_empty() {
+        out.push_str("  <none>");
+    } else {
+        for row in rows {
+            out.push_str(&format!("  - {}\n", row));
+        }
+    }
+    out.trim_end().to_owned()
+}
+
+fn join_blocks<I>(blocks: I) -> String
+where
+    I: IntoIterator<Item = String>,
+{
+    blocks
+        .into_iter()
+        .filter(|block| !block.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+fn option_string(value: Option<String>) -> String {
+    value.unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn option_str(value: Option<&str>) -> String {
+    value.unwrap_or("<none>").to_owned()
+}
+
+fn option_i64(value: Option<i64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn option_u16(value: Option<u16>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn option_datetime(value: Option<chrono::DateTime<chrono::Utc>>) -> String {
+    value
+        .map(|value| value.to_rfc3339())
+        .unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn option_preview(value: Option<&str>, limit: usize) -> String {
+    value
+        .map(|value| truncate(value, limit))
+        .unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn truncate(value: &str, limit: usize) -> String {
+    if value.chars().count() <= limit {
+        return value.to_owned();
+    }
+
+    let truncated: String = value.chars().take(limit).collect();
+    format!("{}...", truncated)
+}
+
+fn single_line(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn tags_or_none(tags: &[String]) -> String {
+    if tags.is_empty() {
+        "<none>".to_owned()
+    } else {
+        tags.join(", ")
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
+}
+
+fn config_source_label(kind: &mosaic_config::ConfigSourceKind) -> &'static str {
+    match kind {
+        mosaic_config::ConfigSourceKind::Defaults => "defaults",
+        mosaic_config::ConfigSourceKind::User => "user",
+        mosaic_config::ConfigSourceKind::Workspace => "workspace",
+        mosaic_config::ConfigSourceKind::Env => "env",
+        mosaic_config::ConfigSourceKind::Cli => "cli",
+    }
+}
+
+fn validation_level_label(level: &mosaic_config::ValidationLevel) -> &'static str {
+    match level {
+        mosaic_config::ValidationLevel::Error => "error",
+        mosaic_config::ValidationLevel::Warning => "warning",
+    }
+}
+
+fn doctor_status_label(status: &mosaic_config::DoctorStatus) -> &'static str {
+    match status {
+        mosaic_config::DoctorStatus::Ok => "ok",
+        mosaic_config::DoctorStatus::Warning => "warning",
+        mosaic_config::DoctorStatus::Error => "error",
+    }
+}
+
+fn validation_error_count(report: &ValidationReport) -> usize {
+    report.errors().len()
+}
+
+fn validation_warning_count(report: &ValidationReport) -> usize {
+    report.warnings().len()
+}
+
 #[cfg(test)]
 mod tests {
+    use chrono::{Duration, Utc};
+    use mosaic_config::{
+        DoctorCategory, DoctorCheck, DoctorReport, DoctorStatus, LoadConfigOptions,
+        ValidationLevel, ValidationReport, load_mosaic_config,
+    };
+    use mosaic_inspect::{RunTrace, ToolTrace};
     use mosaic_runtime::events::RunEvent;
+    use mosaic_tool_core::ToolSource;
 
-    use super::format_run_event;
+    use super::{
+        format_run_event, render_config_show, render_doctor_report, render_inspect_report,
+    };
 
     #[test]
     fn formats_provider_requests_with_stable_field_order() {
@@ -214,5 +1076,102 @@ mod tests {
         });
 
         assert_eq!(line, "[run] failed: provider failure");
+    }
+
+    #[test]
+    fn renders_config_show_with_summary_first() {
+        let loaded = load_mosaic_config(&LoadConfigOptions::default()).expect("config should load");
+        let rendered = render_config_show(&loaded, &ValidationReport::default());
+
+        assert!(rendered.starts_with("config summary:"));
+        assert!(rendered.contains("deployment:"));
+        assert!(rendered.contains("profiles:"));
+    }
+
+    #[test]
+    fn renders_doctor_report_with_categories() {
+        let report = DoctorReport {
+            validation: ValidationReport {
+                issues: vec![mosaic_config::ValidationIssue {
+                    level: ValidationLevel::Warning,
+                    field: "profiles.demo".to_owned(),
+                    message: "demo warning".to_owned(),
+                }],
+            },
+            checks: vec![
+                DoctorCheck {
+                    status: DoctorStatus::Warning,
+                    category: DoctorCategory::Auth,
+                    message: "operator token missing".to_owned(),
+                },
+                DoctorCheck {
+                    status: DoctorStatus::Ok,
+                    category: DoctorCategory::Storage,
+                    message: "session store ready".to_owned(),
+                },
+            ],
+        };
+
+        let rendered = render_doctor_report(&report);
+        assert!(rendered.starts_with("doctor summary:"));
+        assert!(rendered.contains("doctor categories:"));
+        assert!(rendered.contains("auth | ok=0 warning=1 error=0"));
+        assert!(rendered.contains("[warning] auth: operator token missing"));
+    }
+
+    #[test]
+    fn renders_inspect_summary_and_verbose_views() {
+        let started_at = Utc::now();
+        let finished_at = started_at + Duration::milliseconds(12);
+        let trace = RunTrace {
+            run_id: "run-1".to_owned(),
+            gateway_run_id: Some("gateway-1".to_owned()),
+            correlation_id: Some("corr-1".to_owned()),
+            session_id: Some("session-1".to_owned()),
+            session_route: Some("gateway.local/session-1".to_owned()),
+            ingress: None,
+            workflow_name: Some("research_brief".to_owned()),
+            started_at,
+            finished_at: Some(finished_at),
+            input: "hello".to_owned(),
+            output: Some("world".to_owned()),
+            effective_profile: None,
+            provider_failure: None,
+            provider_attempts: vec![],
+            governance: None,
+            model_selections: vec![],
+            memory_reads: vec![],
+            memory_writes: vec![],
+            compression: None,
+            tool_calls: vec![ToolTrace {
+                call_id: Some("call-1".to_owned()),
+                name: "echo".to_owned(),
+                source: ToolSource::Builtin,
+                input: serde_json::json!({"text": "hello"}),
+                output: Some("hello".to_owned()),
+                node_id: None,
+                capability_route: None,
+                disconnect_context: None,
+                started_at,
+                finished_at: Some(finished_at),
+            }],
+            capability_invocations: vec![],
+            side_effect_summary: None,
+            active_extensions: vec![],
+            used_extensions: vec![],
+            skill_calls: vec![],
+            step_traces: vec![],
+            error: None,
+        };
+
+        let summary =
+            render_inspect_report(&trace, None, false).expect("summary render should work");
+        let verbose =
+            render_inspect_report(&trace, None, true).expect("verbose render should work");
+
+        assert!(summary.starts_with("run summary:"));
+        assert!(summary.contains("run activity:"));
+        assert!(!summary.contains("tool calls:"));
+        assert!(verbose.contains("tool calls:"));
     }
 }

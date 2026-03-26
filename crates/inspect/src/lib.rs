@@ -127,10 +127,15 @@ pub struct EffectiveProfileTrace {
     pub model: String,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
+    #[serde(default)]
     pub api_key_present: bool,
+    #[serde(default)]
     pub timeout_ms: u64,
+    #[serde(default)]
     pub max_retries: u8,
+    #[serde(default)]
     pub supports_tools: bool,
+    #[serde(default)]
     pub supports_tool_call_shadow_messages: bool,
 }
 
@@ -226,7 +231,9 @@ pub struct ModelSelectionTrace {
     pub selected_profile: String,
     pub selected_model: String,
     pub reason: String,
+    #[serde(default)]
     pub context_window_chars: usize,
+    #[serde(default)]
     pub budget_tier: String,
 }
 
@@ -244,7 +251,16 @@ pub struct GovernanceTrace {
 pub struct RunSummary {
     pub status: String,
     pub tool_calls: usize,
+    pub capability_invocations: usize,
     pub skill_calls: usize,
+    pub workflow_steps: usize,
+    pub provider_attempts: usize,
+    pub model_selections: usize,
+    pub memory_reads: usize,
+    pub memory_writes: usize,
+    pub active_extensions: usize,
+    pub used_extensions: usize,
+    pub has_compression: bool,
     pub duration_ms: Option<i64>,
 }
 
@@ -457,7 +473,16 @@ impl RunTrace {
         RunSummary {
             status: self.status().to_owned(),
             tool_calls: self.tool_calls.len(),
+            capability_invocations: self.capability_invocations.len(),
             skill_calls: self.skill_calls.len(),
+            workflow_steps: self.step_traces.len(),
+            provider_attempts: self.provider_attempts.len(),
+            model_selections: self.model_selections.len(),
+            memory_reads: self.memory_reads.len(),
+            memory_writes: self.memory_writes.len(),
+            active_extensions: self.active_extensions.len(),
+            used_extensions: self.used_extensions.len(),
+            has_compression: self.compression.is_some(),
             duration_ms: self.duration_ms(),
         }
     }
@@ -655,7 +680,16 @@ mod tests {
         assert_eq!(trace.duration_ms(), Some(18));
         assert_eq!(summary.status, "success");
         assert_eq!(summary.tool_calls, 1);
+        assert_eq!(summary.capability_invocations, 0);
         assert_eq!(summary.skill_calls, 0);
+        assert_eq!(summary.workflow_steps, 1);
+        assert_eq!(summary.provider_attempts, 0);
+        assert_eq!(summary.model_selections, 1);
+        assert_eq!(summary.memory_reads, 0);
+        assert_eq!(summary.memory_writes, 0);
+        assert_eq!(summary.active_extensions, 0);
+        assert_eq!(summary.used_extensions, 0);
+        assert!(!summary.has_compression);
         assert_eq!(summary.duration_ms, Some(18));
         assert_eq!(trace.tool_calls[0].duration_ms(), Some(3));
         assert_eq!(trace.step_traces[0].duration_ms(), Some(9));
@@ -700,5 +734,39 @@ mod tests {
                 .and_then(|ingress| ingress.display_name.as_deref()),
             Some("guest")
         );
+    }
+
+    #[test]
+    fn legacy_effective_profile_fields_default_when_missing() {
+        let raw = serde_json::json!({
+            "run_id": "legacy-run",
+            "started_at": Utc::now(),
+            "input": "hello",
+            "tool_calls": [],
+            "capability_invocations": [],
+            "active_extensions": [],
+            "used_extensions": [],
+            "skill_calls": [],
+            "step_traces": [],
+            "provider_attempts": [],
+            "model_selections": [],
+            "memory_reads": [],
+            "memory_writes": [],
+            "effective_profile": {
+                "profile": "mock",
+                "provider_type": "mock",
+                "model": "mock",
+                "base_url": null,
+                "api_key_env": null
+            }
+        });
+
+        let trace: RunTrace = serde_json::from_value(raw).expect("legacy trace should deserialize");
+        let effective = trace
+            .effective_profile
+            .expect("effective profile should exist");
+        assert_eq!(effective.timeout_ms, 0);
+        assert_eq!(effective.max_retries, 0);
+        assert!(!effective.supports_tools);
     }
 }

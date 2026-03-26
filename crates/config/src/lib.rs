@@ -465,9 +465,30 @@ pub enum DoctorStatus {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum DoctorCategory {
+    Storage,
+    Auth,
+    Extensions,
+    Providers,
+}
+
+impl DoctorCategory {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Storage => "storage",
+            Self::Auth => "auth",
+            Self::Extensions => "extensions",
+            Self::Providers => "providers",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DoctorCheck {
     pub status: DoctorStatus,
+    pub category: DoctorCategory,
     pub message: String,
 }
 
@@ -485,6 +506,63 @@ impl DoctorReport {
                 .iter()
                 .any(|check| matches!(check.status, DoctorStatus::Error))
     }
+
+    pub fn summary(&self) -> DoctorSummary {
+        let mut summary = DoctorSummary::default();
+
+        for check in &self.checks {
+            match check.status {
+                DoctorStatus::Ok => summary.ok += 1,
+                DoctorStatus::Warning => summary.warnings += 1,
+                DoctorStatus::Error => summary.errors += 1,
+            }
+
+            if let Some(category) = summary
+                .categories
+                .iter_mut()
+                .find(|entry| entry.category == check.category)
+            {
+                match check.status {
+                    DoctorStatus::Ok => category.ok += 1,
+                    DoctorStatus::Warning => category.warnings += 1,
+                    DoctorStatus::Error => category.errors += 1,
+                }
+            } else {
+                let mut category = DoctorCategorySummary {
+                    category: check.category,
+                    ok: 0,
+                    warnings: 0,
+                    errors: 0,
+                };
+                match check.status {
+                    DoctorStatus::Ok => category.ok = 1,
+                    DoctorStatus::Warning => category.warnings = 1,
+                    DoctorStatus::Error => category.errors = 1,
+                }
+                summary.categories.push(category);
+            }
+        }
+
+        summary.categories.sort_by_key(|entry| entry.category);
+        summary
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DoctorSummary {
+    pub ok: usize,
+    pub warnings: usize,
+    pub errors: usize,
+    #[serde(default)]
+    pub categories: Vec<DoctorCategorySummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DoctorCategorySummary {
+    pub category: DoctorCategory,
+    pub ok: usize,
+    pub warnings: usize,
+    pub errors: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -990,25 +1068,43 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
     let mut checks = Vec::new();
 
     let session_root = cwd.join(&config.session_store.root_dir);
-    checks.push(path_check(&session_root, "session store directory", true));
+    checks.push(path_check(
+        &session_root,
+        DoctorCategory::Storage,
+        "session store directory",
+        true,
+    ));
 
     let runs_root = cwd.join(&config.inspect.runs_dir);
-    checks.push(path_check(&runs_root, "run trace directory", true));
+    checks.push(path_check(
+        &runs_root,
+        DoctorCategory::Storage,
+        "run trace directory",
+        true,
+    ));
 
     let audit_root = cwd.join(&config.audit.root_dir);
-    checks.push(path_check(&audit_root, "audit directory", true));
+    checks.push(path_check(
+        &audit_root,
+        DoctorCategory::Storage,
+        "audit directory",
+        true,
+    ));
 
     checks.push(secret_env_check(
+        DoctorCategory::Auth,
         config.auth.operator_token_env.as_deref(),
         "operator auth token",
         config.deployment.profile == "production",
     ));
     checks.push(secret_env_check(
+        DoctorCategory::Auth,
         config.auth.webchat_shared_secret_env.as_deref(),
         "webchat ingress shared secret",
         false,
     ));
     checks.push(secret_env_check(
+        DoctorCategory::Auth,
         config.auth.telegram_secret_token_env.as_deref(),
         "telegram ingress secret token",
         false,
@@ -1016,13 +1112,19 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
 
     for manifest in &config.extensions.manifests {
         let manifest_path = cwd.join(&manifest.path);
-        checks.push(path_check(&manifest_path, "extension manifest", false));
+        checks.push(path_check(
+            &manifest_path,
+            DoctorCategory::Extensions,
+            "extension manifest",
+            false,
+        ));
     }
 
     for (name, profile) in &config.profiles {
         let Some(provider_type) = parse_provider_type(&profile.provider_type) else {
             checks.push(DoctorCheck {
                 status: DoctorStatus::Error,
+                category: DoctorCategory::Providers,
                 message: format!(
                     "profile '{}' uses unsupported provider type '{}'",
                     name, profile.provider_type
@@ -1034,6 +1136,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
         match provider_type {
             ProviderType::Mock => checks.push(DoctorCheck {
                 status: DoctorStatus::Ok,
+                category: DoctorCategory::Providers,
                 message: format!(
                     "profile '{}' uses the mock provider and does not require API credentials",
                     name
@@ -1048,6 +1151,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                 match configured_base_url.or_else(|| provider_type.default_base_url()) {
                     Some(base_url) => checks.push(DoctorCheck {
                         status: DoctorStatus::Ok,
+                        category: DoctorCategory::Providers,
                         message: if configured_base_url.is_some() {
                             format!(
                                 "profile '{}' uses {} base URL {}",
@@ -1062,6 +1166,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                     }),
                     None => checks.push(DoctorCheck {
                         status: DoctorStatus::Error,
+                        category: DoctorCategory::Providers,
                         message: format!(
                             "profile '{}' requires an explicit {} base_url",
                             name, provider_type
@@ -1079,6 +1184,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                         Some(api_key_env) if env::var(api_key_env).is_ok() => {
                             checks.push(DoctorCheck {
                                 status: DoctorStatus::Ok,
+                                category: DoctorCategory::Providers,
                                 message: format!(
                                     "profile '{}' has {} available in the environment",
                                     name, api_key_env
@@ -1091,6 +1197,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                             } else {
                                 DoctorStatus::Warning
                             },
+                            category: DoctorCategory::Providers,
                             message: format!(
                                 "profile '{}' expects environment variable {} to be set",
                                 name, api_key_env
@@ -1098,6 +1205,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                         }),
                         None => checks.push(DoctorCheck {
                             status: DoctorStatus::Error,
+                            category: DoctorCategory::Providers,
                             message: format!(
                                 "profile '{}' is missing api_key_env for {}",
                                 name, provider_type
@@ -1107,6 +1215,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                 } else {
                     checks.push(DoctorCheck {
                         status: DoctorStatus::Ok,
+                        category: DoctorCategory::Providers,
                         message: format!("profile '{}' does not require API credentials", name),
                     });
                 }
@@ -1238,12 +1347,18 @@ fn env_var_present(name: Option<&str>) -> bool {
         .is_some_and(|value| env::var(value).is_ok())
 }
 
-fn secret_env_check(env_name: Option<&str>, label: &str, required: bool) -> DoctorCheck {
+fn secret_env_check(
+    category: DoctorCategory,
+    env_name: Option<&str>,
+    label: &str,
+    required: bool,
+) -> DoctorCheck {
     match env_name.map(str::trim).filter(|value| !value.is_empty()) {
         Some(name) => {
             if env::var(name).is_ok() {
                 DoctorCheck {
                     status: DoctorStatus::Ok,
+                    category,
                     message: format!("{label} is configured via {name}"),
                 }
             } else {
@@ -1253,6 +1368,7 @@ fn secret_env_check(env_name: Option<&str>, label: &str, required: bool) -> Doct
                     } else {
                         DoctorStatus::Warning
                     },
+                    category,
                     message: format!("{label} expects environment variable {name} to be set"),
                 }
             }
@@ -1263,6 +1379,7 @@ fn secret_env_check(env_name: Option<&str>, label: &str, required: bool) -> Doct
             } else {
                 DoctorStatus::Warning
             },
+            category,
             message: if required {
                 format!("{label} is not configured")
             } else {
@@ -1272,16 +1389,23 @@ fn secret_env_check(env_name: Option<&str>, label: &str, required: bool) -> Doct
     }
 }
 
-fn path_check(path: &Path, label: &str, create_if_missing: bool) -> DoctorCheck {
+fn path_check(
+    path: &Path,
+    category: DoctorCategory,
+    label: &str,
+    create_if_missing: bool,
+) -> DoctorCheck {
     if path.exists() {
         if path.is_dir() {
             DoctorCheck {
                 status: DoctorStatus::Ok,
+                category,
                 message: format!("{label} is ready at {}", path.display()),
             }
         } else {
             DoctorCheck {
                 status: DoctorStatus::Error,
+                category,
                 message: format!(
                     "{label} path {} exists but is not a directory",
                     path.display()
@@ -1291,6 +1415,7 @@ fn path_check(path: &Path, label: &str, create_if_missing: bool) -> DoctorCheck 
     } else {
         DoctorCheck {
             status: DoctorStatus::Warning,
+            category,
             message: if create_if_missing {
                 format!(
                     "{label} does not exist yet at {} and will be created on demand",

@@ -9,9 +9,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
 use mosaic_config::{
-    ACTIVE_PROFILE_ENV, ConfigSourceKind, DoctorStatus, LoadConfigOptions, LoadedMosaicConfig,
-    PolicyConfig, ValidationLevel, doctor_mosaic_config, init_workspace_config, load_from_file,
-    load_mosaic_config, redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
+    ACTIVE_PROFILE_ENV, LoadConfigOptions, LoadedMosaicConfig, PolicyConfig, ValidationLevel,
+    doctor_mosaic_config, init_workspace_config, load_from_file, load_mosaic_config,
+    redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
 use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
@@ -45,9 +45,17 @@ const CLI_AFTER_HELP: &str = "Quick start:
   mosaic setup init
   mosaic setup validate
   mosaic setup doctor
+  mosaic config show
   mosaic model list
   mosaic tui          # main operator console
   mosaic run <app> --tui   # single-run observer
+
+Operator groups:
+  setup/config         bootstrap and explain merged configuration
+  tui/run/session/model manage conversations and provider routing
+  inspect              explain one saved run
+  gateway/adapter/node operate the control plane edges and devices
+  capability/cron/extension/memory operate automations and state
 
 Docs:
   docs/getting-started.md
@@ -57,11 +65,24 @@ Docs:
 Examples:
   examples/providers/openai.yaml
   examples/workflows/research-brief.yaml";
-const SETUP_AFTER_HELP: &str = "Examples:
+const SETUP_AFTER_HELP: &str = "When to use it:
+  Use `setup` before first run, after config edits, or when an operator needs to diagnose why Mosaic will not start cleanly.
+
+Examples:
   mosaic setup init
   mosaic setup validate
   mosaic setup doctor";
-const GATEWAY_AFTER_HELP: &str = "Examples:
+const CONFIG_AFTER_HELP: &str = "When to use it:
+  Use `config` when you need to explain which merged settings Mosaic will actually run and which layer supplied them.
+
+Examples:
+  mosaic config show
+  mosaic config sources
+  mosaic config show --json";
+const GATEWAY_AFTER_HELP: &str = "When to use it:
+  Use `gateway` to inspect control-plane health, replay audit state, or expose the local Gateway over HTTP.
+
+Examples:
   mosaic gateway status
   mosaic gateway serve --local
   mosaic gateway serve --http 127.0.0.1:8080
@@ -86,7 +107,11 @@ struct Cli {
     log_level: String,
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Plain, help = "Set internal log output format")]
     log_format: LogFormat,
-    #[arg(long, global = true, help = "Start the TUI or TUI-backed flow in the session resume browser")]
+    #[arg(
+        long,
+        global = true,
+        help = "Start the TUI or TUI-backed flow in the session resume browser"
+    )]
     resume: bool,
     #[command(subcommand)]
     command: Option<Commands>,
@@ -94,6 +119,34 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Initialize workspace state and diagnose configuration problems before operating Mosaic.
+    Setup {
+        #[command(subcommand)]
+        command: SetupCommand,
+    },
+    /// Show the merged operator config and the layers that supplied it.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+    /// Start the main operator chat console.
+    Tui {
+        #[arg(
+            long,
+            help = "Resume or create this session as the active operator conversation"
+        )]
+        session: Option<String>,
+        #[arg(
+            long,
+            help = "Use this provider profile for future turns submitted from the TUI"
+        )]
+        profile: Option<String>,
+        #[arg(
+            long,
+            help = "Attach the operator console to a remote HTTP Gateway instead of the local workspace Gateway"
+        )]
+        attach: Option<String>,
+    },
     /// Execute one app YAML run. Add --tui to watch a single run in the terminal observer.
     Run {
         file: PathBuf,
@@ -101,42 +154,49 @@ enum Commands {
         skill: Option<String>,
         #[arg(long, conflicts_with = "skill")]
         workflow: Option<String>,
-        #[arg(long, help = "Bind this run to a session id so transcript, memory, and routing persist across turns")]
+        #[arg(
+            long,
+            help = "Bind this run to a session id so transcript, memory, and routing persist across turns"
+        )]
         session: Option<String>,
-        #[arg(long, help = "Override the provider profile used for this run or TUI session")]
+        #[arg(
+            long,
+            help = "Override the provider profile used for this run or TUI session"
+        )]
         profile: Option<String>,
-        #[arg(long, help = "Attach this run to a remote HTTP Gateway instead of the local workspace Gateway")]
+        #[arg(
+            long,
+            help = "Attach this run to a remote HTTP Gateway instead of the local workspace Gateway"
+        )]
         attach: Option<String>,
-        #[arg(long, help = "Show the terminal observer while this single file-backed run executes; use `mosaic tui` for the long-lived operator console")]
+        #[arg(
+            long,
+            help = "Show the terminal observer while this single file-backed run executes; use `mosaic tui` for the long-lived operator console"
+        )]
         tui: bool,
     },
-    /// Inspect one saved run trace JSON file.
-    Inspect { file: PathBuf },
-    /// Start the main operator chat console.
-    Tui {
-        #[arg(long, help = "Resume or create this session as the active operator conversation")]
-        session: Option<String>,
-        #[arg(long, help = "Use this provider profile for future turns submitted from the TUI")]
-        profile: Option<String>,
-        #[arg(long, help = "Attach the operator console to a remote HTTP Gateway instead of the local workspace Gateway")]
-        attach: Option<String>,
-    },
-    /// Initialize and validate workspace configuration.
-    Setup {
-        #[command(subcommand)]
-        command: SetupCommand,
-    },
-    /// List sessions or inspect one saved session transcript.
+    /// List persisted operator conversations or inspect one saved transcript.
     Session {
         #[arg(long)]
         attach: Option<String>,
         #[command(subcommand)]
         command: SessionCommand,
     },
-    /// List configured provider profiles or switch the active one.
+    /// List configured provider profiles or switch the active one for future turns.
     Model {
         #[command(subcommand)]
         command: ModelCommand,
+    },
+    /// Summarize one saved run trace. Add --verbose for provider, tool, workflow, and memory detail.
+    Inspect {
+        file: PathBuf,
+        #[arg(
+            long,
+            help = "Include provider, tool, workflow, memory, and governance details"
+        )]
+        verbose: bool,
+        #[arg(long, help = "Print the saved trace as machine-readable JSON")]
+        json: bool,
     },
     /// Inspect or serve the control-plane Gateway.
     Gateway {
@@ -145,7 +205,7 @@ enum Commands {
         #[command(subcommand)]
         command: GatewayCliCommand,
     },
-    /// Inspect channel adapter readiness.
+    /// Inspect channel adapter readiness and ingress exposure.
     Adapter {
         #[arg(long)]
         attach: Option<String>,
@@ -171,15 +231,15 @@ enum Commands {
         #[command(subcommand)]
         command: CronCommand,
     },
-    /// Inspect saved memory summaries and references.
-    Memory {
-        #[command(subcommand)]
-        command: MemoryCommand,
-    },
     /// Validate and reload extension manifests.
     Extension {
         #[command(subcommand)]
         command: ExtensionCommand,
+    },
+    /// Inspect saved memory summaries and cross-session references.
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
     },
 }
 
@@ -192,6 +252,22 @@ enum SetupCommand {
     },
     Validate,
     Doctor,
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+#[command(after_help = CONFIG_AFTER_HELP)]
+enum ConfigCommand {
+    Show {
+        #[arg(
+            long,
+            help = "Print the merged operator config as machine-readable JSON"
+        )]
+        json: bool,
+    },
+    Sources {
+        #[arg(long, help = "Print the config source stack as machine-readable JSON")]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -359,11 +435,11 @@ enum DispatchCommand {
         tui: bool,
         resume: bool,
     },
-    Inspect {
-        file: PathBuf,
-    },
     Setup {
         command: SetupCommand,
+    },
+    Config {
+        command: ConfigCommand,
     },
     Session {
         attach: Option<String>,
@@ -371,6 +447,11 @@ enum DispatchCommand {
     },
     Model {
         command: ModelCommand,
+    },
+    Inspect {
+        file: PathBuf,
+        verbose: bool,
+        json: bool,
     },
     Gateway {
         attach: Option<String>,
@@ -436,12 +517,21 @@ impl Cli {
                 tui,
                 resume: self.resume,
             },
-            Some(Commands::Inspect { file }) => DispatchCommand::Inspect { file },
             Some(Commands::Setup { command }) => DispatchCommand::Setup { command },
+            Some(Commands::Config { command }) => DispatchCommand::Config { command },
             Some(Commands::Session { attach, command }) => {
                 DispatchCommand::Session { attach, command }
             }
             Some(Commands::Model { command }) => DispatchCommand::Model { command },
+            Some(Commands::Inspect {
+                file,
+                verbose,
+                json,
+            }) => DispatchCommand::Inspect {
+                file,
+                verbose,
+                json,
+            },
             Some(Commands::Gateway { attach, command }) => {
                 DispatchCommand::Gateway { attach, command }
             }
@@ -481,10 +571,15 @@ async fn main() -> Result<()> {
             tui,
             resume,
         } => run_cmd(file, skill, workflow, session, profile, attach, tui, resume).await,
-        DispatchCommand::Inspect { file } => inspect_cmd(file),
         DispatchCommand::Setup { command } => setup_cmd(command),
+        DispatchCommand::Config { command } => config_cmd(command),
         DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
         DispatchCommand::Model { command } => model_cmd(command),
+        DispatchCommand::Inspect {
+            file,
+            verbose,
+            json,
+        } => inspect_cmd(file, verbose, json),
         DispatchCommand::Gateway { attach, command } => gateway_cmd(attach, command).await,
         DispatchCommand::Adapter { attach, command } => adapter_cmd(attach, command).await,
         DispatchCommand::Node { command } => node_cmd(command).await,
@@ -787,17 +882,9 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    let collected = steps
-        .into_iter()
-        .map(|step| step.as_ref().to_owned())
-        .collect::<Vec<_>>();
-    if collected.is_empty() {
-        return;
-    }
-
-    println!("next:");
-    for step in collected {
-        println!("  {}", step);
+    let rendered = output::render_next_steps(steps);
+    if !rendered.is_empty() {
+        print!("{}", rendered);
     }
 }
 
@@ -806,7 +893,8 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
         SetupCommand::Init { force } => {
             let cwd = env::current_dir()?;
             let path = init_workspace_config(&cwd, force)?;
-            println!("initialized workspace config: {}", path.display());
+            println!("workspace initialized");
+            println!("config_path: {}", path.display());
             print_next_steps([
                 "mosaic setup validate",
                 "mosaic setup doctor",
@@ -818,8 +906,7 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
         SetupCommand::Validate => {
             let loaded = load_config()?;
             let report = validate_mosaic_config(&loaded.config);
-            print_config_summary(&loaded);
-            print_validation_report(&report);
+            println!("{}", output::render_config_show(&loaded, &report));
 
             if report.has_errors() {
                 bail!(
@@ -828,23 +915,18 @@ next: run `mosaic setup doctor` and compare `.mosaic/config.yaml` with `docs/con
                 )
             }
 
-            println!("validation: ok");
-            print_next_steps(["mosaic setup doctor", "mosaic model list", "mosaic tui"]);
+            print_next_steps(["mosaic setup doctor", "mosaic config sources", "mosaic tui"]);
             Ok(())
         }
         SetupCommand::Doctor => {
             let loaded = load_config()?;
             let doctor = doctor_mosaic_config(&loaded.config, &current_dir()?);
-            print_config_summary(&loaded);
-            print_validation_report(&doctor.validation);
-            println!("doctor checks:");
-            for check in &doctor.checks {
-                println!(
-                    "  [{}] {}",
-                    doctor_status_label(&check.status),
-                    check.message
-                );
-            }
+            println!(
+                "{}",
+                output::render_config_show(&loaded, &doctor.validation)
+            );
+            println!();
+            println!("{}", output::render_doctor_report(&doctor));
 
             if doctor.has_errors() {
                 bail!(
@@ -853,8 +935,50 @@ next: fix the reported checks, then rerun `mosaic setup doctor`"
                 )
             }
 
-            println!("doctor: ok");
             print_next_steps(["mosaic model list", "mosaic tui", "mosaic gateway status"]);
+            Ok(())
+        }
+    }
+}
+
+fn config_cmd(command: ConfigCommand) -> Result<()> {
+    let loaded = load_config()?;
+    let validation = validate_mosaic_config(&loaded.config);
+
+    match command {
+        ConfigCommand::Show { json } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "workspace_config_path": loaded.workspace_config_path,
+                        "user_config_path": loaded.user_config_path,
+                        "sources": loaded.sources,
+                        "config": redact_mosaic_config(&loaded.config),
+                        "validation": validation,
+                    }))?
+                );
+            } else {
+                println!("{}", output::render_config_show(&loaded, &validation));
+                print_next_steps(["mosaic config sources", "mosaic setup doctor"]);
+            }
+            Ok(())
+        }
+        ConfigCommand::Sources { json } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "active_profile": loaded.config.active_profile,
+                        "workspace_config_path": loaded.workspace_config_path,
+                        "user_config_path": loaded.user_config_path,
+                        "sources": loaded.sources,
+                    }))?
+                );
+            } else {
+                println!("{}", output::render_config_sources(&loaded));
+                print_next_steps(["mosaic config show", "mosaic setup validate"]);
+            }
             Ok(())
         }
     }
@@ -1690,15 +1814,20 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
         ModelCommand::List => {
             let loaded = ensure_loaded_config(None)?;
             let registry = ProviderProfileRegistry::from_config(&loaded.config)?;
+            let profiles = registry.list();
 
-            for profile in registry.list() {
+            println!("model summary:");
+            println!("  active_profile: {}", loaded.config.active_profile);
+            println!("  profile_count: {}", profiles.len());
+            println!("profiles:");
+            for profile in profiles {
                 let marker = if profile.name == loaded.config.active_profile {
                     '*'
                 } else {
                     ' '
                 };
                 println!(
-                    "{} {} | type={} | model={} | family={} | tools={} | sessions={} | context_window_chars={} | budget_tier={} | api_key_env={:?} | api_key_present={}",
+                    "  {} {} | type={} | model={} | family={} | tools={} | sessions={} | context_window_chars={} | budget_tier={} | api_key_env={:?} | api_key_present={}",
                     marker,
                     profile.name,
                     profile.provider_type,
@@ -1725,9 +1854,10 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
             loaded.config.active_profile = profile.clone();
             save_mosaic_config(&loaded.workspace_config_path, &loaded.config)?;
 
+            println!("model updated");
+            println!("  active_profile: {}", profile);
             println!(
-                "active profile set to {} in {}",
-                profile,
+                "  workspace_config: {}",
                 loaded.workspace_config_path.display()
             );
 
@@ -1738,387 +1868,35 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
                 );
             }
 
+            print_next_steps(["mosaic model list", "mosaic tui"]);
             Ok(())
         }
     }
 }
 
-fn inspect_cmd(file: PathBuf) -> Result<()> {
-    let content = fs::read_to_string(file)?;
+fn inspect_cmd(file: PathBuf, verbose: bool, json: bool) -> Result<()> {
+    let content = fs::read_to_string(&file)?;
     let trace: RunTrace = serde_json::from_str(&content)?;
-    let summary = trace.summary();
 
-    println!("run_id: {}", trace.run_id);
-    println!("gateway_run_id: {:?}", trace.gateway_run_id);
-    println!("correlation_id: {:?}", trace.correlation_id);
-    println!("session_id: {:?}", trace.session_id);
-    println!("session_route: {:?}", trace.session_route);
-    println!("ingress: {:?}", trace.ingress);
-    println!("workflow_name: {:?}", trace.workflow_name);
-    println!("status: {}", summary.status);
-    println!("started_at: {}", trace.started_at);
-    println!("finished_at: {:?}", trace.finished_at);
-    println!("duration_ms: {:?}", summary.duration_ms);
-    println!("input: {}", trace.input);
-    println!("output: {:?}", trace.output);
-    println!("error: {:?}", trace.error);
-
-    if let Some(profile) = &trace.effective_profile {
-        println!(
-            "
-effective_profile:"
-        );
-        println!("  profile: {}", profile.profile);
-        println!("  provider_type: {}", profile.provider_type);
-        println!("  model: {}", profile.model);
-        println!("  base_url: {:?}", profile.base_url);
-        println!("  api_key_env: {:?}", profile.api_key_env);
-        println!("  api_key_present: {}", profile.api_key_present);
-        println!("  timeout_ms: {}", profile.timeout_ms);
-        println!("  max_retries: {}", profile.max_retries);
-        println!("  supports_tools: {}", profile.supports_tools);
-        println!(
-            "  supports_tool_call_shadow_messages: {}",
-            profile.supports_tool_call_shadow_messages
-        );
+    if json {
+        println!("{}", serde_json::to_string_pretty(&trace)?);
+        return Ok(());
     }
 
-    if let Some(provider_failure) = &trace.provider_failure {
-        println!(
-            "
-provider_failure:"
-        );
-        println!("  kind: {}", provider_failure.kind);
-        println!("  status_code: {:?}", provider_failure.status_code);
-        println!("  retryable: {}", provider_failure.retryable);
-        println!("  message: {}", provider_failure.message);
-    }
-
-    if let Some(ingress) = &trace.ingress {
-        println!("\ningress:");
-        println!("  kind: {}", ingress.kind);
-        println!("  channel: {:?}", ingress.channel);
-        println!("  source: {:?}", ingress.source);
-        println!("  remote_addr: {:?}", ingress.remote_addr);
-        println!("  display_name: {:?}", ingress.display_name);
-        println!("  actor_id: {:?}", ingress.actor_id);
-        println!("  thread_id: {:?}", ingress.thread_id);
-        println!("  thread_title: {:?}", ingress.thread_title);
-        println!("  reply_target: {:?}", ingress.reply_target);
-        println!("  gateway_url: {:?}", ingress.gateway_url);
-    }
-
-    if let Some(governance) = &trace.governance {
-        println!(
-            "
-governance:"
-        );
-        println!("  deployment_profile: {}", governance.deployment_profile);
-        println!("  workspace_name: {}", governance.workspace_name);
-        println!("  auth_mode: {}", governance.auth_mode);
-        println!(
-            "  audit_retention_days: {}",
-            governance.audit_retention_days
-        );
-        println!("  event_replay_window: {}", governance.event_replay_window);
-        println!("  redact_inputs: {}", governance.redact_inputs);
-    }
-
+    let workspace = load_config()
+        .ok()
+        .map(|loaded| redact_mosaic_config(&loaded.config));
     println!(
-        "
-summary:"
+        "{}",
+        output::render_inspect_report(&trace, workspace.as_ref(), verbose)?
     );
-    println!("  tool_calls: {}", summary.tool_calls);
-    println!(
-        "  capability_invocations: {}",
-        trace.capability_invocations.len()
-    );
-    println!("  skill_calls: {}", summary.skill_calls);
-    println!("  workflow_steps: {}", trace.step_traces.len());
-    println!("  provider_attempts: {}", trace.provider_attempts.len());
-    println!("  model_selections: {}", trace.model_selections.len());
-    println!("  memory_reads: {}", trace.memory_reads.len());
-    println!("  memory_writes: {}", trace.memory_writes.len());
-    println!("  active_extensions: {}", trace.active_extensions.len());
-    println!("  used_extensions: {}", trace.used_extensions.len());
-    println!("  compression: {}", trace.compression.is_some());
 
-    if !trace.active_extensions.is_empty() {
-        println!(
-            "
-== active extensions =="
-        );
-        for extension in &trace.active_extensions {
-            println!(
-                "{}@{} | source={} | enabled={} | active={} | error={:?}",
-                extension.name,
-                extension.version,
-                extension.source,
-                extension.enabled,
-                extension.active,
-                extension.error,
-            );
+    if !verbose {
+        let mut next_steps = vec![format!("mosaic inspect {} --verbose", file.display())];
+        if trace.status() == "failed" {
+            next_steps.push(format!("mosaic gateway incident {}", trace.run_id));
         }
-    }
-
-    if !trace.provider_attempts.is_empty() {
-        println!(
-            "
-== provider attempts =="
-        );
-        for (idx, attempt) in trace.provider_attempts.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  attempt: {}/{}", attempt.attempt, attempt.max_attempts);
-            println!("  status: {}", attempt.status);
-            println!("  error_kind: {:?}", attempt.error_kind);
-            println!("  status_code: {:?}", attempt.status_code);
-            println!("  retryable: {}", attempt.retryable);
-            println!("  message: {:?}", attempt.message);
-        }
-    }
-
-    if !trace.used_extensions.is_empty() {
-        println!(
-            "
-== used extensions =="
-        );
-        for usage in &trace.used_extensions {
-            println!(
-                "{}@{} | {}:{}",
-                usage.name, usage.version, usage.component_kind, usage.component_name,
-            );
-        }
-    }
-
-    if !trace.model_selections.is_empty() {
-        println!(
-            "
-== model selections =="
-        );
-        for (idx, selection) in trace.model_selections.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  scope: {}", selection.scope);
-            println!("  requested_profile: {:?}", selection.requested_profile);
-            println!("  selected_profile: {}", selection.selected_profile);
-            println!("  selected_model: {}", selection.selected_model);
-            println!("  reason: {}", selection.reason);
-            println!("  context_window_chars: {}", selection.context_window_chars);
-            println!("  budget_tier: {}", selection.budget_tier);
-        }
-    }
-
-    if !trace.memory_reads.is_empty() {
-        println!(
-            "
-== memory reads =="
-        );
-        for (idx, read) in trace.memory_reads.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  session_id: {}", read.session_id);
-            println!("  source: {}", read.source);
-            println!("  tags: {:?}", read.tags);
-            println!("  preview: {}", read.preview);
-        }
-    }
-
-    if let Some(compression) = &trace.compression {
-        println!(
-            "
-== compression =="
-        );
-        println!(
-            "  original_message_count: {}",
-            compression.original_message_count
-        );
-        println!("  kept_recent_count: {}", compression.kept_recent_count);
-        println!("  summary_preview: {}", compression.summary_preview);
-    }
-
-    if let Some(side_effect_summary) = &trace.side_effect_summary {
-        println!(
-            "
-== side-effect summary =="
-        );
-        println!("  total: {}", side_effect_summary.total);
-        println!("  failed: {}", side_effect_summary.failed);
-        println!("  high_risk: {}", side_effect_summary.high_risk);
-        println!(
-            "  capability_kinds: {:?}",
-            side_effect_summary.capability_kinds
-        );
-    }
-
-    if !trace.capability_invocations.is_empty() {
-        println!(
-            "
-== capability invocations =="
-        );
-
-        for (idx, invocation) in trace.capability_invocations.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  job_id: {}", invocation.job_id);
-            println!("  call_id: {:?}", invocation.call_id);
-            println!("  tool_name: {}", invocation.tool_name);
-            println!("  kind: {}", invocation.kind.label());
-            println!("  risk: {}", invocation.risk.label());
-            println!("  permission_scopes: {:?}", invocation.permission_scopes);
-            println!("  status: {}", invocation.status);
-            println!("  summary: {}", invocation.summary);
-            println!("  target: {:?}", invocation.target);
-            println!("  node_id: {:?}", invocation.node_id);
-            println!("  capability_route: {:?}", invocation.capability_route);
-            println!("  disconnect_context: {:?}", invocation.disconnect_context);
-            println!("  started_at: {}", invocation.started_at);
-            println!("  finished_at: {:?}", invocation.finished_at);
-            println!("  duration_ms: {:?}", invocation.duration_ms());
-            println!("  error: {:?}", invocation.error);
-        }
-    }
-
-    if !trace.memory_writes.is_empty() {
-        println!(
-            "
-== memory writes =="
-        );
-        for (idx, write) in trace.memory_writes.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  session_id: {}", write.session_id);
-            println!("  kind: {}", write.kind);
-            println!("  tags: {:?}", write.tags);
-            println!("  preview: {}", write.preview);
-        }
-    }
-
-    if let Ok(loaded) = load_config() {
-        let redacted = redact_mosaic_config(&loaded.config);
-        println!("\ncurrent_workspace_config:");
-        println!("  active_profile: {}", redacted.active_profile);
-        println!(
-            "  deployment: profile={} workspace={}",
-            redacted.deployment.profile, redacted.deployment.workspace_name
-        );
-        println!(
-            "  auth: operator_env={:?} operator_present={} webchat_env={:?} webchat_present={} telegram_env={:?} telegram_present={}",
-            redacted.auth.operator_token_env,
-            redacted.auth.operator_token_present,
-            redacted.auth.webchat_shared_secret_env,
-            redacted.auth.webchat_shared_secret_present,
-            redacted.auth.telegram_secret_token_env,
-            redacted.auth.telegram_secret_token_present
-        );
-        println!(
-            "  session_store_root_dir: {}",
-            redacted.session_store_root_dir
-        );
-        println!("  inspect_runs_dir: {}", redacted.inspect_runs_dir);
-        println!(
-            "  audit: root_dir={} retention_days={} replay_window={} redact_inputs={}",
-            redacted.audit.root_dir,
-            redacted.audit.retention_days,
-            redacted.audit.event_replay_window,
-            redacted.audit.redact_inputs
-        );
-        println!(
-            "  observability: metrics={} readiness={} slow_consumer_lag_threshold={}",
-            redacted.observability.enable_metrics,
-            redacted.observability.enable_readiness,
-            redacted.observability.slow_consumer_lag_threshold
-        );
-        println!(
-            "  extension_manifest_count: {}",
-            redacted.extension_manifest_count
-        );
-        println!(
-            "  policies: exec={} webhook={} cron={} mcp={} hot_reload={}",
-            redacted.policies.allow_exec,
-            redacted.policies.allow_webhook,
-            redacted.policies.allow_cron,
-            redacted.policies.allow_mcp,
-            redacted.policies.hot_reload_enabled
-        );
-        println!("  profiles:");
-        for profile in redacted.profiles {
-            println!(
-                "    - {} | type={} | model={} | api_key_env={:?} | api_key_present={}",
-                profile.name,
-                profile.provider_type,
-                profile.model,
-                profile.api_key_env,
-                profile.api_key_present
-            );
-        }
-    }
-
-    if !trace.tool_calls.is_empty() {
-        println!("\n== tool calls ==");
-
-        for (idx, call) in trace.tool_calls.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  call_id: {:?}", call.call_id);
-            println!("  name: {}", call.name);
-            println!("  source: {}", call.source.label());
-            if let Some(server_name) = call.source.server_name() {
-                println!("  server_name: {}", server_name);
-            }
-            if let Some(remote_tool_name) = call.source.remote_tool_name() {
-                println!("  remote_tool_name: {}", remote_tool_name);
-            }
-            println!("  node_id: {:?}", call.node_id);
-            println!("  capability_route: {:?}", call.capability_route);
-            println!("  disconnect_context: {:?}", call.disconnect_context);
-            println!("  started_at: {}", call.started_at);
-            println!("  finished_at: {:?}", call.finished_at);
-            println!("  duration_ms: {:?}", call.duration_ms());
-            println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
-
-            match &call.output {
-                Some(output) => println!("  output_preview: {}", truncate_for_cli(output, 240)),
-                None => println!("  output_preview: <none>"),
-            }
-        }
-    }
-
-    if !trace.skill_calls.is_empty() {
-        println!("\n== skill calls ==");
-
-        for (idx, call) in trace.skill_calls.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  name: {}", call.name);
-            println!("  started_at: {}", call.started_at);
-            println!("  finished_at: {:?}", call.finished_at);
-            println!("  duration_ms: {:?}", call.duration_ms());
-            println!("  input: {}", serde_json::to_string_pretty(&call.input)?);
-
-            match &call.output {
-                Some(output) => println!("  output_preview: {}", truncate_for_cli(output, 240)),
-                None => println!("  output_preview: <none>"),
-            }
-        }
-    }
-
-    if !trace.step_traces.is_empty() {
-        println!("\n== workflow steps ==");
-
-        for (idx, step) in trace.step_traces.iter().enumerate() {
-            println!("[{}]", idx + 1);
-            println!("  name: {}", step.name);
-            println!("  kind: {}", step.kind);
-            println!("  status: {}", step.status());
-            println!("  started_at: {}", step.started_at);
-            println!("  finished_at: {:?}", step.finished_at);
-            println!("  duration_ms: {:?}", step.duration_ms());
-            println!("  input_preview: {}", truncate_for_cli(&step.input, 240));
-
-            match &step.output {
-                Some(output) => println!("  output_preview: {}", truncate_for_cli(output, 240)),
-                None => println!("  output_preview: <none>"),
-            }
-
-            match &step.error {
-                Some(error) => println!("  error: {}", truncate_for_cli(error, 240)),
-                None => println!("  error: <none>"),
-            }
-        }
+        print_next_steps(next_steps);
     }
 
     Ok(())
@@ -2207,46 +1985,26 @@ fn print_gateway_status(
     metrics: &MetricsResponse,
 ) -> Result<()> {
     println!(
-        "health: status={} active_profile={} deployment={} auth={} sessions={} replay_window={} transport={}",
-        health.status,
-        health.active_profile,
-        health.deployment_profile,
-        health.auth_mode,
-        health.session_count,
-        health.event_replay_window,
-        health.transport,
-    );
-    println!(
-        "readiness: status={} session_store_ready={} audit_ready={} replay_buffered={} slow_consumer_threshold={} extensions={}",
-        readiness.status,
-        readiness.session_store_ready,
-        readiness.audit_ready,
-        readiness.replay_events_buffered,
-        readiness.slow_consumer_lag_threshold,
-        readiness.extension_count,
-    );
-    println!(
-        "metrics: completed_runs={} failed_runs={} capability_jobs_total={} audit_events_total={} auth_denials_total={} lagged_events_total={} open_jobs={}",
-        metrics.completed_runs_total,
-        metrics.failed_runs_total,
-        metrics.capability_jobs_total,
-        metrics.audit_events_total,
-        metrics.auth_denials_total,
-        metrics.broadcast_lag_events_total,
-        metrics.capability_job_count,
+        "{}",
+        output::render_gateway_status(health, readiness, metrics)
     );
     Ok(())
 }
 
 fn print_gateway_audit_events(events: &[GatewayAuditEventDto]) -> Result<()> {
     if events.is_empty() {
-        println!("no audit events found");
+        println!("audit summary:");
+        println!("  events: 0");
         return Ok(());
     }
 
+    println!("audit summary:");
+    println!("  events: {}", events.len());
+    println!("  latest_at: {}", events[0].emitted_at);
+    println!("events:");
     for event in events {
         println!(
-            "{} | kind={} | outcome={} | session={} | gateway_run={} | correlation={} | channel={:?} | actor={:?}",
+            "  - {} | kind={} | outcome={} | session={} | gateway_run={} | correlation={} | channel={:?} | actor={:?}",
             event.emitted_at,
             event.kind,
             event.outcome,
@@ -2257,31 +2015,29 @@ fn print_gateway_audit_events(events: &[GatewayAuditEventDto]) -> Result<()> {
             event.actor,
         );
         println!(
-            "  summary: {}{}",
+            "    summary: {}{}",
             truncate_for_cli(&event.summary, 240),
             if event.redacted { " [redacted]" } else { "" }
         );
         if let Some(target) = event.target.as_deref() {
-            println!("  target: {}", target);
+            println!("    target: {}", target);
         }
     }
     Ok(())
 }
 
 fn print_gateway_replay_window(replay: &ReplayWindowResponse) -> Result<()> {
-    println!(
-        "replay_window: capacity={} buffered={} dropped_total={}",
-        replay.capacity,
-        replay.events.len(),
-        replay.dropped_events_total,
-    );
+    println!("replay summary:");
+    println!("  capacity: {}", replay.capacity);
+    println!("  buffered: {}", replay.events.len());
+    println!("  dropped_total: {}", replay.dropped_events_total);
     if replay.events.is_empty() {
-        println!("no replay events captured");
         return Ok(());
     }
+    println!("events:");
     for envelope in &replay.events {
         println!(
-            "{} | run={} | corr={} | session={} | route={} | event={}",
+            "  - {} | run={} | corr={} | session={} | route={} | event={}",
             envelope.emitted_at,
             envelope.gateway_run_id,
             envelope.correlation_id,
@@ -2315,14 +2071,30 @@ fn print_gateway_incident_bundle(bundle: &IncidentBundleDto, path: &Path) -> Res
 }
 
 fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
+    println!("adapter summary:");
+    println!("  adapters: {}", adapters.len());
+    println!(
+        "  errors: {}",
+        adapters
+            .iter()
+            .filter(|adapter| adapter.status == "error")
+            .count()
+    );
+    println!(
+        "  warnings: {}",
+        adapters
+            .iter()
+            .filter(|adapter| adapter.status == "warning")
+            .count()
+    );
     if adapters.is_empty() {
-        println!("no adapters found");
         return Ok(());
     }
 
+    println!("adapters:");
     for adapter in adapters {
         println!(
-            "{} | channel={} | transport={} | path={} | status={} | outbound_ready={}",
+            "  - {} | channel={} | transport={} | path={} | status={} | outbound_ready={}",
             adapter.name,
             adapter.channel,
             adapter.transport,
@@ -2330,7 +2102,7 @@ fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
             adapter.status,
             adapter.outbound_ready,
         );
-        println!("  {}", adapter.detail);
+        println!("    {}", adapter.detail);
     }
 
     Ok(())
@@ -2347,14 +2119,17 @@ fn print_adapter_doctor(adapters: &[AdapterStatusDto]) -> Result<()> {
 }
 
 fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
+    println!("session summary:");
+    println!("  source: local");
+    println!("  total: {}", sessions.len());
     if sessions.is_empty() {
-        println!("no sessions found");
         return Ok(());
     }
 
+    println!("sessions:");
     for session in sessions {
         println!(
-            "{} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
+            "  - {} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
             session.id,
             session.title,
             session.provider_profile,
@@ -2367,7 +2142,7 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
             session.last_correlation_id.as_deref().unwrap_or("-"),
         );
         println!(
-            "  channel={:?} actor={:?} thread={:?}",
+            "    channel={:?} actor={:?} thread={:?}",
             session.channel_context.channel,
             session
                 .channel_context
@@ -2381,10 +2156,10 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
                 .or(session.channel_context.thread_id.as_ref()),
         );
         if let Some(preview) = session.last_message_preview.as_deref() {
-            println!("  last: {}", preview);
+            println!("    last: {}", preview);
         }
         if let Some(summary) = session.memory_summary_preview.as_deref() {
-            println!("  memory: {}", summary);
+            println!("    memory: {}", summary);
         }
     }
 
@@ -2392,14 +2167,17 @@ fn print_session_list(sessions: &[SessionSummary]) -> Result<()> {
 }
 
 fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
+    println!("session summary:");
+    println!("  source: remote");
+    println!("  total: {}", sessions.len());
     if sessions.is_empty() {
-        println!("no sessions found");
         return Ok(());
     }
 
+    println!("sessions:");
     for session in sessions {
         println!(
-            "{} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
+            "  - {} | {} | profile={} | model={} | route={} | messages={} | refs={} | updated_at={} | gateway_run={} | correlation={}",
             session.id,
             session.title,
             session.provider_profile,
@@ -2412,7 +2190,7 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
             session.last_correlation_id.as_deref().unwrap_or("-"),
         );
         println!(
-            "  channel={:?} actor={:?} thread={:?}",
+            "    channel={:?} actor={:?} thread={:?}",
             session.channel_context.channel,
             session
                 .channel_context
@@ -2426,10 +2204,10 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
                 .or(session.channel_context.thread_id.as_ref()),
         );
         if let Some(preview) = session.last_message_preview.as_deref() {
-            println!("  last: {}", preview);
+            println!("    last: {}", preview);
         }
         if let Some(summary) = session.memory_summary_preview.as_deref() {
-            println!("  memory: {}", summary);
+            println!("    memory: {}", summary);
         }
     }
 
@@ -2684,93 +2462,6 @@ fn current_dir() -> Result<PathBuf> {
     env::current_dir().context("failed to resolve current directory")
 }
 
-fn print_config_summary(loaded: &LoadedMosaicConfig) {
-    println!("config sources:");
-    for source in &loaded.sources {
-        println!(
-            "  [{}] {}",
-            config_source_label(&source.kind),
-            source.detail
-        );
-    }
-
-    let redacted = redact_mosaic_config(&loaded.config);
-    println!("\nconfig summary:");
-    println!("  schema_version: {}", redacted.schema_version);
-    println!("  active_profile: {}", redacted.active_profile);
-    println!(
-        "  deployment: profile={} workspace={}",
-        redacted.deployment.profile, redacted.deployment.workspace_name
-    );
-    println!(
-        "  auth: operator_env={:?} operator_present={} webchat_env={:?} webchat_present={} telegram_env={:?} telegram_present={}",
-        redacted.auth.operator_token_env,
-        redacted.auth.operator_token_present,
-        redacted.auth.webchat_shared_secret_env,
-        redacted.auth.webchat_shared_secret_present,
-        redacted.auth.telegram_secret_token_env,
-        redacted.auth.telegram_secret_token_present
-    );
-    println!(
-        "  session_store_root_dir: {}",
-        redacted.session_store_root_dir
-    );
-    println!("  inspect_runs_dir: {}", redacted.inspect_runs_dir);
-    println!(
-        "  audit: root_dir={} retention_days={} replay_window={} redact_inputs={}",
-        redacted.audit.root_dir,
-        redacted.audit.retention_days,
-        redacted.audit.event_replay_window,
-        redacted.audit.redact_inputs
-    );
-    println!(
-        "  observability: metrics={} readiness={} slow_consumer_lag_threshold={}",
-        redacted.observability.enable_metrics,
-        redacted.observability.enable_readiness,
-        redacted.observability.slow_consumer_lag_threshold
-    );
-    println!(
-        "  extension_manifest_count: {}",
-        redacted.extension_manifest_count
-    );
-    println!(
-        "  policies: exec={} webhook={} cron={} mcp={} hot_reload={}",
-        redacted.policies.allow_exec,
-        redacted.policies.allow_webhook,
-        redacted.policies.allow_cron,
-        redacted.policies.allow_mcp,
-        redacted.policies.hot_reload_enabled
-    );
-    println!("  profiles:");
-    for profile in redacted.profiles {
-        println!(
-            "    - {} | type={} | model={} | api_key_env={:?} | api_key_present={}",
-            profile.name,
-            profile.provider_type,
-            profile.model,
-            profile.api_key_env,
-            profile.api_key_present
-        );
-    }
-}
-
-fn print_validation_report(report: &mosaic_config::ValidationReport) {
-    if report.issues.is_empty() {
-        println!("\nvalidation issues: none");
-        return;
-    }
-
-    println!("\nvalidation issues:");
-    for issue in &report.issues {
-        println!(
-            "  [{}] {}: {}",
-            validation_level_label(&issue.level),
-            issue.field,
-            issue.message
-        );
-    }
-}
-
 fn render_validation_issues(report: &mosaic_config::ValidationReport) -> String {
     report
         .issues
@@ -2787,28 +2478,10 @@ fn render_validation_issues(report: &mosaic_config::ValidationReport) -> String 
         .join("\n")
 }
 
-fn config_source_label(kind: &ConfigSourceKind) -> &'static str {
-    match kind {
-        ConfigSourceKind::Defaults => "defaults",
-        ConfigSourceKind::User => "user",
-        ConfigSourceKind::Workspace => "workspace",
-        ConfigSourceKind::Env => "env",
-        ConfigSourceKind::Cli => "cli",
-    }
-}
-
 fn validation_level_label(level: &ValidationLevel) -> &'static str {
     match level {
         ValidationLevel::Error => "error",
         ValidationLevel::Warning => "warning",
-    }
-}
-
-fn doctor_status_label(status: &DoctorStatus) -> &'static str {
-    match status {
-        DoctorStatus::Ok => "ok",
-        DoctorStatus::Warning => "warning",
-        DoctorStatus::Error => "error",
     }
 }
 
@@ -2847,8 +2520,8 @@ mod tests {
     use mosaic_tool_core::ToolSource;
 
     use super::{
-        Cli, DispatchCommand, ExtensionCommand, MemoryCommand, ModelCommand, SessionCommand,
-        SetupCommand,
+        Cli, ConfigCommand, DispatchCommand, ExtensionCommand, MemoryCommand, ModelCommand,
+        SessionCommand, SetupCommand,
     };
 
     fn repo_root() -> PathBuf {
@@ -2857,7 +2530,6 @@ mod tests {
             .expect("cli crate should live under repo root")
             .to_path_buf()
     }
-
 
     fn subcommand_help(name: &str) -> String {
         let mut command = Cli::command();
@@ -3044,12 +2716,39 @@ mod tests {
 
     #[test]
     fn parses_inspect_subcommand() {
-        let cli = Cli::parse_from(["mosaic", "inspect", ".mosaic/runs/demo.json"]);
+        let cli = Cli::parse_from([
+            "mosaic",
+            "inspect",
+            ".mosaic/runs/demo.json",
+            "--verbose",
+            "--json",
+        ]);
 
         assert_eq!(
             cli.dispatch(),
             DispatchCommand::Inspect {
                 file: ".mosaic/runs/demo.json".into(),
+                verbose: true,
+                json: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_config_subcommands() {
+        let cli = Cli::parse_from(["mosaic", "config", "show"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Config {
+                command: ConfigCommand::Show { json: false },
+            }
+        );
+
+        let cli = Cli::parse_from(["mosaic", "config", "sources", "--json"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Config {
+                command: ConfigCommand::Sources { json: true },
             }
         );
     }
@@ -3219,9 +2918,34 @@ mod tests {
     }
 
     #[test]
-    fn top_level_help_mentions_quick_start_and_docs() {
+    fn config_help_mentions_merged_settings_and_json() {
+        let help = subcommand_help("config");
+        assert!(help.contains("merged operator config"));
+        assert!(help.contains("mosaic config show"));
+        assert!(help.contains("mosaic config show --json"));
+    }
+
+    #[test]
+    fn inspect_help_mentions_verbose_and_json() {
+        let help = subcommand_help("inspect");
+        assert!(help.contains("provider, tool, workflow, and memory detail"));
+        assert!(help.contains("--verbose"));
+        assert!(help.contains("--json"));
+    }
+
+    #[test]
+    fn setup_help_explains_when_to_use() {
+        let help = subcommand_help("setup");
+        assert!(help.contains("When to use it"));
+        assert!(help.contains("diagnose why Mosaic will not start cleanly"));
+    }
+
+    #[test]
+    fn top_level_help_mentions_quick_start_docs_and_operator_groups() {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("mosaic setup init"));
+        assert!(help.contains("mosaic config show"));
+        assert!(help.contains("Operator groups"));
         assert!(help.contains("docs/getting-started.md"));
         assert!(help.contains("examples/providers/openai.yaml"));
     }
@@ -3257,6 +2981,21 @@ mod tests {
             assert!(
                 getting_started.contains(required),
                 "getting-started guide missing {required}"
+            );
+        }
+
+        let cli_reference =
+            fs::read_to_string(root.join("docs/cli.md")).expect("cli reference should load");
+        for required in [
+            "mosaic config show",
+            "mosaic config sources",
+            "mosaic inspect .mosaic/runs/<run-id>.json --verbose",
+            "mosaic inspect .mosaic/runs/<run-id>.json --json",
+            "Operator Groupings",
+        ] {
+            assert!(
+                cli_reference.contains(required),
+                "cli reference missing {required}"
             );
         }
     }
