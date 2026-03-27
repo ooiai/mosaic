@@ -2,6 +2,12 @@
 
 The Gateway is the control-plane hub for routing, sessions, event broadcast, status, audit, replay, and incident export.
 
+Related examples:
+
+- [examples/channels/webchat-message.json](../examples/channels/webchat-message.json)
+- [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
+- [examples/full-stack/README.md](../examples/full-stack/README.md)
+
 ## Local status
 
 ```bash
@@ -80,14 +86,29 @@ mosaic gateway incident <run-id> --out /tmp/incident.json
 
 Start the HTTP Gateway and send a sample webchat payload.
 
-Sample payload: [examples/gateway/webchat-message.json](../examples/gateway/webchat-message.json)
+Sample payload: [examples/channels/webchat-message.json](../examples/channels/webchat-message.json)
 
 ```bash
 mosaic gateway serve --http 127.0.0.1:8080
-curl -X POST http://127.0.0.1:8080/ingress/webchat   -H 'content-type: application/json'   --data @examples/gateway/webchat-message.json
+curl -X POST http://127.0.0.1:8080/ingress/webchat \
+  -H 'content-type: application/json' \
+  --data @examples/channels/webchat-message.json
 ```
 
 If you configure `auth.webchat_shared_secret_env`, also send `x-mosaic-shared-secret`.
+
+## Telegram ingress example
+
+Sample payload: [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
+
+```bash
+export MOSAIC_TELEGRAM_SECRET_TOKEN=full-stack-secret
+mosaic gateway serve --http 127.0.0.1:8080
+curl -X POST http://127.0.0.1:8080/ingress/telegram \
+  -H 'content-type: application/json' \
+  -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_SECRET_TOKEN" \
+  --data @examples/channels/telegram-update.json
+```
 
 ## Adapter checks
 
@@ -97,3 +118,5 @@ mosaic adapter doctor
 ```
 
 Use these before exposing Gateway ingress to other channels.
+
+For the end-to-end provider + Gateway + Telegram walkthrough, continue with [full-stack.md](./full-stack.md).

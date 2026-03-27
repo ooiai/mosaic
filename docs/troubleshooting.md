@@ -44,9 +44,16 @@ What to do next:
 Current valid runtime provider types are:
 
 - `mock`
+- `openai`
+- `azure`
+- `anthropic`
+- `ollama`
 - `openai-compatible`
 
-If you want Anthropic today, configure an OpenAI-compatible bridge and use [examples/providers/anthropic.yaml](../examples/providers/anthropic.yaml).
+Compare with:
+
+- [docs/providers.md](./providers.md)
+- [examples/providers/README.md](../examples/providers/README.md)
 
 ## OpenAI key missing
 
@@ -119,6 +126,12 @@ Check:
 - `MOSAIC_OPERATOR_TOKEN` is set if operator auth is enabled
 - ingress shared secrets are configured when needed
 
+For a known-good HTTP Gateway + Telegram path, compare against:
+
+- [docs/full-stack.md](./full-stack.md)
+- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+- [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
+
 ## Need a compact incident package
 
 Use:
@@ -128,3 +141,17 @@ mosaic gateway incident <run-id>
 ```
 
 Then inspect the saved JSON under `.mosaic/audit/incidents/`.
+
+## Gateway starts but ingress requests fail
+
+Check:
+
+- `mosaic adapter status`
+- `mosaic gateway status`
+- the correct ingress path, for example `/ingress/webchat` or `/ingress/telegram`
+- the correct shared-secret header when `auth.webchat_shared_secret_env` or `auth.telegram_secret_token_env` is configured
+
+Known-good payloads:
+
+- [examples/channels/webchat-message.json](../examples/channels/webchat-message.json)
+- [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)

@@ -10,6 +10,7 @@ Repo-wide example verification commands live in [TESTING.md](./TESTING.md).
 - [providers/ollama.yaml](./providers/ollama.yaml): local Ollama configuration
 - [providers/anthropic.yaml](./providers/anthropic.yaml): direct Anthropic configuration
 - [providers/azure.yaml](./providers/azure.yaml): Azure OpenAI configuration
+- [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): OpenAI profile already wired for the Gateway + Telegram golden path
 
 Use them by copying the relevant block into `.mosaic/config.yaml`, then run:
 
@@ -51,13 +52,32 @@ mosaic extension list
 
 ## Gateway
 
-- [gateway/webchat-message.json](./gateway/webchat-message.json): sample payload for `/ingress/webchat`
+- [channels/webchat-message.json](./channels/webchat-message.json): sample payload for `/ingress/webchat`
+- [channels/telegram-update.json](./channels/telegram-update.json): sample payload for `/ingress/telegram`
 
 Use it with a local HTTP Gateway:
 
 ```bash
 mosaic gateway serve --http 127.0.0.1:8080
-curl -X POST http://127.0.0.1:8080/ingress/webchat   -H 'content-type: application/json'   --data @examples/gateway/webchat-message.json
+curl -X POST http://127.0.0.1:8080/ingress/webchat \
+  -H 'content-type: application/json' \
+  --data @examples/channels/webchat-message.json
+```
+
+## Channels
+
+- [channels/README.md](./channels/README.md): channel payloads and local ingress commands
+
+## Full Stack
+
+- [full-stack/README.md](./full-stack/README.md): the complete provider + Gateway + channel + session + inspect path
+- [full-stack/mock-telegram.config.yaml](./full-stack/mock-telegram.config.yaml): fast local Gateway + Telegram config
+- [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): real OpenAI + Telegram config
+
+Automated verification:
+
+```bash
+./scripts/test-full-stack-example.sh mock
 ```
 
 ## Deployment

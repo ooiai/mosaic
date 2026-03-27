@@ -36,6 +36,12 @@
 
 运行：`cargo run -p mosaic-cli -- inspect .mosaic/runs/<trace-id>.json`
 
+`full-stack mock`
+
+运行：`./scripts/test-full-stack-example.sh mock`
+
+预期：启动本地 HTTP Gateway，经由 Telegram ingress 产生 `telegram--100123-99` session、trace、audit/replay 和 incident bundle。
+
 ## Delivery smoke
 
 仓库级 smoke：

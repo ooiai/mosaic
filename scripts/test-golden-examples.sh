@@ -25,6 +25,7 @@ run_cli setup doctor >/dev/null
 run_cli run "$ROOT/examples/time-now-agent.yaml" --session golden-time >/dev/null
 run_cli run "$ROOT/examples/workflows/research-brief.yaml" --workflow research_brief --session golden-workflow >/dev/null
 run_cli run "$ROOT/examples/mcp-filesystem.yaml" --session golden-mcp >/dev/null
+sh "$ROOT/scripts/test-full-stack-example.sh" mock >/dev/null
 
 TRACE_PATH=$(find "$WORKDIR/.mosaic/runs" -maxdepth 1 -name '*.json' | sort | tail -n 1)
 if [ -z "$TRACE_PATH" ]; then

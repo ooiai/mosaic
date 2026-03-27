@@ -158,6 +158,9 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [CLI Reference](./docs/cli.md)
 - [TUI Guide](./docs/tui.md)
 - [Gateway Guide](./docs/gateway.md)
+- [Channel Setup](./docs/channels.md)
+- [Full-Stack Guide](./docs/full-stack.md)
+- [Session, Inspect, and Incident Flow](./docs/session-inspect-incident.md)
 - [Deployment Guide](./docs/deployment.md)
 - [Operations Guide](./docs/operations.md)
 - [Security Guide](./docs/security.md)
@@ -205,9 +208,13 @@ Mosaic is a Cargo workspace. The `cli/` crate is the composition root, while the
 - [examples/README.md](./examples/README.md)
 - [examples/TESTING.md](./examples/TESTING.md)
 - [examples/providers/](./examples/providers/)
+- [examples/channels/README.md](./examples/channels/README.md)
+- [examples/channels/](./examples/channels/)
 - [examples/workflows/](./examples/workflows/)
 - [examples/extensions/](./examples/extensions/)
 - [examples/gateway/](./examples/gateway/)
+- [examples/full-stack/README.md](./examples/full-stack/README.md)
+- [examples/full-stack/](./examples/full-stack/)
 - [examples/deployment/](./examples/deployment/)
 
 ## Current Provider Support

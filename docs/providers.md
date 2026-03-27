@@ -2,6 +2,11 @@
 
 This guide explains how provider configuration works in Mosaic today.
 
+If you want one provider profile that already matches the full Gateway + Telegram example, use:
+
+- [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml)
+- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+
 ## Current provider types
 
 Mosaic currently validates and runs these provider types:
@@ -36,6 +41,11 @@ Required environment variable:
 ```bash
 export OPENAI_API_KEY=your_api_key_here
 ```
+
+Full-stack example using the same provider:
+
+- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+- [docs/full-stack.md](./full-stack.md)
 
 ## Azure OpenAI
 
@@ -158,3 +168,5 @@ mosaic setup doctor
 If validation fails, read [troubleshooting.md](./troubleshooting.md).
 
 For secret handling and production auth guidance, continue with [security.md](./security.md).
+
+For the full provider + Gateway + channel walkthrough, continue with [full-stack.md](./full-stack.md).

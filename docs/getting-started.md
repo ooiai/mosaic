@@ -2,6 +2,8 @@
 
 This guide takes a new operator from a fresh checkout to a real Mosaic conversation and a saved trace.
 
+If you want the complete provider + Gateway + channel + inspect path, continue with [full-stack.md](./full-stack.md) after this guide.
+
 ## Prerequisites
 
 - Rust toolchain installed
@@ -113,6 +115,12 @@ mosaic setup doctor
 mosaic model list
 ```
 
+If you want to move straight into the full HTTP Gateway + Telegram ingress path, use:
+
+- [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml)
+- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+- [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
+
 What success looks like:
 
 - `validation: ok`
@@ -184,3 +192,9 @@ For a production handoff after the first day, continue with:
 - [docs/deployment.md](./deployment.md)
 - [docs/operations.md](./operations.md)
 - [docs/upgrade.md](./upgrade.md)
+
+For the complete operator golden path, continue with:
+
+- [full-stack.md](./full-stack.md)
+- [channels.md](./channels.md)
+- [session-inspect-incident.md](./session-inspect-incident.md)

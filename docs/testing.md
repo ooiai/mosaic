@@ -99,6 +99,7 @@ Real tests then opt into additional vendor or channel checks based on the secret
 | `MOSAIC_TEST_OLLAMA_BASE_URL` | optional Ollama endpoint override, defaults to `http://127.0.0.1:11434` |
 | `MOSAIC_TEST_OLLAMA_MODEL` | Ollama model name for real test, defaults to `llama3.1` |
 | `MOSAIC_TEST_TELEGRAM_SECRET` | optional shared secret header for the real Telegram ingress test |
+| `MOSAIC_FULL_STACK_PORT` | optional override for the full-stack Gateway HTTP port; if unset, the script chooses a free local port |
 | `MOSAIC_OPERATOR_TOKEN` | optional operator auth token for remote gateway SDK tests |
 
 ## Secrets and Service Conventions
@@ -121,6 +122,7 @@ It verifies:
 - mock-backed example runs
 - workflow example execution
 - MCP example execution
+- the mock full-stack Gateway + Telegram path through `scripts/test-full-stack-example.sh mock`
 - trace inspection after a real run artifact exists
 
 This is the guardrail that keeps `README.md`, `examples/`, and the operator getting-started path runnable.
@@ -156,3 +158,26 @@ When you add a new crate or a new operator surface:
 2. decide whether the test is local integration or real integration
 3. document any new env or secret in this file
 4. wire the command into `scripts/test-real-integrations.sh` or `scripts/test-golden-examples.sh` if it is part of a repo-wide lane
+
+## Full-Stack Example Verification
+
+The shared full-stack verification script is:
+
+```bash
+./scripts/test-full-stack-example.sh mock
+```
+
+Real provider lane:
+
+```bash
+MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai
+```
+
+This script verifies:
+
+- setup and validation
+- Gateway HTTP serve
+- Telegram ingress normalization
+- session persistence
+- inspect trace generation
+- audit, replay, and incident export

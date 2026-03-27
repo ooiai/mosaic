@@ -3231,13 +3231,18 @@ mod tests {
             "mosaic inspect .mosaic/runs/<run-id>.json",
             "docs/getting-started.md",
             "docs/cli.md",
+            "docs/channels.md",
+            "docs/full-stack.md",
             "docs/deployment.md",
             "docs/security.md",
+            "docs/session-inspect-incident.md",
             "docs/testing.md",
             "docs/non-tui-architecture-audit.md",
             "docs/release.md",
             "examples/README.md",
             "examples/TESTING.md",
+            "examples/channels/README.md",
+            "examples/full-stack/README.md",
             "examples/deployment/production.config.yaml",
             "make release-check",
             "make test-golden",
@@ -3289,6 +3294,8 @@ mod tests {
             "make test-integration",
             "make test-golden",
             "MOSAIC_REAL_TESTS=1 make test-real",
+            "./scripts/test-full-stack-example.sh mock",
+            "OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai",
             "Per-Crate Matrix",
             "Flaky Test Policy",
         ] {
@@ -3308,14 +3315,24 @@ mod tests {
             "docs/operations.md",
             "docs/security.md",
             "docs/testing.md",
+            "docs/channels.md",
+            "docs/full-stack.md",
+            "docs/session-inspect-incident.md",
             "docs/non-tui-architecture-audit.md",
             "docs/release.md",
             "docs/compatibility.md",
             "docs/upgrade.md",
+            "examples/channels/README.md",
+            "examples/channels/webchat-message.json",
+            "examples/channels/telegram-update.json",
+            "examples/full-stack/README.md",
+            "examples/full-stack/mock-telegram.config.yaml",
+            "examples/full-stack/openai-telegram.config.yaml",
             "examples/deployment/README.md",
             "examples/deployment/production.config.yaml",
             "examples/deployment/mosaic.service",
             "scripts/release-smoke.sh",
+            "scripts/test-full-stack-example.sh",
             "scripts/test-golden-examples.sh",
             "scripts/test-real-integrations.sh",
             "scripts/verify-delivery-artifacts.sh",
@@ -3477,6 +3494,65 @@ mod tests {
             "cargo test --workspace",
         ] {
             assert!(plan.contains(required), "plan_i1 missing {required}");
+        }
+    }
+
+    #[test]
+    fn docs_and_examples_bind_to_one_full_stack_path() {
+        let root = repo_root();
+
+        let readme = fs::read_to_string(root.join("README.md")).expect("README should load");
+        for required in [
+            "docs/channels.md",
+            "docs/full-stack.md",
+            "docs/session-inspect-incident.md",
+            "examples/channels/",
+            "examples/full-stack/",
+        ] {
+            assert!(readme.contains(required), "README missing {required}");
+        }
+
+        let full_stack = fs::read_to_string(root.join("docs/full-stack.md"))
+            .expect("full-stack guide should load");
+        for required in [
+            "examples/full-stack/mock-telegram.config.yaml",
+            "examples/full-stack/openai-telegram.config.yaml",
+            "examples/channels/telegram-update.json",
+            "./scripts/test-full-stack-example.sh mock",
+            "MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai",
+            "mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>",
+        ] {
+            assert!(
+                full_stack.contains(required),
+                "full-stack guide missing {required}"
+            );
+        }
+
+        let channels =
+            fs::read_to_string(root.join("docs/channels.md")).expect("channels guide should load");
+        for required in [
+            "examples/channels/webchat-message.json",
+            "examples/channels/telegram-update.json",
+            "POST /ingress/webchat",
+            "POST /ingress/telegram",
+        ] {
+            assert!(
+                channels.contains(required),
+                "channels guide missing {required}"
+            );
+        }
+
+        let session_flow = fs::read_to_string(root.join("docs/session-inspect-incident.md"))
+            .expect("session/inspect/incident guide should load");
+        for required in [
+            "mosaic session show telegram--100123-99",
+            "mosaic inspect .mosaic/runs/<run-id>.json --verbose",
+            "mosaic gateway incident <run-id>",
+        ] {
+            assert!(
+                session_flow.contains(required),
+                "session/inspect/incident guide missing {required}"
+            );
         }
     }
 
