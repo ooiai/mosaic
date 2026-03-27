@@ -299,34 +299,9 @@ async fn http_webchat_ingress(
         "x-mosaic-shared-secret",
         "webchat ingress",
     )?;
-    let request = RunSubmission {
-        system: None,
-        input: message.input,
-        skill: None,
-        workflow: None,
-        session_id: Some(
-            message
-                .session_id
-                .unwrap_or_else(|| format!("webchat-{}", Uuid::new_v4())),
-        ),
-        profile: message.profile,
-        ingress: Some(message.ingress.unwrap_or(IngressTrace {
-            kind: "webchat".to_owned(),
-            channel: Some("webchat".to_owned()),
-            source: Some("webchat-ingress".to_owned()),
-            remote_addr: None,
-            display_name: message.display_name,
-            actor_id: message.actor_id,
-            thread_id: message.thread_id,
-            thread_title: message.thread_title,
-            reply_target: message.reply_target,
-            gateway_url: None,
-        })),
-    };
-
     let submitted = state
         .gateway
-        .submit_run(request)
+        .submit_webchat_message(message)
         .map_err(http_internal_error)?;
     let result = submitted.wait().await.map_err(http_run_error)?;
     Ok(Json(run_response(result)))

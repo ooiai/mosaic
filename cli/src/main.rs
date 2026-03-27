@@ -1,44 +1,40 @@
 use std::{
-    collections::BTreeMap,
     env, fs, io,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use chrono::Utc;
 use clap::{Parser, Subcommand, ValueEnum};
 use mosaic_config::{
     ACTIVE_PROFILE_ENV, LoadConfigOptions, LoadedMosaicConfig, PolicyConfig, ValidationLevel,
-    doctor_mosaic_config, init_workspace_config, load_from_file, load_mosaic_config,
-    redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
+    doctor_mosaic_config, init_workspace_config, load_mosaic_config, redact_mosaic_config,
+    save_mosaic_config, validate_mosaic_config,
 };
 use mosaic_control_protocol::{
-    AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
-    ExecJobRequest, GatewayAuditEventDto, GatewayEvent, HealthResponse, IncidentBundleDto,
-    IngressTrace, MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunDetailDto,
-    RunResponse, RunSummaryDto, SessionDetailDto, SessionSummaryDto, WebhookJobRequest,
+    AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, GatewayAuditEventDto, GatewayEvent,
+    HealthResponse, IncidentBundleDto, IngressTrace, MetricsResponse, ReadinessResponse,
+    ReplayWindowResponse, RunDetailDto, RunResponse, RunSummaryDto, SessionSummaryDto,
 };
 use mosaic_extension_core::{ExtensionStatus, ExtensionValidationReport, validate_extension_set};
-use mosaic_gateway::{
-    GatewayCommand as GatewayControlCommand, GatewayHandle, GatewayRunError, GatewayRunRequest,
-    GatewayRunResult,
-};
+use mosaic_gateway::{GatewayHandle, GatewayRunError, GatewayRunResult};
 use mosaic_inspect::RunTrace;
 use mosaic_memory::{FileMemoryStore, MemoryStore};
-use mosaic_node_protocol::{
-    DEFAULT_STALE_AFTER_SECS, FileNodeStore, NodeCapabilityDeclaration, NodeCommandDispatch,
-    NodeCommandResultEnvelope, NodeRegistration,
-};
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::events::RunEventSink;
 use mosaic_sdk::GatewayClient;
 use mosaic_session_core::SessionSummary;
-use mosaic_tool_core::{ExecTool, ReadFileTool, Tool};
+use mosaic_tool_core::Tool;
 use tracing_subscriber::EnvFilter;
 
+mod automation_cmd;
 mod bootstrap;
+mod gateway_cmd;
+mod inspect_cmd;
+mod node_cmd;
 mod output;
+mod run_cmd;
+mod session_cmd;
 
 const CLI_ABOUT: &str = "Self-hosted AI assistant control plane for sessions, the TUI, Gateway routing, and trace inspection.";
 const CLI_AFTER_HELP: &str = "Quick start:
@@ -593,21 +589,29 @@ async fn main() -> Result<()> {
             attach,
             tui,
             resume,
-        } => run_cmd(file, skill, workflow, session, profile, attach, tui, resume).await,
+        } => run_cmd::run_cmd(file, skill, workflow, session, profile, attach, tui, resume).await,
         DispatchCommand::Setup { command } => setup_cmd(command),
         DispatchCommand::Config { command } => config_cmd(command),
-        DispatchCommand::Session { attach, command } => session_cmd(attach, command).await,
+        DispatchCommand::Session { attach, command } => {
+            session_cmd::session_cmd(attach, command).await
+        }
         DispatchCommand::Model { command } => model_cmd(command),
         DispatchCommand::Inspect {
             file,
             verbose,
             json,
-        } => inspect_cmd(file, verbose, json),
-        DispatchCommand::Gateway { attach, command } => gateway_cmd(attach, command).await,
+        } => inspect_cmd::inspect_cmd(file, verbose, json),
+        DispatchCommand::Gateway { attach, command } => {
+            gateway_cmd::gateway_cmd(attach, command).await
+        }
         DispatchCommand::Adapter { attach, command } => adapter_cmd(attach, command).await,
-        DispatchCommand::Node { command } => node_cmd(command).await,
-        DispatchCommand::Capability { attach, command } => capability_cmd(attach, command).await,
-        DispatchCommand::Cron { attach, command } => cron_cmd(attach, command).await,
+        DispatchCommand::Node { command } => node_cmd::node_cmd(command).await,
+        DispatchCommand::Capability { attach, command } => {
+            automation_cmd::capability_cmd(attach, command).await
+        }
+        DispatchCommand::Cron { attach, command } => {
+            automation_cmd::cron_cmd(attach, command).await
+        }
         DispatchCommand::Memory { command } => memory_cmd(command),
         DispatchCommand::Extension { command } => extension_cmd(command),
     }
@@ -735,149 +739,13 @@ async fn tui_cmd(
     Ok(())
 }
 
-async fn run_cmd(
-    file: PathBuf,
-    skill: Option<String>,
-    workflow: Option<String>,
-    session: Option<String>,
-    profile: Option<String>,
-    attach: Option<String>,
-    tui: bool,
-    resume: bool,
-) -> Result<()> {
-    let app_cfg = load_from_file(&file)?;
-    let loaded = ensure_loaded_config(profile.clone())?;
-
-    if let Some(url) = attach {
-        if tui {
-            bail!(
-                "remote attach does not support `mosaic run --tui`; use `mosaic tui --attach {url}`"
-            )
-        }
-
-        return run_cmd_remote(loaded, app_cfg, skill, workflow, session, profile, url).await;
-    }
-
-    if tui {
-        return run_cmd_with_tui(loaded, app_cfg, skill, workflow, session, profile, resume).await;
-    }
-
-    let gateway = build_gateway_handle(&loaded, Some(&app_cfg))?;
-    let forwarder =
-        spawn_gateway_runtime_event_forwarder(gateway.subscribe(), Arc::new(output::CliEventSink));
-    let outcome = gateway
-        .submit_command(GatewayControlCommand::SubmitRun(GatewayRunRequest {
-            system: app_cfg.agent.system,
-            input: app_cfg.task.input,
-            skill,
-            workflow,
-            session_id: session,
-            profile,
-            ingress: Some(local_cli_ingress(None)),
-        }))?
-        .wait()
-        .await;
-    forwarder.abort();
-
-    finish_gateway_outcome(outcome)
-}
-
-async fn run_cmd_with_tui(
-    loaded: LoadedMosaicConfig,
-    app_cfg: mosaic_config::AppConfig,
-    skill: Option<String>,
-    workflow: Option<String>,
-    session: Option<String>,
-    profile: Option<String>,
-    resume: bool,
-) -> Result<()> {
-    let gateway = build_gateway_handle(&loaded, Some(&app_cfg))?;
-    let event_buffer = mosaic_tui::build_tui_event_buffer();
-    let forwarder = spawn_gateway_runtime_event_forwarder(
-        gateway.subscribe(),
-        mosaic_tui::build_tui_event_sink(event_buffer.clone()),
-    );
-
-    let request = GatewayRunRequest {
-        system: app_cfg.agent.system,
-        input: app_cfg.task.input,
-        skill,
-        workflow,
-        session_id: session,
-        profile,
-        ingress: Some(local_cli_ingress(None)),
-    };
-
-    let submitted = gateway.submit_command(GatewayControlCommand::SubmitRun(request))?;
-    let runtime_handle = tokio::spawn(async move { submitted.wait().await });
-    let tui_handle = tokio::task::spawn_blocking(move || {
-        mosaic_tui::run_until_complete_with_event_buffer(resume, event_buffer)
-    });
-
-    let runtime_outcome = runtime_handle.await?;
-    forwarder.abort();
-    let tui_join = tui_handle.await;
-
-    let run_result = finish_gateway_outcome(runtime_outcome);
-
-    match (run_result, tui_join) {
-        (Err(err), _) => Err(err),
-        (Ok(()), Err(err)) => Err(err.into()),
-        (Ok(()), Ok(tui_result)) => {
-            tui_result?;
-            Ok(())
-        }
-    }
-}
-
-async fn run_cmd_remote(
-    loaded: LoadedMosaicConfig,
-    app_cfg: mosaic_config::AppConfig,
-    skill: Option<String>,
-    workflow: Option<String>,
-    session: Option<String>,
-    profile: Option<String>,
-    attach: String,
-) -> Result<()> {
-    let client = gateway_client_from_loaded(&loaded, attach.clone());
-    let response = client
-        .submit_run(GatewayRunRequest {
-            system: app_cfg.agent.system,
-            input: app_cfg.task.input,
-            skill,
-            workflow,
-            session_id: session,
-            profile,
-            ingress: Some(remote_cli_ingress(&attach)),
-        })
-        .await?;
-
-    finish_remote_gateway_run(&loaded, response)
-}
-
 fn finish_gateway_outcome(
     outcome: std::result::Result<GatewayRunResult, GatewayRunError>,
 ) -> Result<()> {
     match outcome {
-        Ok(result) => finish_successful_gateway_run(result),
+        Ok(result) => run_cmd::finish_successful_gateway_run(result),
         Err(err) => finish_failed_gateway_run(err),
     }
-}
-
-fn finish_successful_gateway_run(result: GatewayRunResult) -> Result<()> {
-    println!("{}", result.output);
-    println!("saved trace: {}", result.trace_path.display());
-    println!("gateway_run_id: {}", result.gateway_run_id);
-    println!("correlation_id: {}", result.correlation_id);
-    println!("session_route: {}", result.session_route);
-
-    let mut next_steps = Vec::new();
-    if let Some(session_id) = result.trace.session_id.as_deref() {
-        next_steps.push(format!("mosaic session show {}", session_id));
-    }
-    next_steps.push(format!("mosaic inspect {}", result.trace_path.display()));
-    print_next_steps(next_steps);
-    Ok(())
 }
 
 fn finish_failed_gateway_run(err: GatewayRunError) -> Result<()> {
@@ -1007,256 +875,6 @@ fn config_cmd(command: ConfigCommand) -> Result<()> {
     }
 }
 
-async fn session_cmd(attach: Option<String>, command: SessionCommand) -> Result<()> {
-    if let Some(url) = attach {
-        let loaded = ensure_loaded_config(None)?;
-        let client = gateway_client_from_loaded(&loaded, url);
-
-        return match command {
-            SessionCommand::List => print_remote_session_list(&client.list_sessions().await?),
-            SessionCommand::Show { id } => {
-                let session = client
-                    .get_session(&id)
-                    .await?
-                    .ok_or_else(|| anyhow!("session not found: {}", id))?;
-                print_remote_session_detail(&session)
-            }
-        };
-    }
-
-    let loaded = ensure_loaded_config(None)?;
-    let gateway = build_gateway_handle(&loaded, None)?;
-
-    match command {
-        SessionCommand::List => print_session_list(&gateway.list_sessions()?),
-        SessionCommand::Show { id } => {
-            let session = gateway
-                .load_session(&id)?
-                .ok_or_else(|| anyhow!("session not found: {}", id))?;
-
-            println!("id: {}", session.id);
-            println!("title: {}", session.title);
-            println!("created_at: {}", session.created_at);
-            println!("updated_at: {}", session.updated_at);
-            println!("provider_profile: {}", session.provider_profile);
-            println!("provider_type: {}", session.provider_type);
-            println!("model: {}", session.model);
-            println!("last_run_id: {:?}", session.last_run_id);
-            println!("run_status: {}", session.run.status.label());
-            println!("current_run_id: {:?}", session.run.current_run_id);
-            println!(
-                "current_gateway_run_id: {:?}",
-                session.run.current_gateway_run_id
-            );
-            println!(
-                "current_correlation_id: {:?}",
-                session.run.current_correlation_id
-            );
-            println!("last_error: {:?}", session.run.last_error);
-            println!("last_failure_kind: {:?}", session.run.last_failure_kind);
-            println!("run_updated_at: {:?}", session.run.updated_at);
-            println!("session_route: {}", session.gateway.route);
-            println!("channel: {:?}", session.channel_context.channel);
-            println!("actor_id: {:?}", session.channel_context.actor_id);
-            println!("actor_name: {:?}", session.channel_context.actor_name);
-            println!("thread_id: {:?}", session.channel_context.thread_id);
-            println!("thread_title: {:?}", session.channel_context.thread_title);
-            println!("reply_target: {:?}", session.channel_context.reply_target);
-            println!(
-                "last_gateway_run_id: {:?}",
-                session.gateway.last_gateway_run_id
-            );
-            println!(
-                "last_correlation_id: {:?}",
-                session.gateway.last_correlation_id
-            );
-            println!("message_count: {}", session.transcript.len());
-            println!("memory_summary: {:?}", session.memory.latest_summary);
-            println!(
-                "compressed_context: {:?}",
-                session.memory.compressed_context
-            );
-            println!("memory_entry_count: {}", session.memory.memory_entry_count);
-            println!("compression_count: {}", session.memory.compression_count);
-            println!("reference_count: {}", session.references.len());
-
-            if !session.references.is_empty() {
-                println!("\nreferences:");
-                for reference in &session.references {
-                    println!(
-                        "- {} | reason={} | created_at={}",
-                        reference.session_id, reference.reason, reference.created_at
-                    );
-                }
-            }
-
-            if !session.transcript.is_empty() {
-                println!("\ntranscript:");
-                for (idx, message) in session.transcript.iter().enumerate() {
-                    println!(
-                        "[{}] {} {} {:?}",
-                        idx + 1,
-                        transcript_role_label(&message.role),
-                        message.created_at,
-                        message.tool_call_id
-                    );
-                    println!("  {}", truncate_for_cli(&message.content, 400));
-                }
-            }
-
-            Ok(())
-        }
-    }
-}
-
-async fn gateway_cmd(attach: Option<String>, command: GatewayCliCommand) -> Result<()> {
-    let loaded = ensure_loaded_config(None)?;
-
-    if let Some(url) = attach {
-        let client = gateway_client_from_loaded(&loaded, url);
-        return match command {
-            GatewayCliCommand::Serve { .. } => {
-                bail!("remote attach does not support `mosaic gateway serve`")
-            }
-            GatewayCliCommand::Sessions => {
-                print_remote_session_list(&client.list_sessions().await?)
-            }
-            GatewayCliCommand::Runs => print_run_list(&client.list_runs().await?),
-            GatewayCliCommand::ShowRun { id } => {
-                let run = client
-                    .get_run(&id)
-                    .await?
-                    .ok_or_else(|| anyhow!("run not found: {}", id))?;
-                print_run_detail(&run)
-            }
-            GatewayCliCommand::Cancel { id } => print_run_detail(&client.cancel_run(&id).await?),
-            GatewayCliCommand::Retry { id } => {
-                let result = client.retry_run(&id).await?;
-                finish_remote_gateway_run(&loaded, result)
-            }
-            GatewayCliCommand::Status => {
-                let health = client.health().await?;
-                let readiness = client.readiness().await?;
-                let metrics = client.metrics().await?;
-                print_gateway_status(&health, &readiness, &metrics)
-            }
-            GatewayCliCommand::Audit { limit } => {
-                print_gateway_audit_events(&client.audit_events(limit).await?)
-            }
-            GatewayCliCommand::Replay { limit } => {
-                print_gateway_replay_window(&client.replay_window(limit).await?)
-            }
-            GatewayCliCommand::Incident { id, out } => {
-                let bundle = client.incident_bundle(&id).await?;
-                let path = save_incident_bundle(&loaded, &bundle, out)?;
-                print_gateway_incident_bundle(&bundle, &path)
-            }
-        };
-    }
-
-    let gateway = build_gateway_handle(&loaded, None)?;
-    match command {
-        GatewayCliCommand::Sessions => print_session_list(&gateway.list_sessions()?),
-        GatewayCliCommand::Runs => print_run_list(&gateway.list_runs()?),
-        GatewayCliCommand::ShowRun { id } => {
-            let run = gateway
-                .load_run(&id)?
-                .ok_or_else(|| anyhow!("run not found: {}", id))?;
-            print_run_detail(&run)
-        }
-        GatewayCliCommand::Cancel { id } => print_run_detail(&gateway.cancel_run(&id)?),
-        GatewayCliCommand::Retry { id } => {
-            let result = gateway.retry_run(&id)?;
-            finish_gateway_outcome(result.wait().await)
-        }
-        GatewayCliCommand::Status => {
-            let health = gateway.health();
-            let readiness = gateway.readiness();
-            let metrics = gateway.metrics();
-            print_gateway_status(&health, &readiness, &metrics)
-        }
-        GatewayCliCommand::Audit { limit } => {
-            print_gateway_audit_events(&gateway.audit_events(limit))
-        }
-        GatewayCliCommand::Replay { limit } => {
-            print_gateway_replay_window(&gateway.replay_window(limit))
-        }
-        GatewayCliCommand::Incident { id, out } => {
-            let (bundle, saved_path) = gateway.incident_bundle(&id)?;
-            let path = if let Some(out) = out {
-                fs::write(&out, serde_json::to_string_pretty(&bundle)?)?;
-                out
-            } else {
-                saved_path
-            };
-            print_gateway_incident_bundle(&bundle, &path)
-        }
-        GatewayCliCommand::Serve { local, http } => {
-            if let Some(bind) = http {
-                let addr: std::net::SocketAddr = bind.parse()?;
-                let session_count = gateway.list_sessions()?.len();
-                println!("http gateway ready");
-                println!("active_profile: {}", loaded.config.active_profile);
-                println!("deployment_profile: {}", loaded.config.deployment.profile);
-                println!("auth_mode: {}", gateway.auth_mode());
-                println!("sessions: {}", session_count);
-                println!("listen: {}", addr);
-                println!("press Ctrl-C to stop");
-
-                mosaic_gateway::serve_http_with_shutdown(gateway, addr, async {
-                    let _ = tokio::signal::ctrl_c().await;
-                })
-                .await?;
-                println!("http gateway stopped");
-                return Ok(());
-            }
-
-            if !local {
-                bail!("use `mosaic gateway serve --local` or `mosaic gateway serve --http <addr>`");
-            }
-
-            let session_count = gateway.list_sessions()?.len();
-            println!("local gateway ready");
-            println!("active_profile: {}", loaded.config.active_profile);
-            println!("deployment_profile: {}", loaded.config.deployment.profile);
-            println!("auth_mode: {}", gateway.auth_mode());
-            println!("sessions: {}", session_count);
-            println!("press Ctrl-C to stop");
-
-            let mut receiver = gateway.subscribe();
-            loop {
-                tokio::select! {
-                    signal = tokio::signal::ctrl_c() => {
-                        signal?;
-                        println!("local gateway stopped");
-                        break;
-                    }
-                    event = receiver.recv() => {
-                        match event {
-                            Ok(envelope) => {
-                                println!(
-                                    "[gateway] run={} corr={} session={} route={} event= {}",
-                                    envelope.gateway_run_id,
-                                    envelope.correlation_id,
-                                    envelope.session_id.as_deref().unwrap_or("<none>"),
-                                    envelope.session_route,
-                                    gateway_event_label(&envelope.event),
-                                );
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                println!("[gateway] lagged {} events", skipped);
-                            }
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        }
-                    }
-                }
-            }
-
-            Ok(())
-        }
-    }
-}
-
 async fn adapter_cmd(attach: Option<String>, command: AdapterCommand) -> Result<()> {
     let adapters = if let Some(url) = attach {
         let loaded = ensure_loaded_config(None)?;
@@ -1272,367 +890,6 @@ async fn adapter_cmd(attach: Option<String>, command: AdapterCommand) -> Result<
     match command {
         AdapterCommand::Status => print_adapter_statuses(&adapters),
         AdapterCommand::Doctor => print_adapter_doctor(&adapters),
-    }
-}
-
-async fn node_cmd(command: NodeCliCommand) -> Result<()> {
-    match command {
-        NodeCliCommand::Serve { id, label } => serve_local_node(id, label).await,
-        NodeCliCommand::List => {
-            let loaded = ensure_loaded_config(None)?;
-            let gateway = build_gateway_handle(&loaded, None)?;
-            print_node_list(&gateway.list_nodes()?)
-        }
-        NodeCliCommand::Attach { node_id, session } => {
-            let loaded = ensure_loaded_config(None)?;
-            let gateway = build_gateway_handle(&loaded, None)?;
-            gateway.attach_node(&node_id, session.as_deref())?;
-            match session {
-                Some(session) => println!("attached node {} to session {}", node_id, session),
-                None => println!("attached node {} as the default node route", node_id),
-            }
-            Ok(())
-        }
-        NodeCliCommand::Capabilities { node_id } => {
-            let loaded = ensure_loaded_config(None)?;
-            let gateway = build_gateway_handle(&loaded, None)?;
-            match node_id {
-                Some(node_id) => {
-                    print_node_capabilities(&node_id, &gateway.node_capabilities(&node_id)?)
-                }
-                None => {
-                    let nodes = gateway.list_nodes()?;
-                    if nodes.is_empty() {
-                        println!("no nodes found");
-                        return Ok(());
-                    }
-                    for node in nodes {
-                        print_node_capabilities(&node.node_id, &node.capabilities)?;
-                    }
-                    Ok(())
-                }
-            }
-        }
-    }
-}
-
-async fn serve_local_node(id: Option<String>, label: Option<String>) -> Result<()> {
-    let node_store = FileNodeStore::new(resolve_workspace_relative_path(".mosaic/nodes")?);
-    let node_id = id.unwrap_or_else(|| "local-headless".to_owned());
-    let label = label.unwrap_or_else(|| "Local Headless Node".to_owned());
-    let (read_file_tool, exec_tool) = build_headless_node_tools()?;
-    let capabilities = vec![
-        tool_node_capability(&read_file_tool),
-        tool_node_capability(&exec_tool),
-    ];
-    let registration = NodeRegistration::new(
-        node_id.clone(),
-        label.clone(),
-        "file-bus",
-        "headless",
-        capabilities,
-    );
-    node_store.register_node(&registration)?;
-    let _ = node_store.heartbeat(&node_id)?;
-
-    println!("headless node ready");
-    println!("node_id: {}", node_id);
-    println!("label: {}", label);
-    println!("transport: file-bus");
-    println!("node_store: {}", node_store.root().display());
-    println!(
-        "capabilities: {:?}",
-        registration
-            .capabilities
-            .iter()
-            .map(|cap| cap.name.as_str())
-            .collect::<Vec<_>>()
-    );
-    println!("press Ctrl-C to stop");
-
-    loop {
-        tokio::select! {
-            signal = tokio::signal::ctrl_c() => {
-                signal?;
-                node_store.disconnect_node(&node_id, "operator_shutdown")?;
-                println!("headless node stopped");
-                break;
-            }
-            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
-                let _ = node_store.heartbeat(&node_id)?;
-                for dispatch in node_store.pending_commands(&node_id)? {
-                    execute_headless_node_dispatch(&node_store, &dispatch, &read_file_tool, &exec_tool).await?;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn build_headless_node_tools() -> Result<(ReadFileTool, ExecTool)> {
-    let allowed_root = env::current_dir()?;
-    Ok((
-        ReadFileTool::new_with_allowed_roots(vec![allowed_root.clone()]),
-        ExecTool::new(vec![allowed_root]),
-    ))
-}
-
-fn tool_node_capability(tool: &dyn Tool) -> NodeCapabilityDeclaration {
-    let metadata = tool.metadata();
-    NodeCapabilityDeclaration {
-        name: metadata
-            .capability
-            .node
-            .capability
-            .clone()
-            .unwrap_or_else(|| metadata.name.clone()),
-        kind: metadata.capability.kind.clone(),
-        permission_scopes: metadata.capability.permission_scopes.clone(),
-        risk: metadata.capability.risk.clone(),
-    }
-}
-
-async fn execute_headless_node_dispatch(
-    node_store: &FileNodeStore,
-    dispatch: &NodeCommandDispatch,
-    read_file_tool: &ReadFileTool,
-    exec_tool: &ExecTool,
-) -> Result<()> {
-    let result = match dispatch.capability.as_str() {
-        "read_file" => read_file_tool.call(dispatch.input.clone()).await,
-        "exec_command" => exec_tool.call(dispatch.input.clone()).await,
-        capability => Err(anyhow!("unsupported node capability: {}", capability)),
-    };
-
-    let envelope = match result {
-        Ok(result) => NodeCommandResultEnvelope::success(dispatch, result),
-        Err(err) => NodeCommandResultEnvelope::failure(dispatch, "failed", err.to_string(), None),
-    };
-    node_store.complete_command(&envelope)
-}
-
-fn print_node_list(nodes: &[NodeRegistration]) -> Result<()> {
-    if nodes.is_empty() {
-        println!("no nodes found");
-        return Ok(());
-    }
-
-    for node in nodes {
-        let health = node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS);
-        println!(
-            "{} | health={} | transport={} | platform={} | capabilities={} | last_heartbeat_at={}",
-            node.node_id,
-            health.label(),
-            node.transport,
-            node.platform,
-            node.capabilities
-                .iter()
-                .map(|cap| cap.name.as_str())
-                .collect::<Vec<_>>()
-                .join(","),
-            node.last_heartbeat_at,
-        );
-        if let Some(reason) = node.last_disconnect_reason.as_deref() {
-            println!("  disconnect_reason: {}", reason);
-        }
-    }
-
-    Ok(())
-}
-
-fn print_node_capabilities(
-    node_id: &str,
-    capabilities: &[NodeCapabilityDeclaration],
-) -> Result<()> {
-    println!("node: {}", node_id);
-    if capabilities.is_empty() {
-        println!("  capabilities: none");
-        return Ok(());
-    }
-
-    for capability in capabilities {
-        println!(
-            "  - {} | kind={} | risk={} | scopes={:?}",
-            capability.name,
-            capability.kind.label(),
-            capability.risk.label(),
-            capability
-                .permission_scopes
-                .iter()
-                .map(|scope| scope.label())
-                .collect::<Vec<_>>(),
-        );
-    }
-
-    Ok(())
-}
-
-async fn capability_cmd(attach: Option<String>, command: CapabilityCommand) -> Result<()> {
-    let loaded = ensure_loaded_config(None)?;
-
-    match command {
-        CapabilityCommand::Doctor => {
-            if attach.is_some() {
-                bail!("remote capability doctor is not supported");
-            }
-            let components = bootstrap::build_gateway_components(&loaded.config, None)?;
-            println!("capability doctor:");
-            println!("workspace_root: {}", env::current_dir()?.display());
-            for tool in components.tools.iter() {
-                let meta = tool.metadata();
-                println!(
-                    "{} | kind={} | risk={} | scopes={:?} | timeout_ms={} | retry_limit={} | authorized={} | healthy={} | source={}",
-                    meta.name,
-                    meta.capability.kind.label(),
-                    meta.capability.risk.label(),
-                    meta.capability
-                        .permission_scopes
-                        .iter()
-                        .map(|scope| scope.label())
-                        .collect::<Vec<_>>(),
-                    meta.capability.execution.timeout_ms,
-                    meta.capability.execution.retry_limit,
-                    meta.capability.authorized,
-                    meta.capability.healthy,
-                    meta.source.label(),
-                );
-            }
-            Ok(())
-        }
-        CapabilityCommand::Jobs => {
-            if let Some(url) = attach {
-                let client = gateway_client_from_loaded(&loaded, url);
-                return print_capability_jobs(&client.list_capability_jobs().await?);
-            }
-            let gateway = build_gateway_handle(&loaded, None)?;
-            print_capability_jobs(&gateway.list_capability_jobs())
-        }
-        CapabilityCommand::Exec { command } => match command {
-            ExecCapabilityCommand::Guardrails => {
-                if attach.is_some() {
-                    bail!("remote exec guardrails are not supported");
-                }
-                println!("exec guardrails:");
-                println!("  allowed_root: {}", env::current_dir()?.display());
-                println!("  permission_scope: local_exec");
-                println!("  timeout_policy: tool metadata controlled");
-                Ok(())
-            }
-            ExecCapabilityCommand::Run {
-                command,
-                args,
-                cwd,
-                session,
-            } => {
-                if let Some(url) = attach {
-                    let client = gateway_client_from_loaded(&loaded, url);
-                    let job = client
-                        .run_exec_job(ExecJobRequest {
-                            session_id: session,
-                            command,
-                            args,
-                            cwd,
-                        })
-                        .await?;
-                    return print_capability_job(&job);
-                }
-
-                let gateway = build_gateway_handle(&loaded, None)?;
-                let job = gateway
-                    .run_exec_job(ExecJobRequest {
-                        session_id: session,
-                        command,
-                        args,
-                        cwd,
-                    })
-                    .await?;
-                print_capability_job(&job)
-            }
-        },
-        CapabilityCommand::Webhook { command } => match command {
-            WebhookCapabilityCommand::Test {
-                url,
-                method,
-                body,
-                headers,
-                session,
-            } => {
-                let request = WebhookJobRequest {
-                    session_id: session,
-                    url,
-                    method,
-                    body,
-                    headers: parse_header_args(&headers)?,
-                };
-                if let Some(url) = attach {
-                    let client = gateway_client_from_loaded(&loaded, url);
-                    let job = client.run_webhook_job(request).await?;
-                    return print_capability_job(&job);
-                }
-
-                let gateway = build_gateway_handle(&loaded, None)?;
-                let job = gateway.run_webhook_job(request).await?;
-                print_capability_job(&job)
-            }
-        },
-    }
-}
-
-async fn cron_cmd(attach: Option<String>, command: CronCommand) -> Result<()> {
-    let loaded = ensure_loaded_config(None)?;
-
-    match command {
-        CronCommand::List => {
-            if let Some(url) = attach {
-                let client = gateway_client_from_loaded(&loaded, url);
-                return print_cron_registrations(&client.list_cron_registrations().await?);
-            }
-            let gateway = build_gateway_handle(&loaded, None)?;
-            let registrations = gateway
-                .list_cron_registrations()?
-                .iter()
-                .map(mosaic_gateway::cron_registration_dto)
-                .collect::<Vec<_>>();
-            print_cron_registrations(&registrations)
-        }
-        CronCommand::Register {
-            id,
-            schedule,
-            input,
-            session,
-            profile,
-            skill,
-            workflow,
-        } => {
-            let request = CronRegistrationRequest {
-                id,
-                schedule,
-                input,
-                session_id: session,
-                profile,
-                skill,
-                workflow,
-            };
-            if let Some(url) = attach {
-                let client = gateway_client_from_loaded(&loaded, url);
-                let registration = client.register_cron(request).await?;
-                return print_cron_registrations(&[registration]);
-            }
-            let gateway = build_gateway_handle(&loaded, None)?;
-            let registration = gateway.register_cron(request)?;
-            print_cron_registrations(&[mosaic_gateway::cron_registration_dto(&registration)])
-        }
-        CronCommand::Trigger { id } => {
-            if let Some(url) = attach {
-                let client = gateway_client_from_loaded(&loaded, url);
-                let response = client.trigger_cron(&id).await?;
-                return finish_remote_gateway_run(&loaded, response);
-            }
-            let gateway = build_gateway_handle(&loaded, None)?;
-            let result = gateway.trigger_cron(&id).await?;
-            finish_successful_gateway_run(result)
-        }
     }
 }
 
@@ -1695,17 +952,6 @@ fn print_cron_registrations(registrations: &[CronRegistrationDto]) -> Result<()>
     }
 
     Ok(())
-}
-
-fn parse_header_args(headers: &[String]) -> Result<BTreeMap<String, String>> {
-    let mut parsed = BTreeMap::new();
-    for header in headers {
-        let Some((name, value)) = header.split_once('=') else {
-            bail!("invalid header '{}'; expected KEY=VALUE", header);
-        };
-        parsed.insert(name.trim().to_owned(), value.trim().to_owned());
-    }
-    Ok(parsed)
 }
 
 fn memory_cmd(command: MemoryCommand) -> Result<()> {
@@ -1933,34 +1179,6 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
             Ok(())
         }
     }
-}
-
-fn inspect_cmd(file: PathBuf, verbose: bool, json: bool) -> Result<()> {
-    let content = fs::read_to_string(&file)?;
-    let trace: RunTrace = serde_json::from_str(&content)?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&trace)?);
-        return Ok(());
-    }
-
-    let workspace = load_config()
-        .ok()
-        .map(|loaded| redact_mosaic_config(&loaded.config));
-    println!(
-        "{}",
-        output::render_inspect_report(&trace, workspace.as_ref(), verbose)?
-    );
-
-    if !verbose {
-        let mut next_steps = vec![format!("mosaic inspect {} --verbose", file.display())];
-        if trace.status() == "failed" {
-            next_steps.push(format!("mosaic gateway incident {}", trace.run_id));
-        }
-        print_next_steps(next_steps);
-    }
-
-    Ok(())
 }
 
 fn load_config() -> Result<LoadedMosaicConfig> {
@@ -2389,75 +1607,6 @@ fn print_remote_session_list(sessions: &[SessionSummaryDto]) -> Result<()> {
                 session.run.last_failure_kind.as_deref().unwrap_or("-"),
                 truncate_for_cli(error, 160)
             );
-        }
-    }
-
-    Ok(())
-}
-
-fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
-    println!("id: {}", session.id);
-    println!("title: {}", session.title);
-    println!("created_at: {}", session.created_at);
-    println!("updated_at: {}", session.updated_at);
-    println!("provider_profile: {}", session.provider_profile);
-    println!("provider_type: {}", session.provider_type);
-    println!("model: {}", session.model);
-    println!("last_run_id: {:?}", session.last_run_id);
-    println!("run_status: {}", session.run.status.label());
-    println!("current_run_id: {:?}", session.run.current_run_id);
-    println!(
-        "current_gateway_run_id: {:?}",
-        session.run.current_gateway_run_id
-    );
-    println!(
-        "current_correlation_id: {:?}",
-        session.run.current_correlation_id
-    );
-    println!("last_error: {:?}", session.run.last_error);
-    println!("last_failure_kind: {:?}", session.run.last_failure_kind);
-    println!("run_updated_at: {:?}", session.run.updated_at);
-    println!("session_route: {}", session.gateway.route);
-    println!("channel: {:?}", session.channel_context.channel);
-    println!("actor_id: {:?}", session.channel_context.actor_id);
-    println!("actor_name: {:?}", session.channel_context.actor_name);
-    println!("thread_id: {:?}", session.channel_context.thread_id);
-    println!("thread_title: {:?}", session.channel_context.thread_title);
-    println!("reply_target: {:?}", session.channel_context.reply_target);
-    println!(
-        "last_gateway_run_id: {:?}",
-        session.gateway.last_gateway_run_id
-    );
-    println!(
-        "last_correlation_id: {:?}",
-        session.gateway.last_correlation_id
-    );
-    println!("message_count: {}", session.transcript.len());
-    println!("memory_summary: {:?}", session.memory_summary);
-    println!("compressed_context: {:?}", session.compressed_context);
-    println!("reference_count: {}", session.references.len());
-
-    if !session.references.is_empty() {
-        println!("\nreferences:");
-        for reference in &session.references {
-            println!(
-                "- {} | reason={} | created_at={}",
-                reference.session_id, reference.reason, reference.created_at
-            );
-        }
-    }
-
-    if !session.transcript.is_empty() {
-        println!("\ntranscript:");
-        for (idx, message) in session.transcript.iter().enumerate() {
-            println!(
-                "[{}] {} {} {:?}",
-                idx + 1,
-                remote_transcript_role_label(&message.role),
-                message.created_at,
-                message.tool_call_id
-            );
-            println!("  {}", truncate_for_cli(&message.content, 400));
         }
     }
 
@@ -3233,6 +2382,7 @@ mod tests {
             "docs/cli.md",
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/writer-ownership.md",
             "docs/deployment.md",
             "docs/security.md",
             "docs/session-inspect-incident.md",
@@ -3317,6 +2467,7 @@ mod tests {
             "docs/testing.md",
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/writer-ownership.md",
             "docs/session-inspect-incident.md",
             "docs/non-tui-architecture-audit.md",
             "docs/release.md",
@@ -3494,6 +2645,33 @@ mod tests {
             "cargo test --workspace",
         ] {
             assert!(plan.contains(required), "plan_i1 missing {required}");
+        }
+    }
+
+    #[test]
+    fn writer_ownership_guide_covers_gateway_runtime_session_and_inspect_boundaries() {
+        let root = repo_root();
+        let guide = fs::read_to_string(root.join("docs/writer-ownership.md"))
+            .expect("writer ownership guide should load");
+
+        for required in [
+            "# Writer Ownership",
+            "## Gateway Writers",
+            "## Runtime Writers",
+            "## Session-Core Boundary",
+            "## Inspect Boundary",
+            "## Interaction Entry Consistency",
+            "gateway_run_id",
+            "current_gateway_run_id",
+            "transcript messages",
+            "memory summaries",
+            "mosaic-channel-telegram",
+            "mosaic-gateway::ingress",
+        ] {
+            assert!(
+                guide.contains(required),
+                "writer ownership guide missing {required}"
+            );
         }
     }
 

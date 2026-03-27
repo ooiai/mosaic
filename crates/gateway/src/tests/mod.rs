@@ -293,6 +293,15 @@ async fn submit_run_routes_session_and_persists_gateway_metadata() {
         session.gateway.last_gateway_run_id.as_deref(),
         Some(result.gateway_run_id.as_str())
     );
+    assert_eq!(
+        session.run.current_gateway_run_id.as_deref(),
+        Some(result.gateway_run_id.as_str())
+    );
+    assert_eq!(
+        session.run.current_correlation_id.as_deref(),
+        Some(result.correlation_id.as_str())
+    );
+    assert_eq!(session.run.status, RunLifecycleStatus::Success);
     assert_eq!(session.gateway.route, "gateway.local/demo");
     assert!(
         session

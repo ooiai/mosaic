@@ -538,6 +538,51 @@ async fn session_runs_roundtrip_transcript_messages() {
 }
 
 #[tokio::test]
+async fn runtime_session_persistence_leaves_gateway_lifecycle_fields_unset() {
+    let store = Arc::new(MemorySessionStore::default());
+    let runtime = runtime_with_provider(
+        Arc::new(MockProvider),
+        store.clone(),
+        Arc::new(NoopEventSink),
+    );
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: Some("You are helpful.".to_owned()),
+            input: "runtime owns transcript and memory facts".to_owned(),
+            skill: None,
+            workflow: None,
+            session_id: Some("writer-demo".to_owned()),
+            profile: None,
+            ingress: None,
+        })
+        .await
+        .expect("runtime session run should succeed");
+
+    let session = store.get("writer-demo").expect("session should exist");
+
+    assert_eq!(
+        session.last_run_id.as_deref(),
+        Some(result.trace.run_id.as_str())
+    );
+    assert!(
+        session
+            .transcript
+            .iter()
+            .any(|message| message.role == TranscriptRole::Assistant)
+    );
+    assert!(session.gateway.last_gateway_run_id.is_none());
+    assert!(session.gateway.last_correlation_id.is_none());
+    assert_eq!(
+        session.run.status,
+        mosaic_inspect::RunLifecycleStatus::Unknown
+    );
+    assert!(session.run.current_gateway_run_id.is_none());
+    assert!(session.run.current_correlation_id.is_none());
+}
+
+#[tokio::test]
 async fn tool_loop_executes_time_now_and_records_tool_trace() {
     let sink = Arc::new(VecEventSink::default());
     let runtime = runtime_with_provider(

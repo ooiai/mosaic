@@ -161,6 +161,7 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [Channel Setup](./docs/channels.md)
 - [Full-Stack Guide](./docs/full-stack.md)
 - [Session, Inspect, and Incident Flow](./docs/session-inspect-incident.md)
+- [Writer Ownership](./docs/writer-ownership.md)
 - [Deployment Guide](./docs/deployment.md)
 - [Operations Guide](./docs/operations.md)
 - [Security Guide](./docs/security.md)
