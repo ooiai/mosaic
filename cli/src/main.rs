@@ -3234,6 +3234,7 @@ mod tests {
             "docs/deployment.md",
             "docs/security.md",
             "docs/testing.md",
+            "docs/non-tui-architecture-audit.md",
             "docs/release.md",
             "examples/README.md",
             "examples/TESTING.md",
@@ -3307,6 +3308,7 @@ mod tests {
             "docs/operations.md",
             "docs/security.md",
             "docs/testing.md",
+            "docs/non-tui-architecture-audit.md",
             "docs/release.md",
             "docs/compatibility.md",
             "docs/upgrade.md",
@@ -3434,6 +3436,47 @@ mod tests {
                 session_readme.contains(required),
                 "session-core README missing public API {required}"
             );
+        }
+    }
+
+    #[test]
+    fn non_tui_architecture_audit_covers_scope_matrix_and_follow_up_plan() {
+        let root = repo_root();
+        let audit = fs::read_to_string(root.join("docs/non-tui-architecture-audit.md"))
+            .expect("non-tui architecture audit should load");
+
+        for required in [
+            "# Non-TUI Architecture Audit",
+            "## Scope",
+            "## AGENTS Alignment Matrix",
+            "## Crate-by-Crate Debt Register",
+            "## Remediation Priority Order",
+            "crates/tui",
+            "cli/src/main.rs:575-613",
+            "crates/gateway/src/lib.rs:523-538",
+            "crates/runtime/src/lib.rs:240-313",
+            "crates/extension-core/src/lib.rs:257-365",
+            "specs/plan_i1.md",
+            "specs/plan_h5.md",
+        ] {
+            assert!(
+                audit.contains(required),
+                "non-tui architecture audit missing {required}"
+            );
+        }
+
+        let plan = fs::read_to_string(root.join("specs/plan_i1.md")).expect("plan_i1 should load");
+        for required in [
+            "# Plan i1",
+            "cli",
+            "gateway",
+            "runtime",
+            "session / memory / inspect",
+            "extension-core",
+            "webchat",
+            "cargo test --workspace",
+        ] {
+            assert!(plan.contains(required), "plan_i1 missing {required}");
         }
     }
 

@@ -162,6 +162,7 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [Operations Guide](./docs/operations.md)
 - [Security Guide](./docs/security.md)
 - [Testing Guide](./docs/testing.md)
+- [Non-TUI Architecture Audit](./docs/non-tui-architecture-audit.md)
 - [Release Guide](./docs/release.md)
 - [Compatibility Guide](./docs/compatibility.md)
 - [Upgrade Guide](./docs/upgrade.md)
