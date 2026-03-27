@@ -1,0 +1,762 @@
+use super::*;
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use futures::StreamExt;
+use mosaic_config::{LoadConfigOptions, MosaicConfig, ProviderProfileConfig, load_mosaic_config};
+use mosaic_extension_core::load_extension_set;
+use mosaic_mcp_core::{McpServerManager, McpServerSpec};
+use mosaic_memory::{FileMemoryStore, MemoryPolicy};
+use mosaic_provider::MockProvider;
+use mosaic_scheduler_core::FileCronStore;
+use mosaic_session_core::{SessionStore, TranscriptRole};
+use tokio::sync::oneshot;
+
+#[derive(Default)]
+struct MemorySessionStore {
+    sessions: Mutex<BTreeMap<String, SessionRecord>>,
+}
+
+impl SessionStore for MemorySessionStore {
+    fn load(&self, id: &str) -> Result<Option<SessionRecord>> {
+        Ok(self
+            .sessions
+            .lock()
+            .expect("session lock should not be poisoned")
+            .get(id)
+            .cloned())
+    }
+
+    fn save(&self, session: &SessionRecord) -> Result<()> {
+        self.sessions
+            .lock()
+            .expect("session lock should not be poisoned")
+            .insert(session.id.clone(), session.clone());
+        Ok(())
+    }
+
+    fn list(&self) -> Result<Vec<SessionSummary>> {
+        Ok(self
+            .sessions
+            .lock()
+            .expect("session lock should not be poisoned")
+            .values()
+            .map(SessionRecord::summary)
+            .collect())
+    }
+}
+
+fn test_cron_store() -> Arc<dyn CronStore> {
+    Arc::new(FileCronStore::new(
+        std::env::temp_dir().join(format!("mosaic-gateway-tests-cron-{}", Uuid::new_v4())),
+    ))
+}
+
+fn test_node_store() -> Arc<FileNodeStore> {
+    Arc::new(FileNodeStore::new(
+        std::env::temp_dir().join(format!("mosaic-gateway-tests-nodes-{}", Uuid::new_v4())),
+    ))
+}
+
+fn gateway() -> GatewayHandle {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    config.profiles.insert(
+        "mock".to_owned(),
+        ProviderProfileConfig {
+            provider_type: "mock".to_owned(),
+            model: "mock".to_owned(),
+            base_url: None,
+            api_key_env: None,
+        },
+    );
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let mut tools = ToolRegistry::new();
+    tools.register(Arc::new(mosaic_tool_core::TimeNowTool::new()));
+
+    GatewayHandle::new_local(
+        Handle::current(),
+        GatewayRuntimeComponents {
+            profiles: Arc::new(profiles),
+            provider_override: Some(Arc::new(MockProvider)),
+            session_store: Arc::new(MemorySessionStore::default()),
+            memory_store: Arc::new(FileMemoryStore::new(
+                std::env::temp_dir().join("mosaic-gateway-tests-memory"),
+            )),
+            memory_policy: MemoryPolicy::default(),
+            tools: Arc::new(tools),
+            skills: Arc::new(SkillRegistry::new()),
+            workflows: Arc::new(WorkflowRegistry::new()),
+            node_store: test_node_store(),
+            mcp_manager: None,
+            cron_store: test_cron_store(),
+            workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace"),
+            runs_dir: std::env::temp_dir(),
+            audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit"),
+            extensions: Vec::new(),
+            policies: PolicyConfig::default(),
+            deployment: config.deployment.clone(),
+            auth: config.auth.clone(),
+            audit: config.audit.clone(),
+            observability: config.observability.clone(),
+        },
+    )
+}
+
+fn mcp_script_path() -> String {
+    format!(
+        "{}/../../scripts/mock_mcp_server.py",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
+fn extension_workspace_dir(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "mosaic-gateway-extension-tests-{}-{}",
+        name,
+        Uuid::new_v4()
+    ))
+}
+
+fn write_extension_workspace_config(root: &std::path::Path, version_pin: &str) {
+    let mosaic_dir = root.join(".mosaic");
+    std::fs::create_dir_all(mosaic_dir.join("extensions"))
+        .expect("extension test directories should be created");
+    std::fs::write(
+        mosaic_dir.join("config.yaml"),
+        format!(
+            "extensions:
+  manifests:
+    - path: .mosaic/extensions/demo-extension.yaml
+      version_pin: {}
+policies:
+  allow_exec: true
+  allow_webhook: true
+  allow_cron: true
+  allow_mcp: true
+  hot_reload_enabled: true
+",
+            version_pin,
+        ),
+    )
+    .expect("workspace config should be written");
+}
+
+fn write_extension_manifest(
+    root: &std::path::Path,
+    version: &str,
+    workflow_name: &str,
+    tool_name: &str,
+) {
+    std::fs::write(
+        root.join(".mosaic/extensions/demo-extension.yaml"),
+        format!(
+            "name: demo.extension
+version: {}
+description: demo extension
+tools: []
+skills: []
+workflows:
+  - name: {}
+    description: demo workflow
+    steps:
+      - name: ask_time
+        kind: prompt
+        prompt: What time is it?
+        tools:
+          - {}
+",
+            version, workflow_name, tool_name,
+        ),
+    )
+    .expect("extension manifest should be written");
+}
+
+fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
+    let workspace_config_path = root.join(".mosaic/config.yaml");
+    let loaded = load_mosaic_config(&LoadConfigOptions {
+        cwd: root.to_path_buf(),
+        user_config_path: None,
+        workspace_config_path: Some(workspace_config_path.clone()),
+        overrides: Default::default(),
+    })
+    .expect("workspace config should load");
+    let profiles = ProviderProfileRegistry::from_config(&loaded.config)
+        .expect("profile registry should build");
+    let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(root.join(".mosaic/cron")));
+    let extension_set = load_extension_set(&loaded.config, None, root, cron_store.clone())
+        .expect("extension set should load");
+
+    GatewayHandle::new_local_with_reload_source(
+        Handle::current(),
+        GatewayRuntimeComponents {
+            profiles: Arc::new(profiles),
+            provider_override: Some(Arc::new(MockProvider)),
+            session_store: Arc::new(MemorySessionStore::default()),
+            memory_store: Arc::new(FileMemoryStore::new(root.join(".mosaic/memory"))),
+            memory_policy: MemoryPolicy::default(),
+            tools: Arc::new(extension_set.tools),
+            skills: Arc::new(extension_set.skills),
+            workflows: Arc::new(extension_set.workflows),
+            node_store: Arc::new(FileNodeStore::new(root.join(".mosaic/nodes"))),
+            mcp_manager: extension_set.mcp_manager,
+            cron_store,
+            workspace_root: root.to_path_buf(),
+            runs_dir: root.join(".mosaic/runs"),
+            audit_root: root.join(".mosaic/audit"),
+            extensions: extension_set.extensions.clone(),
+            policies: extension_set.policies.clone(),
+            deployment: loaded.config.deployment.clone(),
+            auth: loaded.config.auth.clone(),
+            audit: loaded.config.audit.clone(),
+            observability: loaded.config.observability.clone(),
+        },
+        Some(GatewayReloadSource {
+            workspace_root: root.to_path_buf(),
+            workspace_config_path,
+            user_config_path: None,
+            app_config: None,
+        }),
+    )
+}
+
+async fn spawn_http_gateway(gateway: GatewayHandle) -> Result<(String, oneshot::Sender<()>)> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let router = http_router(gateway);
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router)
+            .with_graceful_shutdown(async {
+                let _ = shutdown_rx.await;
+            })
+            .await;
+    });
+
+    Ok((format!("http://{addr}"), shutdown_tx))
+}
+
+async fn read_first_sse_frame(response: reqwest::Response) -> Result<String> {
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(delimiter) = buffer.find(
+                "
+
+",
+            ) {
+                let frame = buffer[..delimiter].to_owned();
+                return Ok::<String, anyhow::Error>(frame);
+            }
+
+            let Some(chunk) = stream.next().await else {
+                return Err(anyhow::anyhow!("event stream closed before first frame"));
+            };
+            buffer.push_str(&String::from_utf8_lossy(&chunk?));
+        }
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("timed out waiting for SSE frame"))?
+}
+
+#[tokio::test]
+async fn submit_run_routes_session_and_persists_gateway_metadata() {
+    let gateway = gateway();
+    let submitted = gateway
+        .submit_run(GatewayRunRequest {
+            system: Some("You are helpful.".to_owned()),
+            input: "hello gateway".to_owned(),
+            skill: None,
+            workflow: None,
+            session_id: Some("demo".to_owned()),
+            profile: None,
+            ingress: None,
+        })
+        .expect("submit should succeed");
+
+    let result = submitted.wait().await.expect("run should succeed");
+    let session = gateway
+        .load_session("demo")
+        .expect("load should succeed")
+        .expect("session should exist");
+
+    assert_eq!(result.trace.session_id.as_deref(), Some("demo"));
+    assert_eq!(
+        result.trace.gateway_run_id.as_deref(),
+        Some(result.gateway_run_id.as_str())
+    );
+    assert_eq!(
+        session.gateway.last_gateway_run_id.as_deref(),
+        Some(result.gateway_run_id.as_str())
+    );
+    assert_eq!(session.gateway.route, "gateway.local/demo");
+    assert!(
+        session
+            .transcript
+            .iter()
+            .any(|message| matches!(message.role, TranscriptRole::Assistant))
+    );
+}
+
+#[tokio::test]
+async fn subscribe_broadcasts_submitted_runtime_and_session_events() {
+    let gateway = gateway();
+    let mut receiver = gateway.subscribe();
+    let submitted = gateway
+        .submit_command(GatewayCommand::SubmitRun(GatewayRunRequest {
+            system: Some("Use tools when needed.".to_owned()),
+            input: "What time is it now?".to_owned(),
+            skill: None,
+            workflow: None,
+            session_id: Some("clock".to_owned()),
+            profile: None,
+            ingress: None,
+        }))
+        .expect("submit should succeed");
+    let run_id = submitted.gateway_run_id().to_owned();
+    let _ = submitted.wait().await.expect("run should succeed");
+
+    let mut saw_submitted = false;
+    let mut saw_runtime = false;
+    let mut saw_run_updated = false;
+    let mut saw_session_updated = false;
+    let mut saw_completed = false;
+
+    while let Ok(envelope) = receiver.try_recv() {
+        if envelope.gateway_run_id != run_id {
+            continue;
+        }
+
+        match envelope.event {
+            GatewayEvent::RunSubmitted { .. } => saw_submitted = true,
+            GatewayEvent::Runtime(_) => saw_runtime = true,
+            GatewayEvent::RunUpdated { .. } => saw_run_updated = true,
+            GatewayEvent::SessionUpdated { .. } => saw_session_updated = true,
+            GatewayEvent::RunCompleted { .. } => saw_completed = true,
+            GatewayEvent::RunFailed { .. } => {}
+            GatewayEvent::CapabilityJobUpdated { .. } => {}
+            GatewayEvent::CronUpdated { .. } => {}
+            GatewayEvent::ExtensionsReloaded { .. } => {}
+            GatewayEvent::ExtensionReloadFailed { .. } => {}
+        }
+    }
+
+    assert!(saw_submitted);
+    assert!(saw_runtime);
+    assert!(saw_run_updated);
+    assert!(saw_session_updated);
+    assert!(saw_completed);
+}
+
+#[tokio::test]
+async fn gateway_lists_nodes_and_persists_session_affinity() {
+    let gateway = gateway();
+    let node_store = gateway.snapshot_components().node_store.clone();
+    node_store
+        .register_node(&NodeRegistration::new(
+            "node-a",
+            "Headless Node",
+            "file-bus",
+            "headless",
+            vec![NodeCapabilityDeclaration {
+                name: "read_file".to_owned(),
+                kind: mosaic_tool_core::CapabilityKind::File,
+                permission_scopes: vec![mosaic_tool_core::PermissionScope::LocalRead],
+                risk: mosaic_tool_core::ToolRiskLevel::Low,
+            }],
+        ))
+        .expect("node registration should persist");
+
+    let nodes = gateway.list_nodes().expect("nodes should list");
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes[0].node_id, "node-a");
+
+    gateway
+        .attach_node("node-a", Some("demo"))
+        .expect("node affinity should persist");
+    assert_eq!(
+        gateway
+            .node_affinity(Some("demo"))
+            .expect("node affinity should load"),
+        Some("node-a".to_owned())
+    );
+    assert_eq!(
+        gateway
+            .node_capabilities("node-a")
+            .expect("node capabilities should load")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn gateway_node_store_prefers_online_nodes_when_stale_nodes_exist() {
+    let gateway = gateway();
+    let node_store = gateway.snapshot_components().node_store.clone();
+    let mut stale = NodeRegistration::new(
+        "node-stale",
+        "Stale Node",
+        "file-bus",
+        "headless",
+        vec![NodeCapabilityDeclaration {
+            name: "read_file".to_owned(),
+            kind: mosaic_tool_core::CapabilityKind::File,
+            permission_scopes: vec![mosaic_tool_core::PermissionScope::LocalRead],
+            risk: mosaic_tool_core::ToolRiskLevel::Low,
+        }],
+    );
+    stale.last_heartbeat_at = Utc::now() - chrono::Duration::seconds(60);
+    let fresh = NodeRegistration::new(
+        "node-fresh",
+        "Fresh Node",
+        "file-bus",
+        "headless",
+        vec![NodeCapabilityDeclaration {
+            name: "read_file".to_owned(),
+            kind: mosaic_tool_core::CapabilityKind::File,
+            permission_scopes: vec![mosaic_tool_core::PermissionScope::LocalRead],
+            risk: mosaic_tool_core::ToolRiskLevel::Low,
+        }],
+    );
+    node_store
+        .register_node(&stale)
+        .expect("stale node should persist");
+    node_store
+        .register_node(&fresh)
+        .expect("fresh node should persist");
+
+    let selection = node_store
+        .select_node("read_file", None)
+        .expect("node selection should succeed")
+        .expect("node selection should exist");
+    assert_eq!(selection.registration.node_id, "node-fresh");
+}
+
+#[tokio::test]
+async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let mut tools = ToolRegistry::new();
+    tools.register(Arc::new(mosaic_tool_core::TimeNowTool::new()));
+    let manager = Arc::new(
+        McpServerManager::start(&[McpServerSpec {
+            name: "filesystem".to_owned(),
+            command: "python3".to_owned(),
+            args: vec![mcp_script_path(), "filesystem".to_owned()],
+        }])
+        .expect("MCP manager should start"),
+    );
+
+    let gateway = GatewayHandle::new_local(
+        Handle::current(),
+        GatewayRuntimeComponents {
+            profiles: Arc::new(profiles),
+            provider_override: Some(Arc::new(MockProvider)),
+            session_store: Arc::new(MemorySessionStore::default()),
+            memory_store: Arc::new(FileMemoryStore::new(
+                std::env::temp_dir().join("mosaic-gateway-tests-memory"),
+            )),
+            memory_policy: MemoryPolicy::default(),
+            tools: Arc::new(tools),
+            skills: Arc::new(SkillRegistry::new()),
+            workflows: Arc::new(WorkflowRegistry::new()),
+            node_store: test_node_store(),
+            mcp_manager: Some(manager),
+            cron_store: test_cron_store(),
+            workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace"),
+            runs_dir: std::env::temp_dir(),
+            audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit"),
+            extensions: Vec::new(),
+            policies: PolicyConfig::default(),
+            deployment: config.deployment.clone(),
+            auth: config.auth.clone(),
+            audit: config.audit.clone(),
+            observability: config.observability.clone(),
+        },
+    );
+
+    assert_eq!(
+        gateway
+            .snapshot_components()
+            .mcp_manager
+            .as_ref()
+            .map(|manager| manager.server_count()),
+        Some(1)
+    );
+    assert_eq!(
+        gateway
+            .snapshot_components()
+            .mcp_manager
+            .as_ref()
+            .expect("MCP manager should be retained")
+            .list_servers(),
+        vec!["filesystem".to_owned()]
+    );
+}
+
+#[tokio::test]
+async fn http_health_reports_gateway_state() {
+    let gateway = gateway();
+    let (base_url, shutdown) = spawn_http_gateway(gateway)
+        .await
+        .expect("http gateway should start");
+
+    let response = reqwest::get(format!("{base_url}/health"))
+        .await
+        .expect("health request should succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+    let health: HealthResponse = response.json().await.expect("health should deserialize");
+
+    assert_eq!(health.status, "ok");
+    assert_eq!(health.active_profile, "mock");
+    assert_eq!(health.transport, "http+sse");
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn http_runs_and_sessions_handlers_return_gateway_state() {
+    let gateway = gateway();
+    let (base_url, shutdown) = spawn_http_gateway(gateway)
+        .await
+        .expect("http gateway should start");
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("{base_url}/runs"))
+        .json(&RunSubmission {
+            system: Some("You are helpful.".to_owned()),
+            input: "hello over http".to_owned(),
+            skill: None,
+            workflow: None,
+            session_id: Some("http-demo".to_owned()),
+            profile: None,
+            ingress: None,
+        })
+        .send()
+        .await
+        .expect("run request should succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+    let run: RunResponse = response
+        .json()
+        .await
+        .expect("run response should deserialize");
+
+    assert_eq!(run.trace.session_id.as_deref(), Some("http-demo"));
+    assert_eq!(
+        run.trace
+            .ingress
+            .as_ref()
+            .map(|ingress| ingress.kind.as_str()),
+        Some("remote_operator")
+    );
+    assert_eq!(
+        run.trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.channel.as_deref()),
+        Some("api")
+    );
+
+    let sessions_response = client
+        .get(format!("{base_url}/sessions"))
+        .send()
+        .await
+        .expect("session list should succeed");
+    assert_eq!(sessions_response.status(), StatusCode::OK);
+    let sessions: Vec<SessionSummaryDto> = sessions_response
+        .json()
+        .await
+        .expect("sessions should deserialize");
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, "http-demo");
+    assert_eq!(sessions[0].session_route, "gateway.channel/api/http-demo");
+    assert_eq!(sessions[0].channel_context.channel.as_deref(), Some("api"));
+
+    let detail_response = client
+        .get(format!("{base_url}/sessions/http-demo"))
+        .send()
+        .await
+        .expect("session detail should succeed");
+    assert_eq!(detail_response.status(), StatusCode::OK);
+    let detail: SessionDetailDto = detail_response
+        .json()
+        .await
+        .expect("session detail should deserialize");
+    assert_eq!(detail.id, "http-demo");
+    assert_eq!(detail.gateway.route, "gateway.channel/api/http-demo");
+    assert_eq!(detail.channel_context.channel.as_deref(), Some("api"));
+    assert_eq!(detail.transcript.len(), 3);
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn http_webchat_ingress_sets_webchat_trace_metadata() {
+    let gateway = gateway();
+    let (base_url, shutdown) = spawn_http_gateway(gateway)
+        .await
+        .expect("http gateway should start");
+    let client = reqwest::Client::new();
+
+    let response = client
+        .post(format!("{base_url}/ingress/webchat"))
+        .json(&InboundMessage {
+            session_id: None,
+            input: "hello from browser".to_owned(),
+            profile: None,
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            thread_id: Some("room-7".to_owned()),
+            thread_title: Some("Launch Room".to_owned()),
+            reply_target: Some("webchat:guest-1".to_owned()),
+            ingress: None,
+        })
+        .send()
+        .await
+        .expect("webchat request should succeed");
+    assert_eq!(response.status(), StatusCode::OK);
+    let run: RunResponse = response
+        .json()
+        .await
+        .expect("run response should deserialize");
+
+    assert!(
+        run.trace
+            .session_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("webchat-"))
+    );
+    assert_eq!(
+        run.trace
+            .ingress
+            .as_ref()
+            .map(|ingress| ingress.kind.as_str()),
+        Some("webchat")
+    );
+    assert_eq!(
+        run.trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.display_name.as_deref()),
+        Some("guest")
+    );
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn reload_extensions_swaps_workflow_registry_and_broadcasts_event() {
+    let root = extension_workspace_dir("reload-ok");
+    write_extension_workspace_config(&root, "0.1.0");
+    write_extension_manifest(&root, "0.1.0", "demo_flow_alpha", "time_now");
+    let gateway = extension_gateway(&root);
+    let mut receiver = gateway.subscribe();
+
+    assert!(
+        gateway
+            .snapshot_components()
+            .workflows
+            .get("demo_flow_alpha")
+            .is_some()
+    );
+
+    write_extension_manifest(&root, "0.1.0", "demo_flow_beta", "time_now");
+    gateway
+        .reload_extensions()
+        .expect("extension reload should succeed");
+
+    let components = gateway.snapshot_components();
+    assert!(components.workflows.get("demo_flow_beta").is_some());
+    assert!(components.workflows.get("demo_flow_alpha").is_none());
+    assert!(
+        components
+            .extensions
+            .iter()
+            .any(|extension| extension.name == "demo.extension")
+    );
+
+    let mut saw_reloaded = false;
+    while let Ok(envelope) = receiver.try_recv() {
+        if matches!(envelope.event, GatewayEvent::ExtensionsReloaded { .. }) {
+            saw_reloaded = true;
+            break;
+        }
+    }
+    assert!(saw_reloaded);
+
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn reload_extensions_rolls_back_on_failure_and_broadcasts_error() {
+    let root = extension_workspace_dir("reload-fail");
+    write_extension_workspace_config(&root, "0.1.0");
+    write_extension_manifest(&root, "0.1.0", "demo_flow_alpha", "time_now");
+    let gateway = extension_gateway(&root);
+    let mut receiver = gateway.subscribe();
+
+    write_extension_manifest(&root, "0.1.0", "demo_flow_broken", "missing_tool");
+    let error = gateway
+        .reload_extensions()
+        .expect_err("extension reload should fail");
+    assert!(error.to_string().contains("missing_tool"));
+
+    let components = gateway.snapshot_components();
+    assert!(components.workflows.get("demo_flow_alpha").is_some());
+    assert!(components.workflows.get("demo_flow_broken").is_none());
+
+    let mut saw_failure = false;
+    while let Ok(envelope) = receiver.try_recv() {
+        if matches!(envelope.event, GatewayEvent::ExtensionReloadFailed { .. }) {
+            saw_failure = true;
+            break;
+        }
+    }
+    assert!(saw_failure);
+
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn http_events_stream_emits_gateway_envelopes() {
+    let gateway = gateway();
+    let (base_url, shutdown) = spawn_http_gateway(gateway.clone())
+        .await
+        .expect("http gateway should start");
+    let client = reqwest::Client::new();
+    let events_response = client
+        .get(format!("{base_url}/events"))
+        .send()
+        .await
+        .expect("event stream request should succeed");
+    assert_eq!(events_response.status(), StatusCode::OK);
+
+    let wait_handle = gateway
+        .submit_run(GatewayRunRequest {
+            system: Some("You are helpful.".to_owned()),
+            input: "hello events".to_owned(),
+            skill: None,
+            workflow: None,
+            session_id: Some("events-demo".to_owned()),
+            profile: None,
+            ingress: None,
+        })
+        .expect("run submission should succeed");
+    let frame = read_first_sse_frame(events_response)
+        .await
+        .expect("first SSE frame should arrive");
+    let _ = wait_handle.wait().await.expect("run should succeed");
+
+    assert!(frame.contains("data:"));
+    assert!(frame.contains("RunUpdated") || frame.contains("RunSubmitted"));
+    assert!(frame.contains("events-demo"));
+
+    let _ = shutdown.send(());
+}

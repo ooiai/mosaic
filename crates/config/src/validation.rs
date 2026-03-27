@@ -1,0 +1,273 @@
+use super::*;
+
+pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
+    let mut report = ValidationReport::default();
+
+    if config.schema_version != CURRENT_SCHEMA_VERSION {
+        report.push(
+            ValidationLevel::Error,
+            "schema_version",
+            format!(
+                "unsupported schema_version {}; expected {}",
+                config.schema_version, CURRENT_SCHEMA_VERSION
+            ),
+        );
+    }
+
+    if config.profiles.is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "profiles",
+            "at least one provider profile must be configured",
+        );
+    }
+
+    if config.deployment.profile.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "deployment.profile",
+            "deployment profile must not be empty",
+        );
+    } else if !matches!(
+        config.deployment.profile.as_str(),
+        "local" | "staging" | "production"
+    ) {
+        report.push(
+            ValidationLevel::Error,
+            "deployment.profile",
+            format!(
+                "unsupported deployment profile '{}': expected local, staging, or production",
+                config.deployment.profile
+            ),
+        );
+    }
+
+    if config.deployment.workspace_name.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "deployment.workspace_name",
+            "deployment workspace_name must not be empty",
+        );
+    }
+
+    for (field, value) in [
+        (
+            "auth.operator_token_env",
+            config.auth.operator_token_env.as_deref(),
+        ),
+        (
+            "auth.webchat_shared_secret_env",
+            config.auth.webchat_shared_secret_env.as_deref(),
+        ),
+        (
+            "auth.telegram_secret_token_env",
+            config.auth.telegram_secret_token_env.as_deref(),
+        ),
+    ] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            report.push(
+                ValidationLevel::Error,
+                field,
+                "environment variable name must not be empty when provided",
+            );
+        }
+    }
+
+    if !config.profiles.contains_key(&config.active_profile) {
+        report.push(
+            ValidationLevel::Error,
+            "active_profile",
+            format!(
+                "active_profile '{}' does not match any configured profile",
+                config.active_profile
+            ),
+        );
+    }
+
+    for (name, profile) in &config.profiles {
+        let field_prefix = format!("profiles.{name}");
+
+        if profile.provider_type.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.type"),
+                "provider type must not be empty",
+            );
+            continue;
+        }
+
+        let provider_type = match parse_provider_type(&profile.provider_type) {
+            Some(provider_type) => provider_type,
+            None => {
+                report.push(
+                    ValidationLevel::Error,
+                    format!("{field_prefix}.type"),
+                    format!(
+                        "unsupported provider type '{}': expected one of {}",
+                        profile.provider_type,
+                        supported_provider_types().join(", ")
+                    ),
+                );
+                continue;
+            }
+        };
+
+        if profile.model.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.model"),
+                "model must not be empty",
+            );
+        }
+
+        if profile
+            .base_url
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.base_url"),
+                "base_url must not be empty when provided",
+            );
+        }
+
+        if profile
+            .api_key_env
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.api_key_env"),
+                "environment variable name must not be empty when provided",
+            );
+        }
+
+        if provider_type.requires_explicit_base_url()
+            && profile
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.base_url"),
+                format!("{} profiles require base_url", provider_type),
+            );
+        }
+
+        if provider_type.requires_api_key()
+            && profile
+                .api_key_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .is_none()
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.api_key_env"),
+                format!("{} profiles require api_key_env", provider_type),
+            );
+        }
+    }
+
+    if config.session_store.root_dir.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "session_store.root_dir",
+            "session store root directory must not be empty",
+        );
+    }
+
+    if config.inspect.runs_dir.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "inspect.runs_dir",
+            "inspect runs directory must not be empty",
+        );
+    }
+
+    if config.audit.root_dir.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "audit.root_dir",
+            "audit root directory must not be empty",
+        );
+    }
+
+    if config.audit.retention_days == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "audit.retention_days",
+            "audit retention_days must be greater than zero",
+        );
+    }
+
+    if config.audit.event_replay_window == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "audit.event_replay_window",
+            "audit event_replay_window must be greater than zero",
+        );
+    }
+
+    if config.observability.slow_consumer_lag_threshold == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "observability.slow_consumer_lag_threshold",
+            "observability slow_consumer_lag_threshold must be greater than zero",
+        );
+    }
+
+    if config.deployment.profile == "production"
+        && config
+            .auth
+            .operator_token_env
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        report.push(
+            ValidationLevel::Error,
+            "auth.operator_token_env",
+            "production deployment requires auth.operator_token_env",
+        );
+    }
+
+    if config.deployment.profile == "production" && !config.audit.redact_inputs {
+        report.push(
+            ValidationLevel::Warning,
+            "audit.redact_inputs",
+            "production deployment should keep audit.redact_inputs enabled",
+        );
+    }
+
+    for (idx, manifest) in config.extensions.manifests.iter().enumerate() {
+        if manifest.path.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("extensions.manifests.{idx}.path"),
+                "extension manifest path must not be empty",
+            );
+        }
+
+        if manifest
+            .version_pin
+            .as_deref()
+            .is_some_and(|version| version.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("extensions.manifests.{idx}.version_pin"),
+                "extension manifest version_pin must not be empty when provided",
+            );
+        }
+    }
+
+    report
+}
