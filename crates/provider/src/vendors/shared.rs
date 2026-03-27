@@ -34,6 +34,8 @@ pub(crate) struct OpenAiStyleProvider {
     pub(crate) auth: RequestAuth,
     pub(crate) metadata: ProviderTransportMetadata,
     pub(crate) endpoint: OpenAiStyleEndpoint,
+    pub(crate) api_version: Option<String>,
+    pub(crate) request_headers: Vec<(String, String)>,
 }
 
 #[derive(Clone, Copy)]
@@ -62,7 +64,13 @@ impl OpenAiStyleProvider {
     ) -> std::result::Result<ProviderCompletion, ProviderError> {
         let url = match self.endpoint {
             OpenAiStyleEndpoint::Standard => openai_chat_completions_url(&self.base_url),
-            OpenAiStyleEndpoint::Azure => azure_chat_completions_url(&self.base_url, &self.model),
+            OpenAiStyleEndpoint::Azure => azure_chat_completions_url(
+                &self.base_url,
+                &self.model,
+                self.api_version
+                    .as_deref()
+                    .unwrap_or(AZURE_CHAT_COMPLETIONS_API_VERSION),
+            ),
             OpenAiStyleEndpoint::Ollama => ollama_chat_completions_url(&self.base_url),
         };
         let body = build_openai_style_body(
@@ -74,7 +82,7 @@ impl OpenAiStyleProvider {
         let request = JsonRequest {
             url,
             auth: self.auth.clone(),
-            headers: Vec::new(),
+            headers: self.request_headers.clone(),
             body,
         };
         let metadata = self.metadata();
@@ -230,7 +238,10 @@ where
                         retryable = error.retryable,
                         "retrying provider request"
                     );
-                    sleep(Duration::from_millis(150 * attempt as u64)).await;
+                    sleep(Duration::from_millis(
+                        metadata.retry_backoff_ms.saturating_mul(attempt as u64),
+                    ))
+                    .await;
                     continue;
                 }
 
@@ -325,11 +336,9 @@ fn openai_chat_completions_url(base_url: &str) -> String {
     }
 }
 
-fn azure_chat_completions_url(base_url: &str, deployment: &str) -> String {
+fn azure_chat_completions_url(base_url: &str, deployment: &str, api_version: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
-    format!(
-        "{trimmed}/openai/deployments/{deployment}/chat/completions?api-version={AZURE_CHAT_COMPLETIONS_API_VERSION}"
-    )
+    format!("{trimmed}/openai/deployments/{deployment}/chat/completions?api-version={api_version}")
 }
 
 fn ollama_chat_completions_url(base_url: &str) -> String {
@@ -340,15 +349,6 @@ fn ollama_chat_completions_url(base_url: &str) -> String {
         format!("{trimmed}/chat/completions")
     } else {
         format!("{trimmed}/v1/chat/completions")
-    }
-}
-
-fn anthropic_messages_url(base_url: &str) -> String {
-    let trimmed = base_url.trim_end_matches('/');
-    if trimmed.ends_with("/messages") {
-        trimmed.to_owned()
-    } else {
-        format!("{trimmed}/messages")
     }
 }
 

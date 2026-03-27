@@ -13,6 +13,17 @@ use mosaic_scheduler_core::FileCronStore;
 use mosaic_session_core::{SessionStore, TranscriptRole};
 use tokio::sync::oneshot;
 
+fn mock_profile_config() -> ProviderProfileConfig {
+    ProviderProfileConfig {
+        provider_type: "mock".to_owned(),
+        model: "mock".to_owned(),
+        base_url: None,
+        api_key_env: None,
+        transport: Default::default(),
+        vendor: Default::default(),
+    }
+}
+
 #[derive(Default)]
 struct MemorySessionStore {
     sessions: Mutex<BTreeMap<String, SessionRecord>>,
@@ -62,15 +73,9 @@ fn test_node_store() -> Arc<FileNodeStore> {
 fn gateway() -> GatewayHandle {
     let mut config = MosaicConfig::default();
     config.active_profile = "mock".to_owned();
-    config.profiles.insert(
-        "mock".to_owned(),
-        ProviderProfileConfig {
-            provider_type: "mock".to_owned(),
-            model: "mock".to_owned(),
-            base_url: None,
-            api_key_env: None,
-        },
-    );
+    config
+        .profiles
+        .insert("mock".to_owned(), mock_profile_config());
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let mut tools = ToolRegistry::new();
@@ -86,6 +91,7 @@ fn gateway() -> GatewayHandle {
                 std::env::temp_dir().join("mosaic-gateway-tests-memory"),
             )),
             memory_policy: MemoryPolicy::default(),
+            runtime_policy: config.runtime.clone(),
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
@@ -197,6 +203,7 @@ fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
             session_store: Arc::new(MemorySessionStore::default()),
             memory_store: Arc::new(FileMemoryStore::new(root.join(".mosaic/memory"))),
             memory_policy: MemoryPolicy::default(),
+            runtime_policy: loaded.config.runtime.clone(),
             tools: Arc::new(extension_set.tools),
             skills: Arc::new(extension_set.skills),
             workflows: Arc::new(extension_set.workflows),
@@ -472,6 +479,7 @@ async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
                 std::env::temp_dir().join("mosaic-gateway-tests-memory"),
             )),
             memory_policy: MemoryPolicy::default(),
+            runtime_policy: config.runtime.clone(),
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),

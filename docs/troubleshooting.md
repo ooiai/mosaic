@@ -126,11 +126,11 @@ Check:
 - `MOSAIC_OPERATOR_TOKEN` is set if operator auth is enabled
 - ingress shared secrets are configured when needed
 
-For a known-good HTTP Gateway + Telegram path, compare against:
+For a known-good HTTP Gateway path, compare against:
 
 - [docs/full-stack.md](./full-stack.md)
-- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
-- [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
+- [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
+- [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
 
 ## Need a compact incident package
 

@@ -134,9 +134,24 @@ pub struct EffectiveProfileTrace {
     #[serde(default)]
     pub max_retries: u8,
     #[serde(default)]
+    pub retry_backoff_ms: u64,
+    #[serde(default)]
+    pub api_version: Option<String>,
+    #[serde(default)]
+    pub version_header: Option<String>,
+    #[serde(default)]
+    pub custom_header_keys: Vec<String>,
+    #[serde(default)]
     pub supports_tools: bool,
     #[serde(default)]
     pub supports_tool_call_shadow_messages: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimePolicyTrace {
+    pub max_provider_round_trips: usize,
+    pub max_workflow_provider_round_trips: usize,
+    pub continue_after_tool_error: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -332,6 +347,7 @@ pub struct RunTrace {
     #[serde(default)]
     pub provider_attempts: Vec<ProviderAttemptTrace>,
     pub governance: Option<GovernanceTrace>,
+    pub runtime_policy: Option<RuntimePolicyTrace>,
     #[serde(default)]
     pub model_selections: Vec<ModelSelectionTrace>,
     #[serde(default)]
@@ -382,6 +398,7 @@ impl RunTrace {
             provider_failure: None,
             provider_attempts: vec![],
             governance: None,
+            runtime_policy: None,
             model_selections: vec![],
             memory_reads: vec![],
             memory_writes: vec![],
@@ -456,6 +473,10 @@ impl RunTrace {
 
     pub fn bind_governance(&mut self, governance: GovernanceTrace) {
         self.governance = Some(governance);
+    }
+
+    pub fn bind_runtime_policy(&mut self, runtime_policy: RuntimePolicyTrace) {
+        self.runtime_policy = Some(runtime_policy);
     }
 
     pub fn add_model_selection(&mut self, trace: ModelSelectionTrace) {
@@ -779,8 +800,17 @@ mod tests {
                 api_key_present: false,
                 timeout_ms: 0,
                 max_retries: 0,
+                retry_backoff_ms: 0,
+                api_version: None,
+                version_header: None,
+                custom_header_keys: Vec::new(),
                 supports_tools: true,
                 supports_tool_call_shadow_messages: false,
+            }),
+            runtime_policy: Some(RuntimePolicyTrace {
+                max_provider_round_trips: 8,
+                max_workflow_provider_round_trips: 8,
+                continue_after_tool_error: false,
             }),
             lifecycle_status: RunLifecycleStatus::Success,
             failure: None,

@@ -1,12 +1,18 @@
 # Testing Guide
 
-Mosaic now treats testing as a layered system instead of a single `cargo test` bucket.
+Mosaic treats testing as a layered system instead of a single `cargo test` bucket.
 
-The goal of this guide is to make three things explicit:
+The goal of this guide is to make four things explicit:
 
 - which tests are fast and always-on
 - which tests are true integration tests
 - which tests are gated behind real services, secrets, or local daemons
+- which lanes are release-blocking real acceptance and which are mock-only safety nets
+
+See also:
+
+- [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
+- [provider-runtime-policy-matrix.md](./provider-runtime-policy-matrix.md)
 
 ## Layers
 
@@ -19,15 +25,26 @@ Mosaic uses four test layers.
 | real integration | run true provider, gateway, ingress, or daemon paths when explicitly enabled | `MOSAIC_REAL_TESTS=1 make test-real` | secrets, services, or local daemons |
 | golden example verification | prove docs and examples still work from setup to inspect | `make test-golden` | local process only |
 
-## Per-Crate Matrix
+## Release-Blocking Real Lanes
 
-The matrix below is the source of truth for h3.
+These are the i2 release-blocking real checks:
+
+| Lane | Command | Evidence |
+| --- | --- | --- |
+| first-class vendors | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | OpenAI / Azure / Anthropic / Ollama requests succeed when configured |
+| gateway protocol | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | real HTTP server and SSE client path |
+| MCP transport | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | real stdio subprocess path |
+| no-mock full stack | `MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat` | setup -> gateway -> webchat ingress -> session -> inspect -> incident |
+
+`./scripts/test-full-stack-example.sh mock` remains useful, but it is not release acceptance.
+
+## Per-Crate Matrix
 
 | Crate | Unit | Local Integration | Real Integration | Golden / Docs |
 | --- | --- | --- | --- | --- |
 | `mosaic-config` | inline unit tests | `crates/config/tests/integration_load_validate.rs` | no | `scripts/test-golden-examples.sh` |
 | `mosaic-provider` | inline unit tests | `crates/provider/tests/integration_mock_provider.rs` | `crates/provider/tests/real_vendors.rs` | provider examples and setup docs |
-| `mosaic-tool-core` | inline unit tests | `crates/tool-core/tests/integration_builtin_tools.rs` | optional via `exec` / `webhook` local services in `make test-real` | example runs |
+| `mosaic-tool-core` | inline unit tests | `crates/tool-core/tests/integration_builtin_tools.rs` | optional via local `exec` and `webhook` services | example runs |
 | `mosaic-skill-core` | inline unit tests | `crates/skill-core/tests/integration_registry.rs` | no | workflow and skill examples |
 | `mosaic-workflow` | inline unit tests | `crates/workflow/tests/integration_runner.rs` | no | `examples/workflows/research-brief.yaml` |
 | `mosaic-session-core` | inline unit tests | `crates/session-core/tests/integration_file_store.rs` | no | session and inspect flows |
@@ -36,7 +53,7 @@ The matrix below is the source of truth for h3.
 | `mosaic-control-protocol` | inline unit tests | `crates/control-protocol/tests/integration_roundtrip.rs` | no | gateway and SDK flows |
 | `mosaic-sdk` | inline unit tests | `crates/sdk/tests/integration_client_transport.rs` | `crates/sdk/tests/real_gateway_http.rs` | gateway docs |
 | `mosaic-gateway` | inline unit tests | `crates/gateway/tests/integration_local_gateway.rs` | `crates/gateway/tests/real_telegram_ingress.rs` | webchat and telegram examples |
-| `mosaic-runtime` | inline unit tests | `crates/runtime/tests/integration_runtime_flow.rs` | optional via real providers and node routing | example runs |
+| `mosaic-runtime` | inline unit tests | `crates/runtime/tests/integration_runtime_flow.rs` | covered indirectly by real provider and full-stack lanes | example runs |
 | `mosaic-mcp-core` | inline unit tests | `crates/mcp-core/tests/integration_manager.rs` | `crates/mcp-core/tests/real_stdio_mcp.rs` | `examples/mcp-filesystem.yaml` |
 | `mosaic-node-protocol` | inline unit tests | `crates/node-protocol/tests/integration_file_bus.rs` | no | node docs and CLI flows |
 | `mosaic-extension-core` | inline unit tests | `crates/extension-core/tests/integration_extension_set.rs` | no | extension examples |
@@ -87,11 +104,11 @@ Real tests then opt into additional vendor or channel checks based on the secret
 | Variable | Meaning |
 | --- | --- |
 | `MOSAIC_REAL_TESTS` | master switch for real integration tests |
-| `OPENAI_API_KEY` | enable OpenAI provider real test |
+| `OPENAI_API_KEY` | enable OpenAI provider real test and the no-mock full-stack lane |
 | `AZURE_OPENAI_API_KEY` | enable Azure provider real test |
 | `ANTHROPIC_API_KEY` | enable Anthropic provider real test |
-| `MOSAIC_TEST_OPENAI_BASE_URL` | optional OpenAI-compatible override for OpenAI real test |
-| `MOSAIC_TEST_OPENAI_MODEL` | optional OpenAI model override for the OpenAI real test |
+| `MOSAIC_TEST_OPENAI_BASE_URL` | optional OpenAI base URL override for real OpenAI lanes |
+| `MOSAIC_TEST_OPENAI_MODEL` | optional OpenAI model override for real OpenAI lanes |
 | `MOSAIC_TEST_AZURE_BASE_URL` | required Azure endpoint for Azure real test |
 | `MOSAIC_TEST_AZURE_MODEL` | optional Azure deployment override for the Azure real test |
 | `MOSAIC_TEST_ANTHROPIC_BASE_URL` | optional Anthropic base URL override |
@@ -99,7 +116,8 @@ Real tests then opt into additional vendor or channel checks based on the secret
 | `MOSAIC_TEST_OLLAMA_BASE_URL` | optional Ollama endpoint override, defaults to `http://127.0.0.1:11434` |
 | `MOSAIC_TEST_OLLAMA_MODEL` | Ollama model name for real test, defaults to `llama3.1` |
 | `MOSAIC_TEST_TELEGRAM_SECRET` | optional shared secret header for the real Telegram ingress test |
-| `MOSAIC_FULL_STACK_PORT` | optional override for the full-stack Gateway HTTP port; if unset, the script chooses a free local port |
+| `MOSAIC_WEBCHAT_SHARED_SECRET` | shared secret used by the no-mock WebChat full-stack lane |
+| `MOSAIC_FULL_STACK_PORT` | optional override for the full-stack Gateway HTTP port |
 | `MOSAIC_OPERATOR_TOKEN` | optional operator auth token for remote gateway SDK tests |
 
 ## Secrets and Service Conventions
@@ -109,6 +127,7 @@ Real tests then opt into additional vendor or channel checks based on the secret
 - Local daemons such as Ollama are treated as real integrations when the process is external to the test run.
 - MCP real tests spawn an actual subprocess and communicate over stdio instead of mocking the transport.
 - Gateway real tests boot an actual HTTP server and consume real SSE frames through the SDK client.
+- Telegram bot token and public webhook validation remain a manual operator acceptance lane unless the environment can expose a reachable webhook endpoint.
 
 ## Golden Examples and Docs
 
@@ -125,7 +144,9 @@ It verifies:
 - the mock full-stack Gateway + Telegram path through `scripts/test-full-stack-example.sh mock`
 - trace inspection after a real run artifact exists
 
-This is the guardrail that keeps `README.md`, `examples/`, and the operator getting-started path runnable.
+This keeps `README.md`, `examples/`, and the operator getting-started path runnable.
+
+It is intentionally not the final acceptance gate because it still includes the mock full-stack lane.
 
 ## CI Strategy
 
@@ -146,13 +167,13 @@ Recommended CI split:
 
 - A real test may skip when its required secret or daemon is absent.
 - A local integration test must not depend on public internet access.
-- If a test is flaky because of timing, prefer longer readiness polling or explicit process health checks over retries with no diagnosis.
+- If a test is flaky because of timing, prefer longer readiness polling or explicit process health checks over blind retries.
 - If a real upstream API becomes unstable, quarantine only the affected `real_*` test file and keep `ci-fast` green.
 - Do not silently downgrade a real test into a mock test. If the dependency disappears, the test should skip with a clear reason.
 
 ## Adding New Tests
 
-When you add a new crate or a new operator surface:
+When you add a new crate or operator surface:
 
 1. add or update a `tests/` integration file under the owning crate
 2. decide whether the test is local integration or real integration
@@ -161,23 +182,23 @@ When you add a new crate or a new operator surface:
 
 ## Full-Stack Example Verification
 
-The shared full-stack verification script is:
+Dev-only path:
 
 ```bash
 ./scripts/test-full-stack-example.sh mock
 ```
 
-Real provider lane:
+Release-blocking real path:
 
 ```bash
-MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai
+MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat
 ```
 
 This script verifies:
 
 - setup and validation
 - Gateway HTTP serve
-- Telegram ingress normalization
+- ingress normalization
 - session persistence
 - inspect trace generation
 - audit, replay, and incident export

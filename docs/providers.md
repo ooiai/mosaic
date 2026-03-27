@@ -1,15 +1,15 @@
 # Providers
 
-This guide explains how provider configuration works in Mosaic today.
+This guide explains how provider configuration works in Mosaic.
 
-If you want one provider profile that already matches the full Gateway + Telegram example, use:
+If you want the i2 no-mock acceptance path, start with:
 
-- [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml)
-- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+- [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
+- [docs/full-stack.md](./full-stack.md)
 
 ## Current provider types
 
-Mosaic currently validates and runs these provider types:
+Mosaic validates and runs these provider types:
 
 - `mock`
 - `openai`
@@ -18,11 +18,9 @@ Mosaic currently validates and runs these provider types:
 - `ollama`
 - `openai-compatible`
 
-If you set another value, `mosaic setup validate` will fail.
+`openai-compatible` is supported, but it is not a substitute for real acceptance of the first-class vendors above.
 
 ## OpenAI
-
-Use the OpenAI API directly through the `openai` provider type.
 
 Example: [examples/providers/openai.yaml](../examples/providers/openai.yaml)
 
@@ -42,14 +40,11 @@ Required environment variable:
 export OPENAI_API_KEY=your_api_key_here
 ```
 
-Full-stack example using the same provider:
+Full-stack no-mock example:
 
-- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
-- [docs/full-stack.md](./full-stack.md)
+- [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
 
 ## Azure OpenAI
-
-Use the native `azure` provider type when you have an Azure OpenAI deployment.
 
 Example: [examples/providers/azure.yaml](../examples/providers/azure.yaml)
 
@@ -61,6 +56,8 @@ profiles:
     model: gpt-5.4
     base_url: https://your-resource.openai.azure.com
     api_key_env: AZURE_OPENAI_API_KEY
+    vendor:
+      azure_api_version: 2024-10-21
 ```
 
 Required environment variable:
@@ -69,9 +66,29 @@ Required environment variable:
 export AZURE_OPENAI_API_KEY=your_api_key_here
 ```
 
-## Ollama
+## Anthropic
 
-Ollama works through the native `ollama` provider type.
+Example: [examples/providers/anthropic.yaml](../examples/providers/anthropic.yaml)
+
+```yaml
+active_profile: anthropic
+profiles:
+  anthropic:
+    type: anthropic
+    model: claude-sonnet-4-5
+    base_url: https://api.anthropic.com/v1
+    api_key_env: ANTHROPIC_API_KEY
+    vendor:
+      anthropic_version: 2023-06-01
+```
+
+Required environment variable:
+
+```bash
+export ANTHROPIC_API_KEY=your_api_key_here
+```
+
+## Ollama
 
 Example: [examples/providers/ollama.yaml](../examples/providers/ollama.yaml)
 
@@ -84,27 +101,7 @@ profiles:
     base_url: http://127.0.0.1:11434
 ```
 
-## Anthropic
-
-Mosaic ships a native `anthropic` provider type.
-
-Example: [examples/providers/anthropic.yaml](../examples/providers/anthropic.yaml)
-
-```yaml
-active_profile: anthropic
-profiles:
-  anthropic:
-    type: anthropic
-    model: claude-sonnet-4-5
-    base_url: https://api.anthropic.com/v1
-    api_key_env: ANTHROPIC_API_KEY
-```
-
-Required environment variable:
-
-```bash
-export ANTHROPIC_API_KEY=your_api_key_here
-```
+Ollama is treated as a real provider when the daemon is external to the test process.
 
 ## OpenAI-compatible
 
@@ -128,7 +125,33 @@ The generated config starts on `mock` so you can explore the CLI and TUI without
 active_profile: mock
 ```
 
-Use `mock` when you want to test control-plane flows, not real model quality.
+Use `mock` for control-plane regression and local docs smoke tests. Do not use it as release acceptance evidence.
+
+## Transport and Vendor Policy
+
+The operator-visible provider knobs are:
+
+```yaml
+provider_defaults:
+  timeout_ms: 45000
+  max_retries: 2
+  retry_backoff_ms: 250
+
+profiles:
+  openai:
+    type: openai
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    transport:
+      timeout_ms: 60000
+      max_retries: 3
+      retry_backoff_ms: 300
+    vendor:
+      allow_custom_headers: false
+```
+
+See [provider-runtime-policy-matrix.md](./provider-runtime-policy-matrix.md) for the complete matrix.
 
 ## Switching models
 
@@ -163,10 +186,13 @@ After any provider change:
 ```bash
 mosaic setup validate
 mosaic setup doctor
+mosaic config show
 ```
 
-If validation fails, read [troubleshooting.md](./troubleshooting.md).
+For effective per-run values:
 
-For secret handling and production auth guidance, continue with [security.md](./security.md).
+```bash
+mosaic inspect .mosaic/runs/<run-id>.json --verbose
+```
 
-For the full provider + Gateway + channel walkthrough, continue with [full-stack.md](./full-stack.md).
+For the no-mock full provider + Gateway + ingress walkthrough, continue with [full-stack.md](./full-stack.md).

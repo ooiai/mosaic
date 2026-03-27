@@ -11,9 +11,9 @@ use crate::{
 };
 
 use super::shared::{
-    ANTHROPIC_TIMEOUT_MS, ANTHROPIC_VERSION_HEADER, AnthropicResponse, JsonRequest, RequestAuth,
-    build_anthropic_body, build_http_client, execute_with_retry, parse_anthropic_response,
-    resolve_api_key, resolve_base_url, send_json_request, tool_call_shadow_content,
+    AnthropicResponse, JsonRequest, RequestAuth, build_anthropic_body, build_http_client,
+    execute_with_retry, parse_anthropic_response, resolve_api_key, resolve_base_url,
+    send_json_request, tool_call_shadow_content,
 };
 
 pub struct AnthropicProvider {
@@ -23,15 +23,33 @@ pub struct AnthropicProvider {
     api_key: String,
     model: String,
     metadata: ProviderTransportMetadata,
+    request_headers: Vec<(String, String)>,
 }
 
 impl AnthropicProvider {
-    pub fn new(profile_name: String, base_url: String, api_key: String, model: String) -> Self {
+    pub fn new(
+        profile_name: String,
+        base_url: String,
+        api_key: String,
+        model: String,
+        timeout_ms: u64,
+        max_retries: u8,
+        retry_backoff_ms: u64,
+        anthropic_version: String,
+        custom_headers: std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        let custom_header_keys = custom_headers.keys().cloned().collect::<Vec<_>>();
+        let mut request_headers = custom_headers.into_iter().collect::<Vec<_>>();
+        request_headers.push(("anthropic-version".to_owned(), anthropic_version.clone()));
         let metadata = ProviderTransportMetadata {
             provider_type: ProviderType::Anthropic.as_str().to_owned(),
             base_url: Some(base_url.clone()),
-            timeout_ms: ANTHROPIC_TIMEOUT_MS,
-            max_retries: super::shared::DEFAULT_MAX_RETRIES,
+            timeout_ms,
+            max_retries,
+            retry_backoff_ms,
+            api_version: None,
+            version_header: Some(anthropic_version.clone()),
+            custom_header_keys,
             supports_tool_call_shadow_messages: true,
         };
         Self {
@@ -41,6 +59,7 @@ impl AnthropicProvider {
             api_key,
             model,
             metadata,
+            request_headers,
         }
     }
 
@@ -50,6 +69,14 @@ impl AnthropicProvider {
             resolve_base_url(profile, ProviderType::Anthropic)?,
             resolve_api_key(profile, true)?.expect("anthropic requires api key"),
             profile.model.clone(),
+            profile.timeout_ms,
+            profile.max_retries,
+            profile.retry_backoff_ms,
+            profile
+                .anthropic_version
+                .clone()
+                .expect("anthropic profiles should carry version"),
+            profile.custom_headers.clone(),
         ))
     }
 }
@@ -85,10 +112,7 @@ impl LlmProvider for AnthropicProvider {
         let request = JsonRequest {
             url,
             auth: RequestAuth::ApiKey(self.api_key.clone()),
-            headers: vec![(
-                "anthropic-version".to_owned(),
-                ANTHROPIC_VERSION_HEADER.to_owned(),
-            )],
+            headers: self.request_headers.clone(),
             body,
         };
         let metadata = self.metadata();

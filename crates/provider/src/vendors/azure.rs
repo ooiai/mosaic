@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::shared::{
-    DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT_MS, OpenAiStyleEndpoint, OpenAiStyleProvider, RequestAuth,
-    build_http_client, resolve_api_key, resolve_base_url,
+    OpenAiStyleEndpoint, OpenAiStyleProvider, RequestAuth, build_http_client, resolve_api_key,
+    resolve_base_url,
 };
 
 pub struct AzureProvider {
@@ -22,12 +22,21 @@ impl AzureProvider {
         base_url: String,
         api_key: String,
         deployment: String,
+        timeout_ms: u64,
+        max_retries: u8,
+        retry_backoff_ms: u64,
+        api_version: String,
+        custom_headers: std::collections::BTreeMap<String, String>,
     ) -> Self {
         let metadata = ProviderTransportMetadata {
             provider_type: ProviderType::Azure.as_str().to_owned(),
             base_url: Some(base_url.clone()),
-            timeout_ms: DEFAULT_TIMEOUT_MS,
-            max_retries: DEFAULT_MAX_RETRIES,
+            timeout_ms,
+            max_retries,
+            retry_backoff_ms,
+            api_version: Some(api_version.clone()),
+            version_header: None,
+            custom_header_keys: custom_headers.keys().cloned().collect(),
             supports_tool_call_shadow_messages: false,
         };
         Self {
@@ -40,6 +49,8 @@ impl AzureProvider {
                 auth: RequestAuth::ApiKey(api_key),
                 metadata,
                 endpoint: OpenAiStyleEndpoint::Azure,
+                api_version: Some(api_version),
+                request_headers: custom_headers.into_iter().collect(),
             },
         }
     }
@@ -50,6 +61,14 @@ impl AzureProvider {
             resolve_base_url(profile, ProviderType::Azure)?,
             resolve_api_key(profile, true)?.expect("azure requires api key"),
             profile.model.clone(),
+            profile.timeout_ms,
+            profile.max_retries,
+            profile.retry_backoff_ms,
+            profile
+                .azure_api_version
+                .clone()
+                .expect("azure profiles should carry api_version"),
+            profile.custom_headers.clone(),
         ))
     }
 }

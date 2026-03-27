@@ -75,6 +75,7 @@ pub fn build_components(root: &Path) -> GatewayRuntimeComponents {
         )),
         memory_store: Arc::new(FileMemoryStore::new(workspace_root.join(".mosaic/memory"))),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),

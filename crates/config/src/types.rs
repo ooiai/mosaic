@@ -166,6 +166,8 @@ pub struct MosaicConfig {
     #[serde(default = "default_profiles")]
     pub profiles: BTreeMap<String, ProviderProfileConfig>,
     #[serde(default)]
+    pub provider_defaults: ProviderTransportPolicyConfig,
+    #[serde(default)]
     pub deployment: DeploymentConfig,
     #[serde(default)]
     pub auth: AuthConfig,
@@ -178,6 +180,8 @@ pub struct MosaicConfig {
     #[serde(default)]
     pub observability: ObservabilityConfig,
     #[serde(default)]
+    pub runtime: RuntimePolicyConfig,
+    #[serde(default)]
     pub extensions: ExtensionsConfig,
     #[serde(default)]
     pub policies: PolicyConfig,
@@ -189,12 +193,14 @@ impl Default for MosaicConfig {
             schema_version: default_schema_version(),
             active_profile: default_active_profile(),
             profiles: default_profiles(),
+            provider_defaults: ProviderTransportPolicyConfig::default(),
             deployment: DeploymentConfig::default(),
             auth: AuthConfig::default(),
             session_store: SessionStoreConfig::default(),
             inspect: InspectConfig::default(),
             audit: AuditConfig::default(),
             observability: ObservabilityConfig::default(),
+            runtime: RuntimePolicyConfig::default(),
             extensions: ExtensionsConfig::default(),
             policies: PolicyConfig::default(),
         }
@@ -208,6 +214,47 @@ pub struct ProviderProfileConfig {
     pub model: String,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub transport: ProviderTransportPolicyConfig,
+    #[serde(default)]
+    pub vendor: ProviderVendorPolicyConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ProviderTransportPolicyConfig {
+    pub timeout_ms: Option<u64>,
+    pub max_retries: Option<u8>,
+    pub retry_backoff_ms: Option<u64>,
+    #[serde(default)]
+    pub custom_headers: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ProviderVendorPolicyConfig {
+    pub azure_api_version: Option<String>,
+    pub anthropic_version: Option<String>,
+    #[serde(default)]
+    pub allow_custom_headers: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RuntimePolicyConfig {
+    #[serde(default = "default_max_provider_round_trips")]
+    pub max_provider_round_trips: usize,
+    #[serde(default = "default_max_workflow_provider_round_trips")]
+    pub max_workflow_provider_round_trips: usize,
+    #[serde(default)]
+    pub continue_after_tool_error: bool,
+}
+
+impl Default for RuntimePolicyConfig {
+    fn default() -> Self {
+        Self {
+            max_provider_round_trips: default_max_provider_round_trips(),
+            max_workflow_provider_round_trips: default_max_workflow_provider_round_trips(),
+            continue_after_tool_error: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -564,6 +611,27 @@ pub struct RedactedProfileView {
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
     pub api_key_present: bool,
+    pub timeout_ms: Option<u64>,
+    pub max_retries: Option<u8>,
+    pub retry_backoff_ms: Option<u64>,
+    pub custom_header_keys: Vec<String>,
+    pub allow_custom_headers: bool,
+    pub azure_api_version: Option<String>,
+    pub anthropic_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedProviderDefaultsView {
+    pub timeout_ms: Option<u64>,
+    pub max_retries: Option<u8>,
+    pub retry_backoff_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedRuntimePolicyView {
+    pub max_provider_round_trips: usize,
+    pub max_workflow_provider_round_trips: usize,
+    pub continue_after_tool_error: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -611,12 +679,14 @@ pub struct RedactedMosaicConfig {
     pub schema_version: u32,
     pub active_profile: String,
     pub profiles: Vec<RedactedProfileView>,
+    pub provider_defaults: RedactedProviderDefaultsView,
     pub deployment: RedactedDeploymentView,
     pub auth: RedactedAuthView,
     pub session_store_root_dir: String,
     pub inspect_runs_dir: String,
     pub audit: RedactedAuditView,
     pub observability: RedactedObservabilityView,
+    pub runtime: RedactedRuntimePolicyView,
     pub extension_manifest_count: usize,
     pub policies: RedactedPolicyView,
 }
@@ -627,12 +697,14 @@ pub(crate) struct MosaicConfigPatch {
     pub active_profile: Option<String>,
     #[serde(default)]
     pub profiles: BTreeMap<String, ProviderProfileConfig>,
+    pub provider_defaults: Option<ProviderTransportPolicyConfig>,
     pub deployment: Option<DeploymentConfig>,
     pub auth: Option<AuthConfig>,
     pub session_store: Option<SessionStoreConfig>,
     pub inspect: Option<InspectConfig>,
     pub audit: Option<AuditConfig>,
     pub observability: Option<ObservabilityConfig>,
+    pub runtime: Option<RuntimePolicyConfig>,
     pub extensions: Option<ExtensionsConfig>,
     pub policies: Option<PolicyConfig>,
 }
@@ -682,6 +754,8 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 model: "claude-sonnet-4-5".to_owned(),
                 base_url: Some("https://api.anthropic.com/v1".to_owned()),
                 api_key_env: Some("ANTHROPIC_API_KEY".to_owned()),
+                transport: ProviderTransportPolicyConfig::default(),
+                vendor: ProviderVendorPolicyConfig::default(),
             },
         ),
         (
@@ -691,6 +765,8 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 model: "gpt-5.4".to_owned(),
                 base_url: Some("https://your-resource.openai.azure.com".to_owned()),
                 api_key_env: Some("AZURE_OPENAI_API_KEY".to_owned()),
+                transport: ProviderTransportPolicyConfig::default(),
+                vendor: ProviderVendorPolicyConfig::default(),
             },
         ),
         (
@@ -700,6 +776,8 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 model: "gpt-5.4".to_owned(),
                 base_url: Some("https://api.openai.com/v1".to_owned()),
                 api_key_env: Some("OPENAI_API_KEY".to_owned()),
+                transport: ProviderTransportPolicyConfig::default(),
+                vendor: ProviderVendorPolicyConfig::default(),
             },
         ),
         (
@@ -709,6 +787,8 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 model: "gpt-5.4-mini".to_owned(),
                 base_url: Some("https://api.openai.com/v1".to_owned()),
                 api_key_env: Some("OPENAI_API_KEY".to_owned()),
+                transport: ProviderTransportPolicyConfig::default(),
+                vendor: ProviderVendorPolicyConfig::default(),
             },
         ),
         (
@@ -718,6 +798,8 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 model: "mock".to_owned(),
                 base_url: None,
                 api_key_env: None,
+                transport: ProviderTransportPolicyConfig::default(),
+                vendor: ProviderVendorPolicyConfig::default(),
             },
         ),
         (
@@ -727,6 +809,8 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 model: "qwen3:14b".to_owned(),
                 base_url: Some("http://127.0.0.1:11434".to_owned()),
                 api_key_env: None,
+                transport: ProviderTransportPolicyConfig::default(),
+                vendor: ProviderVendorPolicyConfig::default(),
             },
         ),
     ])
@@ -754,4 +838,12 @@ fn default_event_replay_window() -> usize {
 
 fn default_slow_consumer_lag_threshold() -> usize {
     32
+}
+
+fn default_max_provider_round_trips() -> usize {
+    8
+}
+
+fn default_max_workflow_provider_round_trips() -> usize {
+    8
 }

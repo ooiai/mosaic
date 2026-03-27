@@ -237,6 +237,8 @@ fn validate_reports_invalid_active_profile_and_missing_api_key_env() {
             model: "gpt-5.4".to_owned(),
             base_url: Some("https://api.openai.com/v1".to_owned()),
             api_key_env: None,
+            transport: Default::default(),
+            vendor: Default::default(),
         },
     );
 
@@ -267,6 +269,8 @@ fn validate_reports_missing_azure_base_url() {
             model: "gpt-5.4".to_owned(),
             base_url: None,
             api_key_env: Some("AZURE_OPENAI_API_KEY".to_owned()),
+            transport: Default::default(),
+            vendor: Default::default(),
         },
     );
 

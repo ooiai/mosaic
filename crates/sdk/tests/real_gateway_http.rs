@@ -77,6 +77,7 @@ fn build_components(root: &Path) -> GatewayRuntimeComponents {
         )),
         memory_store: Arc::new(FileMemoryStore::new(workspace_root.join(".mosaic/memory"))),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -151,6 +152,8 @@ async fn real_gateway_http_chain_runs_through_sdk_when_enabled() {
         .expect("event should exist");
     assert_eq!(envelope.session_id.as_deref(), Some("sdk-real"));
 
+    drop(events);
+    drop(client);
     let _ = shutdown_tx.send(());
     server.await.expect("server task should join");
     fs::remove_dir_all(root).ok();

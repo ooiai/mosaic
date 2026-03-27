@@ -44,6 +44,10 @@ impl AgentRuntime {
             api_key_present: profile.api_key_present(),
             timeout_ms: metadata.timeout_ms,
             max_retries: metadata.max_retries,
+            retry_backoff_ms: metadata.retry_backoff_ms,
+            api_version: metadata.api_version.clone(),
+            version_header: metadata.version_header.clone(),
+            custom_header_keys: metadata.custom_header_keys.clone(),
             supports_tools: profile.capabilities.supports_tools,
             supports_tool_call_shadow_messages: metadata.supports_tool_call_shadow_messages,
         }
@@ -52,14 +56,6 @@ impl AgentRuntime {
     pub(crate) fn provider_metadata_from_profile(
         profile: &ProviderProfile,
     ) -> ProviderTransportMetadata {
-        let (timeout_ms, max_retries, supports_tool_call_shadow_messages) =
-            match profile.provider_type.as_str() {
-                "anthropic" => (60_000, 2, true),
-                "ollama" => (90_000, 1, false),
-                "mock" => (0, 0, false),
-                _ => (45_000, 2, false),
-            };
-
         let base_url = profile
             .base_url
             .clone()
@@ -73,9 +69,24 @@ impl AgentRuntime {
         ProviderTransportMetadata {
             provider_type: profile.provider_type.clone(),
             base_url,
-            timeout_ms,
-            max_retries,
-            supports_tool_call_shadow_messages,
+            timeout_ms: profile.timeout_ms,
+            max_retries: profile.max_retries,
+            retry_backoff_ms: profile.retry_backoff_ms,
+            api_version: profile.azure_api_version.clone(),
+            version_header: profile.anthropic_version.clone(),
+            custom_header_keys: profile.custom_headers.keys().cloned().collect(),
+            supports_tool_call_shadow_messages: profile.provider_type == "anthropic",
+        }
+    }
+
+    pub(crate) fn runtime_policy_trace(&self) -> mosaic_inspect::RuntimePolicyTrace {
+        mosaic_inspect::RuntimePolicyTrace {
+            max_provider_round_trips: self.ctx.runtime_policy.max_provider_round_trips,
+            max_workflow_provider_round_trips: self
+                .ctx
+                .runtime_policy
+                .max_workflow_provider_round_trips,
+            continue_after_tool_error: self.ctx.runtime_policy.continue_after_tool_error,
         }
     }
 

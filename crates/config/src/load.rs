@@ -145,6 +145,10 @@ pub(crate) fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
         config.profiles.extend(patch.profiles);
     }
 
+    if let Some(provider_defaults) = patch.provider_defaults {
+        config.provider_defaults = provider_defaults;
+    }
+
     if let Some(deployment) = patch.deployment {
         config.deployment = deployment;
     }
@@ -167,6 +171,10 @@ pub(crate) fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
 
     if let Some(observability) = patch.observability {
         config.observability = observability;
+    }
+
+    if let Some(runtime) = patch.runtime {
+        config.runtime = runtime;
     }
 
     if let Some(extensions) = patch.extensions {

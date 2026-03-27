@@ -322,6 +322,8 @@ mod tests {
                 model: "mock".to_owned(),
                 base_url: None,
                 api_key_env: None,
+                transport: Default::default(),
+                vendor: Default::default(),
             },
         );
 
@@ -338,6 +340,7 @@ mod tests {
                 session_store: Arc::new(FileSessionStore::new(&session_root)),
                 memory_store: Arc::new(FileMemoryStore::new(session_root.join("memory"))),
                 memory_policy: MemoryPolicy::default(),
+                runtime_policy: config.runtime.clone(),
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),

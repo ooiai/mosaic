@@ -8,8 +8,8 @@ use crate::{
 };
 
 use super::shared::{
-    OLLAMA_TIMEOUT_MS, OpenAiStyleEndpoint, OpenAiStyleProvider, RequestAuth, build_http_client,
-    resolve_api_key, resolve_base_url,
+    OpenAiStyleEndpoint, OpenAiStyleProvider, RequestAuth, build_http_client, resolve_api_key,
+    resolve_base_url,
 };
 
 pub struct OllamaProvider {
@@ -22,12 +22,20 @@ impl OllamaProvider {
         base_url: String,
         api_key: Option<String>,
         model: String,
+        timeout_ms: u64,
+        max_retries: u8,
+        retry_backoff_ms: u64,
+        custom_headers: std::collections::BTreeMap<String, String>,
     ) -> Self {
         let metadata = ProviderTransportMetadata {
             provider_type: ProviderType::Ollama.as_str().to_owned(),
             base_url: Some(base_url.clone()),
-            timeout_ms: OLLAMA_TIMEOUT_MS,
-            max_retries: 1,
+            timeout_ms,
+            max_retries,
+            retry_backoff_ms,
+            api_version: None,
+            version_header: None,
+            custom_header_keys: custom_headers.keys().cloned().collect(),
             supports_tool_call_shadow_messages: false,
         };
         Self {
@@ -42,6 +50,8 @@ impl OllamaProvider {
                     .unwrap_or(RequestAuth::None),
                 metadata,
                 endpoint: OpenAiStyleEndpoint::Ollama,
+                api_version: None,
+                request_headers: custom_headers.into_iter().collect(),
             },
         }
     }
@@ -52,6 +62,10 @@ impl OllamaProvider {
             resolve_base_url(profile, ProviderType::Ollama)?,
             resolve_api_key(profile, false)?,
             profile.model.clone(),
+            profile.timeout_ms,
+            profile.max_retries,
+            profile.retry_backoff_ms,
+            profile.custom_headers.clone(),
         ))
     }
 }

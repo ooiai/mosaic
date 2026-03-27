@@ -2382,6 +2382,8 @@ mod tests {
             "docs/cli.md",
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/real-vs-mock-acceptance.md",
+            "docs/provider-runtime-policy-matrix.md",
             "docs/writer-ownership.md",
             "docs/deployment.md",
             "docs/security.md",
@@ -2393,6 +2395,7 @@ mod tests {
             "examples/TESTING.md",
             "examples/channels/README.md",
             "examples/full-stack/README.md",
+            "examples/full-stack/openai-webchat.config.yaml",
             "examples/deployment/production.config.yaml",
             "make release-check",
             "make test-golden",
@@ -2445,8 +2448,9 @@ mod tests {
             "make test-golden",
             "MOSAIC_REAL_TESTS=1 make test-real",
             "./scripts/test-full-stack-example.sh mock",
-            "OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai",
+            "OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat",
             "Per-Crate Matrix",
+            "Release-Blocking Real Lanes",
             "Flaky Test Policy",
         ] {
             assert!(
@@ -2467,6 +2471,8 @@ mod tests {
             "docs/testing.md",
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/real-vs-mock-acceptance.md",
+            "docs/provider-runtime-policy-matrix.md",
             "docs/writer-ownership.md",
             "docs/session-inspect-incident.md",
             "docs/non-tui-architecture-audit.md",
@@ -2475,9 +2481,11 @@ mod tests {
             "docs/upgrade.md",
             "examples/channels/README.md",
             "examples/channels/webchat-message.json",
+            "examples/channels/webchat-openai-message.json",
             "examples/channels/telegram-update.json",
             "examples/full-stack/README.md",
             "examples/full-stack/mock-telegram.config.yaml",
+            "examples/full-stack/openai-webchat.config.yaml",
             "examples/full-stack/openai-telegram.config.yaml",
             "examples/deployment/README.md",
             "examples/deployment/production.config.yaml",
@@ -2683,6 +2691,8 @@ mod tests {
         for required in [
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/real-vs-mock-acceptance.md",
+            "docs/provider-runtime-policy-matrix.md",
             "docs/session-inspect-incident.md",
             "examples/channels/",
             "examples/full-stack/",
@@ -2693,11 +2703,13 @@ mod tests {
         let full_stack = fs::read_to_string(root.join("docs/full-stack.md"))
             .expect("full-stack guide should load");
         for required in [
+            "examples/full-stack/openai-webchat.config.yaml",
             "examples/full-stack/mock-telegram.config.yaml",
             "examples/full-stack/openai-telegram.config.yaml",
+            "examples/channels/webchat-openai-message.json",
             "examples/channels/telegram-update.json",
             "./scripts/test-full-stack-example.sh mock",
-            "MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai",
+            "MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat",
             "mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>",
         ] {
             assert!(

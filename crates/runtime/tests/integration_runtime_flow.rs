@@ -53,6 +53,7 @@ async fn runtime_executes_mock_provider_tool_loop_against_real_session_and_memor
         session_store: Arc::new(FileSessionStore::new(root.join("sessions"))),
         memory_store: Arc::new(FileMemoryStore::new(root.join("memory"))),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),

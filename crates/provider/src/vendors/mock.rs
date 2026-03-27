@@ -32,6 +32,10 @@ impl LlmProvider for MockProvider {
             base_url: None,
             timeout_ms: 0,
             max_retries: 0,
+            retry_backoff_ms: 0,
+            api_version: None,
+            version_header: None,
+            custom_header_keys: Vec::new(),
             supports_tool_call_shadow_messages: false,
         }
     }

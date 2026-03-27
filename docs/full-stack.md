@@ -2,15 +2,17 @@
 
 This is the operator golden path for Mosaic.
 
-It binds one provider profile, one HTTP Gateway, one real channel ingress path, one saved session, one run trace, and one incident flow into a single walkthrough.
+It binds one provider profile, one HTTP Gateway, one real ingress path, one saved session, one run trace, and one incident flow into a single walkthrough.
 
 Use this guide when you want more than a local `mosaic run ...` smoke test.
 
 Examples used by this guide:
 
 - [examples/full-stack/README.md](../examples/full-stack/README.md)
+- [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
 - [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml)
 - [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+- [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
 - [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
 
 ## What this proves
@@ -18,14 +20,79 @@ Examples used by this guide:
 The full-stack path verifies:
 
 1. workspace config loads
-2. provider profile is selected
+2. provider profile and runtime policy are selected
 3. Gateway serves HTTP and SSE
-4. Telegram ingress normalizes into a session
+4. a real ingress path normalizes into a session
 5. session, trace, audit, replay, and incident artifacts are written
+6. inspect exposes the effective provider and runtime policy used by the run
 
-## Fast Local Full-Stack Path
+## Release-Blocking No-Mock Path
+
+This is the i2 acceptance lane.
+
+It uses:
+
+- a real OpenAI provider
+- the real Gateway HTTP surface
+- the real WebChat ingress endpoint
+- real saved session, trace, audit, replay, and incident artifacts
+
+1. Initialize the workspace.
+
+```bash
+mosaic setup init
+cp examples/full-stack/openai-webchat.config.yaml .mosaic/config.yaml
+export OPENAI_API_KEY=your_api_key_here
+export MOSAIC_WEBCHAT_SHARED_SECRET=full-stack-secret
+```
+
+2. Validate the setup and inspect the configured policy.
+
+```bash
+mosaic setup validate
+mosaic setup doctor
+mosaic config show
+mosaic model list
+```
+
+3. Start the HTTP Gateway.
+
+```bash
+mosaic gateway serve --http 127.0.0.1:18080
+```
+
+4. In another shell, send a real WebChat ingress request.
+
+```bash
+curl -X POST http://127.0.0.1:18080/ingress/webchat \
+  -H 'content-type: application/json' \
+  -H "x-mosaic-shared-secret: $MOSAIC_WEBCHAT_SHARED_SECRET" \
+  --data @examples/channels/webchat-openai-message.json
+```
+
+5. Inspect the same fact stream from the operator surfaces.
+
+```bash
+mosaic gateway --attach http://127.0.0.1:18080 status
+mosaic gateway --attach http://127.0.0.1:18080 audit --limit 10
+mosaic gateway --attach http://127.0.0.1:18080 replay --limit 10
+mosaic session show full-stack-openai-webchat
+mosaic inspect .mosaic/runs/<run-id>.json --verbose
+mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>
+```
+
+In the verbose inspect output you should see:
+
+- `provider_type: openai`
+- `runtime policy:`
+- `retry_backoff_ms`
+- `max_provider_round_trips`
+
+## Fast Local Dev Path
 
 This lane uses the mock provider but the real Gateway HTTP and Telegram ingress path.
+
+It is useful for docs smoke tests and local iteration, but it is not final acceptance.
 
 1. Initialize the workspace.
 
@@ -68,62 +135,42 @@ mosaic inspect .mosaic/runs/<run-id>.json
 mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>
 ```
 
-## Real Provider + Real Channel Path
+## Telegram Bot Acceptance Path
 
-This lane keeps the same Telegram ingress path and swaps the provider profile to OpenAI.
+Use this path when Telegram is a real release target and you have:
 
-1. Prepare the workspace config and secrets.
+- a real bot token
+- a reachable HTTPS webhook endpoint
+- a workspace configured from [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
 
-```bash
-mosaic setup init
-cp examples/full-stack/openai-telegram.config.yaml .mosaic/config.yaml
-export OPENAI_API_KEY=your_api_key_here
-export MOSAIC_TELEGRAM_SECRET_TOKEN=full-stack-secret
-```
+This is a manual operator acceptance flow, not the default automated real-test lane.
 
-2. Validate the setup.
+At that point the check is:
 
-```bash
-mosaic setup validate
-mosaic setup doctor
-mosaic model list
-```
-
-3. Serve the Gateway and post the same Telegram payload.
-
-```bash
-mosaic gateway serve --http 127.0.0.1:18080
-curl -X POST http://127.0.0.1:18080/ingress/telegram \
-  -H 'content-type: application/json' \
-  -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_SECRET_TOKEN" \
-  --data @examples/channels/telegram-update.json
-```
-
-4. Verify the operator artifacts.
-
-```bash
-mosaic session show telegram--100123-99
-mosaic inspect .mosaic/runs/<run-id>.json --verbose
-mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>
-```
+1. serve the Gateway on the public webhook endpoint
+2. register the Telegram webhook
+3. send a real Telegram message to the bot
+4. verify `session`, `inspect`, and `incident` artifacts for the resulting run
 
 ## Automated Verification
 
-Mock full-stack lane:
+Dev-only mock lane:
 
 ```bash
 ./scripts/test-full-stack-example.sh mock
 ```
 
-Real OpenAI + Telegram lane:
+Release-blocking OpenAI + WebChat lane:
 
 ```bash
-MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai
+MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat
 ```
 
 Continue with:
 
 - [channels.md](./channels.md)
+- [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
+- [provider-runtime-policy-matrix.md](./provider-runtime-policy-matrix.md)
 - [gateway.md](./gateway.md)
 - [session-inspect-incident.md](./session-inspect-incident.md)
 - [troubleshooting.md](./troubleshooting.md)

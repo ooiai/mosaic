@@ -29,6 +29,17 @@ use mosaic_workflow::{Workflow, WorkflowRegistry, WorkflowStep, WorkflowStepKind
 use super::{AgentRuntime, RunRequest, RuntimeContext};
 use crate::events::{NoopEventSink, RunEvent, RunEventSink};
 
+fn mock_profile_config() -> ProviderProfileConfig {
+    ProviderProfileConfig {
+        provider_type: "mock".to_owned(),
+        model: "mock".to_owned(),
+        base_url: None,
+        api_key_env: None,
+        transport: Default::default(),
+        vendor: Default::default(),
+    }
+}
+
 #[derive(Default)]
 struct VecEventSink {
     events: Mutex<Vec<RunEvent>>,
@@ -164,6 +175,10 @@ impl LlmProvider for EmptyProvider {
             base_url: None,
             timeout_ms: 0,
             max_retries: 0,
+            retry_backoff_ms: 0,
+            api_version: None,
+            version_header: None,
+            custom_header_keys: Vec::new(),
             supports_tool_call_shadow_messages: false,
         }
     }
@@ -277,15 +292,9 @@ fn runtime_with_provider_and_workflows(
 ) -> AgentRuntime {
     let mut config = MosaicConfig::default();
     config.active_profile = "mock".to_owned();
-    config.profiles.insert(
-        "mock".to_owned(),
-        ProviderProfileConfig {
-            provider_type: "mock".to_owned(),
-            model: "mock".to_owned(),
-            base_url: None,
-            api_key_env: None,
-        },
-    );
+    config
+        .profiles
+        .insert("mock".to_owned(), mock_profile_config());
 
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
@@ -298,6 +307,7 @@ fn runtime_with_provider_and_workflows(
         session_store,
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(workflows),
@@ -643,6 +653,7 @@ async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
         session_store: Arc::new(MemorySessionStore::default()),
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -749,6 +760,7 @@ async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
         session_store: Arc::new(MemorySessionStore::default()),
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -817,6 +829,7 @@ async fn workflow_runs_record_step_trace_and_skill_invocation() {
         session_store: store.clone(),
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(skills),
         workflows: Arc::new(workflows),
@@ -900,6 +913,8 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
             model: "plain-1".to_owned(),
             base_url: None,
             api_key_env: None,
+            transport: Default::default(),
+            vendor: Default::default(),
         },
     );
     let profiles =
@@ -927,6 +942,7 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
         session_store: store,
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(workflows),
@@ -1012,6 +1028,7 @@ async fn skill_failures_emit_skill_failed_then_run_failed() {
         session_store: Arc::new(MemorySessionStore::default()),
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -1057,6 +1074,7 @@ async fn session_skill_runs_persist_assistant_output() {
         session_store: store.clone(),
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -1109,6 +1127,7 @@ async fn session_runs_persist_memory_and_record_compression_trace() {
             summary_char_budget: 160,
             note_char_budget: 120,
         },
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -1178,6 +1197,7 @@ async fn cross_session_reference_records_memory_reads_and_session_links() {
         session_store: store.clone(),
         memory_store: memory_store.clone(),
         memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),

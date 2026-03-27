@@ -37,7 +37,7 @@ schema_version: 1
 active_profile: openai
 profiles:
   openai:
-    type: openai-compatible
+    type: openai
     model: gpt-5.4-mini
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_API_KEY
@@ -48,27 +48,62 @@ profiles:
 ### `schema_version`
 
 - default: `1`
-- required: no
 - purpose: config schema compatibility marker
 
 ### `active_profile`
 
 - default: `mock`
-- required: yes, in practice
-- purpose: selects the provider profile used by the runtime unless overridden by session or CLI
+- purpose: selects the provider profile used by the runtime unless overridden by session, ingress, or CLI
 
 ### `profiles`
 
-- default: built-in `gpt-5.4`, `gpt-5.4-mini`, and `mock`
-- required: yes if you want a real provider
+- default: built-in first-class provider profiles plus `mock`
 - purpose: provider profile registry used by `run`, `tui`, `gateway`, and scheduling logic
+
+Supported `type` values:
+
+- `mock`
+- `openai`
+- `azure`
+- `anthropic`
+- `ollama`
+- `openai-compatible`
 
 Profile fields:
 
-- `type`: current valid values are `mock` and `openai-compatible`
-- `model`: model name sent to the provider
-- `base_url`: endpoint root for `openai-compatible`
+- `type`: provider implementation
+- `model`: model or deployment name
+- `base_url`: endpoint root when required or overridden
 - `api_key_env`: environment variable containing the credential
+- `transport.timeout_ms`: per-profile request timeout override
+- `transport.max_retries`: per-profile provider retry override
+- `transport.retry_backoff_ms`: per-profile retry backoff override
+- `transport.custom_headers`: optional provider-specific custom headers
+- `vendor.azure_api_version`: Azure API version override
+- `vendor.anthropic_version`: Anthropic version header override
+- `vendor.allow_custom_headers`: must be `true` before custom headers are accepted
+
+### `provider_defaults`
+
+```yaml
+provider_defaults:
+  timeout_ms: 45000
+  max_retries: 2
+  retry_backoff_ms: 250
+```
+
+This block carries workspace-level defaults for provider transport behavior.
+
+### `runtime`
+
+```yaml
+runtime:
+  max_provider_round_trips: 8
+  max_workflow_provider_round_trips: 8
+  continue_after_tool_error: false
+```
+
+This block controls runtime loop ceilings and whether tool failures may be fed back into the conversation and retried.
 
 ### `deployment`
 
@@ -78,8 +113,7 @@ deployment:
   workspace_name: default
 ```
 
-- `profile` default: `local`
-- valid values today: `local`, `staging`, `production`
+- `profile` valid values: `local`, `staging`, `production`
 - `workspace_name` default: `default`
 
 ### `auth`
@@ -100,18 +134,12 @@ session_store:
   root_dir: .mosaic/sessions
 ```
 
-- default: `.mosaic/sessions`
-- purpose: session and transcript persistence
-
 ### `inspect`
 
 ```yaml
 inspect:
   runs_dir: .mosaic/runs
 ```
-
-- default: `.mosaic/runs`
-- purpose: saved trace output directory
 
 ### `audit`
 
@@ -122,11 +150,6 @@ audit:
   event_replay_window: 256
   redact_inputs: true
 ```
-
-- `root_dir` default: `.mosaic/audit`
-- `retention_days` default: `14`
-- `event_replay_window` default: `256`
-- `redact_inputs` default: `true`
 
 ### `observability`
 
@@ -144,7 +167,6 @@ extensions:
   manifests:
     - path: .mosaic/extensions/time-and-summary.yaml
       version_pin: 0.1.0
-      enabled: true
 ```
 
 ### `policies`
@@ -165,11 +187,20 @@ These flags gate high-privilege surfaces and extension behavior.
 ```bash
 mosaic setup validate
 mosaic setup doctor
+mosaic config show
 mosaic model list
 ```
 
-## Example files
+For effective per-run policy values:
 
+```bash
+mosaic inspect .mosaic/runs/<run-id>.json --verbose
+```
+
+## Related docs
+
+- [providers.md](./providers.md)
+- [provider-runtime-policy-matrix.md](./provider-runtime-policy-matrix.md)
+- [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
 - [examples/providers/openai.yaml](../examples/providers/openai.yaml)
-- [examples/providers/ollama.yaml](../examples/providers/ollama.yaml)
-- [examples/providers/anthropic.yaml](../examples/providers/anthropic.yaml)
+- [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)

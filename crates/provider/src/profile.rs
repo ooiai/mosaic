@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, env, sync::Arc};
 
 use anyhow::{Result, anyhow, bail};
-use mosaic_config::{MosaicConfig, ProviderProfileConfig};
+use mosaic_config::{MosaicConfig, ProviderProfileConfig, ProviderType, parse_provider_type};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -11,6 +11,10 @@ use crate::{
     },
     types::LlmProvider,
     vendors::build_provider_from_profile,
+    vendors::shared::{
+        ANTHROPIC_TIMEOUT_MS, ANTHROPIC_VERSION_HEADER, AZURE_CHAT_COMPLETIONS_API_VERSION,
+        DEFAULT_MAX_RETRIES, DEFAULT_TIMEOUT_MS, OLLAMA_TIMEOUT_MS,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -20,6 +24,15 @@ pub struct ProviderProfile {
     pub model: String,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
+    pub timeout_ms: u64,
+    pub max_retries: u8,
+    pub retry_backoff_ms: u64,
+    #[serde(default)]
+    pub custom_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub allow_custom_headers: bool,
+    pub azure_api_version: Option<String>,
+    pub anthropic_version: Option<String>,
     pub capabilities: ModelCapabilities,
 }
 
@@ -46,7 +59,12 @@ impl ProviderProfileRegistry {
         let profiles = config
             .profiles
             .iter()
-            .map(|(name, profile)| (name.clone(), provider_profile_from_config(name, profile)))
+            .map(|(name, profile)| {
+                (
+                    name.clone(),
+                    provider_profile_from_config(config, name, profile),
+                )
+            })
             .collect::<BTreeMap<_, _>>();
 
         if !profiles.contains_key(&config.active_profile) {
@@ -197,15 +215,93 @@ fn channel_policy_profile(
 }
 
 pub(crate) fn provider_profile_from_config(
+    root_config: &MosaicConfig,
     name: &str,
-    config: &ProviderProfileConfig,
+    profile_config: &ProviderProfileConfig,
 ) -> ProviderProfile {
+    let provider_type = parse_provider_type(&profile_config.provider_type);
+    let timeout_ms = profile_config
+        .transport
+        .timeout_ms
+        .or(root_config.provider_defaults.timeout_ms)
+        .unwrap_or_else(|| default_timeout_ms(provider_type));
+    let max_retries = profile_config
+        .transport
+        .max_retries
+        .or(root_config.provider_defaults.max_retries)
+        .unwrap_or_else(|| default_max_retries(provider_type));
+    let retry_backoff_ms = profile_config
+        .transport
+        .retry_backoff_ms
+        .or(root_config.provider_defaults.retry_backoff_ms)
+        .unwrap_or_else(|| default_retry_backoff_ms(provider_type));
+    let allow_custom_headers = profile_config.vendor.allow_custom_headers;
+    let custom_headers = if allow_custom_headers {
+        profile_config.transport.custom_headers.clone()
+    } else {
+        BTreeMap::new()
+    };
+    let azure_api_version = match provider_type {
+        Some(ProviderType::Azure) => Some(
+            profile_config
+                .vendor
+                .azure_api_version
+                .clone()
+                .unwrap_or_else(|| AZURE_CHAT_COMPLETIONS_API_VERSION.to_owned()),
+        ),
+        _ => None,
+    };
+    let anthropic_version = match provider_type {
+        Some(ProviderType::Anthropic) => Some(
+            profile_config
+                .vendor
+                .anthropic_version
+                .clone()
+                .unwrap_or_else(|| ANTHROPIC_VERSION_HEADER.to_owned()),
+        ),
+        _ => None,
+    };
+
     ProviderProfile {
         name: name.to_owned(),
-        provider_type: config.provider_type.clone(),
-        model: config.model.clone(),
-        base_url: config.base_url.clone(),
-        api_key_env: config.api_key_env.clone(),
-        capabilities: infer_model_capabilities(&config.provider_type, &config.model),
+        provider_type: profile_config.provider_type.clone(),
+        model: profile_config.model.clone(),
+        base_url: profile_config.base_url.clone(),
+        api_key_env: profile_config.api_key_env.clone(),
+        timeout_ms,
+        max_retries,
+        retry_backoff_ms,
+        custom_headers,
+        allow_custom_headers,
+        azure_api_version,
+        anthropic_version,
+        capabilities: infer_model_capabilities(
+            &profile_config.provider_type,
+            &profile_config.model,
+        ),
+    }
+}
+
+fn default_timeout_ms(provider_type: Option<ProviderType>) -> u64 {
+    match provider_type {
+        Some(ProviderType::Anthropic) => ANTHROPIC_TIMEOUT_MS,
+        Some(ProviderType::Ollama) => OLLAMA_TIMEOUT_MS,
+        Some(ProviderType::Mock) => 0,
+        _ => DEFAULT_TIMEOUT_MS,
+    }
+}
+
+fn default_max_retries(provider_type: Option<ProviderType>) -> u8 {
+    match provider_type {
+        Some(ProviderType::Mock) => 0,
+        Some(ProviderType::Ollama) => 1,
+        _ => DEFAULT_MAX_RETRIES,
+    }
+}
+
+fn default_retry_backoff_ms(provider_type: Option<ProviderType>) -> u64 {
+    match provider_type {
+        Some(ProviderType::Mock) => 0,
+        _ => 150,
     }
 }

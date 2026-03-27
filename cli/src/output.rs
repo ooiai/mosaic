@@ -451,7 +451,45 @@ pub fn render_inspect_report(
                 ("api_key_present", profile.api_key_present.to_string()),
                 ("timeout_ms", profile.timeout_ms.to_string()),
                 ("max_retries", profile.max_retries.to_string()),
+                ("retry_backoff_ms", profile.retry_backoff_ms.to_string()),
+                ("api_version", option_string(profile.api_version.clone())),
+                (
+                    "version_header",
+                    option_string(profile.version_header.clone()),
+                ),
+                (
+                    "custom_header_keys",
+                    if profile.custom_header_keys.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        profile.custom_header_keys.join(", ")
+                    },
+                ),
                 ("supports_tools", profile.supports_tools.to_string()),
+                (
+                    "supports_tool_call_shadow_messages",
+                    profile.supports_tool_call_shadow_messages.to_string(),
+                ),
+            ],
+        ));
+    }
+
+    if let Some(runtime_policy) = &trace.runtime_policy {
+        blocks.push(render_key_value_block(
+            "runtime policy",
+            vec![
+                (
+                    "max_provider_round_trips",
+                    runtime_policy.max_provider_round_trips.to_string(),
+                ),
+                (
+                    "max_workflow_provider_round_trips",
+                    runtime_policy.max_workflow_provider_round_trips.to_string(),
+                ),
+                (
+                    "continue_after_tool_error",
+                    runtime_policy.continue_after_tool_error.to_string(),
+                ),
             ],
         ));
     }
@@ -900,6 +938,43 @@ fn render_redacted_config(
             ),
         ],
     ));
+    blocks.push(render_key_value_block(
+        "provider defaults",
+        vec![
+            (
+                "timeout_ms",
+                option_u64(redacted.provider_defaults.timeout_ms),
+            ),
+            (
+                "max_retries",
+                option_u8(redacted.provider_defaults.max_retries),
+            ),
+            (
+                "retry_backoff_ms",
+                option_u64(redacted.provider_defaults.retry_backoff_ms),
+            ),
+        ],
+    ));
+    blocks.push(render_key_value_block(
+        "runtime policy",
+        vec![
+            (
+                "max_provider_round_trips",
+                redacted.runtime.max_provider_round_trips.to_string(),
+            ),
+            (
+                "max_workflow_provider_round_trips",
+                redacted
+                    .runtime
+                    .max_workflow_provider_round_trips
+                    .to_string(),
+            ),
+            (
+                "continue_after_tool_error",
+                redacted.runtime.continue_after_tool_error.to_string(),
+            ),
+        ],
+    ));
     blocks.push(render_list_block(
         "profiles",
         redacted
@@ -907,13 +982,24 @@ fn render_redacted_config(
             .iter()
             .map(|profile| {
                 format!(
-                    "{} | type={} | model={} | base_url={} | api_key_env={} | api_key_present={}",
+                    "{} | type={} | model={} | base_url={} | api_key_env={} | api_key_present={} | timeout_ms={} | max_retries={} | retry_backoff_ms={} | allow_custom_headers={} | custom_headers={} | azure_api_version={} | anthropic_version={}",
                     profile.name,
                     profile.provider_type,
                     profile.model,
                     option_string(profile.base_url.clone()),
                     option_string(profile.api_key_env.clone()),
                     profile.api_key_present,
+                    option_u64(profile.timeout_ms),
+                    option_u8(profile.max_retries),
+                    option_u64(profile.retry_backoff_ms),
+                    profile.allow_custom_headers,
+                    if profile.custom_header_keys.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        profile.custom_header_keys.join(", ")
+                    },
+                    option_string(profile.azure_api_version.clone()),
+                    option_string(profile.anthropic_version.clone()),
                 )
             })
             .collect::<Vec<_>>(),
@@ -968,6 +1054,18 @@ fn option_i64(value: Option<i64>) -> String {
 }
 
 fn option_u16(value: Option<u16>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn option_u8(value: Option<u8>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn option_u64(value: Option<u64>) -> String {
     value
         .map(|value| value.to_string())
         .unwrap_or_else(|| "<none>".to_owned())
@@ -1195,6 +1293,11 @@ mod tests {
             input: "hello".to_owned(),
             output: Some("world".to_owned()),
             effective_profile: None,
+            runtime_policy: Some(mosaic_inspect::RuntimePolicyTrace {
+                max_provider_round_trips: 8,
+                max_workflow_provider_round_trips: 8,
+                continue_after_tool_error: false,
+            }),
             lifecycle_status: mosaic_inspect::RunLifecycleStatus::Success,
             failure: None,
             output_chunks: 1,
@@ -1234,6 +1337,7 @@ mod tests {
 
         assert!(summary.starts_with("run summary:"));
         assert!(summary.contains("run activity:"));
+        assert!(summary.contains("runtime policy:"));
         assert!(!summary.contains("tool calls:"));
         assert!(verbose.contains("tool calls:"));
     }

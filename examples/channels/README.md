@@ -3,6 +3,7 @@
 These files are payloads for the current HTTP ingress adapters.
 
 - `webchat-message.json`: sample payload for `POST /ingress/webchat`
+- `webchat-openai-message.json`: no-mock WebChat payload used by the OpenAI full-stack lane
 - `telegram-update.json`: sample Telegram webhook payload for `POST /ingress/telegram`
 
 Serve a local Gateway first:
@@ -17,6 +18,16 @@ Webchat:
 curl -X POST http://127.0.0.1:8080/ingress/webchat \
   -H 'content-type: application/json' \
   --data @examples/channels/webchat-message.json
+```
+
+Webchat with shared-secret auth and the no-mock full-stack payload:
+
+```bash
+export MOSAIC_WEBCHAT_SHARED_SECRET=full-stack-secret
+curl -X POST http://127.0.0.1:8080/ingress/webchat \
+  -H 'content-type: application/json' \
+  -H "x-mosaic-shared-secret: $MOSAIC_WEBCHAT_SHARED_SECRET" \
+  --data @examples/channels/webchat-openai-message.json
 ```
 
 Telegram:

@@ -7,9 +7,9 @@ These files are workspace-config snippets for `.mosaic/config.yaml`.
 - `anthropic.yaml`: direct Anthropic configuration
 - `azure.yaml`: Azure OpenAI configuration
 
-For the complete provider + Gateway + Telegram walkthrough, use:
+For the complete no-mock provider + Gateway walkthrough, use:
 
-- `../full-stack/openai-telegram.config.yaml`
+- `../full-stack/openai-webchat.config.yaml`
 
 After copying a profile block into `.mosaic/config.yaml`, run:
 

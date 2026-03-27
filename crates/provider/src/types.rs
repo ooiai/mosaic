@@ -46,6 +46,13 @@ pub struct ProviderTransportMetadata {
     pub base_url: Option<String>,
     pub timeout_ms: u64,
     pub max_retries: u8,
+    pub retry_backoff_ms: u64,
+    #[serde(default)]
+    pub api_version: Option<String>,
+    #[serde(default)]
+    pub version_header: Option<String>,
+    #[serde(default)]
+    pub custom_header_keys: Vec<String>,
     pub supports_tool_call_shadow_messages: bool,
 }
 

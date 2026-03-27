@@ -10,7 +10,7 @@ Repo-wide example verification commands live in [TESTING.md](./TESTING.md).
 - [providers/ollama.yaml](./providers/ollama.yaml): local Ollama configuration
 - [providers/anthropic.yaml](./providers/anthropic.yaml): direct Anthropic configuration
 - [providers/azure.yaml](./providers/azure.yaml): Azure OpenAI configuration
-- [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): OpenAI profile already wired for the Gateway + Telegram golden path
+- [full-stack/openai-webchat.config.yaml](./full-stack/openai-webchat.config.yaml): OpenAI profile already wired for the no-mock full-stack path
 
 Use them by copying the relevant block into `.mosaic/config.yaml`, then run:
 
@@ -53,6 +53,7 @@ mosaic extension list
 ## Gateway
 
 - [channels/webchat-message.json](./channels/webchat-message.json): sample payload for `/ingress/webchat`
+- [channels/webchat-openai-message.json](./channels/webchat-openai-message.json): release-grade payload for `/ingress/webchat`
 - [channels/telegram-update.json](./channels/telegram-update.json): sample payload for `/ingress/telegram`
 
 Use it with a local HTTP Gateway:
@@ -72,12 +73,14 @@ curl -X POST http://127.0.0.1:8080/ingress/webchat \
 
 - [full-stack/README.md](./full-stack/README.md): the complete provider + Gateway + channel + session + inspect path
 - [full-stack/mock-telegram.config.yaml](./full-stack/mock-telegram.config.yaml): fast local Gateway + Telegram config
-- [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): real OpenAI + Telegram config
+- [full-stack/openai-webchat.config.yaml](./full-stack/openai-webchat.config.yaml): release-blocking OpenAI + WebChat config
+- [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): manual Telegram bot sign-off config
 
 Automated verification:
 
 ```bash
 ./scripts/test-full-stack-example.sh mock
+MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat
 ```
 
 ## Deployment

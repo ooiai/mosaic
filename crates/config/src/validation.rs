@@ -3,6 +3,13 @@ use super::*;
 pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
     let mut report = ValidationReport::default();
 
+    validate_transport_policy(
+        &mut report,
+        "provider_defaults",
+        &config.provider_defaults,
+        None,
+    );
+
     if config.schema_version != CURRENT_SCHEMA_VERSION {
         report.push(
             ValidationLevel::Error,
@@ -173,6 +180,21 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
                 format!("{} profiles require api_key_env", provider_type),
             );
         }
+
+        validate_transport_policy(
+            &mut report,
+            &format!("{field_prefix}.transport"),
+            &profile.transport,
+            Some(&profile.vendor),
+        );
+
+        validate_vendor_policy(
+            &mut report,
+            &field_prefix,
+            provider_type,
+            &profile.vendor,
+            &profile.transport,
+        );
     }
 
     if config.session_store.root_dir.trim().is_empty() {
@@ -223,6 +245,22 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         );
     }
 
+    if config.runtime.max_provider_round_trips == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "runtime.max_provider_round_trips",
+            "runtime max_provider_round_trips must be greater than zero",
+        );
+    }
+
+    if config.runtime.max_workflow_provider_round_trips == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "runtime.max_workflow_provider_round_trips",
+            "runtime max_workflow_provider_round_trips must be greater than zero",
+        );
+    }
+
     if config.deployment.profile == "production"
         && config
             .auth
@@ -270,4 +308,122 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
     }
 
     report
+}
+
+fn validate_transport_policy(
+    report: &mut ValidationReport,
+    field_prefix: &str,
+    transport: &ProviderTransportPolicyConfig,
+    vendor: Option<&ProviderVendorPolicyConfig>,
+) {
+    if transport.timeout_ms == Some(0) {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.timeout_ms"),
+            "timeout_ms must be greater than zero when provided",
+        );
+    }
+
+    if transport.retry_backoff_ms == Some(0) {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.retry_backoff_ms"),
+            "retry_backoff_ms must be greater than zero when provided",
+        );
+    }
+
+    for (header_name, header_value) in &transport.custom_headers {
+        if header_name.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.custom_headers"),
+                "custom header names must not be empty",
+            );
+        }
+
+        if header_value.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.custom_headers.{header_name}"),
+                "custom header values must not be empty",
+            );
+        }
+
+        if matches!(
+            header_name.to_ascii_lowercase().as_str(),
+            "authorization" | "api-key"
+        ) {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.custom_headers.{header_name}"),
+                "custom headers must not override authorization or api-key",
+            );
+        }
+    }
+
+    if !transport.custom_headers.is_empty()
+        && !vendor.is_some_and(|vendor| vendor.allow_custom_headers)
+    {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.custom_headers"),
+            "custom headers require vendor.allow_custom_headers=true",
+        );
+    }
+}
+
+fn validate_vendor_policy(
+    report: &mut ValidationReport,
+    field_prefix: &str,
+    provider_type: ProviderType,
+    vendor: &ProviderVendorPolicyConfig,
+    transport: &ProviderTransportPolicyConfig,
+) {
+    if vendor
+        .azure_api_version
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.vendor.azure_api_version"),
+            "azure_api_version must not be empty when provided",
+        );
+    }
+
+    if vendor
+        .anthropic_version
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.vendor.anthropic_version"),
+            "anthropic_version must not be empty when provided",
+        );
+    }
+
+    if vendor.azure_api_version.is_some() && provider_type != ProviderType::Azure {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.vendor.azure_api_version"),
+            "azure_api_version is only valid for azure profiles",
+        );
+    }
+
+    if vendor.anthropic_version.is_some() && provider_type != ProviderType::Anthropic {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.vendor.anthropic_version"),
+            "anthropic_version is only valid for anthropic profiles",
+        );
+    }
+
+    if vendor.allow_custom_headers && transport.custom_headers.is_empty() {
+        report.push(
+            ValidationLevel::Warning,
+            format!("{field_prefix}.vendor.allow_custom_headers"),
+            "allow_custom_headers is enabled but no custom headers are configured",
+        );
+    }
 }

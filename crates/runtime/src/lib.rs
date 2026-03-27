@@ -158,6 +158,7 @@ impl AgentRuntime {
             &profile,
             &Self::provider_metadata_from_profile(&profile),
         ));
+        trace.bind_runtime_policy(self.runtime_policy_trace());
 
         if let Some(session_ref) = session.as_mut() {
             if let Err(err) = self.rebind_session_profile(session_ref, &profile) {
@@ -227,7 +228,7 @@ impl AgentRuntime {
             messages
         };
 
-        for _ in 0..8 {
+        'provider_rounds: for _ in 0..self.ctx.runtime_policy.max_provider_round_trips {
             info!(
                 run_id = %trace.run_id,
                 provider_type = %provider_metadata.provider_type,
@@ -312,6 +313,14 @@ impl AgentRuntime {
                             if let Some(capability_trace) = failure.capability_trace {
                                 trace.add_capability_invocation(capability_trace);
                             }
+                            if self.ctx.runtime_policy.continue_after_tool_error {
+                                messages.push(Message {
+                                    role: Role::Tool,
+                                    content: format!("tool_error: {}", failure.error),
+                                    tool_call_id: Some(call_id),
+                                });
+                                continue 'provider_rounds;
+                            }
                             return Err(failure.error);
                         }
                     }
@@ -368,7 +377,7 @@ impl AgentRuntime {
             tool_call_id: None,
         });
 
-        for _ in 0..8 {
+        'workflow_rounds: for _ in 0..self.ctx.runtime_policy.max_workflow_provider_round_trips {
             info!(
                 provider_type = %provider_metadata.provider_type,
                 profile = %profile.name,
@@ -436,6 +445,14 @@ impl AgentRuntime {
                             }
                             if let Some(capability_trace) = failure.capability_trace {
                                 push_capability_trace(capability_traces, capability_trace);
+                            }
+                            if self.ctx.runtime_policy.continue_after_tool_error {
+                                messages.push(Message {
+                                    role: Role::Tool,
+                                    content: format!("tool_error: {}", failure.error),
+                                    tool_call_id: Some(call_id),
+                                });
+                                continue 'workflow_rounds;
                             }
                             return Err(failure.error);
                         }

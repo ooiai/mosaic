@@ -14,15 +14,17 @@ profiles:
       timeout_ms: 60000
       max_retries: 3
       retry_backoff_ms: 300
+    vendor:
+      allow_custom_headers: false
 runtime:
   max_provider_round_trips: 8
   max_workflow_provider_round_trips: 6
   continue_after_tool_error: false
 deployment:
   profile: local
-  workspace_name: mosaic-full-stack-openai
+  workspace_name: mosaic-full-stack-openai-webchat
 auth:
-  telegram_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
+  webchat_shared_secret_env: MOSAIC_WEBCHAT_SHARED_SECRET
 session_store:
   root_dir: .mosaic/sessions
 inspect:

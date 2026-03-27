@@ -43,6 +43,17 @@ fn read_file_tool_definition() -> ToolDefinition {
     }
 }
 
+fn mock_profile_config(model: &str) -> ProviderProfileConfig {
+    ProviderProfileConfig {
+        provider_type: "mock".to_owned(),
+        model: model.to_owned(),
+        base_url: None,
+        api_key_env: None,
+        transport: Default::default(),
+        vendor: Default::default(),
+    }
+}
+
 fn mcp_read_file_tool_definition() -> ToolDefinition {
     ToolDefinition {
         name: "mcp.filesystem.read_file".to_owned(),
@@ -238,24 +249,12 @@ fn registry_for_scheduling() -> ProviderProfileRegistry {
     let mut config = MosaicConfig::default();
     config.profiles.clear();
     config.active_profile = "mini".to_owned();
-    config.profiles.insert(
-        "mini".to_owned(),
-        ProviderProfileConfig {
-            provider_type: "mock".to_owned(),
-            model: "gpt-5.4-mini".to_owned(),
-            base_url: None,
-            api_key_env: None,
-        },
-    );
-    config.profiles.insert(
-        "large".to_owned(),
-        ProviderProfileConfig {
-            provider_type: "mock".to_owned(),
-            model: "gpt-5.4".to_owned(),
-            base_url: None,
-            api_key_env: None,
-        },
-    );
+    config
+        .profiles
+        .insert("mini".to_owned(), mock_profile_config("gpt-5.4-mini"));
+    config
+        .profiles
+        .insert("large".to_owned(), mock_profile_config("gpt-5.4"));
     ProviderProfileRegistry::from_config(&config).expect("registry should build")
 }
 
@@ -300,24 +299,12 @@ fn channel_policy_prefers_matching_channel_profile() {
     let mut config = MosaicConfig::default();
     config.profiles.clear();
     config.active_profile = "mini".to_owned();
-    config.profiles.insert(
-        "mini".to_owned(),
-        ProviderProfileConfig {
-            provider_type: "mock".to_owned(),
-            model: "gpt-5.4-mini".to_owned(),
-            base_url: None,
-            api_key_env: None,
-        },
-    );
-    config.profiles.insert(
-        "telegram".to_owned(),
-        ProviderProfileConfig {
-            provider_type: "mock".to_owned(),
-            model: "gpt-5.4".to_owned(),
-            base_url: None,
-            api_key_env: None,
-        },
-    );
+    config
+        .profiles
+        .insert("mini".to_owned(), mock_profile_config("gpt-5.4-mini"));
+    config
+        .profiles
+        .insert("telegram".to_owned(), mock_profile_config("gpt-5.4"));
     let registry = ProviderProfileRegistry::from_config(&config).expect("registry should build");
 
     let scheduled = registry
@@ -426,6 +413,10 @@ async fn openai_provider_formats_tools_and_bearer_auth() {
         format!("{base_url}/v1"),
         "sk-openai".to_owned(),
         "gpt-5.4-mini".to_owned(),
+        45_000,
+        2,
+        150,
+        BTreeMap::new(),
     );
 
     let completion = provider
@@ -483,6 +474,11 @@ async fn azure_provider_uses_deployment_endpoint_and_api_key_auth() {
         base_url,
         "azure-secret".to_owned(),
         "demo-deployment".to_owned(),
+        45_000,
+        2,
+        150,
+        "2024-10-21".to_owned(),
+        BTreeMap::new(),
     );
 
     let completion = provider
@@ -545,6 +541,11 @@ async fn anthropic_provider_formats_messages_tools_and_shadow_tool_calls() {
         format!("{base_url}/v1"),
         "anthropic-secret".to_owned(),
         "claude-sonnet-4-5".to_owned(),
+        60_000,
+        2,
+        150,
+        "2023-06-01".to_owned(),
+        BTreeMap::new(),
     );
 
     let completion = provider
@@ -611,7 +612,16 @@ async fn ollama_provider_uses_local_v1_endpoint_without_auth_by_default() {
         }),
     )
     .await;
-    let provider = OllamaProvider::new("ollama".to_owned(), base_url, None, "qwen3:14b".to_owned());
+    let provider = OllamaProvider::new(
+        "ollama".to_owned(),
+        base_url,
+        None,
+        "qwen3:14b".to_owned(),
+        90_000,
+        1,
+        150,
+        BTreeMap::new(),
+    );
 
     let completion = provider
         .complete(
@@ -655,6 +665,10 @@ async fn provider_status_errors_translate_to_structured_auth_failures() {
         format!("{base_url}/v1"),
         "sk-secret".to_owned(),
         "gpt-5.4-mini".to_owned(),
+        45_000,
+        2,
+        150,
+        BTreeMap::new(),
     );
 
     let error = provider

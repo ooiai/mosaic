@@ -4,6 +4,10 @@ profiles:
   mock:
     type: mock
     model: mock
+runtime:
+  max_provider_round_trips: 4
+  max_workflow_provider_round_trips: 4
+  continue_after_tool_error: false
 deployment:
   profile: local
   workspace_name: mosaic-full-stack-mock
@@ -16,9 +20,11 @@ inspect:
 audit:
   root_dir: .mosaic/audit
   retention_days: 30
+  event_replay_window: 512
   redact_inputs: false
 observability:
-  event_replay_window: 512
+  enable_metrics: true
+  enable_readiness: true
   slow_consumer_lag_threshold: 64
 policies:
   allow_exec: false

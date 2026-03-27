@@ -160,6 +160,8 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [Gateway Guide](./docs/gateway.md)
 - [Channel Setup](./docs/channels.md)
 - [Full-Stack Guide](./docs/full-stack.md)
+- [Real vs Mock Acceptance](./docs/real-vs-mock-acceptance.md)
+- [Provider and Runtime Policy Matrix](./docs/provider-runtime-policy-matrix.md)
 - [Session, Inspect, and Incident Flow](./docs/session-inspect-incident.md)
 - [Writer Ownership](./docs/writer-ownership.md)
 - [Deployment Guide](./docs/deployment.md)
@@ -215,6 +217,7 @@ Mosaic is a Cargo workspace. The `cli/` crate is the composition root, while the
 - [examples/extensions/](./examples/extensions/)
 - [examples/gateway/](./examples/gateway/)
 - [examples/full-stack/README.md](./examples/full-stack/README.md)
+- [examples/full-stack/openai-webchat.config.yaml](./examples/full-stack/openai-webchat.config.yaml)
 - [examples/full-stack/](./examples/full-stack/)
 - [examples/deployment/](./examples/deployment/)
 

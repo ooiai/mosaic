@@ -14,4 +14,4 @@ cargo test --manifest-path "$ROOT/Cargo.toml" -p mosaic-provider --test real_ven
 cargo test --manifest-path "$ROOT/Cargo.toml" -p mosaic-gateway --test real_telegram_ingress -- --nocapture
 cargo test --manifest-path "$ROOT/Cargo.toml" -p mosaic-sdk --test real_gateway_http -- --nocapture
 cargo test --manifest-path "$ROOT/Cargo.toml" -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture
-sh "$ROOT/scripts/test-full-stack-example.sh" openai
+sh "$ROOT/scripts/test-full-stack-example.sh" openai-webchat

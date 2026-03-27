@@ -115,11 +115,12 @@ mosaic setup doctor
 mosaic model list
 ```
 
-If you want to move straight into the full HTTP Gateway + Telegram ingress path, use:
+If you want to move straight into the full HTTP Gateway ingress path, use:
 
+- [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
 - [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml)
-- [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
-- [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
+- [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
+- [docs/real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
 
 What success looks like:
 
