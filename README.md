@@ -165,6 +165,38 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [Upgrade Guide](./docs/upgrade.md)
 - [Troubleshooting](./docs/troubleshooting.md)
 
+## Crate Guide
+
+Mosaic is a Cargo workspace. The `cli/` crate is the composition root, while the crates under `crates/` hold reusable system boundaries. Start with these READMEs when you need to understand ownership before changing code.
+
+### Composition Root
+
+- [cli/README.md](./cli/README.md) - operator-facing command entrypoint, bootstrap wiring, and top-level workflow composition
+
+### Core Crates
+
+- [crates/config/README.md](./crates/config/README.md) - config loading, validation, doctor output, and redaction
+- [crates/provider/README.md](./crates/provider/README.md) - provider registry, capability metadata, retry, and vendor adapters
+- [crates/tool-core/README.md](./crates/tool-core/README.md) - tool contracts, registry, built-in tools, and tool metadata
+- [crates/skill-core/README.md](./crates/skill-core/README.md) - skill manifests, native skills, metadata, and registry behavior
+- [crates/runtime/README.md](./crates/runtime/README.md) - agent run orchestration, model selection, tool loop, memory, and workflow dispatch
+- [crates/gateway/README.md](./crates/gateway/README.md) - control-plane hub, ingress routing, run registry, HTTP and SSE surfaces
+- [crates/session-core/README.md](./crates/session-core/README.md) - persistent sessions, transcripts, routes, and session metadata
+- [crates/inspect/README.md](./crates/inspect/README.md) - trace loading, summary formatting, and operator inspection output
+
+### Support Crates
+
+- [crates/memory/README.md](./crates/memory/README.md) - session memory storage, summaries, compression, and search
+- [crates/mcp-core/README.md](./crates/mcp-core/README.md) - MCP stdio server lifecycle and remote tool discovery
+- [crates/sdk/README.md](./crates/sdk/README.md) - external HTTP and SSE client surface for operators and adapters
+- [crates/control-protocol/README.md](./crates/control-protocol/README.md) - stable DTOs for gateway HTTP, SSE, sessions, and runs
+- [crates/node-protocol/README.md](./crates/node-protocol/README.md) - local node registration, heartbeat, dispatch, and affinity contracts
+- [crates/extension-core/README.md](./crates/extension-core/README.md) - extension manifests, validation, policy, and reload-safe registration
+- [crates/scheduler-core/README.md](./crates/scheduler-core/README.md) - capability jobs, cron registration, and scheduler state
+- [crates/channel-telegram/README.md](./crates/channel-telegram/README.md) - Telegram webhook adapter for multi-channel ingress
+- [crates/workflow/README.md](./crates/workflow/README.md) - workflow manifests and step execution runner
+- [crates/tui/README.md](./crates/tui/README.md) - operator console state machine, rendering, and gateway-backed interaction flow
+
 ## Examples
 
 - [examples/README.md](./examples/README.md)

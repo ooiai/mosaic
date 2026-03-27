@@ -2731,6 +2731,69 @@ mod tests {
             .to_path_buf()
     }
 
+    const REQUIRED_CRATE_README_SECTIONS: &[&str] = &[
+        "## Positioning",
+        "## Architecture Layer",
+        "## Responsibilities",
+        "## Out of Scope",
+        "## Public Boundary",
+        "## Why This Is In `crates/`",
+        "## Relationships",
+        "## Minimal Use",
+        "## Testing",
+        "## Current Limitations",
+        "## Roadmap",
+    ];
+
+    const CRATE_READMES: &[(&str, &str)] = &[
+        (
+            "crates/channel-telegram/README.md",
+            "mosaic-channel-telegram",
+        ),
+        ("crates/config/README.md", "mosaic-config"),
+        (
+            "crates/control-protocol/README.md",
+            "mosaic-control-protocol",
+        ),
+        ("crates/extension-core/README.md", "mosaic-extension-core"),
+        ("crates/gateway/README.md", "mosaic-gateway"),
+        ("crates/inspect/README.md", "mosaic-inspect"),
+        ("crates/mcp-core/README.md", "mosaic-mcp-core"),
+        ("crates/memory/README.md", "mosaic-memory"),
+        ("crates/node-protocol/README.md", "mosaic-node-protocol"),
+        ("crates/provider/README.md", "mosaic-provider"),
+        ("crates/runtime/README.md", "mosaic-runtime"),
+        ("crates/scheduler-core/README.md", "mosaic-scheduler-core"),
+        ("crates/sdk/README.md", "mosaic-sdk"),
+        ("crates/session-core/README.md", "mosaic-session-core"),
+        ("crates/skill-core/README.md", "mosaic-skill-core"),
+        ("crates/tool-core/README.md", "mosaic-tool-core"),
+        ("crates/tui/README.md", "mosaic-tui"),
+        ("crates/workflow/README.md", "mosaic-workflow"),
+    ];
+
+    const ROOT_CRATE_GUIDE_LINKS: &[&str] = &[
+        "./cli/README.md",
+        "./crates/channel-telegram/README.md",
+        "./crates/config/README.md",
+        "./crates/control-protocol/README.md",
+        "./crates/extension-core/README.md",
+        "./crates/gateway/README.md",
+        "./crates/inspect/README.md",
+        "./crates/mcp-core/README.md",
+        "./crates/memory/README.md",
+        "./crates/node-protocol/README.md",
+        "./crates/provider/README.md",
+        "./crates/runtime/README.md",
+        "./crates/scheduler-core/README.md",
+        "./crates/sdk/README.md",
+        "./crates/session-core/README.md",
+        "./crates/skill-core/README.md",
+        "./crates/tool-core/README.md",
+        "./crates/tui/README.md",
+        "./crates/workflow/README.md",
+    ];
+
     fn subcommand_help(name: &str) -> String {
         let mut command = Cli::command();
         let subcommand = command
@@ -3251,6 +3314,101 @@ mod tests {
             assert!(
                 env_example.contains(required),
                 ".env.example missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_workspace_crate_has_a_structured_readme() {
+        let root = repo_root();
+        for (relative_path, package_name) in CRATE_READMES {
+            let readme_path = root.join(relative_path);
+            assert!(
+                readme_path.is_file(),
+                "missing crate README {relative_path}"
+            );
+            let readme = fs::read_to_string(&readme_path)
+                .unwrap_or_else(|_| panic!("crate README should load: {relative_path}"));
+
+            for heading in REQUIRED_CRATE_README_SECTIONS {
+                assert!(
+                    readme.contains(heading),
+                    "{relative_path} missing required section {heading}"
+                );
+            }
+
+            let test_command = format!("cargo test -p {package_name}");
+            assert!(
+                readme.contains(&test_command),
+                "{relative_path} missing testing command {test_command}"
+            );
+        }
+    }
+
+    #[test]
+    fn root_readme_links_every_workspace_crate_guide() {
+        let root = repo_root();
+        let readme = fs::read_to_string(root.join("README.md")).expect("README should load");
+        assert!(readme.contains("## Crate Guide"));
+
+        for link in ROOT_CRATE_GUIDE_LINKS {
+            assert!(
+                readme.contains(link),
+                "root README missing crate guide link {link}"
+            );
+        }
+    }
+
+    #[test]
+    fn selected_crate_guides_reference_key_public_api_names() {
+        let root = repo_root();
+
+        let provider_readme = fs::read_to_string(root.join("crates/provider/README.md"))
+            .expect("provider README should load");
+        for required in [
+            "ProviderProfileRegistry",
+            "LlmProvider",
+            "build_provider_from_profile",
+        ] {
+            assert!(
+                provider_readme.contains(required),
+                "provider README missing public API {required}"
+            );
+        }
+
+        let tool_readme = fs::read_to_string(root.join("crates/tool-core/README.md"))
+            .expect("tool-core README should load");
+        for required in ["ToolRegistry", "Tool", "EchoTool"] {
+            assert!(
+                tool_readme.contains(required),
+                "tool-core README missing public API {required}"
+            );
+        }
+
+        let runtime_readme = fs::read_to_string(root.join("crates/runtime/README.md"))
+            .expect("runtime README should load");
+        for required in ["AgentRuntime", "RunRequest", "RuntimeContext"] {
+            assert!(
+                runtime_readme.contains(required),
+                "runtime README missing public API {required}"
+            );
+        }
+
+        let gateway_readme = fs::read_to_string(root.join("crates/gateway/README.md"))
+            .expect("gateway README should load");
+        for required in ["GatewayHandle", "http_router", "serve_http"] {
+            assert!(
+                gateway_readme.contains(required),
+                "gateway README missing public API {required}"
+            );
+        }
+
+        let session_readme = fs::read_to_string(root.join("crates/session-core/README.md"))
+            .expect("session-core README should load");
+        for required in ["SessionStore", "FileSessionStore", "SessionRecord"] {
+            assert!(
+                session_readme.contains(required),
+                "session-core README missing public API {required}"
             );
         }
     }
