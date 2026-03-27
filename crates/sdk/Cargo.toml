@@ -17,11 +17,13 @@ mosaic-channel-telegram = { path = "../channel-telegram" }
 
 [dev-dependencies]
 axum.workspace = true
+chrono.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 
 mosaic-config = { path = "../config" }
 mosaic-gateway = { path = "../gateway" }
+mosaic-inspect = { path = "../inspect" }
 mosaic-memory = { path = "../memory" }
 mosaic-node-protocol = { path = "../node-protocol" }
 mosaic-provider = { path = "../provider" }

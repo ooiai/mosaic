@@ -250,6 +250,18 @@ Run the repository smoke path before shipping a change:
 make smoke
 ```
 
+Run the golden example and docs verification lane:
+
+```bash
+make test-golden
+```
+
+Run gated real integration tests when credentials or local daemons are available:
+
+```bash
+MOSAIC_REAL_TESTS=1 make test-real
+```
+
 Run the full delivery gate:
 
 ```bash

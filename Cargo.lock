@@ -1076,6 +1076,7 @@ dependencies = [
  "anyhow",
  "mosaic-inspect",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1201,6 +1202,7 @@ dependencies = [
  "mosaic-tool-core",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1285,11 +1287,13 @@ dependencies = [
  "anyhow",
  "axum",
  "bytes",
+ "chrono",
  "futures",
  "mosaic-channel-telegram",
  "mosaic-config",
  "mosaic-control-protocol",
  "mosaic-gateway",
+ "mosaic-inspect",
  "mosaic-memory",
  "mosaic-node-protocol",
  "mosaic-provider",
@@ -1326,6 +1330,7 @@ dependencies = [
  "mosaic-tool-core",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

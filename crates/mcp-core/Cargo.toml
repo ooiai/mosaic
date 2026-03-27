@@ -12,3 +12,6 @@ serde.workspace = true
 serde_json.workspace = true
 
 mosaic-tool-core = { path = "../tool-core" }
+
+[dev-dependencies]
+tokio.workspace = true

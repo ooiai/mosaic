@@ -14,3 +14,4 @@ mosaic-tool-core = { path = "../tool-core" }
 
 [dev-dependencies]
 futures.workspace = true
+tokio.workspace = true

@@ -9,3 +9,6 @@ anyhow.workspace = true
 serde.workspace = true
 
 mosaic-inspect = { path = "../inspect" }
+
+[dev-dependencies]
+serde_json.workspace = true

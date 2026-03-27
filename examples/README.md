@@ -2,6 +2,8 @@
 
 These examples are organized for operators, not just tests.
 
+Repo-wide example verification commands live in [TESTING.md](./TESTING.md).
+
 ## Providers
 
 - [providers/openai.yaml](./providers/openai.yaml): direct OpenAI configuration for `.mosaic/config.yaml`

@@ -3233,10 +3233,13 @@ mod tests {
             "docs/cli.md",
             "docs/deployment.md",
             "docs/security.md",
+            "docs/testing.md",
             "docs/release.md",
             "examples/README.md",
+            "examples/TESTING.md",
             "examples/deployment/production.config.yaml",
             "make release-check",
+            "make test-golden",
         ] {
             assert!(readme.contains(required), "README missing {required}");
         }
@@ -3268,11 +3271,29 @@ mod tests {
             "mosaic inspect .mosaic/runs/<run-id>.json --json",
             "Operator Groupings",
             "make release-check",
+            "make test-golden",
+            "make test-real",
             "make package",
         ] {
             assert!(
                 cli_reference.contains(required),
                 "cli reference missing {required}"
+            );
+        }
+
+        let testing_guide =
+            fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
+        for required in [
+            "make test-unit",
+            "make test-integration",
+            "make test-golden",
+            "MOSAIC_REAL_TESTS=1 make test-real",
+            "Per-Crate Matrix",
+            "Flaky Test Policy",
+        ] {
+            assert!(
+                testing_guide.contains(required),
+                "testing guide missing {required}"
             );
         }
     }
@@ -3285,6 +3306,7 @@ mod tests {
             "docs/deployment.md",
             "docs/operations.md",
             "docs/security.md",
+            "docs/testing.md",
             "docs/release.md",
             "docs/compatibility.md",
             "docs/upgrade.md",
@@ -3292,6 +3314,8 @@ mod tests {
             "examples/deployment/production.config.yaml",
             "examples/deployment/mosaic.service",
             "scripts/release-smoke.sh",
+            "scripts/test-golden-examples.sh",
+            "scripts/test-real-integrations.sh",
             "scripts/verify-delivery-artifacts.sh",
         ] {
             assert!(

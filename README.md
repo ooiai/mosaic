@@ -70,6 +70,7 @@ cargo run -p mosaic-cli -- --help
 ```bash
 make build
 make check
+make test-golden
 make smoke
 make release-check
 ```
@@ -160,6 +161,7 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [Deployment Guide](./docs/deployment.md)
 - [Operations Guide](./docs/operations.md)
 - [Security Guide](./docs/security.md)
+- [Testing Guide](./docs/testing.md)
 - [Release Guide](./docs/release.md)
 - [Compatibility Guide](./docs/compatibility.md)
 - [Upgrade Guide](./docs/upgrade.md)
@@ -200,6 +202,7 @@ Mosaic is a Cargo workspace. The `cli/` crate is the composition root, while the
 ## Examples
 
 - [examples/README.md](./examples/README.md)
+- [examples/TESTING.md](./examples/TESTING.md)
 - [examples/providers/](./examples/providers/)
 - [examples/workflows/](./examples/workflows/)
 - [examples/extensions/](./examples/extensions/)
@@ -230,6 +233,7 @@ mosaic tui
 mosaic session list
 mosaic gateway status
 mosaic inspect .mosaic/runs/<run-id>.json
+make test-golden
 make smoke
 make release-check
 ```

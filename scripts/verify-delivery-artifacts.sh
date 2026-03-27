@@ -10,12 +10,15 @@ for path in \
     docs/operations.md \
     docs/security.md \
     docs/release.md \
+    docs/testing.md \
     docs/compatibility.md \
     docs/upgrade.md \
     examples/deployment/README.md \
     examples/deployment/production.config.yaml \
     examples/deployment/mosaic.service \
     scripts/release-smoke.sh \
+    scripts/test-golden-examples.sh \
+    scripts/test-real-integrations.sh \
     scripts/verify-delivery-artifacts.sh
  do
     if [ ! -f "$ROOT/$path" ]; then
@@ -24,7 +27,12 @@ for path in \
     fi
 done
 
-for path in scripts/release-smoke.sh scripts/verify-delivery-artifacts.sh; do
+for path in \
+    scripts/release-smoke.sh \
+    scripts/test-golden-examples.sh \
+    scripts/test-real-integrations.sh \
+    scripts/verify-delivery-artifacts.sh
+do
     if [ ! -x "$ROOT/$path" ]; then
         echo "artifact is not executable: $path" >&2
         missing=1

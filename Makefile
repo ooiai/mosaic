@@ -58,6 +58,12 @@ endef
 	clean \
 	check \
 	test \
+	test-unit \
+	test-integration \
+	test-real \
+	test-golden \
+	ci-fast \
+	ci-real \
 	smoke \
 	release-check \
 	verify \
@@ -71,6 +77,11 @@ help: ## Show available Make targets.
 	@printf "  make build\n"
 	@printf "  make check\n"
 	@printf "  make test\n"
+	@printf "  make test-unit\n"
+	@printf "  make test-integration\n"
+	@printf "  make test-golden\n"
+	@printf "  MOSAIC_REAL_TESTS=1 make test-real\n"
+	@printf "  make ci-fast\n"
 	@printf "  make smoke\n"
 	@printf "  make verify\n"
 	@printf "  make release-check\n"
@@ -144,6 +155,39 @@ check: ## Run workspace checks.
 # Usage: make test
 test: ## Run workspace tests.
 	$(CARGO_LINKER_ENV) $(CARGO) test --workspace
+
+# Notes: Run fast unit-style tests for libraries and binaries only.
+# Usage: make test-unit
+test-unit: ## Run fast unit-focused tests.
+	$(CARGO_LINKER_ENV) $(CARGO) test --workspace --lib --bins
+
+# Notes: Run crate integration tests under crates/*/tests and cli/tests surfaces.
+# Usage: make test-integration
+test-integration: ## Run local integration tests.
+	$(CARGO_LINKER_ENV) $(CARGO) test --workspace --tests
+
+# Notes: Run golden example verification from setup to inspect in an isolated workspace.
+# Usage: make test-golden
+test-golden: ## Run golden example and docs command verification.
+	./scripts/test-golden-examples.sh
+
+# Notes: Run real integration tests when MOSAIC_REAL_TESTS=1 and any required secrets are present.
+# Usage: MOSAIC_REAL_TESTS=1 make test-real
+test-real: ## Run gated real integration tests.
+	./scripts/test-real-integrations.sh
+
+# Notes: Default CI lane for pull requests and local pre-merge checks.
+# Usage: make ci-fast
+ci-fast: ## Run the fast CI verification lane.
+	$(MAKE) check
+	$(MAKE) test-unit
+	$(MAKE) test-integration
+	$(MAKE) test-golden
+
+# Notes: Optional CI lane for real service checks with secrets and local daemons.
+# Usage: MOSAIC_REAL_TESTS=1 make ci-real
+ci-real: ## Run the gated real-service CI lane.
+	$(MAKE) test-real
 
 # Notes: Run the release smoke path in an isolated temporary workspace.
 # Usage: make smoke
