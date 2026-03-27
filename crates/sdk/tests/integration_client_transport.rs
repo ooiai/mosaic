@@ -22,7 +22,7 @@ async fn gateway_client_consumes_health_and_event_stream_from_real_http_transpor
             get(|| async {
                 Json(HealthResponse {
                     status: "ok".to_owned(),
-                    active_profile: "mock".to_owned(),
+                    active_profile: "demo-provider".to_owned(),
                     session_count: 0,
                     transport: "http".to_owned(),
                     deployment_profile: "test".to_owned(),
@@ -42,7 +42,7 @@ async fn gateway_client_consumes_health_and_event_stream_from_real_http_transpor
                         .as_deref()
                         .map(|id| format!("gateway.local/{id}"))
                         .unwrap_or_else(|| "gateway.local/ephemeral".to_owned()),
-                    output: "mock response".to_owned(),
+                    output: "assistant response".to_owned(),
                     trace: RunTrace::new(submission.input),
                     session_summary: None,
                 })
@@ -58,7 +58,7 @@ async fn gateway_client_consumes_health_and_event_stream_from_real_http_transpor
                     session_route: "gateway.local/demo".to_owned(),
                     emitted_at: Utc::now(),
                     event: GatewayEvent::RunCompleted {
-                        output_preview: "mock response".to_owned(),
+                        output_preview: "assistant response".to_owned(),
                     },
                 };
                 Sse::new(stream::iter(vec![Ok::<_, Infallible>(
@@ -87,7 +87,7 @@ async fn gateway_client_consumes_health_and_event_stream_from_real_http_transpor
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),
-            profile: Some("mock".to_owned()),
+            profile: Some("demo-provider".to_owned()),
             ingress: None,
         })
         .await

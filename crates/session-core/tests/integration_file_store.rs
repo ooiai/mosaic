@@ -28,7 +28,7 @@ fn temp_dir(label: &str) -> PathBuf {
 fn file_session_store_roundtrips_transcript_and_metadata() {
     let dir = temp_dir("session");
     let store = FileSessionStore::new(&dir);
-    let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+    let mut session = SessionRecord::new("demo", "Demo", "demo-provider", "openai", "gpt-5.4-mini");
     session.gateway.route = "gateway.local/demo".to_owned();
     session.transcript.push(TranscriptMessage::new(
         TranscriptRole::User,

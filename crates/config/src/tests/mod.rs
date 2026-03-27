@@ -55,6 +55,15 @@ fn provider_and_deployment_example_patches_validate_against_defaults() {
 }
 
 #[test]
+fn default_config_is_real_provider_first_not_mock_first() {
+    let config = MosaicConfig::default();
+
+    assert_eq!(config.active_profile, DEFAULT_PRODUCT_ACTIVE_PROFILE);
+    assert_ne!(config.active_profile, DEV_MOCK_PROFILE);
+    assert!(config.profiles.contains_key(DEV_MOCK_PROFILE));
+}
+
+#[test]
 fn workflow_and_gateway_examples_parse_from_disk() {
     let root = repo_root();
     let app = load_from_file(root.join("examples/workflows/research-brief.yaml"))
@@ -200,7 +209,7 @@ profiles:
 
     // SAFETY: tests in this crate do not spawn threads that read process env.
     unsafe {
-        env::set_var(ACTIVE_PROFILE_ENV, "mock");
+        env::set_var(ACTIVE_PROFILE_ENV, "gpt-5.4");
     }
 
     let loaded = load_mosaic_config(&LoadConfigOptions {
@@ -312,13 +321,34 @@ fn doctor_redacts_profiles_and_reports_missing_active_api_key() {
 #[test]
 fn init_workspace_config_writes_template_and_directories() {
     let dir = temp_dir("init");
-    let path = init_workspace_config(&dir, false).expect("workspace init should succeed");
+    let path = init_workspace_config(&dir, &InitWorkspaceConfigOptions::default())
+        .expect("workspace init should succeed");
     let content = fs::read_to_string(&path).expect("config should be readable");
 
     assert!(content.contains("schema_version: 1"));
+    assert!(content.contains("active_profile: gpt-5.4-mini"));
     assert!(dir.join(".mosaic/sessions").is_dir());
     assert!(dir.join(".mosaic/runs").is_dir());
     assert!(dir.join(".mosaic/extensions").is_dir());
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn init_workspace_config_supports_explicit_dev_mock_template() {
+    let dir = temp_dir("init-dev-mock");
+    let path = init_workspace_config(
+        &dir,
+        &InitWorkspaceConfigOptions {
+            force: false,
+            active_profile: None,
+            dev_mock: true,
+        },
+    )
+    .expect("workspace init should succeed");
+    let content = fs::read_to_string(&path).expect("config should be readable");
+
+    assert!(content.contains("active_profile: mock"));
 
     fs::remove_dir_all(dir).ok();
 }

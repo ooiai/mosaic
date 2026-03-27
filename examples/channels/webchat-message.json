@@ -1,6 +1,6 @@
 {
   "session_id": "docs-webchat",
-  "profile": "mock",
+  "profile": "gpt-5.4-mini",
   "display_name": "Webchat Visitor",
   "actor_id": "visitor-1",
   "thread_id": "landing-page",

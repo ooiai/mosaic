@@ -2,6 +2,26 @@ use super::*;
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 pub const ACTIVE_PROFILE_ENV: &str = "MOSAIC_ACTIVE_PROFILE";
+pub const DEFAULT_PRODUCT_ACTIVE_PROFILE: &str = "gpt-5.4-mini";
+pub const DEV_MOCK_PROFILE: &str = "mock";
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderUsage {
+    FirstClassReal,
+    Compatibility,
+    DevOnlyMock,
+}
+
+impl ProviderUsage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FirstClassReal => "first-class-real",
+            Self::Compatibility => "compatibility",
+            Self::DevOnlyMock => "dev-only-mock",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -46,6 +66,16 @@ impl ProviderType {
 
     pub fn requires_explicit_base_url(self) -> bool {
         matches!(self, Self::Azure)
+    }
+
+    pub fn usage(self) -> ProviderUsage {
+        match self {
+            Self::Mock => ProviderUsage::DevOnlyMock,
+            Self::OpenAiCompatible => ProviderUsage::Compatibility,
+            Self::OpenAi | Self::Azure | Self::Anthropic | Self::Ollama => {
+                ProviderUsage::FirstClassReal
+            }
+        }
     }
 }
 
@@ -607,6 +637,7 @@ pub struct DoctorCategorySummary {
 pub struct RedactedProfileView {
     pub name: String,
     pub provider_type: String,
+    pub usage: ProviderUsage,
     pub model: String,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
@@ -734,7 +765,7 @@ fn default_schema_version() -> u32 {
 }
 
 fn default_active_profile() -> String {
-    "mock".to_owned()
+    DEFAULT_PRODUCT_ACTIVE_PROFILE.to_owned()
 }
 
 fn default_deployment_profile() -> String {

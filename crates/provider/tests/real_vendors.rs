@@ -1,5 +1,6 @@
 use std::{env, time::Duration};
 
+use mosaic_config::{ProviderType, ProviderUsage, parse_provider_type};
 use mosaic_provider::{
     Message, ModelCapabilities, ProviderErrorKind, ProviderProfile, Role, ToolDefinition,
     build_provider_from_profile,
@@ -19,6 +20,9 @@ fn provider_profile(
     ProviderProfile {
         name: name.to_owned(),
         provider_type: provider_type.to_owned(),
+        usage: parse_provider_type(provider_type)
+            .map(ProviderType::usage)
+            .unwrap_or(ProviderUsage::Compatibility),
         model: model.clone(),
         base_url,
         api_key_env: api_key_env.map(str::to_owned),

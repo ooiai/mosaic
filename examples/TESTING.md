@@ -6,7 +6,7 @@
 
 运行：`cargo run -p mosaic-cli -- run examples/basic-agent.yaml`
 
-预期：输出 `mock response: Explain what Mosaic is.`，并在 `.mosaic/runs/` 下生成 trace 文件。
+预期：在已配置真实 provider 时成功生成回答，并在 `.mosaic/runs/` 下生成 trace 文件。
 
 `research-skill.yaml`
 
@@ -40,7 +40,7 @@
 
 运行：`./scripts/test-full-stack-example.sh mock`
 
-预期：启动本地 HTTP Gateway，经由 Telegram ingress 产生 `telegram--100123-99` session、trace、audit/replay 和 incident bundle。
+预期：启动本地 HTTP Gateway，经由 Telegram ingress 产生 `telegram--100123-99` session、trace、audit/replay 和 incident bundle；该 lane 为显式 dev-only mock，不作为 release evidence。
 
 ## Delivery smoke
 

@@ -87,7 +87,7 @@ Check:
 - `mosaic setup doctor`
 - `mosaic gateway status`
 
-If you are still on `mock`, the TUI is working but you are not talking to a real provider yet.
+If you are still on `mock`, the TUI is working in an explicit dev-only lane and you are not talking to a real provider yet.
 
 ## `session not found`
 

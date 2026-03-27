@@ -7,7 +7,7 @@ fn serializes_run_submission_and_event_envelope_across_public_boundary() {
         input: "hello".to_owned(),
         system: Some("system".to_owned()),
         session_id: Some("demo".to_owned()),
-        profile: Some("mock".to_owned()),
+        profile: Some("demo-provider".to_owned()),
         skill: None,
         workflow: None,
         ingress: None,
@@ -20,7 +20,7 @@ fn serializes_run_submission_and_event_envelope_across_public_boundary() {
         emitted_at: Utc::now(),
         event: GatewayEvent::RunSubmitted {
             input: submission.input.clone(),
-            profile: "mock".to_owned(),
+            profile: "demo-provider".to_owned(),
             ingress: None,
         },
     };
@@ -36,7 +36,7 @@ fn serializes_run_submission_and_event_envelope_across_public_boundary() {
         serde_json::from_str(&envelope_json).expect("envelope should deserialize");
 
     assert_eq!(submission_back.session_id.as_deref(), Some("demo"));
-    assert_eq!(submission_back.profile.as_deref(), Some("mock"));
+    assert_eq!(submission_back.profile.as_deref(), Some("demo-provider"));
     assert_eq!(envelope_back.gateway_run_id, "gw-1");
     assert_eq!(envelope_back.session_route, "gateway.local/demo");
 }

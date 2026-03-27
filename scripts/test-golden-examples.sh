@@ -18,7 +18,7 @@ ln -s "$ROOT/README.md" "$WORKDIR/README.md"
 
 cd "$WORKDIR"
 
-run_cli setup init >/dev/null
+run_cli setup init --dev-mock >/dev/null
 run_cli setup validate >/dev/null
 run_cli setup doctor >/dev/null
 

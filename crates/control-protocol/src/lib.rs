@@ -415,7 +415,7 @@ mod tests {
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),
-            profile: Some("mock".to_owned()),
+            profile: Some("demo-provider".to_owned()),
             ingress: Some(IngressTrace {
                 kind: "remote_operator".to_owned(),
                 channel: Some("cli".to_owned()),
@@ -473,7 +473,7 @@ mod tests {
             emitted_at: Utc::now(),
             event: GatewayEvent::RunSubmitted {
                 input: "hello".to_owned(),
-                profile: "mock".to_owned(),
+                profile: "demo-provider".to_owned(),
                 ingress: Some(IngressTrace {
                     kind: "webchat".to_owned(),
                     channel: Some("webchat".to_owned()),

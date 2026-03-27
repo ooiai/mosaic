@@ -2,8 +2,8 @@ app:
   name: basic-demo
 
 provider:
-  type: openai-compatible
-  model: mock
+  type: openai
+  model: gpt-5.4-mini
   api_key_env: OPENAI_API_KEY
 
 tools:

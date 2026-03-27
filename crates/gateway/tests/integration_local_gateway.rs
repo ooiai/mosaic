@@ -19,7 +19,7 @@ async fn local_gateway_submits_run_and_persists_session_state() {
             skill: None,
             workflow: None,
             session_id: Some("gateway-demo".to_owned()),
-            profile: Some("mock".to_owned()),
+            profile: Some("demo-provider".to_owned()),
             ingress: None,
         })
         .expect("run should submit");

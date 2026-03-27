@@ -21,13 +21,15 @@ mosaic setup doctor
 
 ## Workflows
 
-- [workflows/research-brief.yaml](./workflows/research-brief.yaml): runnable mock workflow example
+- [workflows/research-brief.yaml](./workflows/research-brief.yaml): runnable real-provider-first workflow example
 
 Run it:
 
 ```bash
 mosaic run examples/workflows/research-brief.yaml --workflow research_brief --session workflow-demo
 ```
+
+For a local dev-only smoke lane without provider credentials, initialize the workspace with `mosaic setup init --dev-mock` before running the example.
 
 ## Extensions
 
@@ -52,7 +54,7 @@ mosaic extension list
 
 ## Gateway
 
-- [channels/webchat-message.json](./channels/webchat-message.json): sample payload for `/ingress/webchat`
+- [channels/webchat-message.json](./channels/webchat-message.json): sample payload for `/ingress/webchat` using the built-in real-provider-first profile name
 - [channels/webchat-openai-message.json](./channels/webchat-openai-message.json): release-grade payload for `/ingress/webchat`
 - [channels/telegram-update.json](./channels/telegram-update.json): sample payload for `/ingress/telegram`
 
@@ -72,7 +74,7 @@ curl -X POST http://127.0.0.1:8080/ingress/webchat \
 ## Full Stack
 
 - [full-stack/README.md](./full-stack/README.md): the complete provider + Gateway + channel + session + inspect path
-- [full-stack/mock-telegram.config.yaml](./full-stack/mock-telegram.config.yaml): fast local Gateway + Telegram config
+- [full-stack/mock-telegram.config.yaml](./full-stack/mock-telegram.config.yaml): fast local Gateway + Telegram dev-only mock config
 - [full-stack/openai-webchat.config.yaml](./full-stack/openai-webchat.config.yaml): release-blocking OpenAI + WebChat config
 - [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): manual Telegram bot sign-off config
 

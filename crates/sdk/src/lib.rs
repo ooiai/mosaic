@@ -314,9 +314,9 @@ mod tests {
 
     async fn spawn_gateway() -> Result<(String, oneshot::Sender<()>)> {
         let mut config = MosaicConfig::default();
-        config.active_profile = "mock".to_owned();
+        config.active_profile = "demo-provider".to_owned();
         config.profiles.insert(
-            "mock".to_owned(),
+            "demo-provider".to_owned(),
             ProviderProfileConfig {
                 provider_type: "mock".to_owned(),
                 model: "mock".to_owned(),

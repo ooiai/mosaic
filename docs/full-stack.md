@@ -10,7 +10,7 @@ Examples used by this guide:
 
 - [examples/full-stack/README.md](../examples/full-stack/README.md)
 - [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
-- [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml)
+- [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml) for the explicit dev-only mock lane
 - [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
 - [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
 - [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
@@ -97,7 +97,7 @@ It is useful for docs smoke tests and local iteration, but it is not final accep
 1. Initialize the workspace.
 
 ```bash
-mosaic setup init
+mosaic setup init --dev-mock
 cp examples/full-stack/mock-telegram.config.yaml .mosaic/config.yaml
 export MOSAIC_TELEGRAM_SECRET_TOKEN=full-stack-secret
 ```

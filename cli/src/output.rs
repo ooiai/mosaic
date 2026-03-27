@@ -1,10 +1,19 @@
 use anyhow::Result;
-use mosaic_config::{DoctorReport, LoadedMosaicConfig, RedactedMosaicConfig, ValidationReport};
+use mosaic_config::{
+    DoctorReport, LoadedMosaicConfig, ProviderUsage, RedactedMosaicConfig, ValidationReport,
+};
 use mosaic_inspect::RunTrace;
 use mosaic_runtime::events::{RunEvent, RunEventSink};
 use tracing::info;
 
 pub struct CliEventSink;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OnboardingView {
+    state: &'static str,
+    active_profile_usage: &'static str,
+    message: String,
+}
 
 fn format_run_event(event: &RunEvent) -> String {
     match event {
@@ -185,9 +194,16 @@ where
     out
 }
 
-pub fn render_config_sources(loaded: &LoadedMosaicConfig) -> String {
+pub fn render_config_sources(loaded: &LoadedMosaicConfig, validation: &ValidationReport) -> String {
+    let redacted = mosaic_config::redact_mosaic_config(&loaded.config);
+    let onboarding = derive_onboarding(&redacted, validation);
     let rows = vec![
         ("active_profile", loaded.config.active_profile.clone()),
+        (
+            "active_profile_usage",
+            onboarding.active_profile_usage.to_owned(),
+        ),
+        ("onboarding_state", onboarding.state.to_owned()),
         ("source_layers", loaded.sources.len().to_string()),
         (
             "workspace_config",
@@ -218,6 +234,17 @@ pub fn render_config_sources(loaded: &LoadedMosaicConfig) -> String {
 
     join_blocks([
         render_key_value_block("config source summary", rows),
+        render_key_value_block(
+            "onboarding",
+            vec![
+                ("state", onboarding.state.to_owned()),
+                (
+                    "active_profile_usage",
+                    onboarding.active_profile_usage.to_owned(),
+                ),
+                ("message", onboarding.message),
+            ],
+        ),
         render_list_block("config sources", source_lines),
         render_list_block(
             "config precedence",
@@ -234,8 +261,22 @@ pub fn render_config_show(loaded: &LoadedMosaicConfig, validation: &ValidationRe
     render_redacted_config(&redacted, validation, Some(&loaded.workspace_config_path))
 }
 
-pub fn render_doctor_report(doctor: &DoctorReport) -> String {
+pub fn render_onboarding_json(
+    loaded: &LoadedMosaicConfig,
+    validation: &ValidationReport,
+) -> serde_json::Value {
+    let redacted = mosaic_config::redact_mosaic_config(&loaded.config);
+    let onboarding = derive_onboarding(&redacted, validation);
+    serde_json::json!({
+        "state": onboarding.state,
+        "active_profile_usage": onboarding.active_profile_usage,
+        "message": onboarding.message,
+    })
+}
+
+pub fn render_doctor_report(doctor: &DoctorReport, workspace: &RedactedMosaicConfig) -> String {
     let summary = doctor.summary();
+    let onboarding = derive_onboarding(workspace, &doctor.validation);
     let status = if doctor.has_errors() {
         "issues found"
     } else if summary.warnings > 0 || !doctor.validation.issues.is_empty() {
@@ -285,8 +326,21 @@ pub fn render_doctor_report(doctor: &DoctorReport) -> String {
             ("ok", summary.ok.to_string()),
             ("warnings", summary.warnings.to_string()),
             ("errors", summary.errors.to_string()),
+            ("onboarding_state", onboarding.state.to_owned()),
         ],
     )];
+
+    blocks.push(render_key_value_block(
+        "onboarding",
+        vec![
+            ("state", onboarding.state.to_owned()),
+            (
+                "active_profile_usage",
+                onboarding.active_profile_usage.to_owned(),
+            ),
+            ("message", onboarding.message),
+        ],
+    ));
 
     if !category_lines.is_empty() {
         blocks.push(render_list_block("doctor categories", category_lines));
@@ -825,11 +879,17 @@ fn render_redacted_config(
     validation: &ValidationReport,
     workspace_path: Option<&std::path::Path>,
 ) -> String {
+    let onboarding = derive_onboarding(redacted, validation);
     let mut blocks = vec![render_key_value_block(
         "config summary",
         vec![
             ("schema_version", redacted.schema_version.to_string()),
             ("active_profile", redacted.active_profile.clone()),
+            (
+                "active_profile_usage",
+                onboarding.active_profile_usage.to_owned(),
+            ),
+            ("onboarding_state", onboarding.state.to_owned()),
             ("profile_count", redacted.profiles.len().to_string()),
             (
                 "validation_errors",
@@ -847,6 +907,18 @@ fn render_redacted_config(
             ),
         ],
     )];
+
+    blocks.push(render_key_value_block(
+        "onboarding",
+        vec![
+            ("state", onboarding.state.to_owned()),
+            (
+                "active_profile_usage",
+                onboarding.active_profile_usage.to_owned(),
+            ),
+            ("message", onboarding.message),
+        ],
+    ));
 
     blocks.push(render_key_value_block(
         "deployment",
@@ -982,8 +1054,9 @@ fn render_redacted_config(
             .iter()
             .map(|profile| {
                 format!(
-                    "{} | type={} | model={} | base_url={} | api_key_env={} | api_key_present={} | timeout_ms={} | max_retries={} | retry_backoff_ms={} | allow_custom_headers={} | custom_headers={} | azure_api_version={} | anthropic_version={}",
+                    "{} | usage={} | type={} | model={} | base_url={} | api_key_env={} | api_key_present={} | timeout_ms={} | max_retries={} | retry_backoff_ms={} | allow_custom_headers={} | custom_headers={} | azure_api_version={} | anthropic_version={}",
                     profile.name,
+                    profile.usage.label(),
                     profile.provider_type,
                     profile.model,
                     option_string(profile.base_url.clone()),
@@ -1041,6 +1114,72 @@ where
 
 fn option_string(value: Option<String>) -> String {
     value.unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn derive_onboarding(
+    redacted: &RedactedMosaicConfig,
+    validation: &ValidationReport,
+) -> OnboardingView {
+    let Some(active_profile) = redacted
+        .profiles
+        .iter()
+        .find(|profile| profile.name == redacted.active_profile)
+    else {
+        return OnboardingView {
+            state: "invalid",
+            active_profile_usage: "<unknown>",
+            message: format!(
+                "active profile '{}' does not resolve to a configured provider profile",
+                redacted.active_profile
+            ),
+        };
+    };
+
+    if active_profile.usage == ProviderUsage::DevOnlyMock {
+        return OnboardingView {
+            state: "dev-mock",
+            active_profile_usage: active_profile.usage.label(),
+            message: format!(
+                "active profile '{}' is dev-only mock; use it for local smoke tests, not onboarding or release evidence",
+                active_profile.name
+            ),
+        };
+    }
+
+    if let Some(issue) = validation.issues.iter().find(|issue| {
+        issue.field == "active_profile"
+            || issue
+                .field
+                .starts_with(&format!("profiles.{}.", active_profile.name))
+    }) {
+        return OnboardingView {
+            state: "pending-provider-configuration",
+            active_profile_usage: active_profile.usage.label(),
+            message: issue.message.clone(),
+        };
+    }
+
+    if let Some(api_key_env) = active_profile.api_key_env.as_deref() {
+        if !active_profile.api_key_present {
+            return OnboardingView {
+                state: "pending-provider-credentials",
+                active_profile_usage: active_profile.usage.label(),
+                message: format!(
+                    "active real profile '{}' expects {} to be set before runs can use the configured provider",
+                    active_profile.name, api_key_env
+                ),
+            };
+        }
+    }
+
+    OnboardingView {
+        state: "ready",
+        active_profile_usage: active_profile.usage.label(),
+        message: format!(
+            "active profile '{}' is ready for real provider runs",
+            active_profile.name
+        ),
+    }
 }
 
 fn option_str(value: Option<&str>) -> String {
@@ -1145,8 +1284,8 @@ fn validation_warning_count(report: &ValidationReport) -> usize {
 mod tests {
     use chrono::{Duration, Utc};
     use mosaic_config::{
-        DoctorCategory, DoctorCheck, DoctorReport, DoctorStatus, LoadConfigOptions,
-        ValidationLevel, ValidationReport, load_mosaic_config,
+        DoctorCategory, DoctorCheck, DoctorReport, DoctorStatus, LoadConfigOptions, ProviderUsage,
+        RedactedMosaicConfig, ValidationLevel, ValidationReport, load_mosaic_config,
     };
     use mosaic_inspect::{RunTrace, ToolTrace};
     use mosaic_runtime::events::RunEvent;
@@ -1241,6 +1380,7 @@ mod tests {
         let rendered = render_config_show(&loaded, &ValidationReport::default());
 
         assert!(rendered.starts_with("config summary:"));
+        assert!(rendered.contains("onboarding:"));
         assert!(rendered.contains("deployment:"));
         assert!(rendered.contains("profiles:"));
     }
@@ -1269,8 +1409,74 @@ mod tests {
             ],
         };
 
-        let rendered = render_doctor_report(&report);
+        let rendered = render_doctor_report(
+            &report,
+            &RedactedMosaicConfig {
+                schema_version: 1,
+                active_profile: "mock".to_owned(),
+                profiles: vec![mosaic_config::RedactedProfileView {
+                    name: "mock".to_owned(),
+                    provider_type: "mock".to_owned(),
+                    usage: ProviderUsage::DevOnlyMock,
+                    model: "mock".to_owned(),
+                    base_url: None,
+                    api_key_env: None,
+                    api_key_present: false,
+                    timeout_ms: Some(0),
+                    max_retries: Some(0),
+                    retry_backoff_ms: Some(0),
+                    custom_header_keys: Vec::new(),
+                    allow_custom_headers: false,
+                    azure_api_version: None,
+                    anthropic_version: None,
+                }],
+                provider_defaults: mosaic_config::RedactedProviderDefaultsView {
+                    timeout_ms: None,
+                    max_retries: None,
+                    retry_backoff_ms: None,
+                },
+                deployment: mosaic_config::RedactedDeploymentView {
+                    profile: "local".to_owned(),
+                    workspace_name: "default".to_owned(),
+                },
+                auth: mosaic_config::RedactedAuthView {
+                    operator_token_env: None,
+                    operator_token_present: false,
+                    webchat_shared_secret_env: None,
+                    webchat_shared_secret_present: false,
+                    telegram_secret_token_env: None,
+                    telegram_secret_token_present: false,
+                },
+                session_store_root_dir: ".mosaic/sessions".to_owned(),
+                inspect_runs_dir: ".mosaic/runs".to_owned(),
+                audit: mosaic_config::RedactedAuditView {
+                    root_dir: ".mosaic/audit".to_owned(),
+                    retention_days: 14,
+                    event_replay_window: 256,
+                    redact_inputs: true,
+                },
+                observability: mosaic_config::RedactedObservabilityView {
+                    enable_metrics: true,
+                    enable_readiness: true,
+                    slow_consumer_lag_threshold: 128,
+                },
+                runtime: mosaic_config::RedactedRuntimePolicyView {
+                    max_provider_round_trips: 8,
+                    max_workflow_provider_round_trips: 8,
+                    continue_after_tool_error: false,
+                },
+                extension_manifest_count: 0,
+                policies: mosaic_config::RedactedPolicyView {
+                    allow_exec: false,
+                    allow_webhook: true,
+                    allow_cron: true,
+                    allow_mcp: true,
+                    hot_reload_enabled: false,
+                },
+            },
+        );
         assert!(rendered.starts_with("doctor summary:"));
+        assert!(rendered.contains("onboarding:"));
         assert!(rendered.contains("doctor categories:"));
         assert!(rendered.contains("auth | ok=0 warning=1 error=0"));
         assert!(rendered.contains("[warning] auth: operator token missing"));

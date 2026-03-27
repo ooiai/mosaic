@@ -33,7 +33,7 @@ From the repository root:
 mosaic setup init
 ```
 
-This writes `.mosaic/config.yaml` and creates the default runtime directories.
+This writes `.mosaic/config.yaml` with a real-provider-first active profile and creates the default runtime directories.
 
 If the file already exists and you want to regenerate it:
 
@@ -41,9 +41,15 @@ If the file already exists and you want to regenerate it:
 mosaic setup init --force
 ```
 
+For a dev-only local smoke template that keeps the built-in mock provider active:
+
+```bash
+mosaic setup init --dev-mock
+```
+
 ## 3. Choose a provider
 
-Open `.mosaic/config.yaml` and configure a real profile.
+Open `.mosaic/config.yaml` and finish the generated real-provider-first profile, or switch to one of the examples below.
 
 ### OpenAI example
 
@@ -118,9 +124,10 @@ mosaic model list
 If you want to move straight into the full HTTP Gateway ingress path, use:
 
 - [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
-- [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml)
 - [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
 - [docs/real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
+
+For a dev-only mock lane, see [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml).
 
 What success looks like:
 

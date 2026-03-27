@@ -2,7 +2,7 @@
 
 These files are payloads for the current HTTP ingress adapters.
 
-- `webchat-message.json`: sample payload for `POST /ingress/webchat`
+- `webchat-message.json`: sample payload for `POST /ingress/webchat` targeting the built-in real-provider-first profile
 - `webchat-openai-message.json`: no-mock WebChat payload used by the OpenAI full-stack lane
 - `telegram-update.json`: sample Telegram webhook payload for `POST /ingress/telegram`
 

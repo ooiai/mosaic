@@ -12,6 +12,7 @@ use std::{
 
 use mosaic_config::{
     AuditConfig, AuthConfig, DeploymentConfig, MosaicConfig, ObservabilityConfig, PolicyConfig,
+    ProviderProfileConfig,
 };
 use mosaic_gateway::GatewayRuntimeComponents;
 use mosaic_memory::{FileMemoryStore, MemoryPolicy};
@@ -49,6 +50,19 @@ pub fn free_port() -> u16 {
 }
 
 pub fn build_components(root: &Path) -> GatewayRuntimeComponents {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "demo-provider".to_owned();
+    config.profiles.insert(
+        "demo-provider".to_owned(),
+        ProviderProfileConfig {
+            provider_type: "mock".to_owned(),
+            model: "mock".to_owned(),
+            base_url: None,
+            api_key_env: None,
+            transport: Default::default(),
+            vendor: Default::default(),
+        },
+    );
     let workspace_root = root.to_path_buf();
     let runs_dir = workspace_root.join(".mosaic/runs");
     let audit_root = workspace_root.join(".mosaic/audit");
@@ -66,8 +80,7 @@ pub fn build_components(root: &Path) -> GatewayRuntimeComponents {
 
     GatewayRuntimeComponents {
         profiles: Arc::new(
-            ProviderProfileRegistry::from_config(&MosaicConfig::default())
-                .expect("provider registry should build"),
+            ProviderProfileRegistry::from_config(&config).expect("provider registry should build"),
         ),
         provider_override: None,
         session_store: Arc::new(FileSessionStore::new(
@@ -75,7 +88,7 @@ pub fn build_components(root: &Path) -> GatewayRuntimeComponents {
         )),
         memory_store: Arc::new(FileMemoryStore::new(workspace_root.join(".mosaic/memory"))),
         memory_policy: MemoryPolicy::default(),
-        runtime_policy: MosaicConfig::default().runtime,
+        runtime_policy: config.runtime.clone(),
         tools: Arc::new(tools),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),

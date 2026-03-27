@@ -1,7 +1,9 @@
 use std::{collections::BTreeMap, env, sync::Arc};
 
 use anyhow::{Result, anyhow, bail};
-use mosaic_config::{MosaicConfig, ProviderProfileConfig, ProviderType, parse_provider_type};
+use mosaic_config::{
+    MosaicConfig, ProviderProfileConfig, ProviderType, ProviderUsage, parse_provider_type,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -21,6 +23,7 @@ use crate::{
 pub struct ProviderProfile {
     pub name: String,
     pub provider_type: String,
+    pub usage: ProviderUsage,
     pub model: String,
     pub base_url: Option<String>,
     pub api_key_env: Option<String>,
@@ -265,6 +268,9 @@ pub(crate) fn provider_profile_from_config(
     ProviderProfile {
         name: name.to_owned(),
         provider_type: profile_config.provider_type.clone(),
+        usage: provider_type
+            .map(ProviderType::usage)
+            .unwrap_or(ProviderUsage::Compatibility),
         model: profile_config.model.clone(),
         base_url: profile_config.base_url.clone(),
         api_key_env: profile_config.api_key_env.clone(),

@@ -12,7 +12,7 @@ use axum::{
     routing::any,
 };
 use futures::executor::block_on;
-use mosaic_config::{MosaicConfig, ProviderProfileConfig};
+use mosaic_config::{MosaicConfig, ProviderProfileConfig, ProviderUsage};
 use mosaic_tool_core::{CapabilityKind, CapabilityMetadata, ToolMetadata};
 use tokio::net::TcpListener;
 
@@ -319,6 +319,21 @@ fn channel_policy_prefers_matching_channel_profile() {
 
     assert_eq!(scheduled.profile.name, "telegram");
     assert_eq!(scheduled.reason, "channel_policy:telegram");
+}
+
+#[test]
+fn registry_profiles_expose_usage_classification() {
+    let registry = ProviderProfileRegistry::from_config(&MosaicConfig::default())
+        .expect("registry should build");
+
+    assert_eq!(
+        registry.get("gpt-5.4-mini").map(|profile| profile.usage),
+        Some(ProviderUsage::FirstClassReal)
+    );
+    assert_eq!(
+        registry.get("mock").map(|profile| profile.usage),
+        Some(ProviderUsage::DevOnlyMock)
+    );
 }
 
 #[derive(Debug, Clone)]

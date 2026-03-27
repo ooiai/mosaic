@@ -264,7 +264,7 @@ mod tests {
         assert!(ctx.tools.get("read_file").is_some());
         assert!(ctx.skills.get("summarize").is_some());
         assert!(ctx.workflows.is_empty());
-        assert_eq!(ctx.profiles.active_profile_name(), "mock");
+        assert_eq!(ctx.profiles.active_profile_name(), "gpt-5.4-mini");
         assert_eq!(ctx.active_extensions.len(), 1);
         assert_eq!(ctx.active_extensions[0].name, "app.inline");
     }
@@ -293,7 +293,7 @@ mod tests {
         assert!(components.tools.get("read_file").is_some());
         assert!(components.skills.get("summarize").is_some());
         assert!(components.workflows.is_empty());
-        assert_eq!(components.profiles.active_profile_name(), "mock");
+        assert_eq!(components.profiles.active_profile_name(), "gpt-5.4-mini");
         assert!(components.runs_dir.ends_with(".mosaic/runs"));
         assert_eq!(components.extensions.len(), 1);
         assert_eq!(components.extensions[0].name, "app.inline");

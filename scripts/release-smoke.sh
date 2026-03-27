@@ -13,7 +13,7 @@ run_cli() {
 }
 
 cd "$WORKDIR"
-run_cli setup init
+run_cli setup init --dev-mock
 run_cli setup validate >/dev/null
 run_cli setup doctor >/dev/null
 run_cli config show >/dev/null

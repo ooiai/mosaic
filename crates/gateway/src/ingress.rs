@@ -76,7 +76,7 @@ mod tests {
         let normalized = normalize_webchat_message(InboundMessage {
             session_id: Some("webchat-demo".to_owned()),
             input: "hello webchat".to_owned(),
-            profile: Some("mock".to_owned()),
+            profile: Some("demo-provider".to_owned()),
             ingress: None,
             display_name: Some("Web Guest".to_owned()),
             actor_id: Some("actor-1".to_owned()),
@@ -86,7 +86,7 @@ mod tests {
         });
 
         assert_eq!(normalized.session_id, "webchat-demo");
-        assert_eq!(normalized.profile.as_deref(), Some("mock"));
+        assert_eq!(normalized.profile.as_deref(), Some("demo-provider"));
         assert_eq!(normalized.ingress.channel.as_deref(), Some("webchat"));
         assert_eq!(
             normalized.ingress.reply_target.as_deref(),

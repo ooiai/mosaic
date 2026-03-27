@@ -52,12 +52,12 @@ profiles:
 
 ### `active_profile`
 
-- default: `mock`
+- default: `gpt-5.4-mini`
 - purpose: selects the provider profile used by the runtime unless overridden by session, ingress, or CLI
 
 ### `profiles`
 
-- default: built-in first-class provider profiles plus `mock`
+- default: built-in first-class provider profiles plus the explicit dev-only `mock` profile
 - purpose: provider profile registry used by `run`, `tui`, `gateway`, and scheduling logic
 
 Supported `type` values:
@@ -68,6 +68,8 @@ Supported `type` values:
 - `anthropic`
 - `ollama`
 - `openai-compatible`
+
+`mock` remains available for dev/test paths, but product onboarding should prefer one of the real first-class provider profiles above.
 
 Profile fields:
 

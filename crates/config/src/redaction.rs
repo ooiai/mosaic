@@ -7,6 +7,9 @@ pub fn redact_mosaic_config(config: &MosaicConfig) -> RedactedMosaicConfig {
         .map(|(name, profile)| RedactedProfileView {
             name: name.clone(),
             provider_type: profile.provider_type.clone(),
+            usage: parse_provider_type(&profile.provider_type)
+                .map(ProviderType::usage)
+                .unwrap_or(ProviderUsage::Compatibility),
             model: profile.model.clone(),
             base_url: profile.base_url.clone(),
             api_key_env: profile.api_key_env.clone(),

@@ -38,7 +38,7 @@ fn loads_example_app_and_layered_workspace_config() {
     let root = repo_root();
     let app = load_from_file(root.join("examples/time-now-agent.yaml"))
         .expect("example app config should load");
-    assert_eq!(app.provider.provider_type, "mock");
+    assert_eq!(app.provider.provider_type, "openai");
     assert_eq!(app.task.input, "What time is it now?");
 
     let workspace = temp_dir("workspace");
@@ -46,7 +46,7 @@ fn loads_example_app_and_layered_workspace_config() {
     fs::write(
         workspace.join(".mosaic/config.yaml"),
         r#"
-active_profile: mock
+active_profile: gpt-5.4-mini
 deployment:
   profile: staging
   workspace_name: integration

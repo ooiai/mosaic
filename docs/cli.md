@@ -26,6 +26,18 @@ Initialize the workspace the first time:
 mosaic setup init
 ```
 
+Initialize on a specific real provider profile:
+
+```bash
+mosaic setup init --profile anthropic-sonnet
+```
+
+Opt into the dev-only mock template:
+
+```bash
+mosaic setup init --dev-mock
+```
+
 Overwrite an existing generated template:
 
 ```bash

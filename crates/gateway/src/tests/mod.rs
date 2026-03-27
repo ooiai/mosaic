@@ -72,10 +72,10 @@ fn test_node_store() -> Arc<FileNodeStore> {
 
 fn gateway() -> GatewayHandle {
     let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    config.active_profile = "demo-provider".to_owned();
     config
         .profiles
-        .insert("mock".to_owned(), mock_profile_config());
+        .insert("demo-provider".to_owned(), mock_profile_config());
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let mut tools = ToolRegistry::new();
@@ -455,7 +455,10 @@ async fn gateway_node_store_prefers_online_nodes_when_stale_nodes_exist() {
 #[tokio::test]
 async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
     let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    config.active_profile = "demo-provider".to_owned();
+    config
+        .profiles
+        .insert("demo-provider".to_owned(), mock_profile_config());
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let mut tools = ToolRegistry::new();
@@ -531,7 +534,7 @@ async fn http_health_reports_gateway_state() {
     let health: HealthResponse = response.json().await.expect("health should deserialize");
 
     assert_eq!(health.status, "ok");
-    assert_eq!(health.active_profile, "mock");
+    assert_eq!(health.active_profile, "demo-provider");
     assert_eq!(health.transport, "http+sse");
 
     let _ = shutdown.send(());

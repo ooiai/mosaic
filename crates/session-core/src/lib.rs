@@ -501,7 +501,8 @@ mod tests {
 
     #[test]
     fn session_records_append_messages_and_create_summaries() {
-        let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+        let mut session =
+            SessionRecord::new("demo", "Demo", "demo-provider", "openai", "gpt-5.4-mini");
         session.append_message(TranscriptRole::User, "hello", None);
         session.append_message(TranscriptRole::Assistant, "world", None);
         session.bind_ingress_context(&IngressTrace {
@@ -545,7 +546,8 @@ mod tests {
 
     #[test]
     fn summary_backfills_missing_gateway_route_for_legacy_sessions() {
-        let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+        let mut session =
+            SessionRecord::new("demo", "Demo", "demo-provider", "openai", "gpt-5.4-mini");
         session.gateway.route.clear();
 
         assert_eq!(
@@ -559,7 +561,8 @@ mod tests {
         let dir = temp_dir("roundtrip");
         let store = FileSessionStore::new(&dir);
 
-        let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+        let mut session =
+            SessionRecord::new("demo", "Demo", "demo-provider", "openai", "gpt-5.4-mini");
         session.append_message(TranscriptRole::User, "hello", None);
         session.set_memory_state(Some("Stored summary".to_owned()), None, 1, false);
         store.save(&session).expect("session should save");
@@ -595,11 +598,11 @@ mod tests {
         let dir = temp_dir("load-or-create");
         let store = FileSessionStore::new(&dir);
 
-        let session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+        let session = SessionRecord::new("demo", "Demo", "demo-provider", "openai", "gpt-5.4-mini");
         store.save(&session).expect("session should save");
 
         let loaded = store
-            .load_or_create("demo", "Other", "mock", "mock", "mock")
+            .load_or_create("demo", "Other", "demo-provider", "openai", "gpt-5.4-mini")
             .expect("load_or_create should succeed");
 
         assert_eq!(loaded.title, "Demo");

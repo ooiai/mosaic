@@ -76,7 +76,7 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                 status: DoctorStatus::Ok,
                 category: DoctorCategory::Providers,
                 message: format!(
-                    "profile '{}' uses the mock provider and does not require API credentials",
+                    "profile '{}' uses the dev-only mock provider and does not require API credentials",
                     name
                 ),
             }),

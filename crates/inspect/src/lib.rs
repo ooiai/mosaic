@@ -792,15 +792,15 @@ mod tests {
             input: "hello".to_owned(),
             output: Some("world".to_owned()),
             effective_profile: Some(EffectiveProfileTrace {
-                profile: "mock".to_owned(),
-                provider_type: "mock".to_owned(),
-                model: "mock".to_owned(),
-                base_url: None,
-                api_key_env: None,
-                api_key_present: false,
-                timeout_ms: 0,
-                max_retries: 0,
-                retry_backoff_ms: 0,
+                profile: "gpt-5.4-mini".to_owned(),
+                provider_type: "openai".to_owned(),
+                model: "gpt-5.4-mini".to_owned(),
+                base_url: Some("https://api.openai.com/v1".to_owned()),
+                api_key_env: Some("OPENAI_API_KEY".to_owned()),
+                api_key_present: true,
+                timeout_ms: 45_000,
+                max_retries: 2,
+                retry_backoff_ms: 150,
                 api_version: None,
                 version_header: None,
                 custom_header_keys: Vec::new(),
@@ -829,11 +829,11 @@ mod tests {
             model_selections: vec![ModelSelectionTrace {
                 scope: "run".to_owned(),
                 requested_profile: None,
-                selected_profile: "mock".to_owned(),
-                selected_model: "mock".to_owned(),
+                selected_profile: "gpt-5.4-mini".to_owned(),
+                selected_model: "gpt-5.4-mini".to_owned(),
                 reason: "active_profile".to_owned(),
-                context_window_chars: 4000,
-                budget_tier: "debug".to_owned(),
+                context_window_chars: 128000,
+                budget_tier: "small".to_owned(),
             }],
             memory_reads: vec![],
             memory_writes: vec![],
@@ -948,11 +948,11 @@ mod tests {
             "memory_reads": [],
             "memory_writes": [],
             "effective_profile": {
-                "profile": "mock",
-                "provider_type": "mock",
-                "model": "mock",
-                "base_url": null,
-                "api_key_env": null
+                "profile": "demo-provider",
+                "provider_type": "openai-compatible",
+                "model": "demo-model",
+                "base_url": "https://gateway.example/v1",
+                "api_key_env": "COMPAT_API_KEY"
             }
         });
 

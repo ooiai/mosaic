@@ -69,10 +69,9 @@ BASE_URL="http://127.0.0.1:${PORT}"
 
 cd "$WORKDIR"
 
-run_cli setup init >/dev/null
-
 case "$MODE" in
     mock|mock-telegram)
+        run_cli setup init --dev-mock >/dev/null
         cp "$ROOT/examples/full-stack/mock-telegram.config.yaml" ".mosaic/config.yaml"
         export MOSAIC_TELEGRAM_SECRET_TOKEN="${MOSAIC_TELEGRAM_SECRET_TOKEN:-full-stack-secret}"
         PAYLOAD_FILE="$ROOT/examples/channels/telegram-update.json"
@@ -80,6 +79,7 @@ case "$MODE" in
         SESSION_ID="telegram--100123-99"
         ;;
     openai|openai-webchat)
+        run_cli setup init >/dev/null
         cp "$ROOT/examples/full-stack/openai-webchat.config.yaml" ".mosaic/config.yaml"
         if [ -n "${MOSAIC_TEST_OPENAI_BASE_URL:-}" ]; then
             tmp=".mosaic/config.yaml.tmp"

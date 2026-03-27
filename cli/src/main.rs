@@ -7,9 +7,10 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use mosaic_config::{
-    ACTIVE_PROFILE_ENV, LoadConfigOptions, LoadedMosaicConfig, PolicyConfig, ValidationLevel,
-    doctor_mosaic_config, init_workspace_config, load_mosaic_config, redact_mosaic_config,
-    save_mosaic_config, validate_mosaic_config,
+    ACTIVE_PROFILE_ENV, DEFAULT_PRODUCT_ACTIVE_PROFILE, DEV_MOCK_PROFILE,
+    InitWorkspaceConfigOptions, LoadConfigOptions, LoadedMosaicConfig, PolicyConfig, ProviderUsage,
+    ValidationLevel, doctor_mosaic_config, init_workspace_config, load_mosaic_config,
+    redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
 use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, GatewayAuditEventDto, GatewayEvent,
@@ -75,6 +76,8 @@ const SETUP_AFTER_HELP: &str = "When to use it:
 
 Examples:
   mosaic setup init
+  mosaic setup init --profile anthropic-sonnet
+  mosaic setup init --dev-mock
   mosaic setup validate
   mosaic setup doctor";
 const CONFIG_AFTER_HELP: &str = "When to use it:
@@ -258,6 +261,17 @@ enum SetupCommand {
     Init {
         #[arg(long)]
         force: bool,
+        #[arg(
+            long,
+            help = "Use this built-in provider profile as the initial active profile"
+        )]
+        profile: Option<String>,
+        #[arg(
+            long,
+            conflicts_with = "profile",
+            help = "Generate a dev-only mock template instead of the real-provider-first default"
+        )]
+        dev_mock: bool,
     },
     Validate,
     Doctor,
@@ -781,17 +795,54 @@ where
 
 fn setup_cmd(command: SetupCommand) -> Result<()> {
     match command {
-        SetupCommand::Init { force } => {
+        SetupCommand::Init {
+            force,
+            profile,
+            dev_mock,
+        } => {
             let cwd = env::current_dir()?;
-            let path = init_workspace_config(&cwd, force)?;
+            let selected_profile = if dev_mock {
+                DEV_MOCK_PROFILE.to_owned()
+            } else {
+                profile
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_PRODUCT_ACTIVE_PROFILE.to_owned())
+            };
+            let dev_mock_mode = selected_profile == DEV_MOCK_PROFILE;
+            let path = init_workspace_config(
+                &cwd,
+                &InitWorkspaceConfigOptions {
+                    force,
+                    active_profile: profile,
+                    dev_mock,
+                },
+            )?;
             println!("workspace initialized");
             println!("config_path: {}", path.display());
-            print_next_steps([
-                "mosaic setup validate",
-                "mosaic setup doctor",
-                "mosaic model list",
-                "mosaic tui",
-            ]);
+            println!("active_profile: {}", selected_profile);
+            println!(
+                "setup_mode: {}",
+                if dev_mock_mode {
+                    "dev-only-mock"
+                } else {
+                    "real-provider-first"
+                }
+            );
+            if dev_mock_mode {
+                print_next_steps([
+                    "mosaic setup validate",
+                    "mosaic setup doctor",
+                    "mosaic model list",
+                    "mosaic tui",
+                ]);
+            } else {
+                print_next_steps([
+                    "mosaic setup validate",
+                    "mosaic setup doctor",
+                    "mosaic model list",
+                    "mosaic tui",
+                ]);
+            }
             Ok(())
         }
         SetupCommand::Validate => {
@@ -817,7 +868,10 @@ next: run `mosaic setup doctor` and compare `.mosaic/config.yaml` with `docs/con
                 output::render_config_show(&loaded, &doctor.validation)
             );
             println!();
-            println!("{}", output::render_doctor_report(&doctor));
+            println!(
+                "{}",
+                output::render_doctor_report(&doctor, &redact_mosaic_config(&loaded.config))
+            );
 
             if doctor.has_errors() {
                 bail!(
@@ -846,6 +900,7 @@ fn config_cmd(command: ConfigCommand) -> Result<()> {
                         "user_config_path": loaded.user_config_path,
                         "sources": loaded.sources,
                         "config": redact_mosaic_config(&loaded.config),
+                        "onboarding": output::render_onboarding_json(&loaded, &validation),
                         "validation": validation,
                     }))?
                 );
@@ -864,10 +919,13 @@ fn config_cmd(command: ConfigCommand) -> Result<()> {
                         "workspace_config_path": loaded.workspace_config_path,
                         "user_config_path": loaded.user_config_path,
                         "sources": loaded.sources,
+                        "config": redact_mosaic_config(&loaded.config),
+                        "onboarding": output::render_onboarding_json(&loaded, &validation),
+                        "validation": validation,
                     }))?
                 );
             } else {
-                println!("{}", output::render_config_sources(&loaded));
+                println!("{}", output::render_config_sources(&loaded, &validation));
                 print_next_steps(["mosaic config show", "mosaic setup validate"]);
             }
             Ok(())
@@ -1122,9 +1180,27 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
             let loaded = ensure_loaded_config(None)?;
             let registry = ProviderProfileRegistry::from_config(&loaded.config)?;
             let profiles = registry.list();
+            let validation = validate_mosaic_config(&loaded.config);
+            let active = registry.active_profile();
+            let active_state = if active.usage == ProviderUsage::DevOnlyMock {
+                "dev-mock"
+            } else if validation.issues.iter().any(|issue| {
+                issue.field == "active_profile"
+                    || issue
+                        .field
+                        .starts_with(&format!("profiles.{}.", active.name))
+            }) {
+                "pending-provider-configuration"
+            } else if active.api_key_env.is_some() && !active.api_key_present() {
+                "pending-provider-credentials"
+            } else {
+                "ready"
+            };
 
             println!("model summary:");
             println!("  active_profile: {}", loaded.config.active_profile);
+            println!("  active_profile_usage: {}", active.usage.label());
+            println!("  onboarding_state: {}", active_state);
             println!("  profile_count: {}", profiles.len());
             println!("profiles:");
             for profile in profiles {
@@ -1134,9 +1210,10 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
                     ' '
                 };
                 println!(
-                    "  {} {} | type={} | model={} | family={} | tools={} | sessions={} | context_window_chars={} | budget_tier={} | api_key_env={:?} | api_key_present={}",
+                    "  {} {} | usage={} | type={} | model={} | family={} | tools={} | sessions={} | context_window_chars={} | budget_tier={} | api_key_env={:?} | api_key_present={}",
                     marker,
                     profile.name,
+                    profile.usage.label(),
                     profile.provider_type,
                     profile.model,
                     profile.capabilities.family,
@@ -2167,11 +2244,34 @@ mod tests {
 
     #[test]
     fn parses_setup_subcommands() {
-        let cli = Cli::parse_from(["mosaic", "setup", "init", "--force"]);
+        let cli = Cli::parse_from([
+            "mosaic",
+            "setup",
+            "init",
+            "--force",
+            "--profile",
+            "anthropic-sonnet",
+        ]);
         assert_eq!(
             cli.dispatch(),
             DispatchCommand::Setup {
-                command: SetupCommand::Init { force: true },
+                command: SetupCommand::Init {
+                    force: true,
+                    profile: Some("anthropic-sonnet".to_owned()),
+                    dev_mock: false,
+                },
+            }
+        );
+
+        let cli = Cli::parse_from(["mosaic", "setup", "init", "--dev-mock"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Setup {
+                command: SetupCommand::Init {
+                    force: false,
+                    profile: None,
+                    dev_mock: true,
+                },
             }
         );
 
@@ -2350,6 +2450,8 @@ mod tests {
         let help = subcommand_help("setup");
         assert!(help.contains("When to use it"));
         assert!(help.contains("diagnose why Mosaic will not start cleanly"));
+        assert!(help.contains("mosaic setup init --profile anthropic-sonnet"));
+        assert!(help.contains("mosaic setup init --dev-mock"));
     }
 
     #[test]
@@ -2383,6 +2485,7 @@ mod tests {
             "docs/channels.md",
             "docs/full-stack.md",
             "docs/real-vs-mock-acceptance.md",
+            "docs/residual-mock-first-audit.md",
             "docs/provider-runtime-policy-matrix.md",
             "docs/writer-ownership.md",
             "docs/deployment.md",
@@ -2472,6 +2575,7 @@ mod tests {
             "docs/channels.md",
             "docs/full-stack.md",
             "docs/real-vs-mock-acceptance.md",
+            "docs/residual-mock-first-audit.md",
             "docs/provider-runtime-policy-matrix.md",
             "docs/writer-ownership.md",
             "docs/session-inspect-incident.md",

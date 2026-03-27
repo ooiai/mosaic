@@ -93,7 +93,7 @@ This creates:
 
 ### 2. Configure a provider
 
-Open `.mosaic/config.yaml` and replace the default `mock` profile with a real profile, or merge one of the provider examples from [`examples/providers/`](./examples/providers/README.md).
+Open `.mosaic/config.yaml` and finish the real-provider-first template, or merge one of the provider examples from [`examples/providers/`](./examples/providers/README.md). If you want a local dev-only lane without credentials, re-run `mosaic setup init --dev-mock`.
 
 For OpenAI:
 
@@ -161,6 +161,7 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [Channel Setup](./docs/channels.md)
 - [Full-Stack Guide](./docs/full-stack.md)
 - [Real vs Mock Acceptance](./docs/real-vs-mock-acceptance.md)
+- [Residual Mock-First Audit](./docs/residual-mock-first-audit.md)
 - [Provider and Runtime Policy Matrix](./docs/provider-runtime-policy-matrix.md)
 - [Session, Inspect, and Incident Flow](./docs/session-inspect-incident.md)
 - [Writer Ownership](./docs/writer-ownership.md)
@@ -225,7 +226,7 @@ Mosaic is a Cargo workspace. The `cli/` crate is the composition root, while the
 
 Mosaic currently supports these provider modes in the runtime:
 
-- `mock`
+- `mock` via explicit `mosaic setup init --dev-mock`
 - `openai`
 - `azure`
 - `anthropic`

@@ -11,12 +11,12 @@ If you want the i2 no-mock acceptance path, start with:
 
 Mosaic validates and runs these provider types:
 
-- `mock`
 - `openai`
 - `azure`
 - `anthropic`
 - `ollama`
 - `openai-compatible`
+- `mock` for explicit dev-only lanes
 
 `openai-compatible` is supported, but it is not a substitute for real acceptance of the first-class vendors above.
 
@@ -119,13 +119,19 @@ profiles:
 
 ## Built-in mock provider
 
-The generated config starts on `mock` so you can explore the CLI and TUI without credentials.
+`mock` remains available for local smoke tests, but it is no longer the default onboarding path.
 
 ```yaml
 active_profile: mock
 ```
 
-Use `mock` for control-plane regression and local docs smoke tests. Do not use it as release acceptance evidence.
+Enable it explicitly with:
+
+```bash
+mosaic setup init --dev-mock
+```
+
+Use `mock` for control-plane regression and local docs smoke tests. Do not use it as onboarding default or release acceptance evidence.
 
 ## Transport and Vendor Policy
 

@@ -47,7 +47,13 @@ Sessions are shared state, not a CLI-specific implementation detail. `mosaic-run
 use mosaic_session_core::{FileSessionStore, SessionStore, SessionRecord};
 
 let store = FileSessionStore::new(".mosaic/sessions");
-let session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
+let session = SessionRecord::new(
+    "demo",
+    "Demo",
+    "demo-provider",
+    "openai",
+    "gpt-5.4-mini",
+);
 store.save(&session)?;
 let loaded = store.load("demo")?;
 ```

@@ -5,7 +5,7 @@ These examples bind one provider profile, one Gateway, one ingress path, one per
 Primary files:
 
 - `openai-webchat.config.yaml`: no-mock OpenAI + WebChat acceptance config
-- `mock-telegram.config.yaml`: local mock provider plus Telegram ingress secret
+- `mock-telegram.config.yaml`: local dev-only mock provider plus Telegram ingress secret
 - `openai-telegram.config.yaml`: OpenAI plus Telegram ingress secret for Telegram bot sign-off
 - `../channels/webchat-openai-message.json`: no-mock WebChat ingress payload
 - `../channels/telegram-update.json`: sample Telegram webhook payload
@@ -45,7 +45,7 @@ mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>
 ## Fast Local Dev Lane
 
 ```bash
-mosaic setup init
+mosaic setup init --dev-mock
 cp examples/full-stack/mock-telegram.config.yaml .mosaic/config.yaml
 export MOSAIC_TELEGRAM_SECRET_TOKEN=full-stack-secret
 mosaic setup validate
