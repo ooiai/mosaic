@@ -2,6 +2,8 @@
 
 This is the j5 Telegram-first release-blocking acceptance lane when Telegram is in release scope.
 
+If you have not created a Telegram bot before, start with [telegram-step-by-step.md](./telegram-step-by-step.md) first and then come back here for the stricter acceptance checklist.
+
 Use it when Telegram is a real release target and you need one repeatable path that proves:
 
 - a real Telegram user message reaches Mosaic

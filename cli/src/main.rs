@@ -2705,6 +2705,7 @@ mod tests {
             "docs/getting-started.md",
             "docs/cli.md",
             "docs/channels.md",
+            "docs/telegram-step-by-step.md",
             "docs/full-stack.md",
             "docs/telegram-real-e2e.md",
             "docs/real-vs-mock-acceptance.md",
@@ -2803,6 +2804,7 @@ mod tests {
             "docs/security.md",
             "docs/testing.md",
             "docs/channels.md",
+            "docs/telegram-step-by-step.md",
             "docs/full-stack.md",
             "docs/telegram-real-e2e.md",
             "docs/real-vs-mock-acceptance.md",
@@ -3028,6 +3030,7 @@ mod tests {
         let readme = fs::read_to_string(root.join("README.md")).expect("README should load");
         for required in [
             "docs/channels.md",
+            "docs/telegram-step-by-step.md",
             "docs/full-stack.md",
             "docs/telegram-real-e2e.md",
             "docs/real-vs-mock-acceptance.md",
@@ -3067,6 +3070,7 @@ mod tests {
             "examples/channels/telegram-update.json",
             "POST /ingress/webchat",
             "POST /ingress/telegram",
+            "telegram-step-by-step.md",
             "telegram-real-e2e.md",
         ] {
             assert!(
@@ -3122,6 +3126,43 @@ mod tests {
             assert!(
                 guide.contains(required),
                 "telegram real e2e guide missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn telegram_step_by_step_guide_covers_botfather_webhook_and_cli_verification() {
+        let root = repo_root();
+        let guide = fs::read_to_string(root.join("docs/telegram-step-by-step.md"))
+            .expect("telegram step-by-step guide should load");
+
+        for required in [
+            "# Telegram Step-by-Step Setup",
+            "https://t.me/BotFather",
+            "https://core.telegram.org/bots/tutorial#obtain-your-bot-token",
+            "MOSAIC_TELEGRAM_BOT_TOKEN",
+            "MOSAIC_PUBLIC_WEBHOOK_BASE_URL",
+            "MOSAIC_TELEGRAM_SECRET_TOKEN",
+            "mosaic setup init",
+            "openai-telegram-e2e.config.yaml",
+            "mosaic setup validate",
+            "mosaic setup doctor",
+            "mosaic adapter status",
+            "mosaic gateway serve --http 127.0.0.1:18080",
+            "cloudflared tunnel --url http://localhost:18080",
+            "ngrok http 18080",
+            "mosaic adapter telegram webhook set",
+            "mosaic adapter telegram webhook info",
+            "mosaic adapter telegram test-send --chat-id 123456789 \"hello from mosaic\"",
+            "conversation_id: telegram:chat:123456789",
+            "/mosaic tool read_file .mosaic/config.yaml",
+            "/mosaic skill summarize_notes",
+            "/mosaic workflow summarize_operator_note",
+            "mosaic gateway incident \"$RUN_ID\"",
+        ] {
+            assert!(
+                guide.contains(required),
+                "telegram step-by-step guide missing {required}"
             );
         }
     }

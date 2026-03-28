@@ -11,6 +11,7 @@ for path in \
     docs/security.md \
     docs/release.md \
     docs/testing.md \
+    docs/telegram-step-by-step.md \
     docs/compatibility.md \
     docs/upgrade.md \
     examples/deployment/README.md \

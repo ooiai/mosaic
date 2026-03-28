@@ -40,4 +40,6 @@ curl -X POST http://127.0.0.1:8080/ingress/telegram \
   --data @examples/channels/telegram-update.json
 ```
 
+If you are new to Telegram bot setup, continue with [../../docs/telegram-step-by-step.md](../../docs/telegram-step-by-step.md).
+
 For the full operator walkthrough, continue with [../full-stack/README.md](../full-stack/README.md).

@@ -4,6 +4,8 @@ This guide takes a new operator from a fresh checkout to a real Mosaic conversat
 
 If you want the complete provider + Gateway + channel + inspect path, continue with [full-stack.md](./full-stack.md) after this guide.
 
+If you specifically want to bring up a real Telegram bot from scratch, use [telegram-step-by-step.md](./telegram-step-by-step.md).
+
 ## Prerequisites
 
 - Rust toolchain installed
@@ -205,4 +207,5 @@ For the complete operator golden path, continue with:
 
 - [full-stack.md](./full-stack.md)
 - [channels.md](./channels.md)
+- [telegram-step-by-step.md](./telegram-step-by-step.md)
 - [session-inspect-incident.md](./session-inspect-incident.md)

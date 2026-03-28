@@ -160,6 +160,7 @@ mosaic run examples/time-now-agent.yaml --session quickstart
 - [TUI Guide](./docs/tui.md)
 - [Gateway Guide](./docs/gateway.md)
 - [Channel Setup](./docs/channels.md)
+- [Telegram Step-by-Step Setup](./docs/telegram-step-by-step.md)
 - [Full-Stack Guide](./docs/full-stack.md)
 - [Telegram Real E2E Runbook](./docs/telegram-real-e2e.md)
 - [Real vs Mock Acceptance](./docs/real-vs-mock-acceptance.md)
