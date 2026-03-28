@@ -19,6 +19,7 @@ for path in \
     scripts/release-smoke.sh \
     scripts/test-golden-examples.sh \
     scripts/test-real-integrations.sh \
+    scripts/verify-test-matrix.sh \
     scripts/verify-delivery-artifacts.sh
  do
     if [ ! -f "$ROOT/$path" ]; then
@@ -31,6 +32,7 @@ for path in \
     scripts/release-smoke.sh \
     scripts/test-golden-examples.sh \
     scripts/test-real-integrations.sh \
+    scripts/verify-test-matrix.sh \
     scripts/verify-delivery-artifacts.sh
 do
     if [ ! -x "$ROOT/$path" ]; then

@@ -1,6 +1,6 @@
 # Telegram Real E2E Runbook
 
-This is the j3 Telegram-first manual acceptance lane.
+This is the j5 Telegram-first release-blocking acceptance lane when Telegram is in release scope.
 
 Use it when Telegram is a real release target and you need one repeatable path that proves:
 
@@ -10,6 +10,19 @@ Use it when Telegram is a real release target and you need one repeatable path t
 - `session`, `inspect`, `audit`, `replay`, and `incident` all describe the same run truth
 
 This lane is intentionally no-mock. It does not use fake ingress or a mock provider.
+
+It is the primary product proof for these crates and surfaces:
+
+- `mosaic-channel-telegram`
+- `mosaic-gateway`
+- `mosaic-runtime`
+- `mosaic-tool-core`
+- `mosaic-skill-core`
+- `mosaic-workflow`
+- `mosaic-session-core`
+- `mosaic-inspect`
+- `mosaic-extension-core`
+- `mosaic-cli`
 
 Related files:
 

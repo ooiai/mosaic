@@ -1,54 +1,83 @@
 # Real vs Mock Acceptance Matrix
 
-This document is the source of truth for i2 acceptance.
+This document is the release-facing summary of the j5 testing model.
 
-Mosaic keeps mock paths for fast local iteration, but mock paths are not stage-completion evidence.
+Mosaic keeps mock paths for speed, but mock paths are never product evidence by themselves.
 
-## Rule
+## Rules
 
-- Mock paths are allowed for fast regression and docs smoke tests.
-- Mock paths are not release-blocking acceptance.
-- Release-blocking acceptance must use a real provider, a real protocol surface, and real saved artifacts.
-- Manual operator acceptance may still be required for channels that depend on public callbacks or third-party bot infrastructure.
+- Mock is allowed for fast regression and docs smoke loops.
+- Mock is not valid release-blocking acceptance evidence.
+- `protocol-real` proves a transport or contract boundary.
+- `product-real` proves a real operator story with real artifacts.
+- `release-blocking acceptance` is the subset of real lanes that must pass before shipping the scoped release target.
 
-## Matrix
+## Classification Matrix
 
 | Surface | Path | Classification | Command / Artifact | Notes |
 | --- | --- | --- | --- | --- |
-| provider smoke | `mock` provider | dev-only | `cargo test -p mosaic-provider --test integration_mock_provider` | Keeps fast local regression coverage |
-| provider vendors | OpenAI / Azure / Anthropic / Ollama | release-blocking real | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | Requires secrets or local Ollama |
-| provider payload shaping | local HTTP capture servers | local integration | `cargo test -p mosaic-provider --lib` | Validates protocol formatting, not upstream behavior |
-| gateway protocol | HTTP + SSE through SDK | release-blocking real | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | Real server, real port, real client |
-| MCP transport | stdio subprocess manager | release-blocking real | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | Real subprocess, not mocked transport |
-| webchat ingress | `POST /ingress/webchat` | release-blocking real | `MOSAIC_REAL_TESTS=1 ./scripts/test-full-stack-example.sh openai-webchat` | Primary no-mock full-stack lane |
-| telegram ingress | local webhook path with normalized update | real protocol, not final external acceptance | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-gateway --test real_telegram_ingress -- --nocapture` | Real HTTP handler and persisted session, but not a live bot webhook |
-| telegram bot delivery | bot token + public webhook endpoint | manual real acceptance | [docs/telegram-real-e2e.md](./telegram-real-e2e.md) | Required before shipping Telegram as a production ingress |
-| full-stack example | mock provider + Telegram payload | dev-only golden path | `./scripts/test-full-stack-example.sh mock` | Keeps docs/examples runnable without secrets |
-| full-stack example | OpenAI + WebChat ingress | release-blocking real | `MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat` | Setup -> gateway -> ingress -> session -> inspect -> incident |
+| provider smoke | `mock` provider | dev-only | `cargo test -p mosaic-provider --test integration_mock_provider` | fast safety net only |
+| provider vendors | OpenAI / Azure / Anthropic / Ollama | protocol-real and release-blocking for provider compatibility | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | OpenAI is the default release provider lane |
+| gateway protocol | real HTTP + SSE through SDK | protocol-real and release-blocking | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | real server, real port, real SSE |
+| MCP transport | stdio subprocess manager | protocol-real and release-blocking | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | real subprocess transport |
+| webchat full stack | OpenAI + WebChat ingress + saved artifacts | product-real and automated release-blocking acceptance | `MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat` | primary automated no-mock lane |
+| telegram webhook contract | local real Telegram HTTP handler | protocol-real | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-gateway --test real_telegram_ingress -- --nocapture` | real handler, not a live bot |
+| Telegram-first acceptance | live bot token + public HTTPS webhook + OpenAI + CLI operator flow | product-real and operator-manual release-blocking acceptance | [telegram-real-e2e.md](./telegram-real-e2e.md) | required when Telegram is in release scope |
+| mock full stack | mock provider + Telegram sample payload | dev-only | `./scripts/test-full-stack-example.sh mock` | docs and example smoke only |
 
-## Release Gate
+## Release Roles
 
-The release-blocking real lane for i2 is:
+### Automated release-blocking lanes
 
-```bash
-MOSAIC_REAL_TESTS=1 make test-real
-```
+- OpenAI provider-real lane
+- `make test-matrix`
+- `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture`
+- `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture`
+- `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture`
+- `MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat`
 
-That lane must prove:
+### Operator-manual release-blocking sign-off
 
-- at least one first-class provider succeeds without mock data
-- Gateway HTTP and SSE work through the SDK
-- MCP works over a real stdio transport
-- the no-mock full-stack WebChat lane writes session, trace, audit, replay, and incident artifacts
+- Telegram-first release-blocking acceptance lane in [telegram-real-e2e.md](./telegram-real-e2e.md)
 
-## Manual Acceptance
+Use this lane when:
 
-The following are intentionally outside the default automated gate:
+- Telegram is a release target
+- outbound bot delivery must be proven against the real Telegram Bot API
+- the operator needs final evidence that `session`, `inspect`, `audit`, `replay`, and `incident` all match the live Telegram conversation
 
-- live Telegram bot webhook validation
-- externally routed public webhook infrastructure
-- vendor accounts that are unavailable in the current environment
+### Compatibility addendum lanes
 
-When one of these surfaces is a release target, document the operator runbook and record the artifact path used for acceptance.
+- Azure real vendor path
+- Anthropic real vendor path
+- Ollama local real-model path
 
-For Telegram-first sign-off, use [telegram-real-e2e.md](./telegram-real-e2e.md).
+These remain real tests, but they are compatibility proof rather than the main operator story.
+
+## What Still Uses Mock
+
+Mock is intentionally retained for:
+
+- fast unit and local integration safety nets
+- docs smoke paths that must run without secrets
+- the explicit dev-only mock full-stack example
+
+Mock is intentionally not used for:
+
+- the primary OpenAI provider lane
+- the OpenAI + WebChat full-stack release lane
+- the Telegram-first acceptance lane
+
+## Telegram Release Scope
+
+When Telegram is in release scope, release sign-off is not complete until the Telegram-first runbook is executed and the operator records the saved artifact paths.
+
+That sign-off should capture:
+
+- the session id
+- the run trace path
+- the incident bundle path
+- the webhook info output
+- the CLI commands used for verification
+
+For the detailed operator procedure, use [telegram-real-e2e.md](./telegram-real-e2e.md).

@@ -70,6 +70,7 @@ cargo run -p mosaic-cli -- --help
 ```bash
 make build
 make check
+make test-matrix
 make test-golden
 make smoke
 make release-check

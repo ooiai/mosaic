@@ -2725,6 +2725,7 @@ mod tests {
             "examples/full-stack/openai-webchat.config.yaml",
             "examples/deployment/production.config.yaml",
             "make release-check",
+            "make test-matrix",
             "make test-golden",
         ] {
             assert!(readme.contains(required), "README missing {required}");
@@ -2757,6 +2758,7 @@ mod tests {
             "mosaic inspect .mosaic/runs/<run-id>.json --json",
             "Operator Groupings",
             "make release-check",
+            "make test-matrix",
             "make test-golden",
             "make test-real",
             "make package",
@@ -2772,12 +2774,16 @@ mod tests {
         for required in [
             "make test-unit",
             "make test-integration",
+            "make test-matrix",
             "make test-golden",
             "MOSAIC_REAL_TESTS=1 make test-real",
             "./scripts/test-full-stack-example.sh mock",
             "OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat",
-            "Per-Crate Matrix",
-            "Release-Blocking Real Lanes",
+            "Crate-by-Crate Product Proof Matrix",
+            "Release Roles",
+            "protocol-real",
+            "product-real",
+            "release-blocking acceptance",
             "Flaky Test Policy",
         ] {
             assert!(
@@ -2825,6 +2831,7 @@ mod tests {
             "scripts/test-full-stack-example.sh",
             "scripts/test-golden-examples.sh",
             "scripts/test-real-integrations.sh",
+            "scripts/verify-test-matrix.sh",
             "scripts/verify-delivery-artifacts.sh",
         ] {
             assert!(
@@ -3115,6 +3122,71 @@ mod tests {
             assert!(
                 guide.contains(required),
                 "telegram real e2e guide missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn testing_release_and_provider_docs_define_j5_real_acceptance_matrix() {
+        let root = repo_root();
+
+        let testing =
+            fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
+        for required in [
+            "protocol-real",
+            "product-real",
+            "release-blocking acceptance",
+            "Crate-by-Crate Product Proof Matrix",
+            "Telegram-first release-blocking acceptance lane",
+            "mosaic-config",
+            "mosaic-provider",
+            "mosaic-runtime",
+            "mosaic-tool-core",
+            "mosaic-skill-core",
+            "mosaic-workflow",
+            "mosaic-extension-core",
+            "mosaic-gateway",
+            "mosaic-session-core",
+            "mosaic-inspect",
+            "mosaic-control-protocol",
+            "mosaic-sdk",
+            "mosaic-channel-telegram",
+        ] {
+            assert!(
+                testing.contains(required),
+                "testing guide missing {required}"
+            );
+        }
+
+        let release =
+            fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
+        for required in [
+            "make test-matrix",
+            "MOSAIC_REAL_TESTS=1 make test-real",
+            "Telegram-first release-blocking acceptance lane",
+            "Compatibility addendum lanes",
+            "mosaic adapter telegram webhook info",
+        ] {
+            assert!(
+                release.contains(required),
+                "release guide missing {required}"
+            );
+        }
+
+        let providers = fs::read_to_string(root.join("docs/providers.md"))
+            .expect("providers guide should load");
+        for required in [
+            "Vendor Real Proof Lanes",
+            "OpenAI",
+            "Azure OpenAI",
+            "Anthropic",
+            "Ollama",
+            "testing.md",
+            "release.md",
+        ] {
+            assert!(
+                providers.contains(required),
+                "providers guide missing {required}"
             );
         }
     }

@@ -1,6 +1,10 @@
 # Examples Testing
 
-## Fast example checks
+This file explains how the repo examples map into the j5 test matrix.
+
+## Fast local example checks
+
+These are safety-net flows, not release evidence by themselves.
 
 `basic-agent.yaml`
 
@@ -36,19 +40,54 @@
 
 运行：`cargo run -p mosaic-cli -- inspect .mosaic/runs/<trace-id>.json`
 
-`full-stack mock`
+## Dev-only full-stack lane
 
 运行：`./scripts/test-full-stack-example.sh mock`
 
-预期：启动本地 HTTP Gateway，经由 Telegram ingress 产生 `telegram--100123-99` session、trace、audit/replay 和 incident bundle；该 lane 为显式 dev-only mock，不作为 release evidence。
+预期：启动本地 HTTP Gateway，经由 Telegram ingress 产生 `telegram--100123-99` session、trace、audit/replay 和 incident bundle。
 
-`telegram real e2e`
+说明：该 lane 为显式 dev-only mock，不作为 release evidence。
+
+## Automated no-mock release lane
+
+运行：
+
+```bash
+MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat
+```
+
+预期：
+
+- real OpenAI provider
+- real WebChat ingress
+- real session / trace / audit / replay / incident artifacts
+- `mosaic inspect ... --verbose` 能看到真实 provider 与 runtime policy
+
+## Telegram-first release-blocking lane
 
 运行：参考 `docs/telegram-real-e2e.md`
 
-预期：真实 Telegram bot webhook、真实 OpenAI provider、真实 `time_now` / `read_file` / `summarize_notes` / `summarize_operator_note` 都在同一条 Telegram 会话里被验证，并且 `session`、`inspect`、`audit`、`replay`、`incident` 一致。
+预期：
 
-## Delivery smoke
+- 真实 Telegram bot webhook
+- 真实 OpenAI provider
+- 真实 `time_now` / `read_file`
+- 真实 `summarize_notes` / `summarize_operator_note`
+- `session`、`inspect`、`audit`、`replay`、`incident` 一致
+
+## Matrix and release checks
+
+测试矩阵一致性：
+
+```bash
+make test-matrix
+```
+
+黄金路径文档与示例：
+
+```bash
+make test-golden
+```
 
 仓库级 smoke：
 

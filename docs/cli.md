@@ -292,6 +292,12 @@ Run the golden example and docs verification lane:
 make test-golden
 ```
 
+Run the test-matrix consistency lane:
+
+```bash
+make test-matrix
+```
+
 Run gated real integration tests when credentials or local daemons are available:
 
 ```bash

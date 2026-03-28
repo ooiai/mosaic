@@ -1,205 +1,181 @@
 # Testing Guide
 
-Mosaic treats testing as a layered system instead of a single `cargo test` bucket.
+Mosaic testing is not one bucket of `cargo test`. It is a product-proof system with fixed layers, fixed release roles, and an explicit mapping from each key crate to at least one real or quasi-real acceptance lane.
 
-The goal of this guide is to make four things explicit:
-
-- which tests are fast and always-on
-- which tests are true integration tests
-- which tests are gated behind real services, secrets, or local daemons
-- which lanes are release-blocking real acceptance and which are mock-only safety nets
+This document is the source of truth for j5.
 
 See also:
 
 - [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
-- [provider-runtime-policy-matrix.md](./provider-runtime-policy-matrix.md)
+- [telegram-real-e2e.md](./telegram-real-e2e.md)
+- [providers.md](./providers.md)
+- [release.md](./release.md)
 
-## Layers
+## Fixed Layers
 
-Mosaic uses four test layers.
+Mosaic uses five test layers.
 
-| Layer | Purpose | Default command | External dependencies |
+| Layer | Meaning | Typical command | What is allowed |
 | --- | --- | --- | --- |
-| unit | validate isolated logic and small contracts | `make test-unit` | none |
-| local integration | exercise crate public APIs, file IO, local HTTP, subprocesses, and registry wiring | `make test-integration` | local process only |
-| real integration | run true provider, gateway, ingress, or daemon paths when explicitly enabled | `MOSAIC_REAL_TESTS=1 make test-real` | secrets, services, or local daemons |
-| golden example verification | prove docs and examples still work from setup to inspect | `make test-golden` | local process only |
+| `unit` | isolated crate logic and small contracts | `make test-unit` | mocks and pure in-process fixtures |
+| `local integration` | public crate API, file IO, local HTTP, subprocesses, local persistence | `make test-integration` | local processes, local ports, local filesystem |
+| `protocol-real` | a real transport or protocol surface, but not necessarily the final external product environment | targeted `cargo test ... --test real_*` | real HTTP, SSE, stdio, webhook handlers, SDK clients |
+| `product-real` | a real provider, real channel or ingress shape, real persistence, real operator flow, real artifacts | `MOSAIC_REAL_TESTS=1 make test-real` or the Telegram runbook | no mock-only evidence |
+| `release-blocking acceptance` | the lanes that must be proven before shipping the scoped release target | `make test-matrix`, `MOSAIC_REAL_TESTS=1 make test-real`, plus Telegram manual sign-off when Telegram is in scope | real evidence only |
 
-## Release-Blocking Real Lanes
+Rules:
 
-These are the i2 release-blocking real checks:
+- Mock is acceptable in `unit` and selected `local integration` tests.
+- Mock is not acceptable as `product-real` or `release-blocking acceptance` evidence.
+- A `protocol-real` lane proves a contract boundary. It does not automatically prove the whole product story.
+- A `product-real` lane should write real session, trace, audit, replay, or incident artifacts whenever the surface supports them.
 
-| Lane | Command | Evidence |
+## Release Roles
+
+Mosaic uses three release roles for real testing.
+
+### 1. Automated release-blocking acceptance
+
+These lanes must pass in automation before a release is cut:
+
+| Lane | Command | Why it blocks release |
 | --- | --- | --- |
-| first-class vendors | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | OpenAI / Azure / Anthropic / Ollama requests succeed when configured |
-| gateway protocol | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | real HTTP server and SSE client path |
-| MCP transport | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | real stdio subprocess path |
-| no-mock full stack | `MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat` | setup -> gateway -> webchat ingress -> session -> inspect -> incident |
+| test matrix consistency | `make test-matrix` | proves docs, scripts, and release instructions still describe the same lanes |
+| OpenAI provider-real lane | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | proves at least one first-class external provider works without mock data |
+| Gateway protocol-real lane | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | proves real HTTP server and SSE client paths |
+| MCP protocol-real lane | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | proves real subprocess transport |
+| OpenAI + WebChat product-real lane | `MOSAIC_REAL_TESTS=1 ./scripts/test-full-stack-example.sh openai-webchat` | proves setup -> gateway -> ingress -> session -> inspect -> incident without mock |
 
-`./scripts/test-full-stack-example.sh mock` remains useful, but it is not release acceptance.
+### 2. Operator-manual release-blocking acceptance
 
-## Per-Crate Matrix
+These lanes are release-blocking when the feature is in scope, but they require operator-managed infrastructure:
 
-| Crate | Unit | Local Integration | Real Integration | Golden / Docs |
-| --- | --- | --- | --- | --- |
-| `mosaic-config` | inline unit tests | `crates/config/tests/integration_load_validate.rs` | no | `scripts/test-golden-examples.sh` |
-| `mosaic-provider` | inline unit tests | `crates/provider/tests/integration_mock_provider.rs` | `crates/provider/tests/real_vendors.rs` | provider examples and setup docs |
-| `mosaic-tool-core` | inline unit tests | `crates/tool-core/tests/integration_builtin_tools.rs` | optional via local `exec` and `webhook` services | example runs |
-| `mosaic-skill-core` | inline unit tests | `crates/skill-core/tests/integration_registry.rs` | no | workflow and skill examples |
-| `mosaic-workflow` | inline unit tests | `crates/workflow/tests/integration_runner.rs` | no | `examples/workflows/research-brief.yaml` |
-| `mosaic-session-core` | inline unit tests | `crates/session-core/tests/integration_file_store.rs` | no | session and inspect flows |
-| `mosaic-memory` | inline unit tests | `crates/memory/tests/integration_file_store.rs` | no | runtime session flows |
-| `mosaic-inspect` | inline unit tests | `crates/inspect/tests/integration_trace_roundtrip.rs` | no | inspect docs and golden scripts |
-| `mosaic-control-protocol` | inline unit tests | `crates/control-protocol/tests/integration_roundtrip.rs` | no | gateway and SDK flows |
-| `mosaic-sdk` | inline unit tests | `crates/sdk/tests/integration_client_transport.rs` | `crates/sdk/tests/real_gateway_http.rs` | gateway docs |
-| `mosaic-gateway` | inline unit tests | `crates/gateway/tests/integration_local_gateway.rs` | `crates/gateway/tests/real_telegram_ingress.rs` | webchat and telegram examples |
-| `mosaic-runtime` | inline unit tests | `crates/runtime/tests/integration_runtime_flow.rs` | covered indirectly by real provider and full-stack lanes | example runs |
-| `mosaic-mcp-core` | inline unit tests | `crates/mcp-core/tests/integration_manager.rs` | `crates/mcp-core/tests/real_stdio_mcp.rs` | `examples/mcp-filesystem.yaml` |
-| `mosaic-node-protocol` | inline unit tests | `crates/node-protocol/tests/integration_file_bus.rs` | no | node docs and CLI flows |
-| `mosaic-extension-core` | inline unit tests | `crates/extension-core/tests/integration_extension_set.rs` | no | extension examples |
-| `mosaic-scheduler-core` | inline unit tests | `crates/scheduler-core/tests/integration_file_store.rs` | no | cron flows |
-| `mosaic-channel-telegram` | inline unit tests | `crates/channel-telegram/tests/integration_payloads.rs` | gateway-level real webhook path | telegram ingress docs |
-| `mosaic-tui` | inline unit tests | `crates/tui/tests/integration_event_buffer.rs` | no | `mosaic tui` docs |
-| `mosaic-cli` | inline unit tests | command-path regression tests in `cli/src/main.rs` | no | `scripts/test-golden-examples.sh` |
+| Lane | Command / Runbook | Scope |
+| --- | --- | --- |
+| Telegram-first release-blocking acceptance lane | [telegram-real-e2e.md](./telegram-real-e2e.md) | required when Telegram is a release target |
+| live public webhook routing | operator-managed HTTPS reverse proxy or tunnel | required for Telegram bot acceptance |
+
+### 3. Compatibility addendum lanes
+
+These are real lanes, but they are compatibility proof rather than the default operator story:
+
+| Vendor | Command | Role |
+| --- | --- | --- |
+| Azure | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | vendor compatibility addendum |
+| Anthropic | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | vendor compatibility addendum |
+| Ollama | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | local real-model addendum |
+
+## Crate-by-Crate Product Proof Matrix
+
+Every key crate must map to a primary real proof lane or an explicit supplemental lane.
+
+| Crate | Primary proof lane | Supplemental lane | Highest classification |
+| --- | --- | --- | --- |
+| `mosaic-config` | `mosaic setup init`, `mosaic setup validate`, `mosaic setup doctor`, `mosaic config show` inside `./scripts/test-full-stack-example.sh openai-webchat` | [telegram-real-e2e.md](./telegram-real-e2e.md) workspace bootstrap | `release-blocking acceptance` |
+| `mosaic-provider` | `cargo test -p mosaic-provider --test real_vendors -- --nocapture` | OpenAI + WebChat full-stack and Telegram-first operator runbook | `release-blocking acceptance` |
+| `mosaic-runtime` | OpenAI + WebChat full-stack lane writes real session and trace artifacts | Telegram-first lane proves tool, skill, and workflow routing in a real channel session | `product-real` |
+| `mosaic-tool-core` | Telegram-first lane proves real `time_now` and `read_file` invocations | `crates/tool-core/tests/integration_builtin_tools.rs` for local exec/webhook coverage | `product-real` |
+| `mosaic-skill-core` | Telegram-first lane proves `/mosaic skill summarize_notes` in a real Telegram session | `crates/skill-core/tests/integration_registry.rs` | `product-real` |
+| `mosaic-workflow` | Telegram-first lane proves `/mosaic workflow summarize_operator_note` in a real Telegram session | `crates/workflow/tests/integration_runner.rs` | `product-real` |
+| `mosaic-extension-core` | Telegram-first lane loads `examples/extensions/telegram-e2e.yaml` and exposes capabilities through Gateway and CLI | `crates/extension-core/tests/integration_extension_set.rs` | `product-real` |
+| `mosaic-gateway` | OpenAI + WebChat full-stack lane proves real HTTP, session, audit, replay, and incident flow | Telegram-first lane proves live Telegram webhook ingress and outbound reply | `release-blocking acceptance` |
+| `mosaic-session-core` | OpenAI + WebChat full-stack lane proves persisted sessions and routing metadata | Telegram-first lane proves persisted Telegram session continuity | `product-real` |
+| `mosaic-inspect` | OpenAI + WebChat full-stack lane proves saved trace and incident export | Telegram-first lane proves operator-facing `inspect --verbose` against live Telegram artifacts | `product-real` |
+| `mosaic-control-protocol` | `cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` proves the real control-plane DTO path | CLI attach flows and remote Gateway operator commands | `protocol-real` |
+| `mosaic-sdk` | `cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | remote operator attach commands in CLI and TUI | `protocol-real` |
+| `mosaic-channel-telegram` | `cargo test -p mosaic-gateway --test real_telegram_ingress -- --nocapture` proves the real webhook contract path | Telegram-first lane proves live inbound normalize plus outbound reply | `product-real` |
+| `mosaic-mcp-core` | `cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | `examples/mcp-filesystem.yaml` golden path | `protocol-real` |
+| `mosaic-memory` | OpenAI + WebChat full-stack and Telegram-first lanes persist real session memory and references | `crates/memory/tests/integration_file_store.rs` | `product-real` |
+| `mosaic-node-protocol` | local integration file-bus tests | node operator flows in CLI | `local integration` |
+| `mosaic-scheduler-core` | local integration cron store tests | CLI cron flows | `local integration` |
+| `mosaic-cli` | `make test-golden`, `make test-matrix`, and the Telegram-first runbook | command regression tests in `cli/src/main.rs` | `release-blocking acceptance` |
+| `mosaic-tui` | local operator-console tests | remote attach and session refresh tests | `local integration` |
+
+Interpretation:
+
+- Telegram-first is the primary product proof for `tool-core`, `skill-core`, `workflow`, `extension-core`, `channel-telegram`, and most operator-facing CLI behavior.
+- OpenAI + WebChat is the primary automated no-mock release lane for `config`, `gateway`, `runtime`, `session-core`, and `inspect`.
+- Provider vendor breadth is carried by `real_vendors.rs`, not by forcing every vendor through the Telegram lane.
+- `node-protocol`, `scheduler-core`, and `tui` are not currently proven by the Telegram-first release lane; their highest proof class remains local integration until a broader real product lane is added.
+
+## Telegram-First Release Lane
+
+The Telegram-first release-blocking acceptance lane proves:
+
+- real OpenAI provider
+- real Telegram inbound message
+- real Telegram outbound reply
+- real builtin tool path
+- real manifest skill path
+- real workflow path
+- real session persistence
+- real inspect, audit, replay, and incident artifacts
+- real CLI operator flow for setup, webhook management, and diagnosis
+
+Use [telegram-real-e2e.md](./telegram-real-e2e.md) as the operator runbook. That runbook is the product-level proof for Telegram. Do not replace it with mock payloads when Telegram is in scope.
 
 ## Commands
 
-Fast local loop:
+Fast local safety net:
 
 ```bash
 make test-unit
 make test-integration
 ```
 
-Golden docs and examples:
+Docs, examples, and matrix consistency:
 
 ```bash
+make test-matrix
 make test-golden
-```
-
-Real integration lane:
-
-```bash
-MOSAIC_REAL_TESTS=1 make test-real
-```
-
-Pull-request style lane:
-
-```bash
-make ci-fast
-```
-
-Operator lane with real secrets and services:
-
-```bash
-MOSAIC_REAL_TESTS=1 make ci-real
-```
-
-## Environment Gates
-
-All real tests are disabled unless `MOSAIC_REAL_TESTS=1`.
-
-Real tests then opt into additional vendor or channel checks based on the secrets that are present:
-
-| Variable | Meaning |
-| --- | --- |
-| `MOSAIC_REAL_TESTS` | master switch for real integration tests |
-| `OPENAI_API_KEY` | enable OpenAI provider real test and the no-mock full-stack lane |
-| `AZURE_OPENAI_API_KEY` | enable Azure provider real test |
-| `ANTHROPIC_API_KEY` | enable Anthropic provider real test |
-| `MOSAIC_TEST_OPENAI_BASE_URL` | optional OpenAI base URL override for real OpenAI lanes |
-| `MOSAIC_TEST_OPENAI_MODEL` | optional OpenAI model override for real OpenAI lanes |
-| `MOSAIC_TEST_AZURE_BASE_URL` | required Azure endpoint for Azure real test |
-| `MOSAIC_TEST_AZURE_MODEL` | optional Azure deployment override for the Azure real test |
-| `MOSAIC_TEST_ANTHROPIC_BASE_URL` | optional Anthropic base URL override |
-| `MOSAIC_TEST_ANTHROPIC_MODEL` | optional Anthropic model override for the Anthropic real test |
-| `MOSAIC_TEST_OLLAMA_BASE_URL` | optional Ollama endpoint override, defaults to `http://127.0.0.1:11434` |
-| `MOSAIC_TEST_OLLAMA_MODEL` | Ollama model name for real test, defaults to `llama3.1` |
-| `MOSAIC_TEST_TELEGRAM_SECRET` | optional shared secret header for the real Telegram ingress test |
-| `MOSAIC_WEBCHAT_SHARED_SECRET` | shared secret used by the no-mock WebChat full-stack lane |
-| `MOSAIC_FULL_STACK_PORT` | optional override for the full-stack Gateway HTTP port |
-| `MOSAIC_OPERATOR_TOKEN` | optional operator auth token for remote gateway SDK tests |
-
-## Secrets and Service Conventions
-
-- Provider secrets are never committed. Real tests read them from environment variables only.
-- Vendor-specific base URLs are configurable so the same test can target direct APIs, proxies, or private gateways.
-- Local daemons such as Ollama are treated as real integrations when the process is external to the test run.
-- MCP real tests spawn an actual subprocess and communicate over stdio instead of mocking the transport.
-- Gateway real tests boot an actual HTTP server and consume real SSE frames through the SDK client.
-- Telegram bot token and public webhook validation remain a manual operator acceptance lane unless the environment can expose a reachable webhook endpoint.
-- The canonical manual Telegram bot acceptance runbook lives in [telegram-real-e2e.md](./telegram-real-e2e.md).
-
-## Golden Examples and Docs
-
-`scripts/test-golden-examples.sh` is the docs/examples gate.
-
-It verifies:
-
-- `mosaic setup init`
-- `mosaic setup validate`
-- `mosaic setup doctor`
-- mock-backed example runs
-- workflow example execution
-- MCP example execution
-- the mock full-stack Gateway + Telegram path through `scripts/test-full-stack-example.sh mock`
-- trace inspection after a real run artifact exists
-
-This keeps `README.md`, `examples/`, and the operator getting-started path runnable.
-
-It is intentionally not the final acceptance gate because it still includes the mock full-stack lane.
-
-## CI Strategy
-
-Recommended CI split:
-
-1. `ci-fast`
-   Run on every push and pull request.
-   Includes `check`, unit tests, local integration tests, and golden examples.
-
-2. `ci-real`
-   Run on a scheduled lane, protected branch, or manual dispatch.
-   Requires secrets and any local daemons such as Ollama.
-
-3. Provider-specific spot checks
-   Run when rotating credentials, changing provider payloads, or upgrading SDK dependencies.
-
-## Flaky Test Policy
-
-- A real test may skip when its required secret or daemon is absent.
-- A local integration test must not depend on public internet access.
-- If a test is flaky because of timing, prefer longer readiness polling or explicit process health checks over blind retries.
-- If a real upstream API becomes unstable, quarantine only the affected `real_*` test file and keep `ci-fast` green.
-- Do not silently downgrade a real test into a mock test. If the dependency disappears, the test should skip with a clear reason.
-
-## Adding New Tests
-
-When you add a new crate or operator surface:
-
-1. add or update a `tests/` integration file under the owning crate
-2. decide whether the test is local integration or real integration
-3. document any new env or secret in this file
-4. wire the command into `scripts/test-real-integrations.sh` or `scripts/test-golden-examples.sh` if it is part of a repo-wide lane
-
-## Full-Stack Example Verification
-
-Dev-only path:
-
-```bash
 ./scripts/test-full-stack-example.sh mock
 ```
 
-Release-blocking real path:
+Automated real lanes:
 
 ```bash
+MOSAIC_REAL_TESTS=1 make test-real
 MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat
 ```
 
-This script verifies:
+Telegram-first operator sign-off:
 
-- setup and validation
-- Gateway HTTP serve
-- ingress normalization
-- session persistence
-- inspect trace generation
-- audit, replay, and incident export
+```bash
+See docs/telegram-real-e2e.md
+```
+
+## Environment and Secrets
+
+Real lanes are enabled by `MOSAIC_REAL_TESTS=1`, then narrowed by the secrets and services that are present.
+
+| Variable | Purpose |
+| --- | --- |
+| `OPENAI_API_KEY` | OpenAI provider-real lane and the OpenAI + WebChat full-stack lane |
+| `AZURE_OPENAI_API_KEY` | Azure compatibility addendum |
+| `ANTHROPIC_API_KEY` | Anthropic compatibility addendum |
+| `MOSAIC_TEST_OLLAMA_BASE_URL` / `MOSAIC_TEST_OLLAMA_MODEL` | Ollama local real-model addendum |
+| `MOSAIC_WEBCHAT_SHARED_SECRET` | OpenAI + WebChat full-stack ingress |
+| `MOSAIC_TELEGRAM_BOT_TOKEN` | Telegram-first manual acceptance and CLI webhook management |
+| `MOSAIC_TELEGRAM_SECRET_TOKEN` | Telegram webhook auth |
+| `MOSAIC_PUBLIC_WEBHOOK_BASE_URL` | Telegram-first live webhook registration |
+| `MOSAIC_OPERATOR_TOKEN` | optional remote Gateway operator auth |
+
+## Flaky Test Policy
+
+- A real lane may skip when its required secret, daemon, or public endpoint is absent.
+- A local integration lane must not depend on public internet access.
+- If a real upstream API is unstable, quarantine only the affected real lane instead of silently replacing it with mock coverage.
+- If timing is the issue, prefer readiness polling and explicit health checks over blind retry loops.
+- Do not claim release acceptance based on a skipped Telegram-first lane when Telegram is in release scope.
+
+## Updating the Matrix
+
+When you add a new crate, protocol surface, or acceptance story:
+
+1. decide its highest proof class
+2. update the crate row in this document
+3. update [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md) if release roles changed
+4. update [release.md](./release.md) if release-blocking or operator-manual sign-off changed
+5. update `scripts/verify-test-matrix.sh` so repo automation enforces the same story
+
+Do not add a real test without recording where it fits in the product proof system. Do not claim release acceptance based only on mock data.

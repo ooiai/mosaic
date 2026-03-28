@@ -1,6 +1,13 @@
 # Release
 
-This guide defines the release checklist for Mosaic as a deliverable self-hosted product.
+This guide defines the release gate for Mosaic as a self-hosted agent control plane.
+
+As of j5, release sign-off is not just `cargo test`. It is a combination of:
+
+- workspace verification
+- matrix consistency checks
+- automated no-mock real lanes
+- operator-manual acceptance when a scoped channel requires it
 
 ## Automated gate
 
@@ -10,13 +17,48 @@ Run the delivery gate before cutting a release:
 make release-check
 ```
 
-This currently verifies:
+The release gate must cover:
 
-- workspace build
-- workspace check
-- workspace tests
-- delivery artifact presence
-- isolated smoke flow in a temporary workspace
+```bash
+make check
+make test
+make test-matrix
+make test-golden
+MOSAIC_REAL_TESTS=1 make test-real
+make smoke
+make package
+```
+
+## Release roles
+
+### Automated release-blocking lanes
+
+These are required on every release:
+
+- `make test-matrix`
+- `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture`
+- `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture`
+- `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture`
+- `MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat`
+
+### Operator-manual release-blocking sign-off
+
+When Telegram is in release scope, this is also required:
+
+- Telegram-first release-blocking acceptance lane
+- execute [telegram-real-e2e.md](./telegram-real-e2e.md)
+- record the session id, trace path, and incident bundle path
+- record the `mosaic adapter telegram webhook info` output used for sign-off
+
+### Compatibility addendum lanes
+
+These are real lanes, but they are compatibility evidence rather than the main product story:
+
+- Azure OpenAI vendor lane
+- Anthropic vendor lane
+- Ollama local real-model lane
+
+Review them whenever the release includes provider-facing changes.
 
 ## Release checklist
 
@@ -26,26 +68,64 @@ Confirm these are present and up to date:
 
 - `README.md`
 - `.env.example`
-- `docs/deployment.md`
-- `docs/operations.md`
-- `docs/security.md`
+- `docs/testing.md`
+- `docs/real-vs-mock-acceptance.md`
+- `docs/telegram-real-e2e.md`
+- `docs/providers.md`
 - `docs/release.md`
-- `docs/compatibility.md`
-- `docs/upgrade.md`
-- `examples/deployment/production.config.yaml`
-- `examples/deployment/mosaic.service`
+- `examples/full-stack/openai-webchat.config.yaml`
+- `examples/full-stack/openai-telegram-e2e.config.yaml`
+- `examples/extensions/telegram-e2e.yaml`
+- `scripts/test-real-integrations.sh`
+- `scripts/test-full-stack-example.sh`
+- `scripts/verify-test-matrix.sh`
 
-### 2. Validation and smoke
+### 2. Workspace verification
 
 Run:
 
 ```bash
 make check
 make test
-make smoke
+make test-matrix
+make test-golden
 ```
 
-### 3. Packaging
+### 3. Real automated acceptance
+
+Run:
+
+```bash
+MOSAIC_REAL_TESTS=1 make test-real
+```
+
+This should prove:
+
+- the OpenAI provider-real lane
+- the Gateway real HTTP + SSE lane
+- the MCP real stdio lane
+- the OpenAI + WebChat product-real lane
+
+### 4. Operator-manual sign-off
+
+If Telegram is in the release scope, also run the full Telegram-first acceptance flow:
+
+```bash
+See docs/telegram-real-e2e.md
+```
+
+At minimum, re-check:
+
+- `mosaic setup validate`
+- `mosaic setup doctor`
+- `mosaic adapter status`
+- `mosaic adapter telegram webhook info`
+- `mosaic adapter telegram test-send --chat-id <chat-id> "mosaic outbound smoke"`
+- `mosaic session show <session-id>`
+- `mosaic inspect .mosaic/runs/<run-id>.json --verbose`
+- `mosaic gateway incident <run-id>`
+
+### 5. Packaging
 
 Build the release bundle:
 
@@ -55,19 +135,12 @@ make package
 
 Verify that the tarball under `dist/` contains the binary, docs, examples, and `.env.example`.
 
-### 4. Manual signoff
+### 6. Version and compatibility review
 
-At minimum, re-check:
+Review these before publishing release notes:
 
-- `mosaic setup init`
-- `mosaic setup validate`
-- `mosaic setup doctor`
-- `mosaic tui`
-- `mosaic session list`
-- `mosaic gateway status`
-- `mosaic gateway incident <run-id>`
-- `mosaic inspect .mosaic/runs/<run-id>.json`
-
-### 5. Version and compatibility review
-
-Review [compatibility.md](./compatibility.md) and [upgrade.md](./upgrade.md) before publishing release notes.
+- [testing.md](./testing.md)
+- [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
+- [providers.md](./providers.md)
+- [compatibility.md](./compatibility.md)
+- [upgrade.md](./upgrade.md)

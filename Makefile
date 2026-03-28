@@ -60,6 +60,7 @@ endef
 	test \
 	test-unit \
 	test-integration \
+	test-matrix \
 	test-real \
 	test-golden \
 	ci-fast \
@@ -79,6 +80,7 @@ help: ## Show available Make targets.
 	@printf "  make test\n"
 	@printf "  make test-unit\n"
 	@printf "  make test-integration\n"
+	@printf "  make test-matrix\n"
 	@printf "  make test-golden\n"
 	@printf "  MOSAIC_REAL_TESTS=1 make test-real\n"
 	@printf "  make ci-fast\n"
@@ -171,6 +173,11 @@ test-integration: ## Run local integration tests.
 test-golden: ## Run golden example and docs command verification.
 	./scripts/test-golden-examples.sh
 
+# Notes: Verify the crate-to-acceptance mapping and release matrix docs stay in sync.
+# Usage: make test-matrix
+test-matrix: ## Run acceptance-matrix consistency checks.
+	./scripts/verify-test-matrix.sh
+
 # Notes: Run real integration tests when MOSAIC_REAL_TESTS=1 and any required secrets are present.
 # Usage: MOSAIC_REAL_TESTS=1 make test-real
 test-real: ## Run gated real integration tests.
@@ -182,6 +189,7 @@ ci-fast: ## Run the fast CI verification lane.
 	$(MAKE) check
 	$(MAKE) test-unit
 	$(MAKE) test-integration
+	$(MAKE) test-matrix
 	$(MAKE) test-golden
 
 # Notes: Optional CI lane for real service checks with secrets and local daemons.
@@ -198,6 +206,7 @@ smoke: ## Run the release smoke script in a temporary workspace.
 # Usage: make release-check
 release-check: ## Run delivery artifact checks, verify, and smoke.
 	./scripts/verify-delivery-artifacts.sh
+	$(MAKE) test-matrix
 	$(MAKE) verify
 	$(MAKE) smoke
 

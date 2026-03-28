@@ -145,7 +145,7 @@ Use this path when Telegram is a real release target and you have:
 - a reachable HTTPS webhook endpoint
 - a workspace configured from [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
 
-This is a manual operator acceptance flow, not the default automated real-test lane.
+This is a manual operator acceptance flow. When Telegram is in release scope, it becomes a release-blocking operator sign-off lane instead of an optional walkthrough.
 
 For the complete Telegram-first runbook, use [telegram-real-e2e.md](./telegram-real-e2e.md).
 

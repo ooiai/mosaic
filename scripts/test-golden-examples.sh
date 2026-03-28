@@ -12,9 +12,11 @@ run_cli() {
     cargo run --manifest-path "$ROOT/Cargo.toml" -p mosaic-cli -- "$@"
 }
 
+sh "$ROOT/scripts/verify-test-matrix.sh" >/dev/null
+
 ln -s "$ROOT/examples" "$WORKDIR/examples"
 ln -s "$ROOT/scripts" "$WORKDIR/scripts"
-ln -s "$ROOT/README.md" "$WORKDIR/README.md"
+cp "$ROOT/README.md" "$WORKDIR/README.md"
 
 cd "$WORKDIR"
 

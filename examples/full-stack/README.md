@@ -76,7 +76,7 @@ mosaic setup doctor
 mosaic model list
 ```
 
-Use this config when you are validating a real Telegram bot webhook outside the default repo automation.
+Use this config when you are validating a real Telegram bot webhook outside the default repo automation. When Telegram is a release target, this validation path is part of release sign-off rather than an optional demo.
 
 ## Telegram-First Real Acceptance Lane
 

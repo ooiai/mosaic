@@ -1,11 +1,12 @@
 # Providers
 
-This guide explains how provider configuration works in Mosaic.
+This guide explains how provider configuration works in Mosaic and how each first-class provider is proven in the real test matrix.
 
 If you want the i2 no-mock acceptance path, start with:
 
 - [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
 - [docs/full-stack.md](./full-stack.md)
+- [docs/testing.md](./testing.md)
 
 ## Current provider types
 
@@ -19,6 +20,19 @@ Mosaic validates and runs these provider types:
 - `mock` for explicit dev-only lanes
 
 `openai-compatible` is supported, but it is not a substitute for real acceptance of the first-class vendors above.
+
+## Vendor Real Proof Lanes
+
+This is the provider addendum matrix for j5.
+
+| Provider | Primary role | Real proof lane | Release role |
+| --- | --- | --- | --- |
+| OpenAI | default operator provider and Telegram-first default provider | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` and `MOSAIC_REAL_TESTS=1 ./scripts/test-full-stack-example.sh openai-webchat` | automated release-blocking |
+| Azure OpenAI | first-class vendor compatibility | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | compatibility addendum |
+| Anthropic | first-class vendor compatibility | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | compatibility addendum |
+| Ollama | local real-model compatibility | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | compatibility addendum |
+
+OpenAI is the default provider for the automated no-mock full-stack lane and for the Telegram-first acceptance runbook.
 
 ## OpenAI
 
@@ -43,6 +57,7 @@ export OPENAI_API_KEY=your_api_key_here
 Full-stack no-mock example:
 
 - [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
+- [docs/telegram-real-e2e.md](./telegram-real-e2e.md) when Telegram is in scope
 
 ## Azure OpenAI
 
@@ -202,3 +217,9 @@ mosaic inspect .mosaic/runs/<run-id>.json --verbose
 ```
 
 For the no-mock full provider + Gateway + ingress walkthrough, continue with [full-stack.md](./full-stack.md).
+
+For provider release roles and acceptance scope, continue with:
+
+- [testing.md](./testing.md)
+- [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
+- [release.md](./release.md)
