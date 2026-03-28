@@ -57,11 +57,36 @@ pub(crate) async fn session_cmd(attach: Option<String>, command: SessionCommand)
             println!("run_updated_at: {:?}", session.run.updated_at);
             println!("session_route: {}", session.gateway.route);
             println!("channel: {:?}", session.channel_context.channel);
+            println!("adapter: {:?}", session.channel_context.adapter);
             println!("actor_id: {:?}", session.channel_context.actor_id);
             println!("actor_name: {:?}", session.channel_context.actor_name);
+            println!(
+                "conversation_id: {:?}",
+                session.channel_context.conversation_id
+            );
             println!("thread_id: {:?}", session.channel_context.thread_id);
             println!("thread_title: {:?}", session.channel_context.thread_title);
             println!("reply_target: {:?}", session.channel_context.reply_target);
+            println!(
+                "last_message_id: {:?}",
+                session.channel_context.last_message_id
+            );
+            println!(
+                "last_delivery_id: {:?}",
+                session.channel_context.last_delivery_id
+            );
+            println!(
+                "last_delivery_status: {:?}",
+                session.channel_context.last_delivery_status
+            );
+            println!(
+                "last_delivery_error: {:?}",
+                session.channel_context.last_delivery_error
+            );
+            println!(
+                "last_delivery_at: {:?}",
+                session.channel_context.last_delivery_at
+            );
             println!(
                 "last_gateway_run_id: {:?}",
                 session.gateway.last_gateway_run_id
@@ -133,11 +158,36 @@ fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
     println!("run_updated_at: {:?}", session.run.updated_at);
     println!("session_route: {}", session.gateway.route);
     println!("channel: {:?}", session.channel_context.channel);
+    println!("adapter: {:?}", session.channel_context.adapter);
     println!("actor_id: {:?}", session.channel_context.actor_id);
     println!("actor_name: {:?}", session.channel_context.actor_name);
+    println!(
+        "conversation_id: {:?}",
+        session.channel_context.conversation_id
+    );
     println!("thread_id: {:?}", session.channel_context.thread_id);
     println!("thread_title: {:?}", session.channel_context.thread_title);
     println!("reply_target: {:?}", session.channel_context.reply_target);
+    println!(
+        "last_message_id: {:?}",
+        session.channel_context.last_message_id
+    );
+    println!(
+        "last_delivery_id: {:?}",
+        session.channel_context.last_delivery_id
+    );
+    println!(
+        "last_delivery_status: {:?}",
+        session.channel_context.last_delivery_status
+    );
+    println!(
+        "last_delivery_error: {:?}",
+        session.channel_context.last_delivery_error
+    );
+    println!(
+        "last_delivery_at: {:?}",
+        session.channel_context.last_delivery_at
+    );
     println!(
         "last_gateway_run_id: {:?}",
         session.gateway.last_gateway_run_id

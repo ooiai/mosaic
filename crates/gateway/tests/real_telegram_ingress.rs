@@ -76,7 +76,7 @@ async fn real_telegram_ingress_path_normalizes_and_persists_session_when_enabled
     assert_eq!(session.channel_context.channel.as_deref(), Some("telegram"));
     assert_eq!(
         session.channel_context.reply_target.as_deref(),
-        Some("telegram:chat:-10042:thread:7")
+        Some("telegram:chat:-10042:thread:7:message:11")
     );
 
     let _ = shutdown_tx.send(());

@@ -145,6 +145,26 @@ impl GatewayHandle {
             components.audit.redact_inputs,
         );
         self.emit(run_record_envelope(&record));
+        if let Some(ingress) = request.ingress.clone() {
+            self.record_audit_event(
+                "channel.inbound_received",
+                "accepted",
+                redact_audit_input(&request.input, components.audit.redact_inputs),
+                request.session_id.clone(),
+                Some(gateway_run_id.clone()),
+                Some(correlation_id.clone()),
+                Some(&ingress),
+                ingress
+                    .conversation_id
+                    .clone()
+                    .or_else(|| ingress.reply_target.clone()),
+                components.audit.redact_inputs,
+            );
+            self.emit(meta.envelope(GatewayEvent::InboundReceived {
+                ingress,
+                text_preview: truncate_preview(&request.input, 120),
+            }));
+        }
         self.emit(meta.envelope(GatewayEvent::RunSubmitted {
             input: request.input.clone(),
             profile: resolved_profile,
@@ -187,8 +207,8 @@ impl GatewayHandle {
             };
 
             let outcome = tokio::select! {
-                _ = wait_for_cancellation(cancel_rx) => finalize_canceled(state.clone(), meta.clone(), &request_for_task),
-                result = runtime.run(run_request) => finalize_run(state.clone(), meta.clone(), result),
+                _ = wait_for_cancellation(cancel_rx) => finalize_canceled(state.clone(), meta.clone(), &request_for_task).await,
+                result = runtime.run(run_request) => finalize_run(state.clone(), meta.clone(), result).await,
             };
             state
                 .active_runs

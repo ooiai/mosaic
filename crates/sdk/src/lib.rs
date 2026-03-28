@@ -399,13 +399,20 @@ mod tests {
                 ingress: Some(IngressTrace {
                     kind: "remote_operator".to_owned(),
                     channel: Some("cli".to_owned()),
+                    adapter: Some("cli_remote".to_owned()),
                     source: Some("mosaic-cli".to_owned()),
                     remote_addr: None,
                     display_name: None,
                     actor_id: None,
+                    conversation_id: None,
                     thread_id: None,
                     thread_title: None,
                     reply_target: None,
+                    message_id: None,
+                    received_at: None,
+                    raw_event_id: None,
+                    session_hint: Some("remote-demo".to_owned()),
+                    profile_hint: None,
                     gateway_url: Some(base_url.clone()),
                 }),
             })
@@ -473,9 +480,13 @@ mod tests {
                 profile: None,
                 display_name: Some("guest".to_owned()),
                 actor_id: Some("guest-1".to_owned()),
+                conversation_id: None,
                 thread_id: Some("room-7".to_owned()),
                 thread_title: Some("Launch Room".to_owned()),
                 reply_target: Some("webchat:guest-1".to_owned()),
+                message_id: None,
+                received_at: None,
+                raw_event_id: None,
                 ingress: None,
             })
             .await
@@ -488,7 +499,7 @@ mod tests {
                 .ingress
                 .as_ref()
                 .map(|trace| trace.kind.as_str()),
-            Some("webchat")
+            Some("webchat_http")
         );
 
         let _ = shutdown.send(());

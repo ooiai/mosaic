@@ -26,11 +26,15 @@ fn normalizes_a_realistic_telegram_webhook_payload() {
 
     let normalized = normalize_update(update).expect("payload should normalize");
 
-    assert_eq!(normalized.session_id, "telegram--100200300-77");
+    assert_eq!(
+        normalized.session_hint.as_deref(),
+        Some("telegram--100200300-77")
+    );
     assert_eq!(normalized.thread_id.as_deref(), Some("77"));
+    assert_eq!(normalized.conversation_id, "telegram:chat:-100200300");
     assert_eq!(
         normalized.reply_target,
-        "telegram:chat:-100200300:thread:77"
+        "telegram:chat:-100200300:thread:77:message:501"
     );
     assert_eq!(normalized.display_name.as_deref(), Some("Mosaic Operator"));
 }

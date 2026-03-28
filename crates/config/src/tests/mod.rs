@@ -298,14 +298,23 @@ fn validate_reports_missing_azure_base_url() {
 fn doctor_redacts_profiles_and_reports_missing_active_api_key() {
     let mut config = MosaicConfig::default();
     config.active_profile = "gpt-5.4".to_owned();
+    config
+        .profiles
+        .get_mut("gpt-5.4")
+        .expect("default gpt-5.4 profile should exist")
+        .api_key_env = Some("MOSAIC_TEST_DOCTOR_MISSING_KEY".to_owned());
     let dir = temp_dir("doctor");
+    unsafe {
+        std::env::remove_var("MOSAIC_TEST_DOCTOR_MISSING_KEY");
+    }
 
     let doctor = doctor_mosaic_config(&config, &dir);
     let redacted = redact_mosaic_config(&config);
 
     assert!(doctor.has_errors());
     assert!(doctor.checks.iter().any(|check| {
-        check.message.contains("OPENAI_API_KEY") && matches!(check.status, DoctorStatus::Error)
+        check.message.contains("MOSAIC_TEST_DOCTOR_MISSING_KEY")
+            && matches!(check.status, DoctorStatus::Error)
     }));
     assert_eq!(redacted.active_profile, "gpt-5.4");
     assert!(

@@ -5,7 +5,10 @@ use mosaic_inspect::{RunLifecycleStatus, RunTrace};
 use mosaic_runtime::events::RunEvent;
 use serde::{Deserialize, Serialize};
 
-pub use mosaic_inspect::IngressTrace;
+pub use mosaic_inspect::{
+    ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace, ChannelOutboundMessage,
+    IngressTrace,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HealthResponse {
@@ -95,9 +98,29 @@ pub struct AdapterStatusDto {
     pub channel: String,
     pub transport: String,
     pub ingress_path: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     pub outbound_ready: bool,
     pub status: String,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelInboundMessage {
+    pub channel: String,
+    pub adapter: String,
+    pub actor_id: Option<String>,
+    pub display_name: Option<String>,
+    pub conversation_id: String,
+    pub thread_id: Option<String>,
+    pub thread_title: Option<String>,
+    pub reply_target: String,
+    pub message_id: String,
+    pub text: String,
+    pub profile_hint: Option<String>,
+    pub session_hint: Option<String>,
+    pub received_at: DateTime<Utc>,
+    pub raw_event_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -151,6 +174,8 @@ pub struct RunSummaryDto {
 pub struct RunDetailDto {
     pub summary: RunSummaryDto,
     pub ingress: Option<IngressTrace>,
+    #[serde(default)]
+    pub outbound_deliveries: Vec<ChannelDeliveryTrace>,
     pub submission: RunSubmission,
 }
 
@@ -246,18 +271,27 @@ pub struct ExtensionStatusDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InboundMessage {
     pub session_id: Option<String>,
+    #[serde(alias = "text")]
     pub input: String,
     pub profile: Option<String>,
     pub display_name: Option<String>,
     pub actor_id: Option<String>,
+    pub conversation_id: Option<String>,
     pub thread_id: Option<String>,
     pub thread_title: Option<String>,
     pub reply_target: Option<String>,
+    pub message_id: Option<String>,
+    pub received_at: Option<DateTime<Utc>>,
+    pub raw_event_id: Option<String>,
     pub ingress: Option<IngressTrace>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum GatewayEvent {
+    InboundReceived {
+        ingress: IngressTrace,
+        text_preview: String,
+    },
     RunSubmitted {
         input: String,
         profile: String,
@@ -285,6 +319,12 @@ pub enum GatewayEvent {
     },
     RunCompleted {
         output_preview: String,
+    },
+    OutboundDelivered {
+        delivery: ChannelDeliveryTrace,
+    },
+    OutboundFailed {
+        delivery: ChannelDeliveryTrace,
     },
     RunFailed {
         error: String,
@@ -366,12 +406,19 @@ pub struct SessionRunDto {
 pub struct SessionChannelDto {
     pub ingress_kind: Option<String>,
     pub channel: Option<String>,
+    pub adapter: Option<String>,
     pub source: Option<String>,
     pub actor_id: Option<String>,
     pub actor_name: Option<String>,
+    pub conversation_id: Option<String>,
     pub thread_id: Option<String>,
     pub thread_title: Option<String>,
     pub reply_target: Option<String>,
+    pub last_message_id: Option<String>,
+    pub last_delivery_id: Option<String>,
+    pub last_delivery_status: Option<String>,
+    pub last_delivery_error: Option<String>,
+    pub last_delivery_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -419,13 +466,20 @@ mod tests {
             ingress: Some(IngressTrace {
                 kind: "remote_operator".to_owned(),
                 channel: Some("cli".to_owned()),
+                adapter: Some("cli_remote".to_owned()),
                 source: Some("mosaic-cli".to_owned()),
                 remote_addr: None,
                 display_name: None,
                 actor_id: None,
+                conversation_id: None,
                 thread_id: None,
                 thread_title: None,
                 reply_target: None,
+                message_id: None,
+                received_at: None,
+                raw_event_id: None,
+                session_hint: None,
+                profile_hint: None,
                 gateway_url: Some("http://127.0.0.1:8080".to_owned()),
             }),
         };
@@ -477,13 +531,20 @@ mod tests {
                 ingress: Some(IngressTrace {
                     kind: "webchat".to_owned(),
                     channel: Some("webchat".to_owned()),
+                    adapter: Some("webchat_http".to_owned()),
                     source: Some("browser".to_owned()),
                     remote_addr: None,
                     display_name: Some("guest".to_owned()),
                     actor_id: Some("guest-1".to_owned()),
+                    conversation_id: Some("webchat:lobby".to_owned()),
                     thread_id: Some("room-7".to_owned()),
                     thread_title: Some("Launch Room".to_owned()),
                     reply_target: Some("webchat:guest-1".to_owned()),
+                    message_id: Some("message-1".to_owned()),
+                    received_at: Some(Utc::now()),
+                    raw_event_id: Some("event-1".to_owned()),
+                    session_hint: Some("webchat-demo".to_owned()),
+                    profile_hint: None,
                     gateway_url: None,
                 }),
             },

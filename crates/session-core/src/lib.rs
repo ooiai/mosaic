@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
-use mosaic_inspect::{IngressTrace, RunLifecycleStatus};
+use mosaic_inspect::{ChannelDeliveryTrace, IngressTrace, RunLifecycleStatus};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -100,12 +100,19 @@ pub struct SessionGatewayMetadata {
 pub struct SessionChannelMetadata {
     pub ingress_kind: Option<String>,
     pub channel: Option<String>,
+    pub adapter: Option<String>,
     pub source: Option<String>,
     pub actor_id: Option<String>,
     pub actor_name: Option<String>,
+    pub conversation_id: Option<String>,
     pub thread_id: Option<String>,
     pub thread_title: Option<String>,
     pub reply_target: Option<String>,
+    pub last_message_id: Option<String>,
+    pub last_delivery_id: Option<String>,
+    pub last_delivery_status: Option<String>,
+    pub last_delivery_error: Option<String>,
+    pub last_delivery_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -221,12 +228,27 @@ impl SessionRecord {
     pub fn bind_ingress_context(&mut self, ingress: &IngressTrace) {
         self.channel_context.ingress_kind = Some(ingress.kind.clone());
         self.channel_context.channel = ingress.channel.clone();
+        self.channel_context.adapter = ingress.adapter.clone();
         self.channel_context.source = ingress.source.clone();
         self.channel_context.actor_id = ingress.actor_id.clone();
         self.channel_context.actor_name = ingress.display_name.clone();
+        self.channel_context.conversation_id = ingress.conversation_id.clone();
         self.channel_context.thread_id = ingress.thread_id.clone();
         self.channel_context.thread_title = ingress.thread_title.clone();
         self.channel_context.reply_target = ingress.reply_target.clone();
+        self.channel_context.last_message_id = ingress.message_id.clone();
+        self.updated_at = Utc::now();
+    }
+
+    pub fn bind_delivery_context(&mut self, delivery: &ChannelDeliveryTrace) {
+        self.channel_context.channel = Some(delivery.message.channel.clone());
+        self.channel_context.adapter = Some(delivery.message.adapter.clone());
+        self.channel_context.conversation_id = Some(delivery.message.conversation_id.clone());
+        self.channel_context.reply_target = Some(delivery.message.reply_target.clone());
+        self.channel_context.last_delivery_id = Some(delivery.result.delivery_id.clone());
+        self.channel_context.last_delivery_status = Some(delivery.result.status.label().to_owned());
+        self.channel_context.last_delivery_error = delivery.result.error.clone();
+        self.channel_context.last_delivery_at = delivery.result.delivered_at;
         self.updated_at = Utc::now();
     }
 
@@ -508,13 +530,20 @@ mod tests {
         session.bind_ingress_context(&IngressTrace {
             kind: "webchat".to_owned(),
             channel: Some("webchat".to_owned()),
+            adapter: Some("webchat_http".to_owned()),
             source: Some("browser".to_owned()),
             remote_addr: None,
             display_name: Some("Guest".to_owned()),
             actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:lobby".to_owned()),
             thread_id: Some("room-7".to_owned()),
             thread_title: Some("Launch Room".to_owned()),
             reply_target: Some("webchat:guest-1".to_owned()),
+            message_id: Some("message-1".to_owned()),
+            received_at: Some(Utc::now()),
+            raw_event_id: Some("event-1".to_owned()),
+            session_hint: Some("demo".to_owned()),
+            profile_hint: None,
             gateway_url: None,
         });
         session.set_last_run_id("run-1");
@@ -532,6 +561,10 @@ mod tests {
         assert_eq!(summary.message_count, 2);
         assert_eq!(summary.last_message_preview.as_deref(), Some("world"));
         assert_eq!(summary.channel_context.channel.as_deref(), Some("webchat"));
+        assert_eq!(
+            summary.channel_context.conversation_id.as_deref(),
+            Some("webchat:lobby")
+        );
         assert_eq!(summary.channel_context.actor_id.as_deref(), Some("guest-1"));
         assert_eq!(summary.channel_context.thread_id.as_deref(), Some("room-7"));
         assert_eq!(summary.session_route, session_route_for_id("demo"));

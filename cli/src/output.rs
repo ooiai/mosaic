@@ -554,11 +554,21 @@ pub fn render_inspect_report(
             vec![
                 ("kind", ingress.kind.clone()),
                 ("channel", option_string(ingress.channel.clone())),
+                ("adapter", option_string(ingress.adapter.clone())),
                 ("source", option_string(ingress.source.clone())),
                 ("actor_id", option_string(ingress.actor_id.clone())),
                 ("display_name", option_string(ingress.display_name.clone())),
+                (
+                    "conversation_id",
+                    option_string(ingress.conversation_id.clone()),
+                ),
                 ("thread_id", option_string(ingress.thread_id.clone())),
                 ("reply_target", option_string(ingress.reply_target.clone())),
+                ("message_id", option_string(ingress.message_id.clone())),
+                ("received_at", option_datetime(ingress.received_at)),
+                ("raw_event_id", option_string(ingress.raw_event_id.clone())),
+                ("session_hint", option_string(ingress.session_hint.clone())),
+                ("profile_hint", option_string(ingress.profile_hint.clone())),
                 ("gateway_url", option_string(ingress.gateway_url.clone())),
             ],
         ));
@@ -691,6 +701,30 @@ pub fn render_inspect_report(
                     attempt.retryable,
                     option_string(attempt.message.clone()),
                 ))
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    if !trace.outbound_deliveries.is_empty() {
+        blocks.push(render_list_block(
+            "outbound deliveries",
+            trace
+                .outbound_deliveries
+                .iter()
+                .map(|delivery| {
+                    format!(
+                        "channel={} | adapter={} | target={} | status={} | retries={} | provider_message_id={} | error_kind={} | error={} | delivered_at={}",
+                        delivery.message.channel,
+                        delivery.message.adapter,
+                        delivery.message.reply_target,
+                        delivery.result.status.label(),
+                        delivery.result.retry_count,
+                        option_string(delivery.result.provider_message_id.clone()),
+                        option_string(delivery.result.error_kind.clone()),
+                        option_string(delivery.result.error.clone()),
+                        option_datetime(delivery.result.delivered_at),
+                    )
+                })
                 .collect::<Vec<_>>(),
         ));
     }
@@ -1493,6 +1527,7 @@ mod tests {
             session_id: Some("session-1".to_owned()),
             session_route: Some("gateway.local/session-1".to_owned()),
             ingress: None,
+            outbound_deliveries: vec![],
             workflow_name: Some("research_brief".to_owned()),
             started_at,
             finished_at: Some(finished_at),

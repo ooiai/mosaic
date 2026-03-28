@@ -20,14 +20,17 @@ use axum::{
 };
 use chrono::Utc;
 use futures::stream;
-use mosaic_channel_telegram::{TelegramUpdate, normalize_update as normalize_telegram_update};
+use mosaic_channel_telegram::{
+    TelegramOutboundClient, TelegramUpdate, normalize_update as normalize_telegram_update,
+};
 use mosaic_config::{
     AppConfig, AuditConfig, AuthConfig, DeploymentConfig, LoadConfigOptions, ObservabilityConfig,
     PolicyConfig, load_mosaic_config,
 };
 use mosaic_control_protocol::{
-    AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, CronRegistrationRequest,
-    ErrorResponse, EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
+    AdapterStatusDto, CapabilityJobDto, ChannelDeliveryTrace, ChannelInboundMessage,
+    ChannelOutboundMessage, CronRegistrationDto, CronRegistrationRequest, ErrorResponse,
+    EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
     GatewayAuditEventDto, GatewayEvent, HealthResponse, InboundMessage, IncidentBundleDto,
     MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunDetailDto, RunResponse,
     RunSubmission, RunSummaryDto, SessionChannelDto, SessionDetailDto, SessionGatewayDto,
@@ -269,6 +272,8 @@ struct StoredRunRecord {
     failure_kind: Option<String>,
     trace_path: Option<String>,
     ingress: Option<IngressTrace>,
+    #[serde(default)]
+    outbound_deliveries: Vec<ChannelDeliveryTrace>,
     submission: RunSubmission,
 }
 
@@ -303,6 +308,7 @@ impl StoredRunRecord {
             failure_kind: None,
             trace_path: None,
             ingress: request.ingress.clone(),
+            outbound_deliveries: Vec::new(),
             submission: request.clone(),
         }
     }
@@ -333,6 +339,7 @@ impl StoredRunRecord {
         self.error = trace.error.clone();
         self.failure_kind = trace.failure.as_ref().map(|failure| failure.kind.clone());
         self.trace_path = trace_path.map(|path| path.display().to_string());
+        self.outbound_deliveries = trace.outbound_deliveries.clone();
         if let Some(profile) = trace.effective_profile.as_ref() {
             self.effective_profile = Some(profile.profile.clone());
             self.effective_provider_type = Some(profile.provider_type.clone());
@@ -370,6 +377,7 @@ impl StoredRunRecord {
         RunDetailDto {
             summary: self.summary_dto(),
             ingress: self.ingress.clone(),
+            outbound_deliveries: self.outbound_deliveries.clone(),
             submission: self.submission.clone(),
         }
     }
@@ -955,13 +963,20 @@ impl GatewayHandle {
             ingress: Some(IngressTrace {
                 kind: "cron".to_owned(),
                 channel: Some("cron".to_owned()),
+                adapter: Some("cron_schedule".to_owned()),
                 source: Some(registration.id.clone()),
                 remote_addr: None,
                 display_name: None,
                 actor_id: None,
+                conversation_id: Some(format!("cron:{}", registration.id)),
                 thread_id: None,
                 thread_title: None,
                 reply_target: None,
+                message_id: None,
+                received_at: None,
+                raw_event_id: None,
+                session_hint: registration.session_id.clone(),
+                profile_hint: registration.profile.clone(),
                 gateway_url: None,
             }),
         })?
@@ -1193,18 +1208,18 @@ impl RunEventSink for GatewayRunEventSink {
     }
 }
 
-fn finalize_run(
+async fn finalize_run(
     state: Arc<GatewayState>,
     meta: GatewayRunMeta,
     outcome: std::result::Result<RunResult, RunError>,
 ) -> Result<GatewayRunResult, GatewayRunError> {
     match outcome {
-        Ok(result) => finalize_success(state, meta, result),
-        Err(err) => finalize_failure(state, meta, err),
+        Ok(result) => finalize_success(state, meta, result).await,
+        Err(err) => finalize_failure(state, meta, err).await,
     }
 }
 
-fn finalize_success(
+async fn finalize_success(
     state: Arc<GatewayState>,
     meta: GatewayRunMeta,
     result: RunResult,
@@ -1224,6 +1239,10 @@ fn finalize_success(
         event_replay_window: components.audit.event_replay_window,
         redact_inputs: components.audit.redact_inputs,
     });
+    let delivery_traces = dispatch_outbound_replies(state.as_ref(), &meta, &result.output).await;
+    for delivery in delivery_traces.iter().cloned() {
+        trace.add_outbound_delivery(delivery);
+    }
     let trace_path = trace
         .save_to_dir(&components.runs_dir)
         .map_err(|err| GatewayRunError {
@@ -1254,6 +1273,7 @@ fn finalize_success(
         RunLifecycleStatus::Success,
         None,
         None,
+        delivery_traces.last(),
     );
 
     increment_metric(state.as_ref(), |metrics| metrics.completed_runs_total += 1);
@@ -1277,6 +1297,9 @@ fn finalize_success(
         Some(trace_path.display().to_string()),
         false,
     );
+    for delivery in &delivery_traces {
+        record_channel_delivery_outcome(state.as_ref(), &meta, delivery);
+    }
     broadcast_envelope(
         state.as_ref(),
         meta.envelope(GatewayEvent::RunCompleted { output_preview }),
@@ -1301,7 +1324,7 @@ fn finalize_success(
     })
 }
 
-fn finalize_failure(
+async fn finalize_failure(
     state: Arc<GatewayState>,
     meta: GatewayRunMeta,
     err: RunError,
@@ -1352,6 +1375,7 @@ fn finalize_failure(
         RunLifecycleStatus::Failed,
         trace.error.clone(),
         failure_kind.clone(),
+        None,
     );
 
     increment_metric(state.as_ref(), |metrics| metrics.failed_runs_total += 1);
@@ -1401,7 +1425,7 @@ fn finalize_failure(
     })
 }
 
-fn finalize_canceled(
+async fn finalize_canceled(
     state: Arc<GatewayState>,
     meta: GatewayRunMeta,
     request: &RunSubmission,
@@ -1460,6 +1484,7 @@ fn finalize_canceled(
         RunLifecycleStatus::Canceled,
         trace.error.clone(),
         Some("canceled".to_owned()),
+        None,
     );
     increment_metric(state.as_ref(), |metrics| metrics.canceled_runs_total += 1);
     record_audit_event(
@@ -1500,6 +1525,131 @@ fn finalize_canceled(
     })
 }
 
+fn build_outbound_message(meta: &GatewayRunMeta, output: &str) -> Option<ChannelOutboundMessage> {
+    let ingress = meta.ingress.as_ref()?;
+    let channel = ingress.channel.clone()?;
+    let adapter = ingress
+        .adapter
+        .clone()
+        .unwrap_or_else(|| ingress.kind.clone());
+    let conversation_id = ingress.conversation_id.clone()?;
+    let reply_target = ingress.reply_target.clone()?;
+    let session_id = meta.session_id.clone()?;
+
+    Some(ChannelOutboundMessage {
+        channel,
+        adapter,
+        conversation_id,
+        reply_target,
+        text: output.to_owned(),
+        idempotency_key: format!("{}:{}", meta.gateway_run_id, meta.correlation_id),
+        correlation_id: meta.correlation_id.clone(),
+        gateway_run_id: meta.gateway_run_id.clone(),
+        session_id,
+    })
+}
+
+async fn dispatch_outbound_replies(
+    _state: &GatewayState,
+    meta: &GatewayRunMeta,
+    output: &str,
+) -> Vec<ChannelDeliveryTrace> {
+    let Some(message) = build_outbound_message(meta, output) else {
+        return Vec::new();
+    };
+
+    match message.channel.as_str() {
+        "telegram" => vec![dispatch_telegram_reply(message).await],
+        _ => Vec::new(),
+    }
+}
+
+async fn dispatch_telegram_reply(message: ChannelOutboundMessage) -> ChannelDeliveryTrace {
+    let Some(client) = TelegramOutboundClient::from_env().unwrap_or_else(|err| {
+        warn!(error = %err, "failed to initialize telegram outbound client");
+        None
+    }) else {
+        return ChannelDeliveryTrace {
+            message,
+            result: mosaic_inspect::ChannelDeliveryResult {
+                delivery_id: Uuid::new_v4().to_string(),
+                status: mosaic_inspect::ChannelDeliveryStatus::Failed,
+                provider_message_id: None,
+                retry_count: 0,
+                retryable: false,
+                error_kind: Some("auth".to_owned()),
+                error: Some(
+                    "telegram outbound replies require TELEGRAM_BOT_TOKEN or MOSAIC_TELEGRAM_BOT_TOKEN"
+                        .to_owned(),
+                ),
+                delivered_at: None,
+            },
+        };
+    };
+
+    client.send_message(message).await
+}
+
+fn record_channel_delivery_outcome(
+    state: &GatewayState,
+    meta: &GatewayRunMeta,
+    delivery: &ChannelDeliveryTrace,
+) {
+    let (kind, outcome, summary, event) = match delivery.result.status {
+        mosaic_inspect::ChannelDeliveryStatus::Delivered => (
+            "channel.outbound_delivered",
+            "success",
+            format!(
+                "{} -> {}",
+                delivery.message.reply_target,
+                delivery
+                    .result
+                    .provider_message_id
+                    .clone()
+                    .unwrap_or_else(|| "<unknown>".to_owned())
+            ),
+            GatewayEvent::OutboundDelivered {
+                delivery: delivery.clone(),
+            },
+        ),
+        mosaic_inspect::ChannelDeliveryStatus::Failed => (
+            "channel.outbound_failed",
+            "failed",
+            format!(
+                "{} | kind={} | error={}",
+                delivery.message.reply_target,
+                delivery
+                    .result
+                    .error_kind
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                delivery
+                    .result
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "<unknown>".to_owned())
+            ),
+            GatewayEvent::OutboundFailed {
+                delivery: delivery.clone(),
+            },
+        ),
+    };
+
+    record_audit_event(
+        state,
+        kind,
+        outcome,
+        summary,
+        Some(delivery.message.session_id.clone()),
+        Some(meta.gateway_run_id.clone()),
+        Some(meta.correlation_id.clone()),
+        meta.ingress.as_ref(),
+        Some(delivery.message.reply_target.clone()),
+        false,
+    );
+    broadcast_envelope(state, meta.envelope(event));
+}
+
 fn update_gateway_session_metadata(
     state: &GatewayState,
     meta: &GatewayRunMeta,
@@ -1507,6 +1657,7 @@ fn update_gateway_session_metadata(
     status: RunLifecycleStatus,
     last_error: Option<String>,
     last_failure_kind: Option<String>,
+    last_delivery: Option<&ChannelDeliveryTrace>,
 ) -> Option<SessionSummary> {
     let session_id = meta.session_id.as_deref()?;
     let components = state.snapshot_components();
@@ -1524,6 +1675,9 @@ fn update_gateway_session_metadata(
         last_error,
         last_failure_kind,
     );
+    if let Some(delivery) = last_delivery {
+        session.bind_delivery_context(delivery);
+    }
     components.session_store.save(&session).ok()?;
     Some(session.summary())
 }

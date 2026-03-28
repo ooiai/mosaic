@@ -1,6 +1,6 @@
 use super::*;
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -12,6 +12,11 @@ use mosaic_provider::MockProvider;
 use mosaic_scheduler_core::FileCronStore;
 use mosaic_session_core::{SessionStore, TranscriptRole};
 use tokio::sync::oneshot;
+
+fn telegram_env_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn mock_profile_config() -> ProviderProfileConfig {
     ProviderProfileConfig {
@@ -348,11 +353,14 @@ async fn subscribe_broadcasts_submitted_runtime_and_session_events() {
         }
 
         match envelope.event {
+            GatewayEvent::InboundReceived { .. } => {}
             GatewayEvent::RunSubmitted { .. } => saw_submitted = true,
             GatewayEvent::Runtime(_) => saw_runtime = true,
             GatewayEvent::RunUpdated { .. } => saw_run_updated = true,
             GatewayEvent::SessionUpdated { .. } => saw_session_updated = true,
             GatewayEvent::RunCompleted { .. } => saw_completed = true,
+            GatewayEvent::OutboundDelivered { .. } => {}
+            GatewayEvent::OutboundFailed { .. } => {}
             GatewayEvent::RunFailed { .. } => {}
             GatewayEvent::CapabilityJobUpdated { .. } => {}
             GatewayEvent::CronUpdated { .. } => {}
@@ -633,9 +641,13 @@ async fn http_webchat_ingress_sets_webchat_trace_metadata() {
             profile: None,
             display_name: Some("guest".to_owned()),
             actor_id: Some("guest-1".to_owned()),
+            conversation_id: None,
             thread_id: Some("room-7".to_owned()),
             thread_title: Some("Launch Room".to_owned()),
             reply_target: Some("webchat:guest-1".to_owned()),
+            message_id: None,
+            received_at: None,
+            raw_event_id: None,
             ingress: None,
         })
         .send()
@@ -658,7 +670,7 @@ async fn http_webchat_ingress_sets_webchat_trace_metadata() {
             .ingress
             .as_ref()
             .map(|ingress| ingress.kind.as_str()),
-        Some("webchat")
+        Some("webchat_http")
     );
     assert_eq!(
         run.trace
@@ -669,6 +681,153 @@ async fn http_webchat_ingress_sets_webchat_trace_metadata() {
     );
 
     let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn telegram_inbound_run_records_outbound_delivery_audit_and_incident_trace() {
+    let _env_guard = telegram_env_lock()
+        .lock()
+        .expect("telegram env lock should not be poisoned");
+    let delivery_requests = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+    let api = axum::Router::new().route(
+        "/bottest-token/sendMessage",
+        axum::routing::post({
+            let delivery_requests = delivery_requests.clone();
+            move |axum::Json(payload): axum::Json<serde_json::Value>| {
+                let delivery_requests = delivery_requests.clone();
+                async move {
+                    delivery_requests
+                        .lock()
+                        .expect("delivery requests lock should not be poisoned")
+                        .push(payload);
+                    axum::Json(serde_json::json!({
+                        "ok": true,
+                        "result": { "message_id": 88 }
+                    }))
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("telegram api listener should bind");
+    let addr = listener.local_addr().expect("listener addr should resolve");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, api).await;
+    });
+
+    unsafe {
+        std::env::set_var("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token");
+        std::env::set_var("MOSAIC_TELEGRAM_API_BASE_URL", format!("http://{addr}"));
+    }
+
+    let gateway = gateway();
+    let mut receiver = gateway.subscribe();
+    let submitted = gateway
+        .submit_telegram_update(TelegramUpdate {
+            update_id: 9001,
+            message: Some(mosaic_channel_telegram::TelegramMessage {
+                message_id: 11,
+                text: Some("hello telegram".to_owned()),
+                caption: None,
+                message_thread_id: Some(7),
+                chat: mosaic_channel_telegram::TelegramChat {
+                    id: -10042,
+                    chat_type: "supergroup".to_owned(),
+                    title: Some("Control Room".to_owned()),
+                    username: None,
+                    first_name: None,
+                    last_name: None,
+                },
+                from: Some(mosaic_channel_telegram::TelegramUser {
+                    id: 17,
+                    username: Some("operator17".to_owned()),
+                    first_name: "Real".to_owned(),
+                    last_name: Some("Operator".to_owned()),
+                }),
+            }),
+            edited_message: None,
+            channel_post: None,
+        })
+        .expect("telegram submit should succeed");
+    let result = submitted.wait().await.expect("telegram run should succeed");
+
+    let session = gateway
+        .load_session("telegram--10042-7")
+        .expect("session load should succeed")
+        .expect("telegram session should exist");
+    assert_eq!(result.trace.outbound_deliveries.len(), 1);
+    assert_eq!(
+        result.trace.outbound_deliveries[0].result.status.label(),
+        "delivered"
+    );
+    assert_eq!(
+        result.trace.outbound_deliveries[0]
+            .result
+            .provider_message_id
+            .as_deref(),
+        Some("88")
+    );
+    assert_eq!(
+        session.channel_context.conversation_id.as_deref(),
+        Some("telegram:chat:-10042")
+    );
+    assert_eq!(
+        session.channel_context.last_delivery_status.as_deref(),
+        Some("delivered")
+    );
+
+    let requests = delivery_requests
+        .lock()
+        .expect("delivery requests lock should not be poisoned");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["chat_id"], -10042);
+    assert_eq!(requests[0]["message_thread_id"], 7);
+    assert_eq!(requests[0]["reply_to_message_id"], 11);
+    drop(requests);
+
+    let audit_events = gateway.audit_events(20);
+    assert!(
+        audit_events
+            .iter()
+            .any(|event| event.kind == "channel.inbound_received")
+    );
+    assert!(
+        audit_events
+            .iter()
+            .any(|event| event.kind == "channel.outbound_delivered")
+    );
+
+    let mut saw_inbound = false;
+    let mut saw_outbound = false;
+    while let Ok(envelope) = receiver.try_recv() {
+        if envelope.gateway_run_id != result.gateway_run_id {
+            continue;
+        }
+        match envelope.event {
+            GatewayEvent::InboundReceived { .. } => saw_inbound = true,
+            GatewayEvent::OutboundDelivered { .. } => saw_outbound = true,
+            _ => {}
+        }
+    }
+    assert!(saw_inbound);
+    assert!(saw_outbound);
+
+    let (bundle, _) = gateway
+        .incident_bundle(&result.gateway_run_id)
+        .expect("incident bundle should build");
+    assert_eq!(bundle.trace.outbound_deliveries.len(), 1);
+    assert!(
+        bundle
+            .audit_events
+            .iter()
+            .any(|event| event.kind == "channel.outbound_delivered")
+    );
+
+    unsafe {
+        std::env::remove_var("MOSAIC_TELEGRAM_BOT_TOKEN");
+        std::env::remove_var("MOSAIC_TELEGRAM_API_BASE_URL");
+    }
 }
 
 #[tokio::test]

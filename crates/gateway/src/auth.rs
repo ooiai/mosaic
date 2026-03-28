@@ -229,6 +229,11 @@ pub(crate) fn webchat_adapter_status(auth: &AuthConfig) -> AdapterStatusDto {
         channel: "webchat".to_owned(),
         transport: "http".to_owned(),
         ingress_path: "/ingress/webchat".to_owned(),
+        capabilities: vec![
+            "text_in".to_owned(),
+            "session_hint".to_owned(),
+            "thread_context".to_owned(),
+        ],
         outbound_ready: true,
         status: status.to_owned(),
         detail: detail.to_owned(),
@@ -263,6 +268,13 @@ pub(crate) fn telegram_adapter_status(auth: &AuthConfig) -> AdapterStatusDto {
         channel: "telegram".to_owned(),
         transport: "http-webhook".to_owned(),
         ingress_path: "/ingress/telegram".to_owned(),
+        capabilities: vec![
+            "text_in".to_owned(),
+            "text_out".to_owned(),
+            "reply_target".to_owned(),
+            "thread_context".to_owned(),
+            "delivery_audit".to_owned(),
+        ],
         outbound_ready,
         status: status.to_owned(),
         detail: detail.to_owned(),
@@ -276,8 +288,9 @@ pub(crate) fn ingress_route(
     let ingress = ingress?;
     let channel = ingress.channel.as_deref().unwrap_or(ingress.kind.as_str());
     let target = ingress
-        .reply_target
+        .conversation_id
         .as_deref()
+        .or(ingress.reply_target.as_deref())
         .or(ingress.actor_id.as_deref())
         .or(session_id)?;
     let mut route = format!(

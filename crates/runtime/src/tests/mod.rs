@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use chrono::Utc;
 use mosaic_config::{MosaicConfig, ProviderProfileConfig};
 use mosaic_inspect::IngressTrace;
 use mosaic_memory::{MemoryPolicy, MemorySearchHit, MemoryStore, SessionMemoryRecord};
@@ -441,13 +442,20 @@ async fn run_records_ingress_metadata_in_trace() {
             ingress: Some(IngressTrace {
                 kind: "remote_operator".to_owned(),
                 channel: Some("cli".to_owned()),
+                adapter: Some("cli_remote".to_owned()),
                 source: Some("mosaic-cli".to_owned()),
                 remote_addr: Some("127.0.0.1".to_owned()),
                 display_name: Some("operator".to_owned()),
                 actor_id: Some("operator-1".to_owned()),
+                conversation_id: Some("cli:operator-1".to_owned()),
                 thread_id: Some("incident-7".to_owned()),
                 thread_title: Some("Incident 7".to_owned()),
                 reply_target: Some("cli:operator-1".to_owned()),
+                message_id: Some("message-1".to_owned()),
+                received_at: Some(Utc::now()),
+                raw_event_id: Some("event-1".to_owned()),
+                session_hint: Some("ingress-demo".to_owned()),
+                profile_hint: None,
                 gateway_url: Some("http://127.0.0.1:8080".to_owned()),
             }),
         })

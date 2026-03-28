@@ -1074,9 +1074,15 @@ name = "mosaic-channel-telegram"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
+ "chrono",
+ "mosaic-control-protocol",
  "mosaic-inspect",
+ "reqwest",
  "serde",
  "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -267,13 +267,23 @@ async fn http_submit_run(
         request.ingress = Some(IngressTrace {
             kind: "remote_operator".to_owned(),
             channel: Some("api".to_owned()),
+            adapter: Some("sdk_http".to_owned()),
             source: Some("mosaic-sdk".to_owned()),
             remote_addr: None,
             display_name: None,
             actor_id: None,
+            conversation_id: request
+                .session_id
+                .clone()
+                .or_else(|| Some("api:remote".to_owned())),
             thread_id: None,
             thread_title: None,
             reply_target: None,
+            message_id: None,
+            received_at: None,
+            raw_event_id: None,
+            session_hint: request.session_id.clone(),
+            profile_hint: request.profile.clone(),
             gateway_url: None,
         });
     }

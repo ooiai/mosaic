@@ -106,18 +106,80 @@ pub struct SkillTrace {
     pub finished_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct IngressTrace {
     pub kind: String,
     pub channel: Option<String>,
+    #[serde(default)]
+    pub adapter: Option<String>,
     pub source: Option<String>,
     pub remote_addr: Option<String>,
     pub display_name: Option<String>,
     pub actor_id: Option<String>,
+    #[serde(default)]
+    pub conversation_id: Option<String>,
     pub thread_id: Option<String>,
     pub thread_title: Option<String>,
     pub reply_target: Option<String>,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub received_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub raw_event_id: Option<String>,
+    #[serde(default)]
+    pub session_hint: Option<String>,
+    #[serde(default)]
+    pub profile_hint: Option<String>,
     pub gateway_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelOutboundMessage {
+    pub channel: String,
+    pub adapter: String,
+    pub conversation_id: String,
+    pub reply_target: String,
+    pub text: String,
+    pub idempotency_key: String,
+    pub correlation_id: String,
+    pub gateway_run_id: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelDeliveryStatus {
+    Delivered,
+    Failed,
+}
+
+impl ChannelDeliveryStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Delivered => "delivered",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelDeliveryResult {
+    pub delivery_id: String,
+    pub status: ChannelDeliveryStatus,
+    pub provider_message_id: Option<String>,
+    #[serde(default)]
+    pub retry_count: usize,
+    pub retryable: bool,
+    pub error_kind: Option<String>,
+    pub error: Option<String>,
+    pub delivered_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelDeliveryTrace {
+    pub message: ChannelOutboundMessage,
+    pub result: ChannelDeliveryResult,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -317,6 +379,8 @@ pub struct RunSummary {
     pub memory_writes: usize,
     pub active_extensions: usize,
     pub used_extensions: usize,
+    pub outbound_deliveries: usize,
+    pub failed_outbound_deliveries: usize,
     pub output_chunks: usize,
     pub integrity_warnings: usize,
     pub has_compression: bool,
@@ -331,6 +395,8 @@ pub struct RunTrace {
     pub session_id: Option<String>,
     pub session_route: Option<String>,
     pub ingress: Option<IngressTrace>,
+    #[serde(default)]
+    pub outbound_deliveries: Vec<ChannelDeliveryTrace>,
     pub workflow_name: Option<String>,
     #[serde(default)]
     pub lifecycle_status: RunLifecycleStatus,
@@ -386,6 +452,7 @@ impl RunTrace {
             session_id: None,
             session_route: None,
             ingress: None,
+            outbound_deliveries: vec![],
             workflow_name: None,
             lifecycle_status: RunLifecycleStatus::Queued,
             failure: None,
@@ -432,6 +499,10 @@ impl RunTrace {
 
     pub fn bind_ingress(&mut self, ingress: IngressTrace) {
         self.ingress = Some(ingress);
+    }
+
+    pub fn add_outbound_delivery(&mut self, delivery: ChannelDeliveryTrace) {
+        self.outbound_deliveries.push(delivery);
     }
 
     pub fn bind_extensions(&mut self, extensions: Vec<ExtensionTrace>) {
@@ -660,6 +731,12 @@ impl RunTrace {
             memory_writes: self.memory_writes.len(),
             active_extensions: self.active_extensions.len(),
             used_extensions: self.used_extensions.len(),
+            outbound_deliveries: self.outbound_deliveries.len(),
+            failed_outbound_deliveries: self
+                .outbound_deliveries
+                .iter()
+                .filter(|delivery| delivery.result.status == ChannelDeliveryStatus::Failed)
+                .count(),
             output_chunks: self.output_chunks,
             integrity_warnings: self.integrity_warnings.len(),
             has_compression: self.compression.is_some(),
@@ -713,13 +790,20 @@ mod tests {
         trace.bind_ingress(IngressTrace {
             kind: "remote_operator".to_owned(),
             channel: Some("cli".to_owned()),
+            adapter: Some("cli_remote".to_owned()),
             source: Some("mosaic-cli".to_owned()),
             remote_addr: None,
             display_name: None,
             actor_id: None,
+            conversation_id: Some("cli:operator".to_owned()),
             thread_id: None,
             thread_title: None,
             reply_target: None,
+            message_id: None,
+            received_at: None,
+            raw_event_id: None,
+            session_hint: None,
+            profile_hint: None,
             gateway_url: Some("http://127.0.0.1:8080".to_owned()),
         });
         trace.add_memory_read(MemoryReadTrace {
@@ -786,6 +870,7 @@ mod tests {
             session_id: Some("session-1".to_owned()),
             session_route: Some("gateway.local/session-1".to_owned()),
             ingress: None,
+            outbound_deliveries: vec![],
             workflow_name: Some("research_brief".to_owned()),
             started_at,
             finished_at: Some(finished_at),
@@ -882,6 +967,8 @@ mod tests {
         assert_eq!(summary.memory_writes, 0);
         assert_eq!(summary.active_extensions, 0);
         assert_eq!(summary.used_extensions, 0);
+        assert_eq!(summary.outbound_deliveries, 0);
+        assert_eq!(summary.failed_outbound_deliveries, 0);
         assert!(!summary.has_compression);
         assert_eq!(summary.output_chunks, 1);
         assert_eq!(summary.integrity_warnings, 0);
@@ -908,13 +995,20 @@ mod tests {
         trace.bind_ingress(IngressTrace {
             kind: "webchat".to_owned(),
             channel: Some("webchat".to_owned()),
+            adapter: Some("webchat_http".to_owned()),
             source: Some("browser".to_owned()),
             remote_addr: Some("127.0.0.1".to_owned()),
             display_name: Some("guest".to_owned()),
             actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:lobby".to_owned()),
             thread_id: Some("room-7".to_owned()),
             thread_title: Some("Launch Room".to_owned()),
             reply_target: Some("webchat:guest-1".to_owned()),
+            message_id: Some("message-1".to_owned()),
+            received_at: Some(Utc::now()),
+            raw_event_id: Some("event-1".to_owned()),
+            session_hint: Some("webchat-demo".to_owned()),
+            profile_hint: Some("gpt-5.4-mini".to_owned()),
             gateway_url: None,
         });
 
@@ -928,6 +1022,13 @@ mod tests {
                 .as_ref()
                 .and_then(|ingress| ingress.display_name.as_deref()),
             Some("guest")
+        );
+        assert_eq!(
+            trace
+                .ingress
+                .as_ref()
+                .and_then(|ingress| ingress.conversation_id.as_deref()),
+            Some("webchat:lobby")
         );
     }
 

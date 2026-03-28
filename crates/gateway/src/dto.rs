@@ -72,12 +72,19 @@ pub(crate) fn session_channel_dto(metadata: &SessionChannelMetadata) -> SessionC
     SessionChannelDto {
         ingress_kind: metadata.ingress_kind.clone(),
         channel: metadata.channel.clone(),
+        adapter: metadata.adapter.clone(),
         source: metadata.source.clone(),
         actor_id: metadata.actor_id.clone(),
         actor_name: metadata.actor_name.clone(),
+        conversation_id: metadata.conversation_id.clone(),
         thread_id: metadata.thread_id.clone(),
         thread_title: metadata.thread_title.clone(),
         reply_target: metadata.reply_target.clone(),
+        last_message_id: metadata.last_message_id.clone(),
+        last_delivery_id: metadata.last_delivery_id.clone(),
+        last_delivery_status: metadata.last_delivery_status.clone(),
+        last_delivery_error: metadata.last_delivery_error.clone(),
+        last_delivery_at: metadata.last_delivery_at,
     }
 }
 

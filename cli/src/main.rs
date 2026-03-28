@@ -1420,6 +1420,7 @@ fn print_run_detail(run: &RunDetailDto) -> Result<()> {
     println!("failure_kind: {:?}", summary.failure_kind);
     println!("trace_path: {:?}", summary.trace_path);
     println!("ingress: {:?}", run.ingress);
+    println!("outbound_deliveries: {}", run.outbound_deliveries.len());
     println!("input: {}", truncate_for_cli(&summary.input_preview, 240));
     println!(
         "output: {}",
@@ -1442,6 +1443,18 @@ fn print_run_detail(run: &RunDetailDto) -> Result<()> {
     println!("submission_workflow: {:?}", run.submission.workflow);
     println!("submission_session_id: {:?}", run.submission.session_id);
     println!("submission_profile: {:?}", run.submission.profile);
+    for (index, delivery) in run.outbound_deliveries.iter().enumerate() {
+        println!(
+            "delivery[{index}]: channel={} adapter={} target={} status={} retries={} error_kind={:?} error={:?}",
+            delivery.message.channel,
+            delivery.message.adapter,
+            delivery.message.reply_target,
+            delivery.result.status.label(),
+            delivery.result.retry_count,
+            delivery.result.error_kind,
+            delivery.result.error
+        );
+    }
     Ok(())
 }
 
@@ -1560,6 +1573,9 @@ fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
             adapter.status,
             adapter.outbound_ready,
         );
+        if !adapter.capabilities.is_empty() {
+            println!("    capabilities: {}", adapter.capabilities.join(", "));
+        }
         println!("    {}", adapter.detail);
     }
 
@@ -1767,13 +1783,20 @@ fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
     IngressTrace {
         kind: "local_cli".to_owned(),
         channel: Some("cli".to_owned()),
+        adapter: Some("cli_local".to_owned()),
         source: Some("mosaic-cli".to_owned()),
         remote_addr: None,
         display_name: None,
         actor_id: None,
+        conversation_id: None,
         thread_id: None,
         thread_title: None,
         reply_target: None,
+        message_id: None,
+        received_at: None,
+        raw_event_id: None,
+        session_hint: None,
+        profile_hint: None,
         gateway_url,
     }
 }
@@ -1782,13 +1805,20 @@ fn remote_cli_ingress(gateway_url: &str) -> IngressTrace {
     IngressTrace {
         kind: "remote_operator".to_owned(),
         channel: Some("cli".to_owned()),
+        adapter: Some("cli_remote".to_owned()),
         source: Some("mosaic-cli".to_owned()),
         remote_addr: None,
         display_name: None,
         actor_id: None,
+        conversation_id: None,
         thread_id: None,
         thread_title: None,
         reply_target: None,
+        message_id: None,
+        received_at: None,
+        raw_event_id: None,
+        session_hint: None,
+        profile_hint: None,
         gateway_url: Some(gateway_url.to_owned()),
     }
 }
@@ -1812,6 +1842,16 @@ fn spawn_gateway_runtime_event_forwarder(
 
 fn gateway_event_label(event: &GatewayEvent) -> String {
     match event {
+        GatewayEvent::InboundReceived {
+            ingress,
+            text_preview,
+        } => format!(
+            "inbound_received channel={} adapter={} conversation={} preview={}",
+            ingress.channel.as_deref().unwrap_or("-"),
+            ingress.adapter.as_deref().unwrap_or("-"),
+            ingress.conversation_id.as_deref().unwrap_or("-"),
+            truncate_for_cli(text_preview, 80),
+        ),
         GatewayEvent::RunSubmitted { profile, .. } => format!("run_submitted profile={profile}"),
         GatewayEvent::Runtime(_) => "runtime_event".to_owned(),
         GatewayEvent::RunUpdated { run } => format!(
@@ -1862,6 +1902,23 @@ fn gateway_event_label(event: &GatewayEvent) -> String {
                 truncate_for_cli(output_preview, 80)
             )
         }
+        GatewayEvent::OutboundDelivered { delivery } => format!(
+            "outbound_delivered channel={} target={} provider_message_id={}",
+            delivery.message.channel,
+            delivery.message.reply_target,
+            delivery
+                .result
+                .provider_message_id
+                .as_deref()
+                .unwrap_or("-"),
+        ),
+        GatewayEvent::OutboundFailed { delivery } => format!(
+            "outbound_failed channel={} target={} error_kind={} error={}",
+            delivery.message.channel,
+            delivery.message.reply_target,
+            delivery.result.error_kind.as_deref().unwrap_or("-"),
+            truncate_for_cli(delivery.result.error.as_deref().unwrap_or("-"), 80),
+        ),
         GatewayEvent::RunFailed { error } => {
             format!("run_failed error={}", truncate_for_cli(error, 80))
         }
