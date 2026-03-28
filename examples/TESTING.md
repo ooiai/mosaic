@@ -42,6 +42,12 @@
 
 预期：启动本地 HTTP Gateway，经由 Telegram ingress 产生 `telegram--100123-99` session、trace、audit/replay 和 incident bundle；该 lane 为显式 dev-only mock，不作为 release evidence。
 
+`telegram real e2e`
+
+运行：参考 `docs/telegram-real-e2e.md`
+
+预期：真实 Telegram bot webhook、真实 OpenAI provider、真实 `time_now` / `read_file` / `summarize_notes` / `summarize_operator_note` 都在同一条 Telegram 会话里被验证，并且 `session`、`inspect`、`audit`、`replay`、`incident` 一致。
+
 ## Delivery smoke
 
 仓库级 smoke：

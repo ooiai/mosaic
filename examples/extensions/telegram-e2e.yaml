@@ -1,0 +1,37 @@
+name: telegram-e2e
+version: 0.1.0
+description: Telegram-first real acceptance manifest with one explicit skill and one explicit workflow.
+schema_version: 1
+tools: []
+skills:
+  - type: manifest
+    name: summarize_notes
+    description: Summarize a short operator note inside a real Telegram session.
+    visibility: visible
+    invocation_mode: explicit_only
+    allowed_channels:
+      - telegram
+    tools: []
+    system_prompt: null
+    steps:
+      - kind: echo
+        name: draft
+        input: "{{input}}"
+      - kind: summarize
+        name: summarize
+        input: "{{current}}"
+workflows:
+  - name: summarize_operator_note
+    description: Run summarize_notes against an operator note from Telegram.
+    visibility:
+      source: telegram-e2e
+      visibility: visible
+      invocation_mode: explicit_only
+      allowed_channels:
+        - telegram
+    steps:
+      - name: summarize
+        kind: skill
+        skill: summarize_notes
+        input: "{{input}}"
+mcp: null

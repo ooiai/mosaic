@@ -12,6 +12,8 @@ Examples used by this guide:
 - [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
 - [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml) for the explicit dev-only mock lane
 - [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+- [examples/full-stack/openai-telegram-e2e.config.yaml](../examples/full-stack/openai-telegram-e2e.config.yaml)
+- [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml)
 - [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
 - [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
 
@@ -145,12 +147,18 @@ Use this path when Telegram is a real release target and you have:
 
 This is a manual operator acceptance flow, not the default automated real-test lane.
 
-At that point the check is:
+For the complete Telegram-first runbook, use [telegram-real-e2e.md](./telegram-real-e2e.md).
 
-1. serve the Gateway on the public webhook endpoint
-2. register the Telegram webhook
-3. send a real Telegram message to the bot
-4. verify `session`, `inspect`, and `incident` artifacts for the resulting run
+That dedicated runbook adds:
+
+- a fixed workspace config: [examples/full-stack/openai-telegram-e2e.config.yaml](../examples/full-stack/openai-telegram-e2e.config.yaml)
+- a fixed manifest: [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml)
+- plain conversation proof
+- automatic `time_now` proof
+- explicit `read_file` proof
+- explicit `summarize_notes` skill proof
+- explicit `summarize_operator_note` workflow proof
+- `session`, `inspect`, `audit`, `replay`, and `incident` verification
 
 ## Automated Verification
 
@@ -169,6 +177,7 @@ MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh open
 Continue with:
 
 - [channels.md](./channels.md)
+- [telegram-real-e2e.md](./telegram-real-e2e.md)
 - [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
 - [provider-runtime-policy-matrix.md](./provider-runtime-policy-matrix.md)
 - [gateway.md](./gateway.md)

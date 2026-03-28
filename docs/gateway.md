@@ -120,3 +120,5 @@ mosaic adapter doctor
 Use these before exposing Gateway ingress to other channels.
 
 For the end-to-end provider + Gateway + Telegram walkthrough, continue with [full-stack.md](./full-stack.md).
+
+For the live no-mock Telegram bot acceptance lane, use [telegram-real-e2e.md](./telegram-real-e2e.md).

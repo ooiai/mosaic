@@ -128,6 +128,7 @@ Real tests then opt into additional vendor or channel checks based on the secret
 - MCP real tests spawn an actual subprocess and communicate over stdio instead of mocking the transport.
 - Gateway real tests boot an actual HTTP server and consume real SSE frames through the SDK client.
 - Telegram bot token and public webhook validation remain a manual operator acceptance lane unless the environment can expose a reachable webhook endpoint.
+- The canonical manual Telegram bot acceptance runbook lives in [telegram-real-e2e.md](./telegram-real-e2e.md).
 
 ## Golden Examples and Docs
 

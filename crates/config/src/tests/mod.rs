@@ -41,6 +41,7 @@ fn provider_and_deployment_example_patches_validate_against_defaults() {
         "examples/providers/ollama.yaml",
         "examples/providers/anthropic.yaml",
         "examples/deployment/production.config.yaml",
+        "examples/full-stack/openai-telegram-e2e.config.yaml",
     ] {
         let patch = load_config_patch(&root.join(rel)).expect("example patch should load");
         let mut config = MosaicConfig::default();

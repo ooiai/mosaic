@@ -14,6 +14,8 @@ Related examples:
 - [examples/full-stack/README.md](../examples/full-stack/README.md)
 - [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
 
+For the live Telegram bot runbook, continue with [telegram-real-e2e.md](./telegram-real-e2e.md).
+
 ## 1. Confirm the session
 
 List sessions first:

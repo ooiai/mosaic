@@ -69,6 +69,8 @@ The sample payload maps to session id `telegram--100123-99`.
 
 The repo automation covers the real Gateway Telegram ingress path, but a live Telegram bot token and public webhook endpoint remain a manual operator acceptance lane.
 
+For the complete no-mock Telegram bot runbook, continue with [telegram-real-e2e.md](./telegram-real-e2e.md).
+
 ## Adapter health checks
 
 Before exposing ingress publicly, check:
@@ -83,5 +85,6 @@ mosaic adapter doctor
 If you want the full provider + gateway + channel + inspect walkthrough, continue with:
 
 - [full-stack.md](./full-stack.md)
+- [telegram-real-e2e.md](./telegram-real-e2e.md)
 - [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
 - [examples/full-stack/README.md](../examples/full-stack/README.md)

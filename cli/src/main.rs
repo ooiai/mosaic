@@ -2545,6 +2545,7 @@ mod tests {
             "docs/cli.md",
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/telegram-real-e2e.md",
             "docs/real-vs-mock-acceptance.md",
             "docs/residual-mock-first-audit.md",
             "docs/provider-runtime-policy-matrix.md",
@@ -2559,6 +2560,7 @@ mod tests {
             "examples/TESTING.md",
             "examples/channels/README.md",
             "examples/full-stack/README.md",
+            "examples/full-stack/openai-telegram-e2e.config.yaml",
             "examples/full-stack/openai-webchat.config.yaml",
             "examples/deployment/production.config.yaml",
             "make release-check",
@@ -2635,6 +2637,7 @@ mod tests {
             "docs/testing.md",
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/telegram-real-e2e.md",
             "docs/real-vs-mock-acceptance.md",
             "docs/residual-mock-first-audit.md",
             "docs/provider-runtime-policy-matrix.md",
@@ -2652,6 +2655,8 @@ mod tests {
             "examples/full-stack/mock-telegram.config.yaml",
             "examples/full-stack/openai-webchat.config.yaml",
             "examples/full-stack/openai-telegram.config.yaml",
+            "examples/full-stack/openai-telegram-e2e.config.yaml",
+            "examples/extensions/telegram-e2e.yaml",
             "examples/deployment/README.md",
             "examples/deployment/production.config.yaml",
             "examples/deployment/mosaic.service",
@@ -2856,6 +2861,7 @@ mod tests {
         for required in [
             "docs/channels.md",
             "docs/full-stack.md",
+            "docs/telegram-real-e2e.md",
             "docs/real-vs-mock-acceptance.md",
             "docs/provider-runtime-policy-matrix.md",
             "docs/session-inspect-incident.md",
@@ -2871,8 +2877,11 @@ mod tests {
             "examples/full-stack/openai-webchat.config.yaml",
             "examples/full-stack/mock-telegram.config.yaml",
             "examples/full-stack/openai-telegram.config.yaml",
+            "examples/full-stack/openai-telegram-e2e.config.yaml",
+            "examples/extensions/telegram-e2e.yaml",
             "examples/channels/webchat-openai-message.json",
             "examples/channels/telegram-update.json",
+            "telegram-real-e2e.md",
             "./scripts/test-full-stack-example.sh mock",
             "MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat",
             "mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>",
@@ -2890,6 +2899,7 @@ mod tests {
             "examples/channels/telegram-update.json",
             "POST /ingress/webchat",
             "POST /ingress/telegram",
+            "telegram-real-e2e.md",
         ] {
             assert!(
                 channels.contains(required),
@@ -2907,6 +2917,42 @@ mod tests {
             assert!(
                 session_flow.contains(required),
                 "session/inspect/incident guide missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn telegram_real_e2e_runbook_covers_acceptance_workspace_and_cli_proofs() {
+        let root = repo_root();
+        let guide = fs::read_to_string(root.join("docs/telegram-real-e2e.md"))
+            .expect("telegram real e2e guide should load");
+
+        for required in [
+            "# Telegram Real E2E Runbook",
+            "examples/full-stack/openai-telegram-e2e.config.yaml",
+            "examples/extensions/telegram-e2e.yaml",
+            "mosaic setup validate",
+            "mosaic setup doctor",
+            "mosaic config show",
+            "mosaic model list",
+            "mosaic extension validate",
+            "mosaic gateway serve --http 127.0.0.1:18080",
+            "setWebhook",
+            "getWebhookInfo",
+            "/mosaic tool read_file .mosaic/config.yaml",
+            "/mosaic skill summarize_notes",
+            "/mosaic workflow summarize_operator_note",
+            "mosaic gateway audit --limit 20",
+            "mosaic gateway replay --limit 20",
+            "mosaic session show \"$SESSION_ID\"",
+            "mosaic inspect \"$TRACE_PATH\" --verbose",
+            "mosaic gateway incident \"$RUN_ID\"",
+            "deleteWebhook",
+            "reverse proxy or tunnel",
+        ] {
+            assert!(
+                guide.contains(required),
+                "telegram real e2e guide missing {required}"
             );
         }
     }

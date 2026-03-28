@@ -34,6 +34,7 @@ For a local dev-only smoke lane without provider credentials, initialize the wor
 ## Extensions
 
 - [extensions/time-and-summary.yaml](./extensions/time-and-summary.yaml): extension manifest with one manifest skill and one workflow
+- [extensions/telegram-e2e.yaml](./extensions/telegram-e2e.yaml): Telegram-first manifest with `summarize_notes` and `summarize_operator_note`
 
 Validate it by referencing it from `.mosaic/config.yaml`:
 
@@ -77,6 +78,7 @@ curl -X POST http://127.0.0.1:8080/ingress/webchat \
 - [full-stack/mock-telegram.config.yaml](./full-stack/mock-telegram.config.yaml): fast local Gateway + Telegram dev-only mock config
 - [full-stack/openai-webchat.config.yaml](./full-stack/openai-webchat.config.yaml): release-blocking OpenAI + WebChat config
 - [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): manual Telegram bot sign-off config
+- [full-stack/openai-telegram-e2e.config.yaml](./full-stack/openai-telegram-e2e.config.yaml): Telegram-first real acceptance config with extension wiring
 
 Automated verification:
 
