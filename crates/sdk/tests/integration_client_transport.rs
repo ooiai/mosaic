@@ -84,6 +84,7 @@ async fn gateway_client_consumes_health_and_event_stream_from_real_http_transpor
         .submit_run(RunSubmission {
             system: None,
             input: "hello".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),

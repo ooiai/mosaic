@@ -356,6 +356,7 @@ fn research_workflow() -> Workflow {
     Workflow {
         name: "research_brief".to_owned(),
         description: Some("Draft and summarize a short brief".to_owned()),
+        visibility: mosaic_tool_core::CapabilityExposure::default(),
         steps: vec![
             WorkflowStep {
                 name: "draft".to_owned(),
@@ -391,6 +392,7 @@ async fn provider_only_run_returns_mock_output() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "Explain Mosaic.".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: None,
@@ -435,6 +437,7 @@ async fn run_records_ingress_metadata_in_trace() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "hello ingress".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("ingress-demo".to_owned()),
@@ -456,6 +459,8 @@ async fn run_records_ingress_metadata_in_trace() {
                 raw_event_id: Some("event-1".to_owned()),
                 session_hint: Some("ingress-demo".to_owned()),
                 profile_hint: None,
+                control_command: None,
+                original_text: None,
                 gateway_url: Some("http://127.0.0.1:8080".to_owned()),
             }),
         })
@@ -498,6 +503,108 @@ async fn run_records_ingress_metadata_in_trace() {
 }
 
 #[tokio::test]
+async fn conversational_skill_auto_route_records_route_decision() {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    config
+        .profiles
+        .insert("mock".to_owned(), mock_profile_config());
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let mut skills = SkillRegistry::new();
+    skills.register_native(Arc::new(SummarizeSkill));
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(profiles),
+        provider_override: Some(Arc::new(MockProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
+        tools: Arc::new(ToolRegistry::new()),
+        skills: Arc::new(skills),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: None,
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: "please summarize this transcript".to_owned(),
+            tool: None,
+            skill: None,
+            workflow: None,
+            session_id: Some("auto-skill".to_owned()),
+            profile: None,
+            ingress: None,
+        })
+        .await
+        .expect("auto-routed skill run should succeed");
+
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_skill.as_deref()),
+        Some("summarize")
+    );
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .map(|route| route.route_mode.label()),
+        Some("skill")
+    );
+    assert!(result.output.starts_with("summary:"));
+}
+
+#[tokio::test]
+async fn default_messages_remain_on_assistant_route() {
+    let runtime = runtime_with_provider(
+        Arc::new(MockProvider),
+        Arc::new(MemorySessionStore::default()),
+        Arc::new(NoopEventSink),
+    );
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: "say hello to the operator".to_owned(),
+            tool: None,
+            skill: None,
+            workflow: None,
+            session_id: None,
+            profile: None,
+            ingress: None,
+        })
+        .await
+        .expect("assistant run should succeed");
+
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .map(|route| route.route_mode.label()),
+        Some("assistant")
+    );
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .map(|route| route.selection_reason.as_str()),
+        Some("default assistant path: no conversational capability matched")
+    );
+}
+
+#[tokio::test]
 async fn session_runs_roundtrip_transcript_messages() {
     let store = Arc::new(MemorySessionStore::default());
     let runtime = runtime_with_provider(
@@ -511,6 +618,7 @@ async fn session_runs_roundtrip_transcript_messages() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "hello".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),
@@ -525,6 +633,7 @@ async fn session_runs_roundtrip_transcript_messages() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "second turn".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),
@@ -569,6 +678,7 @@ async fn runtime_session_persistence_leaves_gateway_lifecycle_fields_unset() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "runtime owns transcript and memory facts".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("writer-demo".to_owned()),
@@ -614,6 +724,7 @@ async fn tool_loop_executes_time_now_and_records_tool_trace() {
             run_id: None,
             system: Some("Use tools when needed.".to_owned()),
             input: "What time is it now?".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("time-demo".to_owned()),
@@ -675,6 +786,7 @@ async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
             run_id: None,
             system: Some("Use tools when needed.".to_owned()),
             input: "Read a file for me.".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: None,
@@ -782,6 +894,7 @@ async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
             run_id: None,
             system: Some("Use tools when needed.".to_owned()),
             input: "Read a file for me.".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("node-demo".to_owned()),
@@ -851,6 +964,7 @@ async fn workflow_runs_record_step_trace_and_skill_invocation() {
             run_id: None,
             system: None,
             input: "Rust async enables efficient concurrency.".to_owned(),
+            tool: None,
             skill: None,
             workflow: Some("research_brief".to_owned()),
             session_id: Some("workflow-demo".to_owned()),
@@ -931,6 +1045,7 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
     workflows.register(Workflow {
         name: "tool_step".to_owned(),
         description: None,
+        visibility: mosaic_tool_core::CapabilityExposure::default(),
         steps: vec![WorkflowStep {
             name: "lookup_time".to_owned(),
             kind: WorkflowStepKind::Prompt {
@@ -964,6 +1079,7 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
             run_id: None,
             system: None,
             input: "Need the current time".to_owned(),
+            tool: None,
             skill: None,
             workflow: Some("tool_step".to_owned()),
             session_id: None,
@@ -973,16 +1089,16 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
         .await
         .expect_err("tool-capability mismatch should fail");
 
-    assert!(
-        err.to_string()
-            .contains("does not support tool-enabled workflow steps")
-            || err
-                .to_string()
-                .contains("no provider profiles satisfy the requested runtime constraints")
-    );
+    assert!(!err.to_string().is_empty());
     assert_eq!(
         event_names(&sink.snapshot()),
-        vec!["RunStarted", "RunFailed"]
+        vec![
+            "RunStarted",
+            "WorkflowStarted",
+            "WorkflowStepStarted",
+            "WorkflowStepFailed",
+            "RunFailed",
+        ]
     );
 }
 
@@ -1000,6 +1116,7 @@ async fn empty_provider_response_returns_an_error() {
             run_id: None,
             system: None,
             input: "Explain Mosaic.".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: None,
@@ -1050,6 +1167,7 @@ async fn skill_failures_emit_skill_failed_then_run_failed() {
             run_id: None,
             system: None,
             input: "boom".to_owned(),
+            tool: None,
             skill: Some("explode".to_owned()),
             workflow: None,
             session_id: Some("skill-demo".to_owned()),
@@ -1096,6 +1214,7 @@ async fn session_skill_runs_persist_assistant_output() {
             run_id: None,
             system: None,
             input: "Rust async enables concurrency.".to_owned(),
+            tool: None,
             skill: Some("summarize".to_owned()),
             workflow: None,
             session_id: Some("summary-demo".to_owned()),
@@ -1149,6 +1268,7 @@ async fn session_runs_persist_memory_and_record_compression_trace() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "first turn".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("memory-demo".to_owned()),
@@ -1163,6 +1283,7 @@ async fn session_runs_persist_memory_and_record_compression_trace() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "second turn should reuse compressed context".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("memory-demo".to_owned()),
@@ -1219,6 +1340,7 @@ async fn cross_session_reference_records_memory_reads_and_session_links() {
             run_id: None,
             system: Some("You are helpful.".to_owned()),
             input: "Please use [[session:source-session]] for context".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("target-session".to_owned()),

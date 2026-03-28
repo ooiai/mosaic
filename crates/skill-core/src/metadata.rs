@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use mosaic_tool_core::CapabilityExposure;
+
 use crate::manifest::manifest::SkillManifest;
 
 fn default_compatibility_schema() -> u32 {
@@ -30,6 +32,8 @@ impl Default for SkillCompatibility {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillMetadata {
     pub name: String,
+    #[serde(default)]
+    pub exposure: CapabilityExposure,
     pub extension: Option<String>,
     pub version: Option<String>,
     #[serde(default)]
@@ -43,6 +47,7 @@ impl SkillMetadata {
     pub fn native(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
             declared_tools: Vec::new(),
@@ -54,6 +59,7 @@ impl SkillMetadata {
     pub fn manifest(manifest: &SkillManifest) -> Self {
         Self {
             name: manifest.name.clone(),
+            exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
             declared_tools: manifest.tools.clone(),
@@ -74,6 +80,11 @@ impl SkillMetadata {
 
     pub fn with_compatibility(mut self, compatibility: SkillCompatibility) -> Self {
         self.compatibility = compatibility;
+        self
+    }
+
+    pub fn with_exposure(mut self, exposure: CapabilityExposure) -> Self {
+        self.exposure = exposure;
         self
     }
 

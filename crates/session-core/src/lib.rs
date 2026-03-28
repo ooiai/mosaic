@@ -544,6 +544,8 @@ mod tests {
             raw_event_id: Some("event-1".to_owned()),
             session_hint: Some("demo".to_owned()),
             profile_hint: None,
+            control_command: None,
+            original_text: None,
             gateway_url: None,
         });
         session.set_last_run_id("run-1");

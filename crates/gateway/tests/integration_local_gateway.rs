@@ -16,6 +16,7 @@ async fn local_gateway_submits_run_and_persists_session_state() {
         .submit_run(RunSubmission {
             system: None,
             input: "What time is it right now?".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("gateway-demo".to_owned()),

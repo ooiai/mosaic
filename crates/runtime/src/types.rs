@@ -44,6 +44,7 @@ pub struct RunRequest {
     pub run_id: Option<String>,
     pub system: Option<String>,
     pub input: String,
+    pub tool: Option<String>,
     pub skill: Option<String>,
     pub workflow: Option<String>,
     pub session_id: Option<String>,

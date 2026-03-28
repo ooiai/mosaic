@@ -146,6 +146,14 @@ pub struct ToolConfig {
     #[serde(rename = "type")]
     pub tool_type: String,
     pub name: String,
+    #[serde(default)]
+    pub visibility: CapabilityVisibility,
+    #[serde(default)]
+    pub invocation_mode: CapabilityInvocationMode,
+    #[serde(default)]
+    pub required_policy: Option<String>,
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -161,6 +169,14 @@ pub struct SkillConfig {
     pub system_prompt: Option<String>,
     #[serde(default)]
     pub steps: Vec<ManifestSkillStep>,
+    #[serde(default)]
+    pub visibility: CapabilityVisibility,
+    #[serde(default)]
+    pub invocation_mode: CapabilityInvocationMode,
+    #[serde(default)]
+    pub required_policy: Option<String>,
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -212,6 +228,13 @@ pub struct MosaicConfig {
     #[serde(default)]
     pub runtime: RuntimePolicyConfig,
     #[serde(default)]
+    pub tools: Vec<ToolConfig>,
+    #[serde(default)]
+    pub skills: Vec<SkillConfig>,
+    #[serde(default)]
+    pub workflows: Vec<Workflow>,
+    pub mcp: Option<McpConfig>,
+    #[serde(default)]
     pub extensions: ExtensionsConfig,
     #[serde(default)]
     pub policies: PolicyConfig,
@@ -231,6 +254,10 @@ impl Default for MosaicConfig {
             audit: AuditConfig::default(),
             observability: ObservabilityConfig::default(),
             runtime: RuntimePolicyConfig::default(),
+            tools: Vec::new(),
+            skills: Vec::new(),
+            workflows: Vec::new(),
+            mcp: None,
             extensions: ExtensionsConfig::default(),
             policies: PolicyConfig::default(),
         }
@@ -736,6 +763,13 @@ pub(crate) struct MosaicConfigPatch {
     pub audit: Option<AuditConfig>,
     pub observability: Option<ObservabilityConfig>,
     pub runtime: Option<RuntimePolicyConfig>,
+    #[serde(default)]
+    pub tools: Vec<ToolConfig>,
+    #[serde(default)]
+    pub skills: Vec<SkillConfig>,
+    #[serde(default)]
+    pub workflows: Vec<Workflow>,
+    pub mcp: Option<McpConfig>,
     pub extensions: Option<ExtensionsConfig>,
     pub policies: Option<PolicyConfig>,
 }

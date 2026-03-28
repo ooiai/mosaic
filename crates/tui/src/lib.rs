@@ -322,6 +322,7 @@ fn spawn_interactive_run(
             let request = GatewayRunRequest {
                 system: context.system.clone(),
                 input,
+                tool: None,
                 skill: None,
                 workflow: None,
                 session_id: Some(session_id.clone()),
@@ -343,6 +344,8 @@ fn spawn_interactive_run(
                     raw_event_id: None,
                     session_hint: Some(session_id.clone()),
                     profile_hint: Some(profile.clone()),
+                    control_command: None,
+                    original_text: None,
                     gateway_url: None,
                 }),
             };
@@ -373,6 +376,7 @@ fn spawn_interactive_run(
             let request = GatewayRunRequest {
                 system: context.system.clone(),
                 input,
+                tool: None,
                 skill: None,
                 workflow: None,
                 session_id: Some(session_id.clone()),
@@ -394,6 +398,8 @@ fn spawn_interactive_run(
                     raw_event_id: None,
                     session_hint: Some(session_id.clone()),
                     profile_hint: Some(profile.clone()),
+                    control_command: None,
+                    original_text: None,
                     gateway_url: Some(gateway_url),
                 }),
             };

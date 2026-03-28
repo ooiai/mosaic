@@ -8,6 +8,7 @@ fn serializes_run_submission_and_event_envelope_across_public_boundary() {
         system: Some("system".to_owned()),
         session_id: Some("demo".to_owned()),
         profile: Some("demo-provider".to_owned()),
+        tool: None,
         skill: None,
         workflow: None,
         ingress: None,

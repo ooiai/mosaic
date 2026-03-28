@@ -10,6 +10,10 @@ fn default_compatibility_schema() -> u32 {
     1
 }
 
+fn default_capability_source() -> String {
+    "unknown".to_owned()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityKind {
@@ -74,6 +78,125 @@ pub enum ToolRiskLevel {
     Low,
     Medium,
     High,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityVisibility {
+    #[default]
+    Visible,
+    Restricted,
+    Hidden,
+}
+
+impl CapabilityVisibility {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Visible => "visible",
+            Self::Restricted => "restricted",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityInvocationMode {
+    #[default]
+    Conversational,
+    ExplicitOnly,
+    Hidden,
+}
+
+impl CapabilityInvocationMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Conversational => "conversational",
+            Self::ExplicitOnly => "explicit_only",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityExposure {
+    #[serde(default = "default_capability_source")]
+    pub source: String,
+    #[serde(default)]
+    pub visibility: CapabilityVisibility,
+    #[serde(default)]
+    pub invocation_mode: CapabilityInvocationMode,
+    #[serde(default)]
+    pub required_policy: Option<String>,
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+}
+
+impl Default for CapabilityExposure {
+    fn default() -> Self {
+        Self {
+            source: default_capability_source(),
+            visibility: CapabilityVisibility::Visible,
+            invocation_mode: CapabilityInvocationMode::Conversational,
+            required_policy: None,
+            allowed_channels: Vec::new(),
+        }
+    }
+}
+
+impl CapabilityExposure {
+    pub fn new(source: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            ..Self::default()
+        }
+    }
+
+    pub fn with_visibility(mut self, visibility: CapabilityVisibility) -> Self {
+        self.visibility = visibility;
+        self
+    }
+
+    pub fn with_invocation_mode(mut self, invocation_mode: CapabilityInvocationMode) -> Self {
+        self.invocation_mode = invocation_mode;
+        self
+    }
+
+    pub fn with_required_policy(mut self, required_policy: Option<String>) -> Self {
+        self.required_policy = required_policy;
+        self
+    }
+
+    pub fn with_allowed_channels(mut self, allowed_channels: Vec<String>) -> Self {
+        self.allowed_channels = allowed_channels;
+        self
+    }
+
+    pub fn allows_channel(&self, channel: Option<&str>) -> bool {
+        if self.allowed_channels.is_empty() {
+            return true;
+        }
+
+        let Some(channel) = channel else {
+            return false;
+        };
+
+        self.allowed_channels
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(channel))
+    }
+
+    pub fn allows_explicit(&self, channel: Option<&str>) -> bool {
+        self.visibility != CapabilityVisibility::Hidden
+            && self.invocation_mode != CapabilityInvocationMode::Hidden
+            && self.allows_channel(channel)
+    }
+
+    pub fn allows_conversational(&self, channel: Option<&str>) -> bool {
+        self.visibility == CapabilityVisibility::Visible
+            && self.invocation_mode == CapabilityInvocationMode::Conversational
+            && self.allows_channel(channel)
+    }
 }
 
 impl ToolRiskLevel {
@@ -285,6 +408,8 @@ pub struct ToolMetadata {
     pub source: ToolSource,
     #[serde(default)]
     pub capability: CapabilityMetadata,
+    #[serde(default)]
+    pub exposure: CapabilityExposure,
     pub extension: Option<String>,
     pub version: Option<String>,
     #[serde(default)]
@@ -303,6 +428,7 @@ impl ToolMetadata {
             input_schema,
             source: ToolSource::Builtin,
             capability: CapabilityMetadata::utility(),
+            exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
             compatibility: ToolCompatibility::default(),
@@ -327,6 +453,7 @@ impl ToolMetadata {
                 remote_tool,
             },
             capability: CapabilityMetadata::utility(),
+            exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
             compatibility: ToolCompatibility::default(),
@@ -335,6 +462,11 @@ impl ToolMetadata {
 
     pub fn with_capability(mut self, capability: CapabilityMetadata) -> Self {
         self.capability = capability;
+        self
+    }
+
+    pub fn with_exposure(mut self, exposure: CapabilityExposure) -> Self {
+        self.exposure = exposure;
         self
     }
 

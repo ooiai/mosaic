@@ -2,12 +2,15 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use mosaic_tool_core::CapabilityExposure;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Workflow {
     pub name: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub visibility: CapabilityExposure,
     #[serde(default)]
     pub steps: Vec<WorkflowStep>,
 }
@@ -89,6 +92,8 @@ impl Default for WorkflowCompatibility {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowMetadata {
     pub name: String,
+    #[serde(default)]
+    pub exposure: CapabilityExposure,
     pub extension: Option<String>,
     pub version: Option<String>,
     #[serde(default)]
@@ -99,6 +104,7 @@ impl WorkflowMetadata {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
             compatibility: WorkflowCompatibility::default(),
@@ -117,6 +123,11 @@ impl WorkflowMetadata {
 
     pub fn with_compatibility(mut self, compatibility: WorkflowCompatibility) -> Self {
         self.compatibility = compatibility;
+        self
+    }
+
+    pub fn with_exposure(mut self, exposure: CapabilityExposure) -> Self {
+        self.exposure = exposure;
         self
     }
 
@@ -385,6 +396,7 @@ mod tests {
         Workflow {
             name: "research_brief".to_owned(),
             description: Some("Build a short brief".to_owned()),
+            visibility: CapabilityExposure::default(),
             steps: vec![
                 WorkflowStep {
                     name: "draft".to_owned(),

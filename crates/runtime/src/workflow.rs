@@ -64,7 +64,8 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
             ),
         );
         let tool_defs = if profile.capabilities.supports_tools {
-            self.runtime.collect_tool_definitions(Some(tools))?
+            self.runtime
+                .collect_tool_definitions(Some(tools), self.ingress_channel.as_deref())?
         } else {
             Vec::new()
         };

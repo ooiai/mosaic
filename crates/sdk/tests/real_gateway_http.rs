@@ -145,6 +145,7 @@ async fn real_gateway_http_chain_runs_through_sdk_when_enabled() {
         .submit_run(RunSubmission {
             system: None,
             input: "What time is it?".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("sdk-real".to_owned()),

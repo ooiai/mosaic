@@ -284,6 +284,8 @@ async fn http_submit_run(
             raw_event_id: None,
             session_hint: request.session_id.clone(),
             profile_hint: request.profile.clone(),
+            control_command: None,
+            original_text: None,
             gateway_url: None,
         });
     }

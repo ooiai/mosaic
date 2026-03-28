@@ -68,6 +68,7 @@ async fn runtime_executes_mock_provider_tool_loop_against_real_session_and_memor
             run_id: None,
             system: None,
             input: "What time is it right now?".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),

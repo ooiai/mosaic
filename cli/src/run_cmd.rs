@@ -47,6 +47,7 @@ pub(crate) async fn run_cmd(
         .submit_command(GatewayControlCommand::SubmitRun(GatewayRunRequest {
             system: app_cfg.agent.system,
             input: app_cfg.task.input,
+            tool: None,
             skill,
             workflow,
             session_id: session,
@@ -79,6 +80,7 @@ async fn run_cmd_with_tui(
     let request = GatewayRunRequest {
         system: app_cfg.agent.system,
         input: app_cfg.task.input,
+        tool: None,
         skill,
         workflow,
         session_id: session,
@@ -122,6 +124,7 @@ async fn run_cmd_remote(
         .submit_run(GatewayRunRequest {
             system: app_cfg.agent.system,
             input: app_cfg.task.input,
+            tool: None,
             skill,
             workflow,
             session_id: session,

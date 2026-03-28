@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use mosaic_config::{ProviderType, parse_provider_type};
-use mosaic_tool_core::ToolMetadata;
+use mosaic_tool_core::{CapabilityInvocationMode, CapabilityVisibility, ToolMetadata};
 use serde::{Deserialize, Serialize};
 
 use crate::{profile::ProviderProfile, types::ToolDefinition};
@@ -49,7 +49,10 @@ pub fn validate_step_tools_support(profile: &ProviderProfile, tool_names: &[Stri
 }
 
 pub fn tool_is_visible_to_model(metadata: &ToolMetadata) -> bool {
-    metadata.capability.authorized && metadata.capability.healthy
+    metadata.capability.authorized
+        && metadata.capability.healthy
+        && metadata.exposure.visibility == CapabilityVisibility::Visible
+        && metadata.exposure.invocation_mode == CapabilityInvocationMode::Conversational
 }
 
 pub fn tool_definition_from_metadata(metadata: &ToolMetadata) -> ToolDefinition {

@@ -16,8 +16,8 @@ use mosaic_skill_core::{
     SkillCompatibility, SkillManifest, SkillMetadata, SkillRegistry, SummarizeSkill,
 };
 use mosaic_tool_core::{
-    CronRegisterTool, EchoTool, ExecTool, ReadFileTool, TimeNowTool, Tool, ToolCompatibility,
-    ToolMetadata, ToolRegistry, WebhookTool,
+    CapabilityExposure, CronRegisterTool, EchoTool, ExecTool, ReadFileTool, TimeNowTool, Tool,
+    ToolCompatibility, ToolMetadata, ToolRegistry, WebhookTool,
 };
 use mosaic_workflow::{Workflow, WorkflowCompatibility, WorkflowMetadata, WorkflowRegistry};
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,8 @@ mod validation;
 
 const BUILTIN_EXTENSION_NAME: &str = "builtin.core";
 const BUILTIN_EXTENSION_VERSION: &str = "1.0.0";
+const WORKSPACE_EXTENSION_NAME: &str = "workspace.inline";
+const WORKSPACE_EXTENSION_VERSION: &str = "0.1.0";
 const APP_EXTENSION_NAME: &str = "app.inline";
 const APP_EXTENSION_VERSION: &str = "0.1.0";
 
@@ -128,6 +130,22 @@ fn wrap_tool(
         .with_extension(extension_name.to_owned(), extension_version.to_owned())
         .with_compatibility(ToolCompatibility { schema_version });
     Arc::new(ExtensionWrappedTool { inner, metadata })
+}
+
+fn exposure_from_tool_config(tool: &ToolConfig, source: &str) -> CapabilityExposure {
+    CapabilityExposure::new(source)
+        .with_visibility(tool.visibility)
+        .with_invocation_mode(tool.invocation_mode)
+        .with_required_policy(tool.required_policy.clone())
+        .with_allowed_channels(tool.allowed_channels.clone())
+}
+
+fn exposure_from_skill_config(skill: &SkillConfig, source: &str) -> CapabilityExposure {
+    CapabilityExposure::new(source)
+        .with_visibility(skill.visibility)
+        .with_invocation_mode(skill.invocation_mode)
+        .with_required_policy(skill.required_policy.clone())
+        .with_allowed_channels(skill.allowed_channels.clone())
 }
 
 #[cfg(test)]

@@ -218,6 +218,22 @@ pub(crate) fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
         config.runtime = runtime;
     }
 
+    if !patch.tools.is_empty() {
+        config.tools = patch.tools;
+    }
+
+    if !patch.skills.is_empty() {
+        config.skills = patch.skills;
+    }
+
+    if !patch.workflows.is_empty() {
+        config.workflows = patch.workflows;
+    }
+
+    if let Some(mcp) = patch.mcp {
+        config.mcp = Some(mcp);
+    }
+
     if let Some(extensions) = patch.extensions {
         config.extensions = extensions;
     }

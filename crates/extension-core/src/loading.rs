@@ -39,6 +39,7 @@ pub(crate) fn load_extension_set(
                 cron_store.clone(),
                 &extension.status.name,
                 &extension.status.version,
+                &extension.status.source,
                 extension.schema_version,
             )?;
             tools.register(built);
@@ -50,6 +51,7 @@ pub(crate) fn load_extension_set(
                 skill,
                 &extension.status.name,
                 &extension.status.version,
+                &extension.status.source,
                 extension.schema_version,
             )?;
         }
@@ -58,6 +60,13 @@ pub(crate) fn load_extension_set(
             workflows.register_with_metadata(
                 workflow.clone(),
                 WorkflowMetadata::new(workflow.name.clone())
+                    .with_exposure(
+                        CapabilityExposure::new(extension.status.source.clone())
+                            .with_visibility(workflow.visibility.visibility)
+                            .with_invocation_mode(workflow.visibility.invocation_mode)
+                            .with_required_policy(workflow.visibility.required_policy.clone())
+                            .with_allowed_channels(workflow.visibility.allowed_channels.clone()),
+                    )
                     .with_extension(
                         extension.status.name.clone(),
                         extension.status.version.clone(),

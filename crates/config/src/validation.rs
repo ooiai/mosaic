@@ -261,6 +261,84 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         );
     }
 
+    for (idx, tool) in config.tools.iter().enumerate() {
+        if tool.name.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("tools.{idx}.name"),
+                "tool name must not be empty",
+            );
+        }
+        if tool.tool_type.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("tools.{idx}.type"),
+                "tool type must not be empty",
+            );
+        }
+        if tool
+            .allowed_channels
+            .iter()
+            .any(|channel| channel.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("tools.{idx}.allowed_channels"),
+                "allowed_channels entries must not be empty",
+            );
+        }
+    }
+
+    for (idx, skill) in config.skills.iter().enumerate() {
+        if skill.name.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("skills.{idx}.name"),
+                "skill name must not be empty",
+            );
+        }
+        if skill.skill_type.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("skills.{idx}.type"),
+                "skill type must not be empty",
+            );
+        }
+        if skill
+            .allowed_channels
+            .iter()
+            .any(|channel| channel.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("skills.{idx}.allowed_channels"),
+                "allowed_channels entries must not be empty",
+            );
+        }
+    }
+
+    for (idx, workflow) in config.workflows.iter().enumerate() {
+        if workflow.name.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("workflows.{idx}.name"),
+                "workflow name must not be empty",
+            );
+        }
+        if workflow
+            .visibility
+            .allowed_channels
+            .iter()
+            .any(|channel| channel.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("workflows.{idx}.allowed_channels"),
+                "allowed_channels entries must not be empty",
+            );
+        }
+    }
+
     if config.deployment.profile == "production"
         && config
             .auth

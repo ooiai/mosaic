@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use mosaic_skill_core::ManifestSkillStep;
+use mosaic_tool_core::{CapabilityInvocationMode, CapabilityVisibility};
 use mosaic_workflow::Workflow;
 use serde::{Deserialize, Serialize};
 

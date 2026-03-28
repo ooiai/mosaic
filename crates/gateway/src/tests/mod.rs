@@ -6,11 +6,14 @@ use std::time::Duration;
 use futures::StreamExt;
 use mosaic_config::{LoadConfigOptions, MosaicConfig, ProviderProfileConfig, load_mosaic_config};
 use mosaic_extension_core::load_extension_set;
+use mosaic_inspect::RouteMode;
 use mosaic_mcp_core::{McpServerManager, McpServerSpec};
 use mosaic_memory::{FileMemoryStore, MemoryPolicy};
 use mosaic_provider::MockProvider;
 use mosaic_scheduler_core::FileCronStore;
 use mosaic_session_core::{SessionStore, TranscriptRole};
+use mosaic_skill_core::SummarizeSkill;
+use mosaic_workflow::{Workflow, WorkflowStep, WorkflowStepKind};
 use tokio::sync::oneshot;
 
 fn telegram_env_lock() -> &'static Mutex<()> {
@@ -85,6 +88,21 @@ fn gateway() -> GatewayHandle {
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let mut tools = ToolRegistry::new();
     tools.register(Arc::new(mosaic_tool_core::TimeNowTool::new()));
+    let mut skills = SkillRegistry::new();
+    skills.register_native(Arc::new(SummarizeSkill));
+    let mut workflows = WorkflowRegistry::new();
+    workflows.register(Workflow {
+        name: "quick_brief".to_owned(),
+        description: Some("Summarize input with one skill step".to_owned()),
+        visibility: mosaic_tool_core::CapabilityExposure::default(),
+        steps: vec![WorkflowStep {
+            name: "summarize".to_owned(),
+            kind: WorkflowStepKind::Skill {
+                skill: "summarize".to_owned(),
+                input: "{{input}}".to_owned(),
+            },
+        }],
+    });
 
     GatewayHandle::new_local(
         Handle::current(),
@@ -98,8 +116,8 @@ fn gateway() -> GatewayHandle {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             tools: Arc::new(tools),
-            skills: Arc::new(SkillRegistry::new()),
-            workflows: Arc::new(WorkflowRegistry::new()),
+            skills: Arc::new(skills),
+            workflows: Arc::new(workflows),
             node_store: test_node_store(),
             mcp_manager: None,
             cron_store: test_cron_store(),
@@ -282,6 +300,7 @@ async fn submit_run_routes_session_and_persists_gateway_metadata() {
         .submit_run(GatewayRunRequest {
             system: Some("You are helpful.".to_owned()),
             input: "hello gateway".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),
@@ -331,6 +350,7 @@ async fn subscribe_broadcasts_submitted_runtime_and_session_events() {
         .submit_command(GatewayCommand::SubmitRun(GatewayRunRequest {
             system: Some("Use tools when needed.".to_owned()),
             input: "What time is it now?".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("clock".to_owned()),
@@ -561,6 +581,7 @@ async fn http_runs_and_sessions_handlers_return_gateway_state() {
         .json(&RunSubmission {
             system: Some("You are helpful.".to_owned()),
             input: "hello over http".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("http-demo".to_owned()),
@@ -681,6 +702,168 @@ async fn http_webchat_ingress_sets_webchat_trace_metadata() {
     );
 
     let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn channel_explicit_tool_skill_and_workflow_commands_route_through_gateway_model() {
+    let gateway = gateway();
+
+    let tool = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("tool-demo".to_owned()),
+            input: "/mosaic tool time_now".to_owned(),
+            profile: Some("demo-provider".to_owned()),
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:tool".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:tool".to_owned()),
+            message_id: Some("message-tool".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("tool command should submit")
+        .wait()
+        .await
+        .expect("tool command should succeed");
+    assert_eq!(
+        tool.trace
+            .route_decision
+            .as_ref()
+            .map(|route| route.route_mode),
+        Some(RouteMode::Tool)
+    );
+    assert_eq!(
+        tool.trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_tool.as_deref()),
+        Some("time_now")
+    );
+    assert_eq!(
+        tool.trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.control_command.as_deref()),
+        Some("tool")
+    );
+    assert_eq!(
+        tool.trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.original_text.as_deref()),
+        Some("/mosaic tool time_now")
+    );
+
+    let skill = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("skill-demo".to_owned()),
+            input: "/mosaic skill summarize summarize this please".to_owned(),
+            profile: Some("demo-provider".to_owned()),
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:skill".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:skill".to_owned()),
+            message_id: Some("message-skill".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("skill command should submit")
+        .wait()
+        .await
+        .expect("skill command should succeed");
+    assert_eq!(
+        skill
+            .trace
+            .route_decision
+            .as_ref()
+            .map(|route| route.route_mode),
+        Some(RouteMode::Skill)
+    );
+    assert_eq!(
+        skill
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_skill.as_deref()),
+        Some("summarize")
+    );
+    assert_eq!(
+        skill
+            .trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.control_command.as_deref()),
+        Some("skill")
+    );
+    assert_eq!(
+        skill
+            .trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.original_text.as_deref()),
+        Some("/mosaic skill summarize summarize this please")
+    );
+    assert!(skill.output.starts_with("summary:"));
+
+    let workflow = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("workflow-demo".to_owned()),
+            input: "/mosaic workflow quick_brief operator handoff".to_owned(),
+            profile: Some("demo-provider".to_owned()),
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:workflow".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:workflow".to_owned()),
+            message_id: Some("message-workflow".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("workflow command should submit")
+        .wait()
+        .await
+        .expect("workflow command should succeed");
+    assert_eq!(
+        workflow
+            .trace
+            .route_decision
+            .as_ref()
+            .map(|route| route.route_mode),
+        Some(RouteMode::Workflow)
+    );
+    assert_eq!(
+        workflow
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_workflow.as_deref()),
+        Some("quick_brief")
+    );
+    assert_eq!(
+        workflow
+            .trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.control_command.as_deref()),
+        Some("workflow")
+    );
+    assert_eq!(
+        workflow
+            .trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.original_text.as_deref()),
+        Some("/mosaic workflow quick_brief operator handoff")
+    );
+    assert!(workflow.output.starts_with("summary:"));
 }
 
 #[tokio::test]
@@ -921,6 +1104,7 @@ async fn http_events_stream_emits_gateway_envelopes() {
         .submit_run(GatewayRunRequest {
             system: Some("You are helpful.".to_owned()),
             input: "hello events".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("events-demo".to_owned()),

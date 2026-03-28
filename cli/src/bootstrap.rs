@@ -214,10 +214,18 @@ mod tests {
                 ToolConfig {
                     tool_type: "builtin".to_owned(),
                     name: "time_now".to_owned(),
+                    visibility: mosaic_tool_core::CapabilityVisibility::Visible,
+                    invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
+                    required_policy: None,
+                    allowed_channels: Vec::new(),
                 },
                 ToolConfig {
                     tool_type: "builtin".to_owned(),
                     name: "read_file".to_owned(),
+                    visibility: mosaic_tool_core::CapabilityVisibility::Visible,
+                    invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
+                    required_policy: None,
+                    allowed_channels: Vec::new(),
                 },
             ],
             skills: vec![SkillConfig {
@@ -228,6 +236,10 @@ mod tests {
                 tools: Vec::new(),
                 system_prompt: None,
                 steps: Vec::new(),
+                visibility: mosaic_tool_core::CapabilityVisibility::Visible,
+                invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
+                required_policy: None,
+                allowed_channels: Vec::new(),
             }],
             workflows: Vec::new(),
             agent: AgentConfig { system: None },
@@ -265,8 +277,17 @@ mod tests {
         assert!(ctx.skills.get("summarize").is_some());
         assert!(ctx.workflows.is_empty());
         assert_eq!(ctx.profiles.active_profile_name(), "gpt-5.4-mini");
-        assert_eq!(ctx.active_extensions.len(), 1);
-        assert_eq!(ctx.active_extensions[0].name, "app.inline");
+        assert_eq!(ctx.active_extensions.len(), 2);
+        assert!(
+            ctx.active_extensions
+                .iter()
+                .any(|ext| ext.name == "builtin.core")
+        );
+        assert!(
+            ctx.active_extensions
+                .iter()
+                .any(|ext| ext.name == "app.inline")
+        );
     }
 
     #[test]
@@ -295,8 +316,19 @@ mod tests {
         assert!(components.workflows.is_empty());
         assert_eq!(components.profiles.active_profile_name(), "gpt-5.4-mini");
         assert!(components.runs_dir.ends_with(".mosaic/runs"));
-        assert_eq!(components.extensions.len(), 1);
-        assert_eq!(components.extensions[0].name, "app.inline");
+        assert_eq!(components.extensions.len(), 2);
+        assert!(
+            components
+                .extensions
+                .iter()
+                .any(|ext| ext.name == "builtin.core")
+        );
+        assert!(
+            components
+                .extensions
+                .iter()
+                .any(|ext| ext.name == "app.inline")
+        );
         assert_eq!(components.policies, PolicyConfig::default());
     }
 
@@ -326,11 +358,16 @@ mod tests {
             .expect("gateway components with MCP should build");
 
         assert!(components.tools.get("mcp.filesystem.read_file").is_some());
-        assert_eq!(components.extensions.len(), 1);
-        assert_eq!(
-            components.extensions[0].mcp_servers,
-            vec!["filesystem".to_owned()]
+        assert_eq!(components.extensions.len(), 2);
+        assert!(
+            components
+                .extensions
+                .iter()
+                .any(|ext| ext.name == "builtin.core")
         );
+        assert!(components.extensions.iter().any(
+            |ext| ext.name == "app.inline" && ext.mcp_servers == vec!["filesystem".to_owned()]
+        ));
         assert_eq!(
             components
                 .mcp_manager

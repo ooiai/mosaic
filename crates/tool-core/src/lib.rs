@@ -10,7 +10,8 @@ mod tests;
 
 pub use builtin::{CronRegisterTool, EchoTool, ExecTool, ReadFileTool, TimeNowTool, WebhookTool};
 pub use metadata::{
-    CapabilityAudit, CapabilityKind, CapabilityMetadata, NodeRouteMetadata, PermissionScope,
+    CapabilityAudit, CapabilityExposure, CapabilityInvocationMode, CapabilityKind,
+    CapabilityMetadata, CapabilityVisibility, NodeRouteMetadata, PermissionScope,
     ToolCompatibility, ToolExecutionPolicy, ToolMetadata, ToolRiskLevel,
 };
 pub use registry::ToolRegistry;

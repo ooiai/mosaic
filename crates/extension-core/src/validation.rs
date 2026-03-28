@@ -44,10 +44,15 @@ pub(crate) fn validate_extension_set(
             if let Some(previous) =
                 tool_names.insert(tool.name.clone(), extension.status.name.clone())
             {
-                issues.push(ExtensionValidationIssue {
-                    extension: Some(extension.status.name.clone()),
-                    message: format!("tool '{}' collides with extension {}", tool.name, previous),
-                });
+                if !inline_override_allowed(&extension.status.name, &previous) {
+                    issues.push(ExtensionValidationIssue {
+                        extension: Some(extension.status.name.clone()),
+                        message: format!(
+                            "tool '{}' collides with extension {}",
+                            tool.name, previous
+                        ),
+                    });
+                }
             }
         }
 
@@ -64,13 +69,15 @@ pub(crate) fn validate_extension_set(
             if let Some(previous) =
                 skill_names.insert(skill.name.clone(), extension.status.name.clone())
             {
-                issues.push(ExtensionValidationIssue {
-                    extension: Some(extension.status.name.clone()),
-                    message: format!(
-                        "skill '{}' collides with extension {}",
-                        skill.name, previous
-                    ),
-                });
+                if !inline_override_allowed(&extension.status.name, &previous) {
+                    issues.push(ExtensionValidationIssue {
+                        extension: Some(extension.status.name.clone()),
+                        message: format!(
+                            "skill '{}' collides with extension {}",
+                            skill.name, previous
+                        ),
+                    });
+                }
             }
         }
 
@@ -78,13 +85,15 @@ pub(crate) fn validate_extension_set(
             if let Some(previous) =
                 workflow_names.insert(workflow.name.clone(), extension.status.name.clone())
             {
-                issues.push(ExtensionValidationIssue {
-                    extension: Some(extension.status.name.clone()),
-                    message: format!(
-                        "workflow '{}' collides with extension {}",
-                        workflow.name, previous
-                    ),
-                });
+                if !inline_override_allowed(&extension.status.name, &previous) {
+                    issues.push(ExtensionValidationIssue {
+                        extension: Some(extension.status.name.clone()),
+                        message: format!(
+                            "workflow '{}' collides with extension {}",
+                            workflow.name, previous
+                        ),
+                    });
+                }
             }
         }
     }
@@ -158,4 +167,12 @@ pub(crate) fn validate_extension_set(
         extensions: planned.into_iter().map(|planned| planned.status).collect(),
         issues,
     }
+}
+
+fn inline_override_allowed(current: &str, previous: &str) -> bool {
+    matches!(current, WORKSPACE_EXTENSION_NAME | APP_EXTENSION_NAME)
+        && matches!(
+            previous,
+            BUILTIN_EXTENSION_NAME | WORKSPACE_EXTENSION_NAME | APP_EXTENSION_NAME
+        )
 }

@@ -80,13 +80,16 @@ impl AgentRuntime {
     }
 
     pub(crate) fn runtime_policy_trace(&self) -> mosaic_inspect::RuntimePolicyTrace {
+        Self::runtime_policy_trace_from_config(&self.ctx.runtime_policy)
+    }
+
+    pub(crate) fn runtime_policy_trace_from_config(
+        runtime_policy: &mosaic_config::RuntimePolicyConfig,
+    ) -> mosaic_inspect::RuntimePolicyTrace {
         mosaic_inspect::RuntimePolicyTrace {
-            max_provider_round_trips: self.ctx.runtime_policy.max_provider_round_trips,
-            max_workflow_provider_round_trips: self
-                .ctx
-                .runtime_policy
-                .max_workflow_provider_round_trips,
-            continue_after_tool_error: self.ctx.runtime_policy.continue_after_tool_error,
+            max_provider_round_trips: runtime_policy.max_provider_round_trips,
+            max_workflow_provider_round_trips: runtime_policy.max_workflow_provider_round_trips,
+            continue_after_tool_error: runtime_policy.continue_after_tool_error,
         }
     }
 

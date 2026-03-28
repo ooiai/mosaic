@@ -9,6 +9,48 @@ use mosaic_tool_core::{CapabilityKind, PermissionScope, ToolRiskLevel, ToolSourc
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteMode {
+    Assistant,
+    Tool,
+    Skill,
+    Workflow,
+    Control,
+}
+
+impl RouteMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Assistant => "assistant",
+            Self::Tool => "tool",
+            Self::Skill => "skill",
+            Self::Workflow => "workflow",
+            Self::Control => "control",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RouteDecisionTrace {
+    pub route_mode: RouteMode,
+    #[serde(default)]
+    pub selected_capability_type: Option<String>,
+    #[serde(default)]
+    pub selected_capability_name: Option<String>,
+    #[serde(default)]
+    pub selected_tool: Option<String>,
+    #[serde(default)]
+    pub selected_skill: Option<String>,
+    #[serde(default)]
+    pub selected_workflow: Option<String>,
+    pub selection_reason: String,
+    #[serde(default)]
+    pub capability_source: Option<String>,
+    #[serde(default)]
+    pub profile_used: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolTrace {
     pub call_id: Option<String>,
@@ -131,6 +173,10 @@ pub struct IngressTrace {
     pub session_hint: Option<String>,
     #[serde(default)]
     pub profile_hint: Option<String>,
+    #[serde(default)]
+    pub control_command: Option<String>,
+    #[serde(default)]
+    pub original_text: Option<String>,
     pub gateway_url: Option<String>,
 }
 
@@ -395,6 +441,7 @@ pub struct RunTrace {
     pub session_id: Option<String>,
     pub session_route: Option<String>,
     pub ingress: Option<IngressTrace>,
+    pub route_decision: Option<RouteDecisionTrace>,
     #[serde(default)]
     pub outbound_deliveries: Vec<ChannelDeliveryTrace>,
     pub workflow_name: Option<String>,
@@ -452,6 +499,7 @@ impl RunTrace {
             session_id: None,
             session_route: None,
             ingress: None,
+            route_decision: None,
             outbound_deliveries: vec![],
             workflow_name: None,
             lifecycle_status: RunLifecycleStatus::Queued,
@@ -499,6 +547,10 @@ impl RunTrace {
 
     pub fn bind_ingress(&mut self, ingress: IngressTrace) {
         self.ingress = Some(ingress);
+    }
+
+    pub fn bind_route_decision(&mut self, route_decision: RouteDecisionTrace) {
+        self.route_decision = Some(route_decision);
     }
 
     pub fn add_outbound_delivery(&mut self, delivery: ChannelDeliveryTrace) {
@@ -804,6 +856,8 @@ mod tests {
             raw_event_id: None,
             session_hint: None,
             profile_hint: None,
+            control_command: None,
+            original_text: None,
             gateway_url: Some("http://127.0.0.1:8080".to_owned()),
         });
         trace.add_memory_read(MemoryReadTrace {
@@ -870,6 +924,7 @@ mod tests {
             session_id: Some("session-1".to_owned()),
             session_route: Some("gateway.local/session-1".to_owned()),
             ingress: None,
+            route_decision: None,
             outbound_deliveries: vec![],
             workflow_name: Some("research_brief".to_owned()),
             started_at,
@@ -1009,6 +1064,8 @@ mod tests {
             raw_event_id: Some("event-1".to_owned()),
             session_hint: Some("webchat-demo".to_owned()),
             profile_hint: Some("gpt-5.4-mini".to_owned()),
+            control_command: None,
+            original_text: None,
             gateway_url: None,
         });
 

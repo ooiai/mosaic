@@ -392,6 +392,7 @@ mod tests {
             .submit_run(RunSubmission {
                 system: Some("You are helpful.".to_owned()),
                 input: "hello remote".to_owned(),
+                tool: None,
                 skill: None,
                 workflow: None,
                 session_id: Some("remote-demo".to_owned()),
@@ -413,6 +414,8 @@ mod tests {
                     raw_event_id: None,
                     session_hint: Some("remote-demo".to_owned()),
                     profile_hint: None,
+                    control_command: None,
+                    original_text: None,
                     gateway_url: Some(base_url.clone()),
                 }),
             })

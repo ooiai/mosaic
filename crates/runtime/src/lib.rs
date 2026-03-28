@@ -39,6 +39,7 @@ use crate::events::{RunEvent, SharedRunEventSink};
 mod branches;
 mod failure;
 mod provider;
+mod routing;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -73,14 +74,11 @@ impl AgentRuntime {
         info!(
             run_id = %trace.run_id,
             session_id = ?req.session_id,
+            tool = ?req.tool,
             skill = ?req.skill,
             workflow = ?req.workflow,
             "runtime run started"
         );
-
-        if req.skill.is_some() && req.workflow.is_some() {
-            return self.fail_run(trace, anyhow!("cannot select both skill and workflow"));
-        }
 
         let requested_profile = req.profile.clone();
         let base_profile = match self.ctx.profiles.resolve(req.profile.as_deref()) {
@@ -102,50 +100,57 @@ impl AgentRuntime {
             input: trace.input.clone(),
         });
 
-        let (profile, selection_scope, selection_reason) = if req.skill.is_some() {
-            (
+        let planned_route = match self.plan_route(&req) {
+            Ok(route) => route,
+            Err(err) => return self.fail_run(trace, err),
+        };
+
+        let (profile, selection_scope, selection_reason) = match &planned_route {
+            crate::routing::PlannedRoute::Tool { .. }
+            | crate::routing::PlannedRoute::Skill { .. } => (
                 base_profile,
-                "run:skill".to_owned(),
+                format!("run:{}", planned_route.mode().label()),
                 if requested_profile.is_some() {
                     "requested_profile"
                 } else {
                     "active_profile"
                 }
                 .to_owned(),
-            )
-        } else {
-            let scheduling_intent = if req.workflow.is_some() {
-                SchedulingIntent::WorkflowStep
-            } else {
-                SchedulingIntent::InteractiveRun
-            };
-            let scheduled = match self.ctx.profiles.schedule(SchedulingRequest {
-                requested_profile: requested_profile.clone(),
-                channel: req
-                    .ingress
-                    .as_ref()
-                    .and_then(|ingress| ingress.channel.clone()),
-                intent: scheduling_intent,
-                estimated_context_chars: req.input.chars().count()
-                    + session
+            ),
+            crate::routing::PlannedRoute::Workflow { .. }
+            | crate::routing::PlannedRoute::Assistant { .. } => {
+                let scheduling_intent =
+                    if matches!(planned_route, crate::routing::PlannedRoute::Workflow { .. }) {
+                        SchedulingIntent::WorkflowStep
+                    } else {
+                        SchedulingIntent::InteractiveRun
+                    };
+                let scheduled = match self.ctx.profiles.schedule(SchedulingRequest {
+                    requested_profile: requested_profile.clone(),
+                    channel: req
+                        .ingress
                         .as_ref()
-                        .map(Self::session_context_chars)
-                        .unwrap_or_default(),
-                requires_tools: req.skill.is_none(),
-            }) {
-                Ok(profile) => profile,
-                Err(err) => return self.fail_run(trace, err),
-            };
-            (
-                scheduled.profile,
-                if req.workflow.is_some() {
-                    "run:workflow"
-                } else {
-                    "run:assistant"
-                }
-                .to_owned(),
-                scheduled.reason,
-            )
+                        .and_then(|ingress| ingress.channel.clone()),
+                    intent: scheduling_intent,
+                    estimated_context_chars: req.input.chars().count()
+                        + session
+                            .as_ref()
+                            .map(Self::session_context_chars)
+                            .unwrap_or_default(),
+                    requires_tools: matches!(
+                        planned_route,
+                        crate::routing::PlannedRoute::Assistant { .. }
+                    ),
+                }) {
+                    Ok(profile) => profile,
+                    Err(err) => return self.fail_run(trace, err),
+                };
+                (
+                    scheduled.profile,
+                    format!("run:{}", planned_route.mode().label()),
+                    scheduled.reason,
+                )
+            }
         };
 
         trace.add_model_selection(Self::model_selection_trace(
@@ -159,6 +164,7 @@ impl AgentRuntime {
             &Self::provider_metadata_from_profile(&profile),
         ));
         trace.bind_runtime_policy(self.runtime_policy_trace());
+        trace.bind_route_decision(planned_route.decision(Some(profile.name.as_str())));
 
         if let Some(session_ref) = session.as_mut() {
             if let Err(err) = self.rebind_session_profile(session_ref, &profile) {
@@ -166,17 +172,20 @@ impl AgentRuntime {
             }
         }
 
-        if let Some(workflow_name) = req.workflow.clone() {
-            return self
-                .run_workflow(req, workflow_name, profile, trace, session)
-                .await;
+        match planned_route {
+            crate::routing::PlannedRoute::Workflow { name, .. } => {
+                self.run_workflow(req, name, profile, trace, session).await
+            }
+            crate::routing::PlannedRoute::Skill { name, .. } => {
+                self.run_skill(req, name, trace, session).await
+            }
+            crate::routing::PlannedRoute::Tool { name, .. } => {
+                self.run_tool(req, name, trace, session).await
+            }
+            crate::routing::PlannedRoute::Assistant { .. } => {
+                self.run_plain_assistant(req, profile, trace, session).await
+            }
         }
-
-        if let Some(skill_name) = req.skill.clone() {
-            return self.run_skill(req, skill_name, trace, session).await;
-        }
-
-        self.run_plain_assistant(req, profile, trace, session).await
     }
 
     async fn execute_assistant_run(
@@ -192,7 +201,13 @@ impl AgentRuntime {
         let provider_metadata = provider.metadata();
         trace.bind_effective_profile(Self::effective_profile_trace(profile, &provider_metadata));
         let tool_defs = if profile.capabilities.supports_tools {
-            self.collect_tool_definitions(None)?
+            self.collect_tool_definitions(
+                None,
+                trace
+                    .ingress
+                    .as_ref()
+                    .and_then(|ingress| ingress.channel.as_deref()),
+            )?
         } else {
             Vec::new()
         };

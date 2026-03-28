@@ -199,6 +199,7 @@ impl GatewayHandle {
                 run_id: Some(meta.run_id.clone()),
                 system: request.system,
                 input: request.input,
+                tool: request.tool,
                 skill: request.skill,
                 workflow: request.workflow,
                 session_id: meta.session_id.clone(),
@@ -227,7 +228,110 @@ impl GatewayHandle {
         })
     }
 
-    fn resolve_session_route(
+    pub(crate) fn submit_control_response(
+        &self,
+        request: GatewayRunRequest,
+        response_text: String,
+        route_decision: RouteDecisionTrace,
+        profile_override: Option<String>,
+    ) -> Result<GatewaySubmittedRun> {
+        let gateway_run_id = Uuid::new_v4().to_string();
+        let correlation_id = Uuid::new_v4().to_string();
+        let run_id = Uuid::new_v4().to_string();
+        let components = self.snapshot_components();
+        let session_route =
+            self.resolve_session_route(request.session_id.as_deref(), request.ingress.as_ref())?;
+        let resolved_profile = profile_override
+            .clone()
+            .or_else(|| request.profile.clone())
+            .unwrap_or_else(|| components.profiles.active_profile_name().to_owned());
+        let meta = GatewayRunMeta {
+            gateway_run_id: gateway_run_id.clone(),
+            correlation_id: correlation_id.clone(),
+            run_id: run_id.clone(),
+            session_id: request.session_id.clone(),
+            session_route: session_route.clone(),
+            ingress: request.ingress.clone(),
+        };
+        let record = StoredRunRecord::new(&meta, &request, Some(resolved_profile), None);
+        self.inner.run_store.save(&record)?;
+        sync_session_run_state(
+            self.inner.as_ref(),
+            &record,
+            RunLifecycleStatus::Queued,
+            Some(run_id),
+            None,
+            None,
+        );
+
+        self.record_audit_event(
+            "run.submitted",
+            "accepted",
+            redact_audit_input(&request.input, components.audit.redact_inputs),
+            request.session_id.clone(),
+            Some(gateway_run_id.clone()),
+            Some(correlation_id.clone()),
+            request.ingress.as_ref(),
+            Some(session_route.clone()),
+            components.audit.redact_inputs,
+        );
+        self.emit(run_record_envelope(&record));
+        if let Some(ingress) = request.ingress.clone() {
+            self.record_audit_event(
+                "channel.inbound_received",
+                "accepted",
+                redact_audit_input(&request.input, components.audit.redact_inputs),
+                request.session_id.clone(),
+                Some(gateway_run_id.clone()),
+                Some(correlation_id.clone()),
+                Some(&ingress),
+                ingress
+                    .conversation_id
+                    .clone()
+                    .or_else(|| ingress.reply_target.clone()),
+                components.audit.redact_inputs,
+            );
+            self.emit(meta.envelope(GatewayEvent::InboundReceived {
+                ingress,
+                text_preview: truncate_preview(&request.input, 120),
+            }));
+        }
+        self.emit(
+            meta.envelope(GatewayEvent::RunSubmitted {
+                input: request.input.clone(),
+                profile: request
+                    .profile
+                    .clone()
+                    .unwrap_or_else(|| components.profiles.active_profile_name().to_owned()),
+                ingress: request.ingress.clone(),
+            }),
+        );
+
+        let state = self.inner.clone();
+        let session_id = request.session_id.clone();
+        let session_route = session_route.clone();
+        let join = self.inner.runtime_handle.spawn(async move {
+            finalize_control_response(
+                state,
+                meta,
+                request,
+                response_text,
+                route_decision,
+                profile_override,
+            )
+            .await
+        });
+
+        Ok(GatewaySubmittedRun {
+            gateway_run_id,
+            correlation_id,
+            session_id,
+            session_route,
+            join,
+        })
+    }
+
+    pub(crate) fn resolve_session_route(
         &self,
         session_id: Option<&str>,
         ingress: Option<&IngressTrace>,
@@ -251,4 +355,180 @@ impl GatewayHandle {
                 .unwrap_or_else(|| "gateway.local/ephemeral".to_owned())),
         }
     }
+}
+
+async fn finalize_control_response(
+    state: Arc<GatewayState>,
+    meta: GatewayRunMeta,
+    request: RunSubmission,
+    response_text: String,
+    mut route_decision: RouteDecisionTrace,
+    profile_override: Option<String>,
+) -> Result<GatewayRunResult, GatewayRunError> {
+    let components = state.snapshot_components();
+    let resolved_profile_name = profile_override
+        .clone()
+        .or_else(|| request.profile.clone())
+        .unwrap_or_else(|| components.profiles.active_profile_name().to_owned());
+    let resolved_profile = components
+        .profiles
+        .resolve(Some(&resolved_profile_name))
+        .map_err(|source| GatewayRunError {
+            source,
+            trace: RunTrace::new_with_id(meta.run_id.clone(), request.input.clone()),
+            trace_path: PathBuf::new(),
+            gateway_run_id: meta.gateway_run_id.clone(),
+            correlation_id: meta.correlation_id.clone(),
+            session_route: meta.session_route.clone(),
+        })?;
+    route_decision.profile_used = Some(resolved_profile.name.clone());
+
+    let mut trace = RunTrace::new_with_id(meta.run_id.clone(), request.input.clone());
+    if let Some(session_id) = meta.session_id.clone() {
+        trace.bind_session(session_id);
+    }
+    if let Some(ingress) = meta.ingress.clone() {
+        trace.bind_ingress(ingress);
+    }
+    trace.bind_route_decision(route_decision);
+    trace.bind_extensions(components.extensions.iter().map(extension_trace).collect());
+    trace.bind_gateway_context(
+        meta.gateway_run_id.clone(),
+        meta.correlation_id.clone(),
+        meta.session_route.clone(),
+    );
+    trace.bind_governance(GovernanceTrace {
+        deployment_profile: components.deployment.profile.clone(),
+        workspace_name: components.deployment.workspace_name.clone(),
+        auth_mode: operator_auth_mode(&components.auth),
+        audit_retention_days: components.audit.retention_days,
+        event_replay_window: components.audit.event_replay_window,
+        redact_inputs: components.audit.redact_inputs,
+    });
+    trace.mark_running();
+
+    if let Some(session_id) = meta.session_id.as_deref() {
+        let mut session = match components.session_store.load(session_id) {
+            Ok(Some(session)) => session,
+            Ok(None) => SessionRecord::new(
+                session_id,
+                session_title_from_input(&request.input),
+                resolved_profile.name.clone(),
+                resolved_profile.provider_type.clone(),
+                resolved_profile.model.clone(),
+            ),
+            Err(source) => {
+                return Err(GatewayRunError {
+                    source,
+                    trace,
+                    trace_path: PathBuf::new(),
+                    gateway_run_id: meta.gateway_run_id.clone(),
+                    correlation_id: meta.correlation_id.clone(),
+                    session_route: meta.session_route.clone(),
+                });
+            }
+        };
+        session.set_runtime_binding(
+            resolved_profile.name.clone(),
+            resolved_profile.provider_type.clone(),
+            resolved_profile.model.clone(),
+        );
+        session.set_last_run_id(meta.run_id.clone());
+        if let Some(ingress) = meta.ingress.as_ref() {
+            session.bind_ingress_context(ingress);
+        }
+        session.append_message(TranscriptRole::User, request.input.clone(), None);
+        session.append_message(TranscriptRole::Assistant, response_text.clone(), None);
+        if let Err(source) = components.session_store.save(&session) {
+            return Err(GatewayRunError {
+                source,
+                trace,
+                trace_path: PathBuf::new(),
+                gateway_run_id: meta.gateway_run_id.clone(),
+                correlation_id: meta.correlation_id.clone(),
+                session_route: meta.session_route.clone(),
+            });
+        }
+    }
+
+    trace.record_output_chunk();
+    trace.finish_ok(response_text.clone());
+    let outbound_deliveries =
+        dispatch_outbound_replies(state.as_ref(), &meta, &response_text).await;
+    let last_delivery = outbound_deliveries.last().cloned();
+    for delivery in outbound_deliveries {
+        trace.add_outbound_delivery(delivery.clone());
+        record_channel_delivery_outcome(state.as_ref(), &meta, &delivery);
+    }
+
+    let trace_path = trace
+        .save_to_dir(&components.runs_dir)
+        .map_err(|source| GatewayRunError {
+            source,
+            trace: trace.clone(),
+            trace_path: PathBuf::new(),
+            gateway_run_id: meta.gateway_run_id.clone(),
+            correlation_id: meta.correlation_id.clone(),
+            session_route: meta.session_route.clone(),
+        })?;
+
+    if let Some(record) = update_run_record(state.as_ref(), &meta.gateway_run_id, |record| {
+        record.update_from_trace(&trace, Some(&trace_path));
+    }) {
+        sync_session_run_state(
+            state.as_ref(),
+            &record,
+            RunLifecycleStatus::Success,
+            Some(trace.run_id.clone()),
+            None,
+            None,
+        );
+        broadcast_envelope(state.as_ref(), run_record_envelope(&record));
+    }
+    let session_summary = update_gateway_session_metadata(
+        &state,
+        &meta,
+        Some(trace.run_id.clone()),
+        RunLifecycleStatus::Success,
+        None,
+        None,
+        last_delivery.as_ref(),
+    );
+    increment_metric(state.as_ref(), |metrics| metrics.completed_runs_total += 1);
+    record_audit_event(
+        state.as_ref(),
+        "run.completed",
+        "success",
+        truncate_preview(&response_text, 160),
+        meta.session_id.clone(),
+        Some(meta.gateway_run_id.clone()),
+        Some(meta.correlation_id.clone()),
+        meta.ingress.as_ref(),
+        Some(trace_path.display().to_string()),
+        false,
+    );
+    broadcast_envelope(
+        state.as_ref(),
+        meta.envelope(GatewayEvent::RunCompleted {
+            output_preview: truncate_preview(&response_text, 120),
+        }),
+    );
+    if let Some(summary) = session_summary.clone() {
+        broadcast_envelope(
+            state.as_ref(),
+            meta.envelope(GatewayEvent::SessionUpdated {
+                summary: session_summary_dto(&summary),
+            }),
+        );
+    }
+
+    Ok(GatewayRunResult {
+        gateway_run_id: meta.gateway_run_id,
+        correlation_id: meta.correlation_id,
+        session_route: meta.session_route,
+        output: response_text,
+        trace,
+        trace_path,
+        session_summary,
+    })
 }

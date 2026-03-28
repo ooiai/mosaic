@@ -1797,6 +1797,8 @@ fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
         raw_event_id: None,
         session_hint: None,
         profile_hint: None,
+        control_command: None,
+        original_text: None,
         gateway_url,
     }
 }
@@ -1819,6 +1821,8 @@ fn remote_cli_ingress(gateway_url: &str) -> IngressTrace {
         raw_event_id: None,
         session_hint: None,
         profile_hint: None,
+        control_command: None,
+        original_text: None,
         gateway_url: Some(gateway_url.to_owned()),
     }
 }

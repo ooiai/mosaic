@@ -537,6 +537,7 @@ impl AgentRuntime {
     pub(crate) fn collect_tool_definitions(
         &self,
         allowlist: Option<&[String]>,
+        channel: Option<&str>,
     ) -> Result<Vec<ToolDefinition>> {
         match allowlist {
             Some(names) => names
@@ -548,8 +549,10 @@ impl AgentRuntime {
                         .get(name)
                         .ok_or_else(|| anyhow!("tool not found: {}", name))?;
                     let metadata = tool.metadata();
-                    if !tool_is_visible_to_model(metadata) {
-                        bail!("tool is not authorized or healthy: {}", name);
+                    if !tool_is_visible_to_model(metadata)
+                        || !metadata.exposure.allows_conversational(channel)
+                    {
+                        bail!("tool is not visible to this session: {}", name);
                     }
                     Ok(tool_definition_from_metadata(metadata))
                 })
@@ -560,8 +563,9 @@ impl AgentRuntime {
                 .iter()
                 .filter_map(|tool| {
                     let metadata = tool.metadata();
-                    tool_is_visible_to_model(metadata)
-                        .then(|| tool_definition_from_metadata(metadata))
+                    (tool_is_visible_to_model(metadata)
+                        && metadata.exposure.allows_conversational(channel))
+                    .then(|| tool_definition_from_metadata(metadata))
                 })
                 .collect()),
         }

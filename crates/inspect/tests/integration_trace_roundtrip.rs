@@ -9,7 +9,7 @@ use std::{
 use chrono::Utc;
 use mosaic_inspect::{
     ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace, ChannelOutboundMessage,
-    IngressTrace, RunTrace,
+    IngressTrace, RouteDecisionTrace, RouteMode, RunTrace,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -48,6 +48,8 @@ fn persists_and_recovers_trace_with_ingress_metadata() {
         raw_event_id: Some("event-1".to_owned()),
         session_hint: Some("demo".to_owned()),
         profile_hint: None,
+        control_command: None,
+        original_text: None,
         gateway_url: Some("http://127.0.0.1:8080".to_owned()),
     });
     trace.add_outbound_delivery(ChannelDeliveryTrace {
@@ -95,6 +97,92 @@ fn persists_and_recovers_trace_with_ingress_metadata() {
             .provider_message_id
             .as_deref(),
         Some("88")
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn persists_and_recovers_route_decision_metadata() {
+    let dir = temp_dir("route-decision");
+    let mut trace = RunTrace::new("summarize this for handoff".to_owned());
+    trace.bind_session("demo");
+    trace.bind_ingress(IngressTrace {
+        kind: "telegram_bot".to_owned(),
+        channel: Some("telegram".to_owned()),
+        adapter: Some("telegram_bot".to_owned()),
+        source: Some("telegram_bot".to_owned()),
+        remote_addr: None,
+        display_name: Some("Operator".to_owned()),
+        actor_id: Some("17".to_owned()),
+        conversation_id: Some("telegram:chat:42".to_owned()),
+        thread_id: Some("7".to_owned()),
+        thread_title: Some("Ops".to_owned()),
+        reply_target: Some("telegram:chat:42:message:10".to_owned()),
+        message_id: Some("10".to_owned()),
+        received_at: None,
+        raw_event_id: Some("event-2".to_owned()),
+        session_hint: Some("demo".to_owned()),
+        profile_hint: Some("demo-provider".to_owned()),
+        control_command: Some("skill".to_owned()),
+        original_text: Some("/mosaic skill summarize summarize this for handoff".to_owned()),
+        gateway_url: None,
+    });
+    trace.bind_route_decision(RouteDecisionTrace {
+        route_mode: RouteMode::Skill,
+        selected_capability_type: Some("skill".to_owned()),
+        selected_capability_name: Some("summarize".to_owned()),
+        selected_tool: None,
+        selected_skill: Some("summarize".to_owned()),
+        selected_workflow: None,
+        selection_reason: "explicit /mosaic skill command".to_owned(),
+        capability_source: Some("builtin.core".to_owned()),
+        profile_used: Some("demo-provider".to_owned()),
+    });
+    trace.finish_ok("summary: summarize this for handoff".to_owned());
+
+    let path = trace.save_to_dir(&dir).expect("trace should save");
+    let bytes = fs::read(path).expect("saved trace should be readable");
+    let loaded: RunTrace = serde_json::from_slice(&bytes).expect("trace should deserialize");
+
+    assert_eq!(
+        loaded.route_decision.as_ref().map(|route| route.route_mode),
+        Some(RouteMode::Skill)
+    );
+    assert_eq!(
+        loaded
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_skill.as_deref()),
+        Some("summarize")
+    );
+    assert_eq!(
+        loaded
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.capability_source.as_deref()),
+        Some("builtin.core")
+    );
+    assert_eq!(
+        loaded
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.profile_used.as_deref()),
+        Some("demo-provider")
+    );
+    assert_eq!(
+        loaded
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.control_command.as_deref()),
+        Some("skill")
+    );
+    assert_eq!(
+        loaded
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.original_text.as_deref()),
+        Some("/mosaic skill summarize summarize this for handoff")
     );
 
     fs::remove_dir_all(dir).ok();

@@ -528,6 +528,38 @@ pub fn render_inspect_report(
         ));
     }
 
+    if let Some(route) = &trace.route_decision {
+        blocks.push(render_key_value_block(
+            "route decision",
+            vec![
+                ("route_mode", route.route_mode.label().to_owned()),
+                (
+                    "selected_capability_type",
+                    option_string(route.selected_capability_type.clone()),
+                ),
+                (
+                    "selected_capability_name",
+                    option_string(route.selected_capability_name.clone()),
+                ),
+                ("selected_tool", option_string(route.selected_tool.clone())),
+                (
+                    "selected_skill",
+                    option_string(route.selected_skill.clone()),
+                ),
+                (
+                    "selected_workflow",
+                    option_string(route.selected_workflow.clone()),
+                ),
+                ("selection_reason", route.selection_reason.clone()),
+                (
+                    "capability_source",
+                    option_string(route.capability_source.clone()),
+                ),
+                ("profile_used", option_string(route.profile_used.clone())),
+            ],
+        ));
+    }
+
     if let Some(runtime_policy) = &trace.runtime_policy {
         blocks.push(render_key_value_block(
             "runtime policy",
@@ -569,6 +601,14 @@ pub fn render_inspect_report(
                 ("raw_event_id", option_string(ingress.raw_event_id.clone())),
                 ("session_hint", option_string(ingress.session_hint.clone())),
                 ("profile_hint", option_string(ingress.profile_hint.clone())),
+                (
+                    "control_command",
+                    option_string(ingress.control_command.clone()),
+                ),
+                (
+                    "original_text",
+                    option_preview(ingress.original_text.as_deref(), 120),
+                ),
                 ("gateway_url", option_string(ingress.gateway_url.clone())),
             ],
         ));
@@ -1527,6 +1567,7 @@ mod tests {
             session_id: Some("session-1".to_owned()),
             session_route: Some("gateway.local/session-1".to_owned()),
             ingress: None,
+            route_decision: None,
             outbound_deliveries: vec![],
             workflow_name: Some("research_brief".to_owned()),
             started_at,

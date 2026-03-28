@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use mosaic_tool_core::CapabilityExposure;
 use mosaic_workflow::{
     Workflow, WorkflowRunner, WorkflowStep, WorkflowStepExecutor, WorkflowStepKind,
 };
@@ -32,6 +33,7 @@ async fn workflow_runner_executes_prompt_and_skill_steps_in_order() {
     let workflow = Workflow {
         name: "demo".to_owned(),
         description: None,
+        visibility: CapabilityExposure::default(),
         steps: vec![
             WorkflowStep {
                 name: "draft".to_owned(),

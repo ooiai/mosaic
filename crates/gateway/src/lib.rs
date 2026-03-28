@@ -39,7 +39,10 @@ use mosaic_control_protocol::{
 use mosaic_extension_core::{
     ExtensionStatus, ExtensionValidationReport, load_extension_set, validate_extension_set,
 };
-use mosaic_inspect::{ExtensionTrace, GovernanceTrace, IngressTrace, RunLifecycleStatus, RunTrace};
+use mosaic_inspect::{
+    ExtensionTrace, GovernanceTrace, IngressTrace, RouteDecisionTrace, RouteMode,
+    RunLifecycleStatus, RunTrace,
+};
 use mosaic_mcp_core::McpServerManager;
 use mosaic_memory::{MemoryPolicy, MemoryStore};
 use mosaic_node_protocol::{FileNodeStore, NodeCapabilityDeclaration, NodeRegistration};
@@ -49,7 +52,7 @@ use mosaic_runtime::{RunError, RunResult, RuntimeContext};
 use mosaic_scheduler_core::{CronRegistration, CronStore};
 use mosaic_session_core::{
     SessionChannelMetadata, SessionRecord, SessionStore, SessionSummary, TranscriptRole,
-    session_route_for_id,
+    session_route_for_id, session_title_from_input,
 };
 use mosaic_skill_core::SkillRegistry;
 use mosaic_tool_core::ToolRegistry;
@@ -260,6 +263,7 @@ struct StoredRunRecord {
     effective_profile: Option<String>,
     effective_provider_type: Option<String>,
     effective_model: Option<String>,
+    tool: Option<String>,
     skill: Option<String>,
     workflow: Option<String>,
     retry_of: Option<String>,
@@ -296,6 +300,7 @@ impl StoredRunRecord {
             effective_profile: None,
             effective_provider_type: None,
             effective_model: None,
+            tool: request.tool.clone(),
             skill: request.skill.clone(),
             workflow: request.workflow.clone(),
             retry_of,
@@ -359,6 +364,7 @@ impl StoredRunRecord {
             effective_profile: self.effective_profile.clone(),
             effective_provider_type: self.effective_provider_type.clone(),
             effective_model: self.effective_model.clone(),
+            tool: self.tool.clone(),
             skill: self.skill.clone(),
             workflow: self.workflow.clone(),
             retry_of: self.retry_of.clone(),
@@ -956,6 +962,7 @@ impl GatewayHandle {
         self.submit_run(RunSubmission {
             system: None,
             input: registration.input.clone(),
+            tool: None,
             skill: registration.skill.clone(),
             workflow: registration.workflow.clone(),
             session_id: registration.session_id.clone(),
@@ -977,6 +984,8 @@ impl GatewayHandle {
                 raw_event_id: None,
                 session_hint: registration.session_id.clone(),
                 profile_hint: registration.profile.clone(),
+                control_command: None,
+                original_text: None,
                 gateway_url: None,
             }),
         })?

@@ -5,7 +5,50 @@ pub(crate) fn plan_extensions(
     app_config: Option<&AppConfig>,
     workspace_root: &Path,
 ) -> Vec<PlannedExtension> {
-    let mut planned = Vec::new();
+    let mut planned = vec![crate::builtin::builtin_planned_extension(&config.policies)];
+
+    if !config.tools.is_empty()
+        || !config.skills.is_empty()
+        || !config.workflows.is_empty()
+        || config.mcp.is_some()
+    {
+        planned.push(PlannedExtension {
+            status: ExtensionStatus {
+                name: WORKSPACE_EXTENSION_NAME.to_owned(),
+                version: WORKSPACE_EXTENSION_VERSION.to_owned(),
+                source: "workspace_config".to_owned(),
+                enabled: true,
+                active: true,
+                tools: config.tools.iter().map(|tool| tool.name.clone()).collect(),
+                skills: config
+                    .skills
+                    .iter()
+                    .map(|skill| skill.name.clone())
+                    .collect(),
+                workflows: config
+                    .workflows
+                    .iter()
+                    .map(|workflow| workflow.name.clone())
+                    .collect(),
+                mcp_servers: config
+                    .mcp
+                    .as_ref()
+                    .map(|mcp| {
+                        mcp.servers
+                            .iter()
+                            .map(|server| server.name.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                error: None,
+            },
+            schema_version: CURRENT_SCHEMA_VERSION,
+            tools: config.tools.clone(),
+            skills: config.skills.clone(),
+            workflows: config.workflows.clone(),
+            mcp: config.mcp.clone(),
+        });
+    }
 
     if let Some(app_config) = app_config {
         planned.push(PlannedExtension {
@@ -48,8 +91,6 @@ pub(crate) fn plan_extensions(
             workflows: app_config.workflows.clone(),
             mcp: app_config.mcp.clone(),
         });
-    } else {
-        planned.push(crate::builtin::builtin_planned_extension(&config.policies));
     }
 
     for manifest_ref in &config.extensions.manifests {

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub use mosaic_inspect::{
     ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace, ChannelOutboundMessage,
-    IngressTrace,
+    IngressTrace, RouteDecisionTrace, RouteMode,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,6 +127,7 @@ pub struct ChannelInboundMessage {
 pub struct RunSubmission {
     pub system: Option<String>,
     pub input: String,
+    pub tool: Option<String>,
     pub skill: Option<String>,
     pub workflow: Option<String>,
     pub session_id: Option<String>,
@@ -157,6 +158,7 @@ pub struct RunSummaryDto {
     pub effective_profile: Option<String>,
     pub effective_provider_type: Option<String>,
     pub effective_model: Option<String>,
+    pub tool: Option<String>,
     pub skill: Option<String>,
     pub workflow: Option<String>,
     pub retry_of: Option<String>,
@@ -459,6 +461,7 @@ mod tests {
         let submission = RunSubmission {
             system: Some("You are helpful.".to_owned()),
             input: "hello".to_owned(),
+            tool: None,
             skill: None,
             workflow: None,
             session_id: Some("demo".to_owned()),
@@ -480,6 +483,8 @@ mod tests {
                 raw_event_id: None,
                 session_hint: None,
                 profile_hint: None,
+                control_command: None,
+                original_text: None,
                 gateway_url: Some("http://127.0.0.1:8080".to_owned()),
             }),
         };
@@ -545,6 +550,8 @@ mod tests {
                     raw_event_id: Some("event-1".to_owned()),
                     session_hint: Some("webchat-demo".to_owned()),
                     profile_hint: None,
+                    control_command: None,
+                    original_text: None,
                     gateway_url: None,
                 }),
             },

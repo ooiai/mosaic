@@ -14,6 +14,86 @@ use crate::{
 };
 
 impl AgentRuntime {
+    pub(crate) async fn run_tool(
+        &self,
+        req: RunRequest,
+        tool_name: String,
+        mut trace: mosaic_inspect::RunTrace,
+        mut session: Option<SessionRecord>,
+    ) -> std::result::Result<RunResult, crate::RunError> {
+        if let Some(session_ref) = session.as_mut() {
+            if let Err(err) = self.append_session_message(
+                session_ref,
+                TranscriptRole::User,
+                req.input.clone(),
+                None,
+            ) {
+                return self.fail_run(trace, err);
+            }
+        }
+
+        let Some(tool) = self.ctx.tools.get(&tool_name) else {
+            return self.fail_run(trace, anyhow!("tool not found: {}", tool_name));
+        };
+        if let Some(usage) = Self::tool_extension_usage(tool.metadata()) {
+            trace.record_extension_usage(usage);
+        }
+
+        let parsed_input = Self::parse_direct_tool_input(tool.metadata(), &req.input);
+        let outcome = match self
+            .invoke_tool_with_guardrails(
+                session.as_ref().map(|record| record.id.as_str()),
+                tool_name.clone(),
+                format!("direct_tool_{}", trace.run_id),
+                parsed_input,
+            )
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                if let Some(tool_trace) = failure.tool_trace {
+                    trace.tool_calls.push(tool_trace);
+                }
+                if let Some(capability_trace) = failure.capability_trace {
+                    trace.add_capability_invocation(capability_trace);
+                }
+                return self.fail_run(trace, failure.error);
+            }
+        };
+
+        trace.tool_calls.push(outcome.tool_trace);
+        trace.add_capability_invocation(outcome.capability_trace);
+
+        if let Some(session_ref) = session.as_mut() {
+            if let Err(err) = self.append_session_message(
+                session_ref,
+                TranscriptRole::Assistant,
+                outcome.output.clone(),
+                None,
+            ) {
+                return self.fail_run(trace, err);
+            }
+            if let Err(err) = self.persist_session_memory(session_ref, &mut trace) {
+                return self.fail_run(trace, err);
+            }
+        }
+
+        self.emit_output_deltas(&mut trace, &outcome.output);
+        self.emit(crate::events::RunEvent::FinalAnswerReady {
+            run_id: trace.run_id.clone(),
+        });
+        self.emit(crate::events::RunEvent::RunFinished {
+            run_id: trace.run_id.clone(),
+            output_preview: Self::truncate_preview(&outcome.output, 120),
+        });
+        trace.finish_ok(outcome.output.clone());
+
+        Ok(RunResult {
+            output: outcome.output,
+            trace,
+        })
+    }
+
     pub(crate) async fn run_plain_assistant(
         &self,
         req: RunRequest,

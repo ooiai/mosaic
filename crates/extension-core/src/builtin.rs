@@ -27,6 +27,10 @@ pub(crate) fn builtin_planned_extension(policies: &PolicyConfig) -> PlannedExten
             tools: Vec::new(),
             system_prompt: None,
             steps: Vec::new(),
+            visibility: mosaic_tool_core::CapabilityVisibility::Visible,
+            invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
+            required_policy: None,
+            allowed_channels: Vec::new(),
         }],
         workflows: Vec::new(),
         mcp: None,
@@ -48,6 +52,7 @@ pub(crate) fn build_builtin_tool(
     cron_store: Arc<dyn CronStore>,
     extension_name: &str,
     extension_version: &str,
+    extension_source: &str,
     schema_version: u32,
 ) -> Result<Arc<dyn Tool>> {
     let roots = vec![workspace_root.to_path_buf()];
@@ -62,6 +67,12 @@ pub(crate) fn build_builtin_tool(
         (other, _) => bail!("unsupported tool type: {}", other),
     };
 
+    let metadata = inner
+        .metadata()
+        .clone()
+        .with_exposure(crate::exposure_from_tool_config(tool, extension_source));
+    let inner: Arc<dyn Tool> = Arc::new(ExtensionWrappedTool { inner, metadata });
+
     Ok(wrap_tool(
         inner,
         extension_name,
@@ -75,6 +86,7 @@ pub(crate) fn register_skill(
     skill: &SkillConfig,
     extension_name: &str,
     extension_version: &str,
+    extension_source: &str,
     schema_version: u32,
 ) -> Result<()> {
     let compatibility = SkillCompatibility { schema_version };
@@ -82,6 +94,7 @@ pub(crate) fn register_skill(
         ("builtin", "summarize") => registry.register_native_with_metadata(
             Arc::new(SummarizeSkill),
             SkillMetadata::native("summarize")
+                .with_exposure(crate::exposure_from_skill_config(skill, extension_source))
                 .with_extension(extension_name.to_owned(), extension_version.to_owned())
                 .with_compatibility(compatibility),
         ),
@@ -108,6 +121,7 @@ pub(crate) fn register_skill(
                 system_prompt: skill.system_prompt.clone(),
                 steps: skill.steps.clone(),
             })
+            .with_exposure(crate::exposure_from_skill_config(skill, extension_source))
             .with_extension(extension_name.to_owned(), extension_version.to_owned())
             .with_compatibility(compatibility),
         ),
@@ -145,14 +159,26 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
         ToolConfig {
             tool_type: "builtin".to_owned(),
             name: "echo".to_owned(),
+            visibility: mosaic_tool_core::CapabilityVisibility::Visible,
+            invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
+            required_policy: None,
+            allowed_channels: Vec::new(),
         },
         ToolConfig {
             tool_type: "builtin".to_owned(),
             name: "read_file".to_owned(),
+            visibility: mosaic_tool_core::CapabilityVisibility::Visible,
+            invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
+            required_policy: None,
+            allowed_channels: Vec::new(),
         },
         ToolConfig {
             tool_type: "builtin".to_owned(),
             name: "time_now".to_owned(),
+            visibility: mosaic_tool_core::CapabilityVisibility::Visible,
+            invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
+            required_policy: None,
+            allowed_channels: Vec::new(),
         },
     ];
 
@@ -160,18 +186,30 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
         tools.push(ToolConfig {
             tool_type: "builtin".to_owned(),
             name: "cron_register".to_owned(),
+            visibility: mosaic_tool_core::CapabilityVisibility::Restricted,
+            invocation_mode: mosaic_tool_core::CapabilityInvocationMode::ExplicitOnly,
+            required_policy: Some("allow_cron".to_owned()),
+            allowed_channels: Vec::new(),
         });
     }
     if policies.allow_exec {
         tools.push(ToolConfig {
             tool_type: "builtin".to_owned(),
             name: "exec_command".to_owned(),
+            visibility: mosaic_tool_core::CapabilityVisibility::Restricted,
+            invocation_mode: mosaic_tool_core::CapabilityInvocationMode::ExplicitOnly,
+            required_policy: Some("allow_exec".to_owned()),
+            allowed_channels: Vec::new(),
         });
     }
     if policies.allow_webhook {
         tools.push(ToolConfig {
             tool_type: "builtin".to_owned(),
             name: "webhook_call".to_owned(),
+            visibility: mosaic_tool_core::CapabilityVisibility::Restricted,
+            invocation_mode: mosaic_tool_core::CapabilityInvocationMode::ExplicitOnly,
+            required_policy: Some("allow_webhook".to_owned()),
+            allowed_channels: Vec::new(),
         });
     }
 
