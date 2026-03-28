@@ -7,7 +7,7 @@ use mosaic_inspect::{
     ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace, ChannelOutboundMessage,
 };
 use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 10;
@@ -63,6 +63,30 @@ pub struct TelegramOutboundClient {
     base_url: String,
     bot_token: String,
     max_retries: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TelegramWebhookConfig {
+    pub url: String,
+    pub secret_token: Option<String>,
+    #[serde(default)]
+    pub allowed_updates: Vec<String>,
+    #[serde(default)]
+    pub drop_pending_updates: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TelegramWebhookInfo {
+    pub url: String,
+    pub has_custom_certificate: bool,
+    pub pending_update_count: i64,
+    pub last_error_date: Option<i64>,
+    pub last_error_message: Option<String>,
+    pub last_synchronization_error_date: Option<i64>,
+    pub max_connections: Option<i64>,
+    pub ip_address: Option<String>,
+    #[serde(default)]
+    pub allowed_updates: Vec<String>,
 }
 
 impl TelegramOutboundClient {
@@ -161,6 +185,79 @@ impl TelegramOutboundClient {
         }
     }
 
+    pub async fn set_webhook(&self, config: TelegramWebhookConfig) -> Result<TelegramWebhookInfo> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/bot{}/setWebhook",
+                self.base_url, self.bot_token
+            ))
+            .json(&TelegramSetWebhookRequest {
+                url: config.url,
+                secret_token: config.secret_token,
+                allowed_updates: if config.allowed_updates.is_empty() {
+                    None
+                } else {
+                    Some(config.allowed_updates)
+                },
+                drop_pending_updates: config.drop_pending_updates,
+            })
+            .send()
+            .await?;
+        self.expect_api_result::<bool>(response).await?;
+        self.get_webhook_info().await
+    }
+
+    pub async fn get_webhook_info(&self) -> Result<TelegramWebhookInfo> {
+        let response = self
+            .client
+            .get(format!(
+                "{}/bot{}/getWebhookInfo",
+                self.base_url, self.bot_token
+            ))
+            .send()
+            .await?;
+        self.expect_api_result::<TelegramWebhookInfo>(response)
+            .await
+    }
+
+    pub async fn delete_webhook(&self, drop_pending_updates: bool) -> Result<()> {
+        let response = self
+            .client
+            .post(format!(
+                "{}/bot{}/deleteWebhook",
+                self.base_url, self.bot_token
+            ))
+            .json(&TelegramDeleteWebhookRequest {
+                drop_pending_updates,
+            })
+            .send()
+            .await?;
+        self.expect_api_result::<bool>(response).await?;
+        Ok(())
+    }
+
+    pub async fn send_test_message(
+        &self,
+        chat_id: i64,
+        text: impl Into<String>,
+        thread_id: Option<i64>,
+        reply_to_message_id: Option<i64>,
+    ) -> ChannelDeliveryTrace {
+        self.send_message(ChannelOutboundMessage {
+            channel: "telegram".to_owned(),
+            adapter: "telegram_cli".to_owned(),
+            conversation_id: format!("telegram:chat:{chat_id}"),
+            reply_target: reply_target_for_target(chat_id, thread_id, reply_to_message_id),
+            text: text.into(),
+            idempotency_key: Uuid::new_v4().to_string(),
+            correlation_id: "telegram-cli-test".to_owned(),
+            gateway_run_id: "telegram-cli-test".to_owned(),
+            session_id: format!("telegram-cli-{chat_id}"),
+        })
+        .await
+    }
+
     async fn send_once(
         &self,
         message: &ChannelOutboundMessage,
@@ -184,9 +281,10 @@ impl TelegramOutboundClient {
         let status = response.status();
         let body = response.text().await.map_err(classify_reqwest_error)?;
 
-        let payload: TelegramApiResponse = serde_json::from_str(&body).map_err(|err| {
-            DeliveryError::protocol(format!("telegram returned invalid JSON: {err}"))
-        })?;
+        let payload: TelegramApiResponse<TelegramApiMessage> = serde_json::from_str(&body)
+            .map_err(|err| {
+                DeliveryError::protocol(format!("telegram returned invalid JSON: {err}"))
+            })?;
 
         if status.is_success() && payload.ok {
             let provider_message_id = payload
@@ -200,7 +298,26 @@ impl TelegramOutboundClient {
             return Ok(provider_message_id.to_string());
         }
 
-        Err(classify_telegram_error(status, payload))
+        Err(classify_telegram_error(status, payload.description))
+    }
+
+    async fn expect_api_result<T: DeserializeOwned>(
+        &self,
+        response: reqwest::Response,
+    ) -> Result<T> {
+        let status = response.status();
+        let body = response.text().await?;
+        let payload: TelegramApiResponse<T> = serde_json::from_str(&body)
+            .map_err(|err| anyhow!("telegram returned invalid JSON: {err}"))?;
+
+        if status.is_success() && payload.ok {
+            return payload
+                .result
+                .ok_or_else(|| anyhow!("telegram success response did not include result"));
+        }
+
+        let error = classify_telegram_error(status, payload.description);
+        Err(anyhow!("telegram {} error: {}", error.kind, error.message))
     }
 }
 
@@ -300,9 +417,24 @@ fn reply_target_for_message(chat_id: i64, thread_id: Option<i64>, message_id: i6
     }
 }
 
+fn reply_target_for_target(
+    chat_id: i64,
+    thread_id: Option<i64>,
+    reply_to_message_id: Option<i64>,
+) -> String {
+    match (thread_id, reply_to_message_id) {
+        (Some(thread_id), Some(message_id)) => {
+            format!("telegram:chat:{chat_id}:thread:{thread_id}:message:{message_id}")
+        }
+        (Some(thread_id), None) => format!("telegram:chat:{chat_id}:thread:{thread_id}"),
+        (None, Some(message_id)) => format!("telegram:chat:{chat_id}:message:{message_id}"),
+        (None, None) => format!("telegram:chat:{chat_id}"),
+    }
+}
+
 fn parse_reply_target(value: &str) -> std::result::Result<TelegramReplyTarget, DeliveryError> {
     let parts = value.split(':').collect::<Vec<_>>();
-    if parts.len() < 4 || parts[0] != "telegram" || parts[1] != "chat" {
+    if parts.len() < 3 || parts[0] != "telegram" || parts[1] != "chat" {
         return Err(DeliveryError::protocol(format!(
             "unsupported telegram reply target: {value}"
         )));
@@ -358,9 +490,8 @@ fn classify_reqwest_error(error: reqwest::Error) -> DeliveryError {
     }
 }
 
-fn classify_telegram_error(status: StatusCode, payload: TelegramApiResponse) -> DeliveryError {
-    let message = payload
-        .description
+fn classify_telegram_error(status: StatusCode, description: Option<String>) -> DeliveryError {
+    let message = description
         .unwrap_or_else(|| format!("telegram request failed with status {}", status.as_u16()));
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => DeliveryError::auth(message),
@@ -424,10 +555,27 @@ struct TelegramSendMessageRequest {
     reply_to_message_id: Option<i64>,
 }
 
+#[derive(Debug, Serialize)]
+struct TelegramSetWebhookRequest {
+    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_updates: Option<Vec<String>>,
+    #[serde(default)]
+    drop_pending_updates: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct TelegramDeleteWebhookRequest {
+    #[serde(default)]
+    drop_pending_updates: bool,
+}
+
 #[derive(Debug, Deserialize)]
-struct TelegramApiResponse {
+struct TelegramApiResponse<T> {
     ok: bool,
-    result: Option<TelegramApiMessage>,
+    result: Option<T>,
     description: Option<String>,
 }
 
@@ -443,7 +591,10 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    use axum::{Json, Router, routing::post};
+    use axum::{
+        Json, Router,
+        routing::{any, post},
+    };
 
     use super::*;
 
@@ -670,9 +821,166 @@ mod tests {
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
     }
 
+    #[tokio::test]
+    async fn manages_webhook_lifecycle_against_bot_api_surface() {
+        let requests = Arc::new(tokio::sync::Mutex::new(
+            Vec::<(String, serde_json::Value)>::new(),
+        ));
+        let app = Router::new()
+            .route(
+                "/bottest-token/setWebhook",
+                post({
+                    let requests = requests.clone();
+                    move |Json(payload): Json<serde_json::Value>| {
+                        let requests = requests.clone();
+                        async move {
+                            requests
+                                .lock()
+                                .await
+                                .push(("setWebhook".to_owned(), payload));
+                            Json(serde_json::json!({
+                                "ok": true,
+                                "result": true
+                            }))
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/bottest-token/getWebhookInfo",
+                any({
+                    let requests = requests.clone();
+                    move || {
+                        let requests = requests.clone();
+                        async move {
+                            requests
+                                .lock()
+                                .await
+                                .push(("getWebhookInfo".to_owned(), serde_json::json!({})));
+                            Json(serde_json::json!({
+                                "ok": true,
+                                "result": {
+                                    "url": "https://public.example.com/ingress/telegram",
+                                    "has_custom_certificate": false,
+                                    "pending_update_count": 0,
+                                    "allowed_updates": ["message"]
+                                }
+                            }))
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/bottest-token/deleteWebhook",
+                post({
+                    let requests = requests.clone();
+                    move |Json(payload): Json<serde_json::Value>| {
+                        let requests = requests.clone();
+                        async move {
+                            requests
+                                .lock()
+                                .await
+                                .push(("deleteWebhook".to_owned(), payload));
+                            Json(serde_json::json!({
+                                "ok": true,
+                                "result": true
+                            }))
+                        }
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let client = TelegramOutboundClient::new("test-token", format!("http://{addr}")).unwrap();
+        let info = client
+            .set_webhook(TelegramWebhookConfig {
+                url: "https://public.example.com/ingress/telegram".to_owned(),
+                secret_token: Some("secret-1".to_owned()),
+                allowed_updates: vec!["message".to_owned()],
+                drop_pending_updates: true,
+            })
+            .await
+            .expect("webhook should set");
+        assert_eq!(info.url, "https://public.example.com/ingress/telegram");
+        assert_eq!(info.allowed_updates, vec!["message".to_owned()]);
+
+        let info = client
+            .get_webhook_info()
+            .await
+            .expect("webhook info should load");
+        assert_eq!(info.pending_update_count, 0);
+
+        client
+            .delete_webhook(true)
+            .await
+            .expect("webhook should delete");
+
+        let requests = requests.lock().await;
+        assert_eq!(requests[0].0, "setWebhook");
+        assert_eq!(requests[0].1["secret_token"], "secret-1");
+        assert_eq!(requests[1].0, "getWebhookInfo");
+        assert_eq!(requests[2].0, "getWebhookInfo");
+        assert_eq!(requests[3].0, "deleteWebhook");
+        assert_eq!(requests[3].1["drop_pending_updates"], true);
+    }
+
+    #[tokio::test]
+    async fn test_send_can_target_chat_without_reply_to_message() {
+        let captured = Arc::new(tokio::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let app = Router::new().route(
+            "/bottest-token/sendMessage",
+            post({
+                let captured = captured.clone();
+                move |Json(payload): Json<serde_json::Value>| {
+                    let captured = captured.clone();
+                    async move {
+                        captured.lock().await.push(payload);
+                        Json(serde_json::json!({
+                            "ok": true,
+                            "result": { "message_id": 101 }
+                        }))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let client = TelegramOutboundClient::new("test-token", format!("http://{addr}")).unwrap();
+        let delivery = client
+            .send_test_message(42, "hello from cli", Some(7), None)
+            .await;
+
+        assert_eq!(delivery.result.status, ChannelDeliveryStatus::Delivered);
+        let captured = captured.lock().await;
+        assert_eq!(captured[0]["chat_id"], 42);
+        assert_eq!(captured[0]["message_thread_id"], 7);
+        assert!(captured[0]["reply_to_message_id"].is_null());
+    }
+
     #[test]
     fn rejects_invalid_reply_target_format() {
         let error = parse_reply_target("telegram:bad").expect_err("reply target should fail");
         assert_eq!(error.kind, "protocol");
+    }
+
+    #[test]
+    fn accepts_reply_target_without_message_segment() {
+        let target = parse_reply_target("telegram:chat:42:thread:7")
+            .expect("reply target without message id should parse");
+        assert_eq!(target.chat_id, 42);
+        assert_eq!(target.thread_id, Some(7));
+        assert_eq!(target.reply_to_message_id, None);
     }
 }

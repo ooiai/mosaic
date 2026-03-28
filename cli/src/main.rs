@@ -13,9 +13,9 @@ use mosaic_config::{
     redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
 };
 use mosaic_control_protocol::{
-    AdapterStatusDto, CapabilityJobDto, CronRegistrationDto, GatewayAuditEventDto, GatewayEvent,
-    HealthResponse, IncidentBundleDto, IngressTrace, MetricsResponse, ReadinessResponse,
-    ReplayWindowResponse, RunDetailDto, RunResponse, RunSummaryDto, SessionSummaryDto,
+    CapabilityJobDto, CronRegistrationDto, GatewayAuditEventDto, GatewayEvent, HealthResponse,
+    IncidentBundleDto, IngressTrace, MetricsResponse, ReadinessResponse, ReplayWindowResponse,
+    RunDetailDto, RunResponse, RunSummaryDto, SessionSummaryDto,
 };
 use mosaic_extension_core::{ExtensionStatus, ExtensionValidationReport, validate_extension_set};
 use mosaic_gateway::{GatewayHandle, GatewayRunError, GatewayRunResult};
@@ -28,6 +28,7 @@ use mosaic_session_core::SessionSummary;
 use mosaic_tool_core::Tool;
 use tracing_subscriber::EnvFilter;
 
+mod adapter_cmd;
 mod automation_cmd;
 mod bootstrap;
 mod gateway_cmd;
@@ -99,6 +100,16 @@ Examples:
   mosaic gateway cancel <gateway-run-id>
   mosaic gateway retry <gateway-run-id>
   mosaic gateway incident <run-id>";
+const ADAPTER_AFTER_HELP: &str = "When to use it:
+  Use `adapter` to verify channel readiness, manage Telegram webhooks, and perform a direct outbound smoke message without leaving the CLI.
+
+Examples:
+  mosaic adapter status
+  mosaic adapter doctor
+  mosaic adapter telegram webhook info
+  mosaic adapter telegram webhook set --url https://public.example.com/ingress/telegram
+  mosaic adapter telegram webhook delete --drop-pending-updates
+  mosaic adapter telegram test-send --chat-id 123456789 \"hello from mosaic\"";
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum LogFormat {
@@ -342,9 +353,65 @@ enum GatewayCliCommand {
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
+#[command(after_help = ADAPTER_AFTER_HELP)]
 enum AdapterCommand {
     Status,
     Doctor,
+    Telegram {
+        #[command(subcommand)]
+        command: TelegramAdapterCommand,
+    },
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum TelegramAdapterCommand {
+    Webhook {
+        #[command(subcommand)]
+        command: TelegramWebhookCommand,
+    },
+    TestSend {
+        #[arg(long)]
+        chat_id: i64,
+        text: String,
+        #[arg(long)]
+        thread_id: Option<i64>,
+        #[arg(long)]
+        reply_to: Option<i64>,
+    },
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+enum TelegramWebhookCommand {
+    Set {
+        #[arg(
+            long,
+            help = "Full public Telegram webhook URL. Defaults to $MOSAIC_PUBLIC_WEBHOOK_BASE_URL/ingress/telegram"
+        )]
+        url: Option<String>,
+        #[arg(
+            long,
+            help = "Override the Telegram webhook secret token instead of reading the configured env var"
+        )]
+        secret_token: Option<String>,
+        #[arg(
+            long = "allowed-update",
+            help = "Repeat to override allowed update types. Defaults to `message`"
+        )]
+        allowed_updates: Vec<String>,
+        #[arg(
+            long,
+            help = "Ask Telegram to drop pending updates when registering the webhook"
+        )]
+        drop_pending_updates: bool,
+    },
+    Info,
+    Delete {
+        #[arg(
+            long,
+            help = "Ask Telegram to drop pending updates when deleting the webhook"
+        )]
+        drop_pending_updates: bool,
+    },
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -618,7 +685,9 @@ async fn main() -> Result<()> {
         DispatchCommand::Gateway { attach, command } => {
             gateway_cmd::gateway_cmd(attach, command).await
         }
-        DispatchCommand::Adapter { attach, command } => adapter_cmd(attach, command).await,
+        DispatchCommand::Adapter { attach, command } => {
+            adapter_cmd::adapter_cmd(attach, command).await
+        }
         DispatchCommand::Node { command } => node_cmd::node_cmd(command).await,
         DispatchCommand::Capability { attach, command } => {
             automation_cmd::capability_cmd(attach, command).await
@@ -857,7 +926,13 @@ next: run `mosaic setup doctor` and compare `.mosaic/config.yaml` with `docs/con
                 )
             }
 
-            print_next_steps(["mosaic setup doctor", "mosaic config sources", "mosaic tui"]);
+            print_next_steps([
+                "mosaic setup doctor",
+                "mosaic config sources",
+                "mosaic extension validate",
+                "mosaic adapter status",
+                "mosaic tui",
+            ]);
             Ok(())
         }
         SetupCommand::Doctor => {
@@ -880,7 +955,13 @@ next: fix the reported checks, then rerun `mosaic setup doctor`"
                 )
             }
 
-            print_next_steps(["mosaic model list", "mosaic tui", "mosaic gateway status"]);
+            print_next_steps([
+                "mosaic model list",
+                "mosaic extension validate",
+                "mosaic adapter doctor",
+                "mosaic gateway status",
+                "mosaic tui",
+            ]);
             Ok(())
         }
     }
@@ -930,24 +1011,6 @@ fn config_cmd(command: ConfigCommand) -> Result<()> {
             }
             Ok(())
         }
-    }
-}
-
-async fn adapter_cmd(attach: Option<String>, command: AdapterCommand) -> Result<()> {
-    let adapters = if let Some(url) = attach {
-        let loaded = ensure_loaded_config(None)?;
-        gateway_client_from_loaded(&loaded, url)
-            .list_adapters()
-            .await?
-    } else {
-        let loaded = ensure_loaded_config(None)?;
-        let gateway = build_gateway_handle(&loaded, None)?;
-        gateway.list_adapter_statuses()
-    };
-
-    match command {
-        AdapterCommand::Status => print_adapter_statuses(&adapters),
-        AdapterCommand::Doctor => print_adapter_doctor(&adapters),
     }
 }
 
@@ -1356,12 +1419,18 @@ fn print_run_list(runs: &[RunSummaryDto]) -> Result<()> {
 
     println!("runs:");
     for run in runs {
+        let route = run_capability_route_label(
+            run.tool.as_deref(),
+            run.skill.as_deref(),
+            run.workflow.as_deref(),
+        );
         println!(
-            "  - {} | status={} | session={} | route={} | profile={} | model={} | retry_of={} | finished_at={}",
+            "  - {} | status={} | session={} | session_route={} | capability_route={} | profile={} | model={} | retry_of={} | finished_at={}",
             run.gateway_run_id,
             run.status.label(),
             run.session_id.as_deref().unwrap_or("-"),
             run.session_route,
+            route,
             run.effective_profile
                 .as_deref()
                 .or(run.requested_profile.as_deref())
@@ -1391,6 +1460,10 @@ fn print_run_list(runs: &[RunSummaryDto]) -> Result<()> {
                 .map(|value| truncate_for_cli(value, 120))
                 .unwrap_or_else(|| "-".to_owned()),
         );
+        if let Some(hint) = operator_failure_hint(run.failure_kind.as_deref(), run.error.as_deref())
+        {
+            println!("    operator_hint: {}", hint);
+        }
     }
 
     Ok(())
@@ -1398,12 +1471,18 @@ fn print_run_list(runs: &[RunSummaryDto]) -> Result<()> {
 
 fn print_run_detail(run: &RunDetailDto) -> Result<()> {
     let summary = &run.summary;
+    let route = run_capability_route_label(
+        summary.tool.as_deref(),
+        summary.skill.as_deref(),
+        summary.workflow.as_deref(),
+    );
     println!("gateway_run_id: {}", summary.gateway_run_id);
     println!("correlation_id: {}", summary.correlation_id);
     println!("run_id: {}", summary.run_id);
     println!("status: {}", summary.status.label());
     println!("session_id: {:?}", summary.session_id);
     println!("session_route: {}", summary.session_route);
+    println!("capability_route: {}", route);
     println!("requested_profile: {:?}", summary.requested_profile);
     println!("effective_profile: {:?}", summary.effective_profile);
     println!(
@@ -1411,6 +1490,7 @@ fn print_run_detail(run: &RunDetailDto) -> Result<()> {
         summary.effective_provider_type
     );
     println!("effective_model: {:?}", summary.effective_model);
+    println!("tool: {:?}", summary.tool);
     println!("skill: {:?}", summary.skill);
     println!("workflow: {:?}", summary.workflow);
     println!("retry_of: {:?}", summary.retry_of);
@@ -1420,6 +1500,17 @@ fn print_run_detail(run: &RunDetailDto) -> Result<()> {
     println!("failure_kind: {:?}", summary.failure_kind);
     println!("trace_path: {:?}", summary.trace_path);
     println!("ingress: {:?}", run.ingress);
+    if let Some(ingress) = run.ingress.as_ref() {
+        println!(
+            "ingress_summary: channel={:?} adapter={:?} conversation_id={:?} thread_id={:?} message_id={:?} control_command={:?}",
+            ingress.channel,
+            ingress.adapter,
+            ingress.conversation_id,
+            ingress.thread_id,
+            ingress.message_id,
+            ingress.control_command,
+        );
+    }
     println!("outbound_deliveries: {}", run.outbound_deliveries.len());
     println!("input: {}", truncate_for_cli(&summary.input_preview, 240));
     println!(
@@ -1439,10 +1530,16 @@ fn print_run_detail(run: &RunDetailDto) -> Result<()> {
             .unwrap_or_else(|| "-".to_owned())
     );
     println!("submission_system: {:?}", run.submission.system);
+    println!("submission_tool: {:?}", run.submission.tool);
     println!("submission_skill: {:?}", run.submission.skill);
     println!("submission_workflow: {:?}", run.submission.workflow);
     println!("submission_session_id: {:?}", run.submission.session_id);
     println!("submission_profile: {:?}", run.submission.profile);
+    if let Some(hint) =
+        operator_failure_hint(summary.failure_kind.as_deref(), summary.error.as_deref())
+    {
+        println!("operator_hint: {}", hint);
+    }
     for (index, delivery) in run.outbound_deliveries.iter().enumerate() {
         println!(
             "delivery[{index}]: channel={} adapter={} target={} status={} retries={} error_kind={:?} error={:?}",
@@ -1456,6 +1553,54 @@ fn print_run_detail(run: &RunDetailDto) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn run_capability_route_label(
+    tool: Option<&str>,
+    skill: Option<&str>,
+    workflow: Option<&str>,
+) -> String {
+    if let Some(tool) = tool {
+        return format!("tool:{tool}");
+    }
+    if let Some(skill) = skill {
+        return format!("skill:{skill}");
+    }
+    if let Some(workflow) = workflow {
+        return format!("workflow:{workflow}");
+    }
+    "assistant".to_owned()
+}
+
+fn operator_failure_hint(failure_kind: Option<&str>, error: Option<&str>) -> Option<&'static str> {
+    match failure_kind {
+        Some("provider") => Some(
+            "provider stage failed; check API credentials, provider endpoint, timeout, or rate limit",
+        ),
+        Some("tool") => Some(
+            "tool stage failed; inspect capability policy, route selection, and tool input/output",
+        ),
+        Some("workflow") => Some(
+            "workflow stage failed; inspect step traces, referenced skill names, and route decision",
+        ),
+        Some("canceled") => Some("run was canceled before completion"),
+        _ => {
+            let error = error?;
+            if error.contains("authorization") || error.contains("auth") {
+                Some(
+                    "authorization failed; check operator token, provider token, or Telegram shared secret",
+                )
+            } else if error.contains("timeout") {
+                Some(
+                    "timeout detected; inspect provider transport settings and remote service health",
+                )
+            } else if error.contains("rate") {
+                Some("rate limit detected; retry later or reduce request frequency")
+            } else {
+                None
+            }
+        }
+    }
 }
 
 fn print_gateway_audit_events(events: &[GatewayAuditEventDto]) -> Result<()> {
@@ -1538,57 +1683,6 @@ fn print_gateway_incident_bundle(bundle: &IncidentBundleDto, path: &Path) -> Res
         bundle.metrics.audit_events_total,
         bundle.metrics.broadcast_lag_events_total,
     );
-    Ok(())
-}
-
-fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
-    println!("adapter summary:");
-    println!("  adapters: {}", adapters.len());
-    println!(
-        "  errors: {}",
-        adapters
-            .iter()
-            .filter(|adapter| adapter.status == "error")
-            .count()
-    );
-    println!(
-        "  warnings: {}",
-        adapters
-            .iter()
-            .filter(|adapter| adapter.status == "warning")
-            .count()
-    );
-    if adapters.is_empty() {
-        return Ok(());
-    }
-
-    println!("adapters:");
-    for adapter in adapters {
-        println!(
-            "  - {} | channel={} | transport={} | path={} | status={} | outbound_ready={}",
-            adapter.name,
-            adapter.channel,
-            adapter.transport,
-            adapter.ingress_path,
-            adapter.status,
-            adapter.outbound_ready,
-        );
-        if !adapter.capabilities.is_empty() {
-            println!("    capabilities: {}", adapter.capabilities.join(", "));
-        }
-        println!("    {}", adapter.detail);
-    }
-
-    Ok(())
-}
-
-fn print_adapter_doctor(adapters: &[AdapterStatusDto]) -> Result<()> {
-    println!("adapter doctor:");
-    print_adapter_statuses(adapters)?;
-    if adapters.iter().any(|adapter| adapter.status == "error") {
-        bail!("adapter doctor found errors");
-    }
-    println!("adapter doctor: ok");
     Ok(())
 }
 
@@ -2007,8 +2101,8 @@ mod tests {
     use mosaic_tool_core::ToolSource;
 
     use super::{
-        Cli, ConfigCommand, DispatchCommand, ExtensionCommand, MemoryCommand, ModelCommand,
-        SessionCommand, SetupCommand,
+        AdapterCommand, Cli, ConfigCommand, DispatchCommand, ExtensionCommand, MemoryCommand,
+        ModelCommand, SessionCommand, SetupCommand, TelegramAdapterCommand, TelegramWebhookCommand,
     };
 
     fn repo_root() -> PathBuf {
@@ -2405,6 +2499,64 @@ mod tests {
     }
 
     #[test]
+    fn parses_adapter_telegram_subcommands() {
+        let cli = Cli::parse_from([
+            "mosaic",
+            "adapter",
+            "telegram",
+            "webhook",
+            "set",
+            "--url",
+            "https://public.example.com/ingress/telegram",
+            "--allowed-update",
+            "message",
+            "--drop-pending-updates",
+        ]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Adapter {
+                attach: None,
+                command: AdapterCommand::Telegram {
+                    command: TelegramAdapterCommand::Webhook {
+                        command: TelegramWebhookCommand::Set {
+                            url: Some("https://public.example.com/ingress/telegram".to_owned()),
+                            secret_token: None,
+                            allowed_updates: vec!["message".to_owned()],
+                            drop_pending_updates: true,
+                        },
+                    },
+                },
+            }
+        );
+
+        let cli = Cli::parse_from([
+            "mosaic",
+            "adapter",
+            "telegram",
+            "test-send",
+            "--chat-id",
+            "42",
+            "--thread-id",
+            "7",
+            "hello from mosaic",
+        ]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Adapter {
+                attach: None,
+                command: AdapterCommand::Telegram {
+                    command: TelegramAdapterCommand::TestSend {
+                        chat_id: 42,
+                        text: "hello from mosaic".to_owned(),
+                        thread_id: Some(7),
+                        reply_to: None,
+                    },
+                },
+            }
+        );
+    }
+
+    #[test]
     fn parses_session_subcommand_with_remote_attach() {
         let cli = Cli::parse_from([
             "mosaic",
@@ -2513,6 +2665,15 @@ mod tests {
         assert!(help.contains("diagnose why Mosaic will not start cleanly"));
         assert!(help.contains("mosaic setup init --profile anthropic-sonnet"));
         assert!(help.contains("mosaic setup init --dev-mock"));
+    }
+
+    #[test]
+    fn adapter_help_mentions_telegram_webhook_management() {
+        let help = subcommand_help("adapter");
+        assert!(help.contains("manage Telegram webhooks"));
+        assert!(help.contains("mosaic adapter telegram webhook info"));
+        assert!(help.contains("mosaic adapter telegram webhook set"));
+        assert!(help.contains("mosaic adapter telegram test-send"));
     }
 
     #[test]
@@ -2937,8 +3098,9 @@ mod tests {
             "mosaic model list",
             "mosaic extension validate",
             "mosaic gateway serve --http 127.0.0.1:18080",
-            "setWebhook",
-            "getWebhookInfo",
+            "mosaic adapter telegram webhook set",
+            "mosaic adapter telegram webhook info",
+            "mosaic adapter telegram test-send --chat-id <chat-id> \"mosaic outbound smoke\"",
             "/mosaic tool read_file .mosaic/config.yaml",
             "/mosaic skill summarize_notes",
             "/mosaic workflow summarize_operator_note",
@@ -2947,7 +3109,7 @@ mod tests {
             "mosaic session show \"$SESSION_ID\"",
             "mosaic inspect \"$TRACE_PATH\" --verbose",
             "mosaic gateway incident \"$RUN_ID\"",
-            "deleteWebhook",
+            "mosaic adapter telegram webhook delete --drop-pending-updates",
             "reverse proxy or tunnel",
         ] {
             assert!(

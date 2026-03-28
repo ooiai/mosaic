@@ -242,6 +242,30 @@ Run adapter doctor:
 mosaic adapter doctor
 ```
 
+Show the live Telegram webhook state:
+
+```bash
+mosaic adapter telegram webhook info
+```
+
+Register the Telegram webhook from CLI:
+
+```bash
+mosaic adapter telegram webhook set --url https://public.example.com/ingress/telegram --drop-pending-updates
+```
+
+Delete the Telegram webhook from CLI:
+
+```bash
+mosaic adapter telegram webhook delete --drop-pending-updates
+```
+
+Send one direct outbound Telegram smoke message:
+
+```bash
+mosaic adapter telegram test-send --chat-id 123456789 "hello from mosaic"
+```
+
 Start a local node:
 
 ```bash

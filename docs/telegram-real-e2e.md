@@ -201,20 +201,18 @@ ${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram
 
 ## Register the Telegram Webhook
 
-Register the live Telegram webhook against the public HTTPS URL:
+Register the live Telegram webhook from CLI:
 
 ```bash
-curl -sS -X POST "https://api.telegram.org/bot${MOSAIC_TELEGRAM_BOT_TOKEN}/setWebhook" \
-  --data-urlencode "url=${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram" \
-  --data-urlencode "secret_token=${MOSAIC_TELEGRAM_SECRET_TOKEN}" \
-  --data-urlencode 'allowed_updates=["message"]' \
-  --data-urlencode "drop_pending_updates=true"
+mosaic adapter telegram webhook set \
+  --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram" \
+  --drop-pending-updates
 ```
 
-Then confirm the webhook state:
+Then confirm the webhook state from CLI:
 
 ```bash
-curl -sS "https://api.telegram.org/bot${MOSAIC_TELEGRAM_BOT_TOKEN}/getWebhookInfo"
+mosaic adapter telegram webhook info
 ```
 
 Expected response shape:
@@ -222,6 +220,14 @@ Expected response shape:
 - `"ok": true`
 - `"url": "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram"`
 - no current delivery error
+
+Before waiting for a real user message, you can verify outbound delivery from CLI with one direct smoke send:
+
+```bash
+mosaic adapter telegram test-send --chat-id <chat-id> "mosaic outbound smoke"
+```
+
+This should return `status: delivered` and a Telegram `provider_message_id`.
 
 ## Plain Conversation Proof
 
@@ -394,12 +400,13 @@ Use this order when the lane fails:
 
 1. Run `mosaic setup validate` and `mosaic setup doctor` again.
 2. Run `mosaic adapter status` and confirm Telegram outbound is ready.
-3. Run `curl -sS "https://api.telegram.org/bot${MOSAIC_TELEGRAM_BOT_TOKEN}/getWebhookInfo"` and check for delivery errors.
-4. Confirm the public HTTPS endpoint really forwards to `127.0.0.1:18080`.
-5. Check `mosaic gateway audit --limit 20` for missing inbound or outbound events.
-6. Check `mosaic inspect "$TRACE_PATH" --verbose` for `provider_failure`, `route decision`, or capability access failures.
-7. If explicit `read_file` fails, verify the requested file is inside the current workspace root.
-8. If the manifest capability is missing, rerun `mosaic extension validate` and confirm `.mosaic/extensions/telegram-e2e.yaml` exists.
+3. Run `mosaic adapter telegram webhook info` and check for webhook URL mismatch or delivery errors.
+4. Run `mosaic adapter telegram test-send --chat-id <chat-id> "mosaic outbound smoke"` to isolate outbound delivery from ingress.
+5. Confirm the public HTTPS endpoint really forwards to `127.0.0.1:18080`.
+6. Check `mosaic gateway audit --limit 20` for missing inbound or outbound events.
+7. Check `mosaic inspect "$TRACE_PATH" --verbose` for `provider_failure`, `route decision`, or capability access failures.
+8. If explicit `read_file` fails, verify the requested file is inside the current workspace root.
+9. If the manifest capability is missing, rerun `mosaic extension validate` and confirm `.mosaic/extensions/telegram-e2e.yaml` exists.
 
 For broader debugging patterns, continue with [troubleshooting.md](./troubleshooting.md).
 
@@ -408,8 +415,7 @@ For broader debugging patterns, continue with [troubleshooting.md](./troubleshoo
 Delete the Telegram webhook when the acceptance window is over:
 
 ```bash
-curl -sS -X POST "https://api.telegram.org/bot${MOSAIC_TELEGRAM_BOT_TOKEN}/deleteWebhook" \
-  --data-urlencode "drop_pending_updates=true"
+mosaic adapter telegram webhook delete --drop-pending-updates
 ```
 
 You can then stop the local Gateway and archive the acceptance artifacts from:
@@ -417,3 +423,20 @@ You can then stop the local Gateway and archive the acceptance artifacts from:
 - `.mosaic/sessions/`
 - `.mosaic/runs/`
 - `.mosaic/audit/`
+
+## Appendix: Raw Telegram Bot API Curl
+
+The CLI commands above are the primary operator path. If you need to compare the raw Telegram Bot API calls directly, the equivalent commands are:
+
+```bash
+curl -sS -X POST "https://api.telegram.org/bot${MOSAIC_TELEGRAM_BOT_TOKEN}/setWebhook" \
+  --data-urlencode "url=${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram" \
+  --data-urlencode "secret_token=${MOSAIC_TELEGRAM_SECRET_TOKEN}" \
+  --data-urlencode 'allowed_updates=["message"]' \
+  --data-urlencode "drop_pending_updates=true"
+
+curl -sS "https://api.telegram.org/bot${MOSAIC_TELEGRAM_BOT_TOKEN}/getWebhookInfo"
+
+curl -sS -X POST "https://api.telegram.org/bot${MOSAIC_TELEGRAM_BOT_TOKEN}/deleteWebhook" \
+  --data-urlencode "drop_pending_updates=true"
+```
