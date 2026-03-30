@@ -546,6 +546,8 @@ mod tests {
             profile_hint: None,
             control_command: None,
             original_text: None,
+            attachments: Vec::new(),
+            attachment_failures: Vec::new(),
             gateway_url: None,
         });
         session.set_last_run_id("run-1");

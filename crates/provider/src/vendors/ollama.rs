@@ -37,6 +37,8 @@ impl OllamaProvider {
             version_header: None,
             custom_header_keys: custom_headers.keys().cloned().collect(),
             supports_tool_call_shadow_messages: false,
+            supports_vision: model.to_ascii_lowercase().contains("vision")
+                || model.to_ascii_lowercase().contains("llava"),
         };
         Self {
             inner: OpenAiStyleProvider {

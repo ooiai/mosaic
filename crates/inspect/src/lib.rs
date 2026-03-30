@@ -181,7 +181,103 @@ pub struct IngressTrace {
     pub control_command: Option<String>,
     #[serde(default)]
     pub original_text: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<ChannelAttachment>,
+    #[serde(default)]
+    pub attachment_failures: Vec<AttachmentFailureTrace>,
     pub gateway_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentKind {
+    Image,
+    Document,
+    Audio,
+    Video,
+    #[default]
+    Other,
+}
+
+impl AttachmentKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Document => "document",
+            Self::Audio => "audio",
+            Self::Video => "video",
+            Self::Other => "other",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ChannelAttachment {
+    pub id: String,
+    #[serde(default)]
+    pub kind: AttachmentKind,
+    #[serde(default)]
+    pub filename: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub source_ref: Option<String>,
+    #[serde(default)]
+    pub remote_url: Option<String>,
+    #[serde(default)]
+    pub local_cache_path: Option<String>,
+    #[serde(default)]
+    pub caption: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttachmentFailureTrace {
+    pub attachment_id: String,
+    pub stage: String,
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentRouteMode {
+    #[default]
+    ProviderNative,
+    SpecializedProcessor,
+    Disabled,
+}
+
+impl AttachmentRouteMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProviderNative => "provider_native",
+            Self::SpecializedProcessor => "specialized_processor",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttachmentRouteTrace {
+    #[serde(default)]
+    pub mode: AttachmentRouteMode,
+    pub selection_reason: String,
+    #[serde(default)]
+    pub provider_profile: Option<String>,
+    #[serde(default)]
+    pub provider_model: Option<String>,
+    #[serde(default)]
+    pub processor: Option<String>,
+    #[serde(default)]
+    pub attachment_count: usize,
+    #[serde(default)]
+    pub attachment_kinds: Vec<String>,
+    #[serde(default)]
+    pub attachment_filenames: Vec<String>,
+    #[serde(default)]
+    pub failure_summary: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -257,6 +353,8 @@ pub struct EffectiveProfileTrace {
     pub supports_tools: bool,
     #[serde(default)]
     pub supports_tool_call_shadow_messages: bool,
+    #[serde(default)]
+    pub supports_vision: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -431,6 +529,8 @@ pub struct RunSummary {
     pub used_extensions: usize,
     pub outbound_deliveries: usize,
     pub failed_outbound_deliveries: usize,
+    pub attachments: usize,
+    pub attachment_failures: usize,
     pub output_chunks: usize,
     pub integrity_warnings: usize,
     pub has_compression: bool,
@@ -446,6 +546,8 @@ pub struct RunTrace {
     pub session_route: Option<String>,
     pub ingress: Option<IngressTrace>,
     pub route_decision: Option<RouteDecisionTrace>,
+    #[serde(default)]
+    pub attachment_route: Option<AttachmentRouteTrace>,
     #[serde(default)]
     pub outbound_deliveries: Vec<ChannelDeliveryTrace>,
     pub workflow_name: Option<String>,
@@ -504,6 +606,7 @@ impl RunTrace {
             session_route: None,
             ingress: None,
             route_decision: None,
+            attachment_route: None,
             outbound_deliveries: vec![],
             workflow_name: None,
             lifecycle_status: RunLifecycleStatus::Queued,
@@ -555,6 +658,10 @@ impl RunTrace {
 
     pub fn bind_route_decision(&mut self, route_decision: RouteDecisionTrace) {
         self.route_decision = Some(route_decision);
+    }
+
+    pub fn bind_attachment_route(&mut self, attachment_route: AttachmentRouteTrace) {
+        self.attachment_route = Some(attachment_route);
     }
 
     pub fn add_outbound_delivery(&mut self, delivery: ChannelDeliveryTrace) {
@@ -793,6 +900,16 @@ impl RunTrace {
                 .iter()
                 .filter(|delivery| delivery.result.status == ChannelDeliveryStatus::Failed)
                 .count(),
+            attachments: self
+                .ingress
+                .as_ref()
+                .map(|ingress| ingress.attachments.len())
+                .unwrap_or_default(),
+            attachment_failures: self
+                .ingress
+                .as_ref()
+                .map(|ingress| ingress.attachment_failures.len())
+                .unwrap_or_default(),
             output_chunks: self.output_chunks,
             integrity_warnings: self.integrity_warnings.len(),
             has_compression: self.compression.is_some(),
@@ -862,6 +979,8 @@ mod tests {
             profile_hint: None,
             control_command: None,
             original_text: None,
+            attachments: Vec::new(),
+            attachment_failures: Vec::new(),
             gateway_url: Some("http://127.0.0.1:8080".to_owned()),
         });
         trace.add_memory_read(MemoryReadTrace {
@@ -929,6 +1048,7 @@ mod tests {
             session_route: Some("gateway.local/session-1".to_owned()),
             ingress: None,
             route_decision: None,
+            attachment_route: None,
             outbound_deliveries: vec![],
             workflow_name: Some("research_brief".to_owned()),
             started_at,
@@ -950,6 +1070,7 @@ mod tests {
                 custom_header_keys: Vec::new(),
                 supports_tools: true,
                 supports_tool_call_shadow_messages: false,
+                supports_vision: true,
             }),
             runtime_policy: Some(RuntimePolicyTrace {
                 max_provider_round_trips: 8,
@@ -1070,6 +1191,8 @@ mod tests {
             profile_hint: Some("gpt-5.4-mini".to_owned()),
             control_command: None,
             original_text: None,
+            attachments: Vec::new(),
+            attachment_failures: Vec::new(),
             gateway_url: None,
         });
 

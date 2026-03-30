@@ -9,10 +9,10 @@ use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 use chrono::Utc;
 use mosaic_inspect::{
-    CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace, ExtensionTrace,
-    ExtensionUsageTrace, IngressTrace, MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace,
-    ProviderAttemptTrace, ProviderFailureTrace, RunFailureTrace, RunTrace, SkillTrace, ToolTrace,
-    WorkflowStepTrace,
+    AttachmentRouteMode, CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace,
+    ExtensionTrace, ExtensionUsageTrace, IngressTrace, MemoryReadTrace, MemoryWriteTrace,
+    ModelSelectionTrace, ProviderAttemptTrace, ProviderFailureTrace, RunFailureTrace, RunTrace,
+    SkillTrace, ToolTrace, WorkflowStepTrace,
 };
 use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
@@ -36,6 +36,7 @@ use uuid::Uuid;
 
 use crate::events::{RunEvent, SharedRunEventSink};
 
+mod attachments;
 mod branches;
 mod failure;
 mod provider;
@@ -100,10 +101,26 @@ impl AgentRuntime {
             input: trace.input.clone(),
         });
 
-        let planned_route = match self.plan_route(&req) {
+        let mut planned_route = match self.plan_route(&req) {
             Ok(route) => route,
             Err(err) => return self.fail_run(trace, err),
         };
+        let mut attachment_route =
+            match self.resolve_attachment_route(&req, &planned_route, &base_profile) {
+                Ok(route) => route,
+                Err(err) => return self.fail_run(trace, err),
+            };
+        if let Some(route) = attachment_route.as_ref() {
+            if route.trace.mode == AttachmentRouteMode::SpecializedProcessor {
+                if let Some(skill_name) = route.specialized_skill.clone() {
+                    planned_route = crate::routing::PlannedRoute::Skill {
+                        name: skill_name,
+                        reason: "attachment specialized processor".to_owned(),
+                        source: "attachment.routing".to_owned(),
+                    };
+                }
+            }
+        }
 
         let (profile, selection_scope, selection_reason) = match &planned_route {
             crate::routing::PlannedRoute::Tool { .. }
@@ -141,6 +158,10 @@ impl AgentRuntime {
                         planned_route,
                         crate::routing::PlannedRoute::Assistant { .. }
                     ),
+                    requires_vision: attachment_route
+                        .as_ref()
+                        .map(|route| route.requires_vision)
+                        .unwrap_or(false),
                 }) {
                     Ok(profile) => profile,
                     Err(err) => return self.fail_run(trace, err),
@@ -159,6 +180,13 @@ impl AgentRuntime {
             &profile,
             selection_reason,
         ));
+        if let Some(route) = attachment_route.as_mut() {
+            if route.trace.mode == AttachmentRouteMode::ProviderNative {
+                route.trace.provider_profile = Some(profile.name.clone());
+                route.trace.provider_model = Some(profile.model.clone());
+            }
+            trace.bind_attachment_route(route.trace.clone());
+        }
         trace.bind_effective_profile(Self::effective_profile_trace(
             &profile,
             &Self::provider_metadata_from_profile(&profile),
@@ -192,6 +220,7 @@ impl AgentRuntime {
         &self,
         system: Option<String>,
         input: String,
+        attachments: &[mosaic_inspect::ChannelAttachment],
         reference_contexts: &[String],
         profile: &ProviderProfile,
         mut session: Option<&mut SessionRecord>,
@@ -222,6 +251,7 @@ impl AgentRuntime {
                     role: Role::System,
                     content: system,
                     tool_call_id: None,
+                    attachments: Vec::new(),
                 });
             }
             for reference_context in reference_contexts {
@@ -233,15 +263,18 @@ impl AgentRuntime {
                         reference_context
                     ),
                     tool_call_id: None,
+                    attachments: Vec::new(),
                 });
             }
             messages.push(Message {
                 role: Role::User,
                 content: input,
                 tool_call_id: None,
+                attachments: attachments.to_vec(),
             });
             messages
         };
+        Self::with_attachments_on_latest_user_message(&mut messages, attachments);
 
         'provider_rounds: for _ in 0..self.ctx.runtime_policy.max_provider_round_trips {
             info!(
@@ -319,6 +352,7 @@ impl AgentRuntime {
                                 role: Role::Tool,
                                 content: outcome.output,
                                 tool_call_id: Some(call_id),
+                                attachments: Vec::new(),
                             });
                         }
                         Err(failure) => {
@@ -333,6 +367,7 @@ impl AgentRuntime {
                                     role: Role::Tool,
                                     content: format!("tool_error: {}", failure.error),
                                     tool_call_id: Some(call_id),
+                                    attachments: Vec::new(),
                                 });
                                 continue 'provider_rounds;
                             }
@@ -369,6 +404,7 @@ impl AgentRuntime {
         profile: &ProviderProfile,
         system: Option<String>,
         input: String,
+        attachments: &[mosaic_inspect::ChannelAttachment],
         tool_defs: Vec<ToolDefinition>,
         tool_traces: &SharedToolTraceCollector,
         capability_traces: &SharedCapabilityTraceCollector,
@@ -383,6 +419,7 @@ impl AgentRuntime {
                 role: Role::System,
                 content: system,
                 tool_call_id: None,
+                attachments: Vec::new(),
             });
         }
 
@@ -390,6 +427,7 @@ impl AgentRuntime {
             role: Role::User,
             content: input,
             tool_call_id: None,
+            attachments: attachments.to_vec(),
         });
 
         'workflow_rounds: for _ in 0..self.ctx.runtime_policy.max_workflow_provider_round_trips {
@@ -452,6 +490,7 @@ impl AgentRuntime {
                                 role: Role::Tool,
                                 content: outcome.output,
                                 tool_call_id: Some(call_id),
+                                attachments: Vec::new(),
                             });
                         }
                         Err(failure) => {
@@ -466,6 +505,7 @@ impl AgentRuntime {
                                     role: Role::Tool,
                                     content: format!("tool_error: {}", failure.error),
                                     tool_call_id: Some(call_id),
+                                    attachments: Vec::new(),
                                 });
                                 continue 'workflow_rounds;
                             }
@@ -491,6 +531,7 @@ impl AgentRuntime {
         &self,
         skill_name: String,
         input: String,
+        attachments: &[mosaic_inspect::ChannelAttachment],
         trace: &mut RunTrace,
     ) -> Result<String> {
         let skill = self
@@ -498,12 +539,16 @@ impl AgentRuntime {
             .skills
             .get(&skill_name)
             .ok_or_else(|| anyhow!("skill not found: {}", skill_name))?;
+        if !attachments.is_empty() && !skill.metadata().exposure.accepts_attachments {
+            bail!("skill '{}' does not accept attachments", skill_name);
+        }
 
         self.emit(RunEvent::SkillStarted {
             name: skill_name.clone(),
         });
 
-        let skill_input = serde_json::json!({ "text": input });
+        let skill_input =
+            Self::with_attachment_metadata(serde_json::json!({ "text": input }), attachments);
         trace.skill_calls.push(SkillTrace {
             name: skill_name.clone(),
             input: skill_input.clone(),
@@ -544,6 +589,7 @@ impl AgentRuntime {
         &self,
         skill_name: String,
         input: String,
+        attachments: &[mosaic_inspect::ChannelAttachment],
         skill_traces: &SharedSkillTraceCollector,
     ) -> Result<String> {
         let skill = self
@@ -551,12 +597,16 @@ impl AgentRuntime {
             .skills
             .get(&skill_name)
             .ok_or_else(|| anyhow!("skill not found: {}", skill_name))?;
+        if !attachments.is_empty() && !skill.metadata().exposure.accepts_attachments {
+            bail!("skill '{}' does not accept attachments", skill_name);
+        }
 
         self.emit(RunEvent::SkillStarted {
             name: skill_name.clone(),
         });
 
-        let skill_input = serde_json::json!({ "text": input });
+        let skill_input =
+            Self::with_attachment_metadata(serde_json::json!({ "text": input }), attachments);
         push_skill_trace(
             skill_traces,
             SkillTrace {

@@ -1,4 +1,4 @@
-use std::{env, future::Future, time::Duration};
+use std::{env, fs, future::Future, time::Duration};
 
 use anyhow::{Result, anyhow, bail};
 use mosaic_config::ProviderType;
@@ -368,7 +368,7 @@ fn build_openai_style_body(
             }),
             _ => serde_json::json!({
                 "role": role_to_api(&message.role),
-                "content": message.content,
+                "content": openai_message_content(message),
             }),
         })
         .collect();
@@ -456,14 +456,11 @@ fn anthropic_messages_from_conversation(messages: &[Message]) -> Vec<serde_json:
     for message in messages {
         match message.role {
             Role::System => {}
-            Role::User => push_anthropic_message(
-                &mut request_messages,
-                "user",
-                serde_json::json!({
-                    "type": "text",
-                    "text": message.content,
-                }),
-            ),
+            Role::User => {
+                for block in anthropic_content_blocks(message) {
+                    push_anthropic_message(&mut request_messages, "user", block);
+                }
+            }
             Role::Assistant => {
                 if let Some(tool_calls) = parse_tool_call_shadow(&message.content) {
                     for tool_call in tool_calls {
@@ -479,14 +476,9 @@ fn anthropic_messages_from_conversation(messages: &[Message]) -> Vec<serde_json:
                         );
                     }
                 } else {
-                    push_anthropic_message(
-                        &mut request_messages,
-                        "assistant",
-                        serde_json::json!({
-                            "type": "text",
-                            "text": message.content,
-                        }),
-                    );
+                    for block in anthropic_content_blocks(message) {
+                        push_anthropic_message(&mut request_messages, "assistant", block);
+                    }
                 }
             }
             Role::Tool => push_anthropic_message(
@@ -523,6 +515,155 @@ fn push_anthropic_message(
         "role": role,
         "content": [block],
     }));
+}
+
+fn openai_message_content(message: &Message) -> serde_json::Value {
+    if message.attachments.is_empty() {
+        return serde_json::Value::String(message.content.clone());
+    }
+
+    let mut blocks = Vec::new();
+    if !message.content.trim().is_empty() {
+        blocks.push(serde_json::json!({
+            "type": "text",
+            "text": message.content,
+        }));
+    }
+
+    for attachment in &message.attachments {
+        if matches!(attachment.kind, mosaic_inspect::AttachmentKind::Image) {
+            if let Some(url) = attachment_media_url(attachment) {
+                blocks.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": { "url": url },
+                }));
+                continue;
+            }
+        }
+        blocks.push(serde_json::json!({
+            "type": "text",
+            "text": attachment_summary_line(attachment),
+        }));
+    }
+
+    serde_json::Value::Array(blocks)
+}
+
+fn anthropic_content_blocks(message: &Message) -> Vec<serde_json::Value> {
+    let mut blocks = Vec::new();
+    if !message.content.trim().is_empty() {
+        blocks.push(serde_json::json!({
+            "type": "text",
+            "text": message.content,
+        }));
+    }
+
+    for attachment in &message.attachments {
+        if matches!(attachment.kind, mosaic_inspect::AttachmentKind::Image) {
+            if let Some(source) = anthropic_image_source(attachment) {
+                blocks.push(serde_json::json!({
+                    "type": "image",
+                    "source": source,
+                }));
+                continue;
+            }
+        }
+        blocks.push(serde_json::json!({
+            "type": "text",
+            "text": attachment_summary_line(attachment),
+        }));
+    }
+
+    if blocks.is_empty() {
+        blocks.push(serde_json::json!({
+            "type": "text",
+            "text": "",
+        }));
+    }
+
+    blocks
+}
+
+fn attachment_summary_line(attachment: &mosaic_inspect::ChannelAttachment) -> String {
+    format!(
+        "attachment kind={} filename={} mime_type={} size_bytes={} local_cache_path={}",
+        attachment.kind.label(),
+        attachment
+            .filename
+            .clone()
+            .unwrap_or_else(|| "<none>".to_owned()),
+        attachment
+            .mime_type
+            .clone()
+            .unwrap_or_else(|| "<none>".to_owned()),
+        attachment
+            .size_bytes
+            .map(|size| size.to_string())
+            .unwrap_or_else(|| "<none>".to_owned()),
+        attachment
+            .local_cache_path
+            .clone()
+            .unwrap_or_else(|| "<none>".to_owned()),
+    )
+}
+
+fn attachment_media_url(attachment: &mosaic_inspect::ChannelAttachment) -> Option<String> {
+    if let Some(url) = attachment.remote_url.as_deref() {
+        if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("data:") {
+            return Some(url.to_owned());
+        }
+    }
+
+    let path = attachment.local_cache_path.as_deref()?;
+    let mime = attachment
+        .mime_type
+        .clone()
+        .unwrap_or_else(|| "application/octet-stream".to_owned());
+    let bytes = fs::read(path).ok()?;
+    Some(format!("data:{};base64,{}", mime, base64_encode(&bytes)))
+}
+
+fn anthropic_image_source(
+    attachment: &mosaic_inspect::ChannelAttachment,
+) -> Option<serde_json::Value> {
+    let path = attachment.local_cache_path.as_deref()?;
+    let media_type = attachment
+        .mime_type
+        .clone()
+        .unwrap_or_else(|| "image/jpeg".to_owned());
+    let bytes = fs::read(path).ok()?;
+    Some(serde_json::json!({
+        "type": "base64",
+        "media_type": media_type,
+        "data": base64_encode(&bytes),
+    }))
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut index = 0;
+    while index < bytes.len() {
+        let b0 = bytes[index];
+        let b1 = bytes.get(index + 1).copied().unwrap_or(0);
+        let b2 = bytes.get(index + 2).copied().unwrap_or(0);
+        let pad = bytes.len().saturating_sub(index).min(3);
+
+        out.push(TABLE[(b0 >> 2) as usize] as char);
+        out.push(TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize] as char);
+        out.push(if pad > 1 {
+            TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if pad > 2 {
+            TABLE[(b2 & 0b0011_1111) as usize] as char
+        } else {
+            '='
+        });
+        index += 3;
+    }
+    out
 }
 
 pub(crate) fn tool_call_shadow_content(tool_calls: &[ToolCall]) -> String {
@@ -573,6 +714,7 @@ fn parse_openai_style_response(
             role: Role::Assistant,
             content: choice.message.content.unwrap_or_default(),
             tool_call_id: None,
+            attachments: Vec::new(),
         })
     } else {
         None
@@ -632,6 +774,7 @@ pub(crate) fn parse_anthropic_response(
                 role: Role::Assistant,
                 content: text_blocks.join("\n"),
                 tool_call_id: None,
+                attachments: Vec::new(),
             })
         } else {
             None

@@ -286,6 +286,8 @@ async fn http_submit_run(
             profile_hint: request.profile.clone(),
             control_command: None,
             original_text: None,
+            attachments: Vec::new(),
+            attachment_failures: Vec::new(),
             gateway_url: None,
         });
     }

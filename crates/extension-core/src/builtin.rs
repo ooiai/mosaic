@@ -31,6 +31,7 @@ pub(crate) fn builtin_planned_extension(policies: &PolicyConfig) -> PlannedExten
             invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
             required_policy: None,
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         }],
         workflows: Vec::new(),
         mcp: None,
@@ -163,6 +164,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
             required_policy: None,
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         },
         ToolConfig {
             tool_type: "builtin".to_owned(),
@@ -171,6 +173,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
             required_policy: None,
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         },
         ToolConfig {
             tool_type: "builtin".to_owned(),
@@ -179,6 +182,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
             required_policy: None,
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         },
     ];
 
@@ -190,6 +194,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             invocation_mode: mosaic_tool_core::CapabilityInvocationMode::ExplicitOnly,
             required_policy: Some("allow_cron".to_owned()),
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         });
     }
     if policies.allow_exec {
@@ -200,6 +205,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             invocation_mode: mosaic_tool_core::CapabilityInvocationMode::ExplicitOnly,
             required_policy: Some("allow_exec".to_owned()),
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         });
     }
     if policies.allow_webhook {
@@ -210,6 +216,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             invocation_mode: mosaic_tool_core::CapabilityInvocationMode::ExplicitOnly,
             required_policy: Some("allow_webhook".to_owned()),
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         });
     }
 

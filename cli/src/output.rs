@@ -520,6 +520,7 @@ pub fn render_inspect_report(
                     },
                 ),
                 ("supports_tools", profile.supports_tools.to_string()),
+                ("supports_vision", profile.supports_vision.to_string()),
                 (
                     "supports_tool_call_shadow_messages",
                     profile.supports_tool_call_shadow_messages.to_string(),
@@ -561,6 +562,42 @@ pub fn render_inspect_report(
                     option_string(route.selected_category.clone()),
                 ),
                 ("catalog_scope", option_string(route.catalog_scope.clone())),
+            ],
+        ));
+    }
+
+    if let Some(route) = &trace.attachment_route {
+        blocks.push(render_key_value_block(
+            "attachment route",
+            vec![
+                ("mode", route.mode.label().to_owned()),
+                ("selection_reason", route.selection_reason.clone()),
+                (
+                    "provider_profile",
+                    option_string(route.provider_profile.clone()),
+                ),
+                (
+                    "provider_model",
+                    option_string(route.provider_model.clone()),
+                ),
+                ("processor", option_string(route.processor.clone())),
+                ("attachment_count", route.attachment_count.to_string()),
+                (
+                    "attachment_kinds",
+                    if route.attachment_kinds.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        route.attachment_kinds.join(", ")
+                    },
+                ),
+                (
+                    "attachment_filenames",
+                    if route.attachment_filenames.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        route.attachment_filenames.join(", ")
+                    },
+                ),
             ],
         ));
     }
@@ -613,6 +650,11 @@ pub fn render_inspect_report(
                 (
                     "original_text",
                     option_preview(ingress.original_text.as_deref(), 120),
+                ),
+                ("attachments", ingress.attachments.len().to_string()),
+                (
+                    "attachment_failures",
+                    ingress.attachment_failures.len().to_string(),
                 ),
                 ("gateway_url", option_string(ingress.gateway_url.clone())),
             ],
@@ -772,6 +814,48 @@ pub fn render_inspect_report(
                 })
                 .collect::<Vec<_>>(),
         ));
+    }
+
+    if let Some(ingress) = &trace.ingress {
+        if !ingress.attachments.is_empty() {
+            blocks.push(render_list_block(
+                "attachments",
+                ingress
+                    .attachments
+                    .iter()
+                    .map(|attachment| {
+                        format!(
+                            "id={} | kind={} | filename={} | mime_type={} | size_bytes={} | source_ref={} | local_cache_path={}",
+                            attachment.id,
+                            attachment.kind.label(),
+                            option_string(attachment.filename.clone()),
+                            option_string(attachment.mime_type.clone()),
+                            attachment
+                                .size_bytes
+                                .map(|size| size.to_string())
+                                .unwrap_or_else(|| "<none>".to_owned()),
+                            option_string(attachment.source_ref.clone()),
+                            option_string(attachment.local_cache_path.clone()),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ));
+        }
+        if !ingress.attachment_failures.is_empty() {
+            blocks.push(render_list_block(
+                "attachment failures",
+                ingress
+                    .attachment_failures
+                    .iter()
+                    .map(|failure| {
+                        format!(
+                            "attachment_id={} | stage={} | kind={} | message={}",
+                            failure.attachment_id, failure.stage, failure.kind, failure.message
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ));
+        }
     }
 
     if !trace.model_selections.is_empty() {
@@ -1544,6 +1628,19 @@ mod tests {
                     max_workflow_provider_round_trips: 8,
                     continue_after_tool_error: false,
                 },
+                attachments: mosaic_config::RedactedAttachmentView {
+                    enabled: true,
+                    cache_dir: ".mosaic/attachments".to_owned(),
+                    max_size_bytes: 10 * 1024 * 1024,
+                    download_timeout_ms: 15_000,
+                    cleanup_after_hours: 24,
+                    allowed_mime_types: vec![
+                        "image/".to_owned(),
+                        "text/".to_owned(),
+                        "application/pdf".to_owned(),
+                    ],
+                    default_route_mode: mosaic_config::AttachmentRouteModeConfig::ProviderNative,
+                },
                 extension_manifest_count: 0,
                 policies: mosaic_config::RedactedPolicyView {
                     allow_exec: false,
@@ -1596,6 +1693,7 @@ mod tests {
             memory_reads: vec![],
             memory_writes: vec![],
             compression: None,
+            attachment_route: None,
             tool_calls: vec![ToolTrace {
                 call_id: Some("call-1".to_owned()),
                 name: "echo".to_owned(),

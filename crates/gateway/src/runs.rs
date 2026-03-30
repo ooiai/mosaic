@@ -194,28 +194,39 @@ impl GatewayHandle {
                 .lock()
                 .expect("gateway components lock should not be poisoned")
                 .clone();
+            let prepared_request =
+                crate::attachments::prepare_submission_attachments(&components, request_for_task)
+                    .await;
+            let mut task_meta = meta.clone();
+            task_meta.ingress = prepared_request.ingress.clone();
             let runtime = AgentRuntime::new(components.runtime_context(event_sink));
             let run_request = RunRequest {
-                run_id: Some(meta.run_id.clone()),
-                system: request.system,
-                input: request.input,
-                tool: request.tool,
-                skill: request.skill,
-                workflow: request.workflow,
-                session_id: meta.session_id.clone(),
-                profile: request.profile,
-                ingress: meta.ingress.clone(),
+                run_id: Some(task_meta.run_id.clone()),
+                system: prepared_request.system.clone(),
+                input: prepared_request.input.clone(),
+                tool: prepared_request.tool.clone(),
+                skill: prepared_request.skill.clone(),
+                workflow: prepared_request.workflow.clone(),
+                session_id: task_meta.session_id.clone(),
+                profile: prepared_request.profile.clone(),
+                ingress: task_meta.ingress.clone(),
             };
 
             let outcome = tokio::select! {
-                _ = wait_for_cancellation(cancel_rx) => finalize_canceled(state.clone(), meta.clone(), &request_for_task).await,
-                result = runtime.run(run_request) => finalize_run(state.clone(), meta.clone(), result).await,
+                _ = wait_for_cancellation(cancel_rx) => finalize_canceled(state.clone(), task_meta.clone(), &prepared_request).await,
+                result = runtime.run(run_request) => finalize_run(state.clone(), task_meta.clone(), result).await,
             };
+            if let Some(record) = update_run_record(state.as_ref(), &task_meta.gateway_run_id, |record| {
+                record.ingress = task_meta.ingress.clone();
+                record.submission = prepared_request.clone();
+            }) {
+                broadcast_envelope(state.as_ref(), run_record_envelope(&record));
+            }
             state
                 .active_runs
                 .lock()
                 .expect("active run lock should not be poisoned")
-                .remove(&meta.gateway_run_id);
+                .remove(&task_meta.gateway_run_id);
             outcome
         });
 

@@ -130,6 +130,8 @@ pub struct CapabilityExposure {
     pub required_policy: Option<String>,
     #[serde(default)]
     pub allowed_channels: Vec<String>,
+    #[serde(default)]
+    pub accepts_attachments: bool,
 }
 
 impl Default for CapabilityExposure {
@@ -140,6 +142,7 @@ impl Default for CapabilityExposure {
             invocation_mode: CapabilityInvocationMode::Conversational,
             required_policy: None,
             allowed_channels: Vec::new(),
+            accepts_attachments: false,
         }
     }
 }
@@ -169,6 +172,11 @@ impl CapabilityExposure {
 
     pub fn with_allowed_channels(mut self, allowed_channels: Vec<String>) -> Self {
         self.allowed_channels = allowed_channels;
+        self
+    }
+
+    pub fn with_accepts_attachments(mut self, accepts_attachments: bool) -> Self {
+        self.accepts_attachments = accepts_attachments;
         self
     }
 

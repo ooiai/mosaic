@@ -16,7 +16,7 @@ use mosaic_skill_core::SummarizeSkill;
 use mosaic_workflow::{Workflow, WorkflowStep, WorkflowStepKind};
 use tokio::sync::oneshot;
 
-fn telegram_env_lock() -> &'static Mutex<()> {
+pub(crate) fn telegram_env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| Mutex::new(()))
 }
@@ -28,6 +28,7 @@ fn mock_profile_config() -> ProviderProfileConfig {
         base_url: None,
         api_key_env: None,
         transport: Default::default(),
+        attachments: Default::default(),
         vendor: Default::default(),
     }
 }
@@ -115,6 +116,8 @@ fn gateway() -> GatewayHandle {
             )),
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
+            attachments: config.attachments.clone(),
+            app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(skills),
             workflows: Arc::new(workflows),
@@ -190,6 +193,8 @@ fn gateway_with_filtered_workflow() -> GatewayHandle {
             )),
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
+            attachments: config.attachments.clone(),
+            app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(skills),
             workflows: Arc::new(workflows),
@@ -302,6 +307,8 @@ fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
             memory_store: Arc::new(FileMemoryStore::new(root.join(".mosaic/memory"))),
             memory_policy: MemoryPolicy::default(),
             runtime_policy: loaded.config.runtime.clone(),
+            attachments: loaded.config.attachments.clone(),
+            app_name: None,
             tools: Arc::new(extension_set.tools),
             skills: Arc::new(extension_set.skills),
             workflows: Arc::new(extension_set.workflows),
@@ -586,6 +593,8 @@ async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
             )),
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
+            attachments: config.attachments.clone(),
+            app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
             workflows: Arc::new(WorkflowRegistry::new()),
@@ -1206,6 +1215,8 @@ async fn telegram_inbound_run_records_outbound_delivery_audit_and_incident_trace
                 message_id: 11,
                 text: Some("hello telegram".to_owned()),
                 caption: None,
+                photo: vec![],
+                document: None,
                 message_thread_id: Some(7),
                 chat: mosaic_channel_telegram::TelegramChat {
                     id: -10042,

@@ -615,6 +615,7 @@ mod tests {
                 base_url: None,
                 api_key_env: None,
                 transport: Default::default(),
+                attachments: Default::default(),
                 vendor: Default::default(),
             },
         );
@@ -666,6 +667,8 @@ mod tests {
             )),
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
+            attachments: config.attachments.clone(),
+            app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(skills),
             workflows: Arc::new(WorkflowRegistry::new()),

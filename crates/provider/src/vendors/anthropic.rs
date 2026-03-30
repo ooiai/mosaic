@@ -51,6 +51,7 @@ impl AnthropicProvider {
             version_header: Some(anthropic_version.clone()),
             custom_header_keys,
             supports_tool_call_shadow_messages: true,
+            supports_vision: model.starts_with("claude"),
         };
         Self {
             client: build_http_client(metadata.timeout_ms),
@@ -92,6 +93,7 @@ impl LlmProvider for AnthropicProvider {
             role: crate::Role::Assistant,
             content: tool_call_shadow_content(tool_calls),
             tool_call_id: None,
+            attachments: Vec::new(),
         })
     }
 

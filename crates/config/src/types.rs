@@ -154,6 +154,8 @@ pub struct ToolConfig {
     pub required_policy: Option<String>,
     #[serde(default)]
     pub allowed_channels: Vec<String>,
+    #[serde(default)]
+    pub accepts_attachments: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -177,6 +179,8 @@ pub struct SkillConfig {
     pub required_policy: Option<String>,
     #[serde(default)]
     pub allowed_channels: Vec<String>,
+    #[serde(default)]
+    pub accepts_attachments: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -228,6 +232,8 @@ pub struct MosaicConfig {
     #[serde(default)]
     pub runtime: RuntimePolicyConfig,
     #[serde(default)]
+    pub attachments: AttachmentConfig,
+    #[serde(default)]
     pub tools: Vec<ToolConfig>,
     #[serde(default)]
     pub skills: Vec<SkillConfig>,
@@ -254,6 +260,7 @@ impl Default for MosaicConfig {
             audit: AuditConfig::default(),
             observability: ObservabilityConfig::default(),
             runtime: RuntimePolicyConfig::default(),
+            attachments: AttachmentConfig::default(),
             tools: Vec::new(),
             skills: Vec::new(),
             workflows: Vec::new(),
@@ -275,6 +282,8 @@ pub struct ProviderProfileConfig {
     pub transport: ProviderTransportPolicyConfig,
     #[serde(default)]
     pub vendor: ProviderVendorPolicyConfig,
+    #[serde(default)]
+    pub attachments: ProviderAttachmentRoutingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -292,6 +301,107 @@ pub struct ProviderVendorPolicyConfig {
     pub anthropic_version: Option<String>,
     #[serde(default)]
     pub allow_custom_headers: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentRouteModeConfig {
+    #[default]
+    ProviderNative,
+    SpecializedProcessor,
+    Disabled,
+}
+
+impl AttachmentRouteModeConfig {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ProviderNative => "provider_native",
+            Self::SpecializedProcessor => "specialized_processor",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttachmentRoutingTargetConfig {
+    #[serde(default)]
+    pub mode: AttachmentRouteModeConfig,
+    #[serde(default)]
+    pub processor: Option<String>,
+}
+
+impl Default for AttachmentRoutingTargetConfig {
+    fn default() -> Self {
+        Self {
+            mode: AttachmentRouteModeConfig::ProviderNative,
+            processor: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ProviderAttachmentRoutingConfig {
+    #[serde(default)]
+    pub mode: Option<AttachmentRouteModeConfig>,
+    #[serde(default)]
+    pub processor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttachmentRoutingConfig {
+    #[serde(default)]
+    pub default: AttachmentRoutingTargetConfig,
+    #[serde(default)]
+    pub channel_overrides: BTreeMap<String, AttachmentRoutingTargetConfig>,
+    #[serde(default)]
+    pub bot_overrides: BTreeMap<String, AttachmentRoutingTargetConfig>,
+}
+
+impl Default for AttachmentRoutingConfig {
+    fn default() -> Self {
+        Self {
+            default: AttachmentRoutingTargetConfig::default(),
+            channel_overrides: BTreeMap::new(),
+            bot_overrides: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AttachmentPolicyConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_attachment_cache_dir")]
+    pub cache_dir: String,
+    #[serde(default = "default_attachment_max_size_bytes")]
+    pub max_size_bytes: u64,
+    #[serde(default = "default_attachment_download_timeout_ms")]
+    pub download_timeout_ms: u64,
+    #[serde(default)]
+    pub allowed_mime_types: Vec<String>,
+    #[serde(default = "default_attachment_cleanup_after_hours")]
+    pub cleanup_after_hours: u64,
+}
+
+impl Default for AttachmentPolicyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            cache_dir: default_attachment_cache_dir(),
+            max_size_bytes: default_attachment_max_size_bytes(),
+            download_timeout_ms: default_attachment_download_timeout_ms(),
+            allowed_mime_types: default_allowed_attachment_mime_types(),
+            cleanup_after_hours: default_attachment_cleanup_after_hours(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct AttachmentConfig {
+    #[serde(default)]
+    pub policy: AttachmentPolicyConfig,
+    #[serde(default)]
+    pub routing: AttachmentRoutingConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -745,8 +855,21 @@ pub struct RedactedMosaicConfig {
     pub audit: RedactedAuditView,
     pub observability: RedactedObservabilityView,
     pub runtime: RedactedRuntimePolicyView,
+    pub attachments: RedactedAttachmentView,
     pub extension_manifest_count: usize,
     pub policies: RedactedPolicyView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedAttachmentView {
+    pub enabled: bool,
+    pub cache_dir: String,
+    pub max_size_bytes: u64,
+    pub download_timeout_ms: u64,
+    pub cleanup_after_hours: u64,
+    #[serde(default)]
+    pub allowed_mime_types: Vec<String>,
+    pub default_route_mode: AttachmentRouteModeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -763,6 +886,7 @@ pub(crate) struct MosaicConfigPatch {
     pub audit: Option<AuditConfig>,
     pub observability: Option<ObservabilityConfig>,
     pub runtime: Option<RuntimePolicyConfig>,
+    pub attachments: Option<AttachmentConfig>,
     #[serde(default)]
     pub tools: Vec<ToolConfig>,
     #[serde(default)]
@@ -821,6 +945,7 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 api_key_env: Some("ANTHROPIC_API_KEY".to_owned()),
                 transport: ProviderTransportPolicyConfig::default(),
                 vendor: ProviderVendorPolicyConfig::default(),
+                attachments: ProviderAttachmentRoutingConfig::default(),
             },
         ),
         (
@@ -832,6 +957,7 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 api_key_env: Some("AZURE_OPENAI_API_KEY".to_owned()),
                 transport: ProviderTransportPolicyConfig::default(),
                 vendor: ProviderVendorPolicyConfig::default(),
+                attachments: ProviderAttachmentRoutingConfig::default(),
             },
         ),
         (
@@ -843,6 +969,7 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 api_key_env: Some("OPENAI_API_KEY".to_owned()),
                 transport: ProviderTransportPolicyConfig::default(),
                 vendor: ProviderVendorPolicyConfig::default(),
+                attachments: ProviderAttachmentRoutingConfig::default(),
             },
         ),
         (
@@ -854,6 +981,7 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 api_key_env: Some("OPENAI_API_KEY".to_owned()),
                 transport: ProviderTransportPolicyConfig::default(),
                 vendor: ProviderVendorPolicyConfig::default(),
+                attachments: ProviderAttachmentRoutingConfig::default(),
             },
         ),
         (
@@ -865,6 +993,7 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 api_key_env: None,
                 transport: ProviderTransportPolicyConfig::default(),
                 vendor: ProviderVendorPolicyConfig::default(),
+                attachments: ProviderAttachmentRoutingConfig::default(),
             },
         ),
         (
@@ -876,6 +1005,7 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 api_key_env: None,
                 transport: ProviderTransportPolicyConfig::default(),
                 vendor: ProviderVendorPolicyConfig::default(),
+                attachments: ProviderAttachmentRoutingConfig::default(),
             },
         ),
     ])
@@ -887,6 +1017,32 @@ fn default_session_store_root_dir() -> String {
 
 fn default_runs_root_dir() -> String {
     ".mosaic/runs".to_owned()
+}
+
+fn default_attachment_cache_dir() -> String {
+    ".mosaic/attachments".to_owned()
+}
+
+fn default_attachment_max_size_bytes() -> u64 {
+    10 * 1024 * 1024
+}
+
+fn default_attachment_download_timeout_ms() -> u64 {
+    15_000
+}
+
+fn default_attachment_cleanup_after_hours() -> u64 {
+    24
+}
+
+fn default_allowed_attachment_mime_types() -> Vec<String> {
+    vec![
+        "image/".to_owned(),
+        "text/".to_owned(),
+        "application/pdf".to_owned(),
+        "application/json".to_owned(),
+        "application/octet-stream".to_owned(),
+    ]
 }
 
 fn default_audit_root_dir() -> String {

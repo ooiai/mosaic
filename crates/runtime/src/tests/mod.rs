@@ -7,20 +7,20 @@ use std::{
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::Utc;
-use mosaic_config::{MosaicConfig, ProviderProfileConfig};
-use mosaic_inspect::IngressTrace;
+use mosaic_config::{AttachmentRouteModeConfig, MosaicConfig, ProviderProfileConfig};
+use mosaic_inspect::{AttachmentKind, IngressTrace};
 use mosaic_memory::{MemoryPolicy, MemorySearchHit, MemoryStore, SessionMemoryRecord};
 use mosaic_node_protocol::{
     FileNodeStore, NodeCapabilityDeclaration, NodeCommandResultEnvelope, NodeRegistration,
 };
 use mosaic_provider::{
     CompletionResponse, LlmProvider, Message, MockProvider, ProviderCompletion, ProviderError,
-    ProviderProfileRegistry, ProviderTransportMetadata, ToolDefinition,
+    ProviderProfileRegistry, ProviderTransportMetadata, Role, ToolDefinition,
 };
 use mosaic_session_core::{
     SessionRecord, SessionStore, SessionSummary, TranscriptMessage, TranscriptRole,
 };
-use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
+use mosaic_skill_core::{SkillOutput, SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{
     CapabilityKind, PermissionScope, ReadFileTool, TimeNowTool, Tool, ToolMetadata, ToolRegistry,
     ToolResult, ToolRiskLevel, ToolSource,
@@ -38,6 +38,7 @@ fn mock_profile_config() -> ProviderProfileConfig {
         api_key_env: None,
         transport: Default::default(),
         vendor: Default::default(),
+        attachments: Default::default(),
     }
 }
 
@@ -168,6 +169,20 @@ impl MemoryStore for MemoryMemoryStore {
 
 struct EmptyProvider;
 
+#[derive(Default)]
+struct RecordingProvider {
+    messages: Mutex<Vec<Message>>,
+}
+
+impl RecordingProvider {
+    fn latest_messages(&self) -> Vec<Message> {
+        self.messages
+            .lock()
+            .expect("provider messages lock should not be poisoned")
+            .clone()
+    }
+}
+
 #[async_trait]
 impl LlmProvider for EmptyProvider {
     fn metadata(&self) -> ProviderTransportMetadata {
@@ -181,6 +196,7 @@ impl LlmProvider for EmptyProvider {
             version_header: None,
             custom_header_keys: Vec::new(),
             supports_tool_call_shadow_messages: false,
+            supports_vision: false,
         }
     }
 
@@ -208,7 +224,59 @@ impl LlmProvider for EmptyProvider {
     }
 }
 
+#[async_trait]
+impl LlmProvider for RecordingProvider {
+    fn metadata(&self) -> ProviderTransportMetadata {
+        ProviderTransportMetadata {
+            provider_type: "mock".to_owned(),
+            base_url: None,
+            timeout_ms: 0,
+            max_retries: 0,
+            retry_backoff_ms: 0,
+            api_version: None,
+            version_header: None,
+            custom_header_keys: Vec::new(),
+            supports_tool_call_shadow_messages: false,
+            supports_vision: true,
+        }
+    }
+
+    async fn complete(
+        &self,
+        messages: &[Message],
+        _tools: Option<&[ToolDefinition]>,
+    ) -> std::result::Result<ProviderCompletion, ProviderError> {
+        *self
+            .messages
+            .lock()
+            .expect("provider messages lock should not be poisoned") = messages.to_vec();
+        Ok(ProviderCompletion {
+            response: CompletionResponse {
+                message: Some(Message {
+                    role: Role::Assistant,
+                    content: "vision response".to_owned(),
+                    tool_call_id: None,
+                    attachments: Vec::new(),
+                }),
+                tool_calls: vec![],
+                finish_reason: Some("stop".to_owned()),
+            },
+            attempts: vec![mosaic_provider::ProviderAttempt {
+                attempt: 1,
+                max_attempts: 1,
+                status: "success".to_owned(),
+                error_kind: None,
+                status_code: None,
+                retryable: false,
+                message: None,
+            }],
+        })
+    }
+}
+
 struct FailingSkill;
+
+struct AttachmentEchoSkill;
 
 #[async_trait]
 impl mosaic_skill_core::Skill for FailingSkill {
@@ -222,6 +290,29 @@ impl mosaic_skill_core::Skill for FailingSkill {
         _ctx: &mosaic_skill_core::SkillContext,
     ) -> Result<mosaic_skill_core::SkillOutput> {
         Err(anyhow!("skill exploded"))
+    }
+}
+
+#[async_trait]
+impl mosaic_skill_core::Skill for AttachmentEchoSkill {
+    fn name(&self) -> &str {
+        "attachment_echo"
+    }
+
+    async fn execute(
+        &self,
+        input: serde_json::Value,
+        _ctx: &mosaic_skill_core::SkillContext,
+    ) -> Result<SkillOutput> {
+        let attachment_count = input
+            .get("attachments")
+            .and_then(serde_json::Value::as_array)
+            .map(|attachments| attachments.len())
+            .unwrap_or(0);
+        Ok(SkillOutput {
+            content: format!("attachment count: {attachment_count}"),
+            structured: Some(input),
+        })
     }
 }
 
@@ -309,6 +400,8 @@ fn runtime_with_provider_and_workflows(
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(workflows),
@@ -461,6 +554,8 @@ async fn run_records_ingress_metadata_in_trace() {
                 profile_hint: None,
                 control_command: None,
                 original_text: None,
+                attachments: Vec::new(),
+                attachment_failures: Vec::new(),
                 gateway_url: Some("http://127.0.0.1:8080".to_owned()),
             }),
         })
@@ -521,6 +616,8 @@ async fn conversational_skill_auto_route_records_route_decision() {
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -601,6 +698,269 @@ async fn default_messages_remain_on_assistant_route() {
             .as_ref()
             .map(|route| route.selection_reason.as_str()),
         Some("default assistant path: no conversational capability matched")
+    );
+}
+
+#[tokio::test]
+async fn assistant_runs_with_attachments_use_provider_native_multimodal_route() {
+    let provider = Arc::new(RecordingProvider::default());
+    let runtime = runtime_with_provider(
+        provider.clone(),
+        Arc::new(MemorySessionStore::default()),
+        Arc::new(NoopEventSink),
+    );
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: "describe this image".to_owned(),
+            tool: None,
+            skill: None,
+            workflow: None,
+            session_id: None,
+            profile: None,
+            ingress: Some(IngressTrace {
+                kind: "telegram".to_owned(),
+                channel: Some("telegram".to_owned()),
+                adapter: Some("telegram_webhook".to_owned()),
+                source: Some("telegram".to_owned()),
+                remote_addr: None,
+                display_name: Some("Operator".to_owned()),
+                actor_id: Some("17".to_owned()),
+                conversation_id: Some("telegram:chat:1".to_owned()),
+                thread_id: None,
+                thread_title: None,
+                reply_target: Some("telegram:chat:1:message:10".to_owned()),
+                message_id: Some("10".to_owned()),
+                received_at: Some(Utc::now()),
+                raw_event_id: Some("event-attach-1".to_owned()),
+                session_hint: None,
+                profile_hint: None,
+                control_command: None,
+                original_text: None,
+                attachments: vec![mosaic_inspect::ChannelAttachment {
+                    id: "img-1".to_owned(),
+                    kind: AttachmentKind::Image,
+                    filename: Some("photo.jpg".to_owned()),
+                    mime_type: Some("image/jpeg".to_owned()),
+                    size_bytes: Some(2048),
+                    source_ref: Some("telegram:file_id:img-1".to_owned()),
+                    remote_url: Some("telegram:file_path:files/photo.jpg".to_owned()),
+                    local_cache_path: Some("/tmp/photo.jpg".to_owned()),
+                    caption: Some("operator photo".to_owned()),
+                }],
+                attachment_failures: vec![],
+                gateway_url: None,
+            }),
+        })
+        .await
+        .expect("multimodal assistant run should succeed");
+
+    assert_eq!(
+        result
+            .trace
+            .attachment_route
+            .as_ref()
+            .map(|route| route.mode.label()),
+        Some("provider_native")
+    );
+    assert_eq!(
+        result
+            .trace
+            .attachment_route
+            .as_ref()
+            .and_then(|route| route.provider_profile.as_deref()),
+        Some("mock")
+    );
+    assert_eq!(
+        result
+            .trace
+            .effective_profile
+            .as_ref()
+            .map(|profile| profile.supports_vision),
+        Some(true)
+    );
+
+    let messages = provider.latest_messages();
+    let user_message = messages
+        .iter()
+        .find(|message| matches!(message.role, Role::User))
+        .expect("user message should be present");
+    assert_eq!(user_message.attachments.len(), 1);
+    assert_eq!(user_message.attachments[0].id, "img-1");
+}
+
+#[tokio::test]
+async fn attachments_can_route_to_specialized_processor_skills() {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    config
+        .profiles
+        .insert("mock".to_owned(), mock_profile_config());
+    config.attachments.routing.default.mode = AttachmentRouteModeConfig::SpecializedProcessor;
+    config.attachments.routing.default.processor = Some("attachment_echo".to_owned());
+
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let mut skills = SkillRegistry::new();
+    skills.register_native_with_metadata(
+        Arc::new(AttachmentEchoSkill),
+        mosaic_skill_core::SkillMetadata::native("attachment_echo").with_exposure(
+            mosaic_tool_core::CapabilityExposure::default().with_accepts_attachments(true),
+        ),
+    );
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(profiles),
+        provider_override: Some(Arc::new(EmptyProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: config.runtime.clone(),
+        attachments: config.attachments.clone(),
+        app_name: None,
+        tools: Arc::new(ToolRegistry::new()),
+        skills: Arc::new(skills),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: None,
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: String::new(),
+            tool: None,
+            skill: None,
+            workflow: None,
+            session_id: None,
+            profile: None,
+            ingress: Some(IngressTrace {
+                kind: "telegram".to_owned(),
+                channel: Some("telegram".to_owned()),
+                adapter: Some("telegram_webhook".to_owned()),
+                source: Some("telegram".to_owned()),
+                remote_addr: None,
+                display_name: Some("Operator".to_owned()),
+                actor_id: Some("17".to_owned()),
+                conversation_id: Some("telegram:chat:1".to_owned()),
+                thread_id: None,
+                thread_title: None,
+                reply_target: Some("telegram:chat:1:message:11".to_owned()),
+                message_id: Some("11".to_owned()),
+                received_at: Some(Utc::now()),
+                raw_event_id: Some("event-attach-2".to_owned()),
+                session_hint: None,
+                profile_hint: None,
+                control_command: None,
+                original_text: None,
+                attachments: vec![mosaic_inspect::ChannelAttachment {
+                    id: "doc-1".to_owned(),
+                    kind: AttachmentKind::Document,
+                    filename: Some("notes.txt".to_owned()),
+                    mime_type: Some("text/plain".to_owned()),
+                    size_bytes: Some(128),
+                    source_ref: Some("telegram:file_id:doc-1".to_owned()),
+                    remote_url: None,
+                    local_cache_path: None,
+                    caption: None,
+                }],
+                attachment_failures: vec![],
+                gateway_url: None,
+            }),
+        })
+        .await
+        .expect("specialized processor route should succeed");
+
+    assert_eq!(result.output, "attachment count: 1");
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_skill.as_deref()),
+        Some("attachment_echo")
+    );
+    assert_eq!(
+        result
+            .trace
+            .attachment_route
+            .as_ref()
+            .map(|route| route.mode.label()),
+        Some("specialized_processor")
+    );
+    assert_eq!(
+        result
+            .trace
+            .attachment_route
+            .as_ref()
+            .and_then(|route| route.processor.as_deref()),
+        Some("attachment_echo")
+    );
+}
+
+#[tokio::test]
+async fn explicit_tools_reject_attachments_when_metadata_disallows_them() {
+    let runtime = runtime_with_provider(
+        Arc::new(EmptyProvider),
+        Arc::new(MemorySessionStore::default()),
+        Arc::new(NoopEventSink),
+    );
+
+    let error = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: String::new(),
+            tool: Some("time_now".to_owned()),
+            skill: None,
+            workflow: None,
+            session_id: None,
+            profile: None,
+            ingress: Some(IngressTrace {
+                kind: "telegram".to_owned(),
+                channel: Some("telegram".to_owned()),
+                adapter: Some("telegram_webhook".to_owned()),
+                source: Some("telegram".to_owned()),
+                remote_addr: None,
+                display_name: Some("Operator".to_owned()),
+                actor_id: Some("17".to_owned()),
+                conversation_id: Some("telegram:chat:1".to_owned()),
+                thread_id: None,
+                thread_title: None,
+                reply_target: Some("telegram:chat:1:message:12".to_owned()),
+                message_id: Some("12".to_owned()),
+                received_at: Some(Utc::now()),
+                raw_event_id: Some("event-attach-3".to_owned()),
+                session_hint: None,
+                profile_hint: None,
+                control_command: None,
+                original_text: None,
+                attachments: vec![mosaic_inspect::ChannelAttachment {
+                    id: "img-2".to_owned(),
+                    kind: AttachmentKind::Image,
+                    filename: Some("photo.jpg".to_owned()),
+                    mime_type: Some("image/jpeg".to_owned()),
+                    size_bytes: Some(256),
+                    source_ref: Some("telegram:file_id:img-2".to_owned()),
+                    remote_url: None,
+                    local_cache_path: None,
+                    caption: None,
+                }],
+                attachment_failures: vec![],
+                gateway_url: None,
+            }),
+        })
+        .await
+        .expect_err("tool route should reject attachments");
+
+    assert!(
+        error
+            .to_string()
+            .contains("tool 'time_now' does not accept attachments")
     );
 }
 
@@ -773,6 +1133,8 @@ async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -881,6 +1243,8 @@ async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -951,6 +1315,8 @@ async fn workflow_runs_record_step_trace_and_skill_invocation() {
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(tools),
         skills: Arc::new(skills),
         workflows: Arc::new(workflows),
@@ -1037,6 +1403,7 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
             api_key_env: None,
             transport: Default::default(),
             vendor: Default::default(),
+            attachments: Default::default(),
         },
     );
     let profiles =
@@ -1066,6 +1433,8 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(tools),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(workflows),
@@ -1154,6 +1523,8 @@ async fn skill_failures_emit_skill_failed_then_run_failed() {
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -1201,6 +1572,8 @@ async fn session_skill_runs_persist_assistant_output() {
         memory_store: Arc::new(MemoryMemoryStore::default()),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -1255,6 +1628,8 @@ async fn session_runs_persist_memory_and_record_compression_trace() {
             note_char_budget: 120,
         },
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),
@@ -1327,6 +1702,8 @@ async fn cross_session_reference_records_memory_reads_and_session_links() {
         memory_store: memory_store.clone(),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        app_name: None,
         tools: Arc::new(ToolRegistry::new()),
         skills: Arc::new(SkillRegistry::new()),
         workflows: Arc::new(WorkflowRegistry::new()),

@@ -8,8 +8,9 @@ use std::{
 
 use chrono::Utc;
 use mosaic_inspect::{
-    ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace, ChannelOutboundMessage,
-    IngressTrace, RouteDecisionTrace, RouteMode, RunTrace,
+    AttachmentFailureTrace, AttachmentKind, AttachmentRouteMode, AttachmentRouteTrace,
+    ChannelAttachment, ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace,
+    ChannelOutboundMessage, IngressTrace, RouteDecisionTrace, RouteMode, RunTrace,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -50,6 +51,8 @@ fn persists_and_recovers_trace_with_ingress_metadata() {
         profile_hint: None,
         control_command: None,
         original_text: None,
+        attachments: Vec::new(),
+        attachment_failures: Vec::new(),
         gateway_url: Some("http://127.0.0.1:8080".to_owned()),
     });
     trace.add_outbound_delivery(ChannelDeliveryTrace {
@@ -126,6 +129,8 @@ fn persists_and_recovers_route_decision_metadata() {
         profile_hint: Some("demo-provider".to_owned()),
         control_command: Some("skill".to_owned()),
         original_text: Some("/mosaic skill summarize summarize this for handoff".to_owned()),
+        attachments: Vec::new(),
+        attachment_failures: Vec::new(),
         gateway_url: None,
     });
     trace.bind_route_decision(RouteDecisionTrace {
@@ -185,6 +190,98 @@ fn persists_and_recovers_route_decision_metadata() {
             .as_ref()
             .and_then(|ingress| ingress.original_text.as_deref()),
         Some("/mosaic skill summarize summarize this for handoff")
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn persists_and_recovers_attachment_route_metadata() {
+    let dir = temp_dir("attachment-route");
+    let mut trace = RunTrace::new("look at this attachment".to_owned());
+    trace.bind_session("demo");
+    trace.bind_ingress(IngressTrace {
+        kind: "telegram".to_owned(),
+        channel: Some("telegram".to_owned()),
+        adapter: Some("telegram_webhook".to_owned()),
+        source: Some("telegram".to_owned()),
+        remote_addr: None,
+        display_name: Some("Operator".to_owned()),
+        actor_id: Some("17".to_owned()),
+        conversation_id: Some("telegram:chat:42".to_owned()),
+        thread_id: None,
+        thread_title: None,
+        reply_target: Some("telegram:chat:42:message:88".to_owned()),
+        message_id: Some("88".to_owned()),
+        received_at: None,
+        raw_event_id: Some("event-attachment".to_owned()),
+        session_hint: Some("demo".to_owned()),
+        profile_hint: Some("mock".to_owned()),
+        control_command: None,
+        original_text: Some("look at this attachment".to_owned()),
+        attachments: vec![ChannelAttachment {
+            id: "img-1".to_owned(),
+            kind: AttachmentKind::Image,
+            filename: Some("photo.jpg".to_owned()),
+            mime_type: Some("image/jpeg".to_owned()),
+            size_bytes: Some(2048),
+            source_ref: Some("telegram:file_id:img-1".to_owned()),
+            remote_url: Some("telegram:file_path:files/photo.jpg".to_owned()),
+            local_cache_path: Some("/tmp/photo.jpg".to_owned()),
+            caption: Some("operator photo".to_owned()),
+        }],
+        attachment_failures: vec![AttachmentFailureTrace {
+            attachment_id: "img-2".to_owned(),
+            stage: "policy".to_owned(),
+            kind: "mime_not_allowed".to_owned(),
+            message: "attachment mime_type 'application/zip' is not allowed".to_owned(),
+        }],
+        gateway_url: None,
+    });
+    trace.bind_attachment_route(AttachmentRouteTrace {
+        mode: AttachmentRouteMode::SpecializedProcessor,
+        selection_reason: "attachment route resolved to specialized_processor".to_owned(),
+        provider_profile: None,
+        provider_model: None,
+        processor: Some("attachment_echo".to_owned()),
+        attachment_count: 1,
+        attachment_kinds: vec!["image".to_owned()],
+        attachment_filenames: vec!["photo.jpg".to_owned()],
+        failure_summary: vec![
+            "policy:mime_not_allowed:attachment mime_type 'application/zip' is not allowed"
+                .to_owned(),
+        ],
+    });
+    trace.finish_ok("attachment count: 1".to_owned());
+
+    let path = trace.save_to_dir(&dir).expect("trace should save");
+    let bytes = fs::read(path).expect("saved trace should be readable");
+    let loaded: RunTrace = serde_json::from_slice(&bytes).expect("trace should deserialize");
+
+    assert_eq!(
+        loaded.attachment_route.as_ref().map(|route| route.mode),
+        Some(AttachmentRouteMode::SpecializedProcessor)
+    );
+    assert_eq!(
+        loaded
+            .attachment_route
+            .as_ref()
+            .and_then(|route| route.processor.as_deref()),
+        Some("attachment_echo")
+    );
+    assert_eq!(
+        loaded
+            .ingress
+            .as_ref()
+            .map(|ingress| ingress.attachments.len()),
+        Some(1)
+    );
+    assert_eq!(
+        loaded
+            .ingress
+            .as_ref()
+            .map(|ingress| ingress.attachment_failures.len()),
+        Some(1)
     );
 
     fs::remove_dir_all(dir).ok();

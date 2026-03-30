@@ -64,6 +64,7 @@ fn workspace_config_and_manifest_capabilities_merge_into_final_registry() {
         invocation_mode: CapabilityInvocationMode::ExplicitOnly,
         required_policy: Some("workspace_override".to_owned()),
         allowed_channels: vec!["telegram".to_owned()],
+        accepts_attachments: false,
     }];
     config.skills = vec![SkillConfig {
         skill_type: "manifest".to_owned(),
@@ -77,6 +78,7 @@ fn workspace_config_and_manifest_capabilities_merge_into_final_registry() {
         invocation_mode: CapabilityInvocationMode::Conversational,
         required_policy: None,
         allowed_channels: vec!["webchat".to_owned()],
+        accepts_attachments: false,
     }];
     config.workflows = vec![Workflow {
         name: "workspace_flow".to_owned(),

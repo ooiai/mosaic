@@ -249,6 +249,7 @@ fn validate_reports_invalid_active_profile_and_missing_api_key_env() {
             api_key_env: None,
             transport: Default::default(),
             vendor: Default::default(),
+            attachments: Default::default(),
         },
     );
 
@@ -281,6 +282,7 @@ fn validate_reports_missing_azure_base_url() {
             api_key_env: Some("AZURE_OPENAI_API_KEY".to_owned()),
             transport: Default::default(),
             vendor: Default::default(),
+            attachments: Default::default(),
         },
     );
 

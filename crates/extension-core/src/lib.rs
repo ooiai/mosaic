@@ -138,6 +138,7 @@ fn exposure_from_tool_config(tool: &ToolConfig, source: &str) -> CapabilityExpos
         .with_invocation_mode(tool.invocation_mode)
         .with_required_policy(tool.required_policy.clone())
         .with_allowed_channels(tool.allowed_channels.clone())
+        .with_accepts_attachments(tool.accepts_attachments)
 }
 
 fn exposure_from_skill_config(skill: &SkillConfig, source: &str) -> CapabilityExposure {
@@ -146,6 +147,7 @@ fn exposure_from_skill_config(skill: &SkillConfig, source: &str) -> CapabilityEx
         .with_invocation_mode(skill.invocation_mode)
         .with_required_policy(skill.required_policy.clone())
         .with_allowed_channels(skill.allowed_channels.clone())
+        .with_accepts_attachments(skill.accepts_attachments)
 }
 
 #[cfg(test)]

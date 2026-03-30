@@ -51,6 +51,10 @@ pub fn build_runtime_context(
         memory_store: Arc::new(FileMemoryStore::new(memory_store_root)),
         memory_policy,
         runtime_policy: config.runtime.clone(),
+        attachments: config.attachments.clone(),
+        app_name: app_config
+            .and_then(|app| app.app.as_ref())
+            .and_then(|app| app.name.clone()),
         tools: Arc::new(extension_set.tools),
         skills: Arc::new(extension_set.skills),
         workflows: Arc::new(extension_set.workflows),
@@ -144,6 +148,10 @@ fn build_gateway_components_for_workspace(
         memory_store: Arc::new(FileMemoryStore::new(memory_store_root)),
         memory_policy,
         runtime_policy: config.runtime.clone(),
+        attachments: config.attachments.clone(),
+        app_name: app_config
+            .and_then(|app| app.app.as_ref())
+            .and_then(|app| app.name.clone()),
         tools: Arc::new(extension_set.tools),
         skills: Arc::new(extension_set.skills),
         workflows: Arc::new(extension_set.workflows),
@@ -218,6 +226,7 @@ mod tests {
                     invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
                     required_policy: None,
                     allowed_channels: Vec::new(),
+                    accepts_attachments: false,
                 },
                 ToolConfig {
                     tool_type: "builtin".to_owned(),
@@ -226,6 +235,7 @@ mod tests {
                     invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
                     required_policy: None,
                     allowed_channels: Vec::new(),
+                    accepts_attachments: false,
                 },
             ],
             skills: vec![SkillConfig {
@@ -240,6 +250,7 @@ mod tests {
                 invocation_mode: mosaic_tool_core::CapabilityInvocationMode::Conversational,
                 required_policy: None,
                 allowed_channels: Vec::new(),
+                accepts_attachments: false,
             }],
             workflows: Vec::new(),
             agent: AgentConfig { system: None },

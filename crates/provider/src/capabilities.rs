@@ -9,6 +9,7 @@ use crate::{profile::ProviderProfile, types::ToolDefinition};
 pub struct ModelCapabilities {
     pub supports_tools: bool,
     pub supports_sessions: bool,
+    pub supports_vision: bool,
     pub family: String,
     pub context_window_chars: usize,
     pub budget_tier: String,
@@ -29,6 +30,8 @@ pub struct SchedulingRequest {
     pub intent: SchedulingIntent,
     pub estimated_context_chars: usize,
     pub requires_tools: bool,
+    #[serde(default)]
+    pub requires_vision: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -95,6 +98,7 @@ pub(crate) fn infer_model_capabilities(provider_type: &str, model: &str) -> Mode
             )
         ),
         supports_sessions: true,
+        supports_vision: infer_vision_support(provider_type, model),
         family,
         context_window_chars,
         budget_tier: budget_tier.to_owned(),
@@ -117,6 +121,27 @@ fn infer_context_budget(provider_type: Option<ProviderType>, model: &str) -> (us
         (24_000, "small")
     } else {
         (24_000, "small")
+    }
+}
+
+fn infer_vision_support(provider_type: Option<ProviderType>, model: &str) -> bool {
+    if model == "mock" {
+        return true;
+    }
+
+    let normalized = model.to_ascii_lowercase();
+    if normalized.contains("vision") || normalized.contains("llava") {
+        return true;
+    }
+
+    match provider_type {
+        Some(ProviderType::OpenAi | ProviderType::Azure | ProviderType::OpenAiCompatible) => {
+            normalized.starts_with("gpt-")
+        }
+        Some(ProviderType::Anthropic) => normalized.starts_with("claude"),
+        Some(ProviderType::Ollama) => normalized.contains("vision") || normalized.contains("llava"),
+        Some(ProviderType::Mock) => true,
+        None => false,
     }
 }
 

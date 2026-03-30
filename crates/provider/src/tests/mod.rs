@@ -51,6 +51,7 @@ fn mock_profile_config(model: &str) -> ProviderProfileConfig {
         api_key_env: None,
         transport: Default::default(),
         vendor: Default::default(),
+        attachments: Default::default(),
     }
 }
 
@@ -89,11 +90,13 @@ fn mock_provider_replies_to_the_last_message_when_no_tool_is_needed() {
                 role: Role::System,
                 content: "system".to_owned(),
                 tool_call_id: None,
+                attachments: Vec::new(),
             },
             Message {
                 role: Role::User,
                 content: "hello".to_owned(),
                 tool_call_id: None,
+                attachments: Vec::new(),
             },
         ],
         None,
@@ -122,6 +125,7 @@ fn mock_provider_emits_time_now_tool_call_when_tool_is_available() {
             role: Role::User,
             content: "What time is it now?".to_owned(),
             tool_call_id: None,
+            attachments: Vec::new(),
         }],
         Some(&tools),
     ))
@@ -145,6 +149,7 @@ fn mock_provider_emits_read_file_tool_call_when_tool_is_available() {
             role: Role::User,
             content: "Read a file for me.".to_owned(),
             tool_call_id: None,
+            attachments: Vec::new(),
         }],
         Some(&tools),
     ))
@@ -166,6 +171,7 @@ fn mock_provider_finalizes_after_tool_output() {
             role: Role::Tool,
             content: "2026-03-20T12:00:00Z".to_owned(),
             tool_call_id: Some("call_mock_time_now".to_owned()),
+            attachments: Vec::new(),
         }],
         None,
     ))
@@ -188,6 +194,7 @@ fn mock_provider_uses_file_preview_after_read_file_tool_output() {
             role: Role::Tool,
             content: "abcdefghijklmnopqrstuvwxyz".repeat(12),
             tool_call_id: Some("call_mock_read_file".to_owned()),
+            attachments: Vec::new(),
         }],
         Some(&[read_file_tool_definition()]),
     ))
@@ -209,6 +216,7 @@ fn mock_provider_can_target_remote_mcp_tools_by_suffix() {
             role: Role::User,
             content: "Read a file for me.".to_owned(),
             tool_call_id: None,
+            attachments: Vec::new(),
         }],
         Some(&[mcp_read_file_tool_definition()]),
     ))
@@ -229,6 +237,7 @@ fn mock_provider_falls_back_when_requested_tool_is_unavailable() {
             role: Role::User,
             content: "What time is it?".to_owned(),
             tool_call_id: None,
+            attachments: Vec::new(),
         }],
         Some(&[read_file_tool_definition()]),
     ))
@@ -269,6 +278,7 @@ fn summary_scheduling_prefers_lower_budget_profile() {
             intent: SchedulingIntent::Summary,
             estimated_context_chars: 2_000,
             requires_tools: false,
+            requires_vision: false,
         })
         .expect("summary schedule should succeed");
 
@@ -287,6 +297,7 @@ fn interactive_scheduling_expands_to_larger_context_window() {
             intent: SchedulingIntent::InteractiveRun,
             estimated_context_chars: 40_000,
             requires_tools: false,
+            requires_vision: false,
         })
         .expect("interactive schedule should succeed");
 
@@ -314,6 +325,7 @@ fn channel_policy_prefers_matching_channel_profile() {
             intent: SchedulingIntent::InteractiveRun,
             estimated_context_chars: 200,
             requires_tools: false,
+            requires_vision: false,
         })
         .expect("channel schedule should succeed");
 
@@ -440,6 +452,7 @@ async fn openai_provider_formats_tools_and_bearer_auth() {
                 role: Role::User,
                 content: "hello".to_owned(),
                 tool_call_id: None,
+                attachments: Vec::new(),
             }],
             Some(&[read_file_tool_definition()]),
         )
@@ -502,6 +515,7 @@ async fn azure_provider_uses_deployment_endpoint_and_api_key_auth() {
                 role: Role::User,
                 content: "hello".to_owned(),
                 tool_call_id: None,
+                attachments: Vec::new(),
             }],
             None,
         )
@@ -570,11 +584,13 @@ async fn anthropic_provider_formats_messages_tools_and_shadow_tool_calls() {
                     role: Role::System,
                     content: "You are helpful.".to_owned(),
                     tool_call_id: None,
+                    attachments: Vec::new(),
                 },
                 Message {
                     role: Role::User,
                     content: "Read the workspace readme".to_owned(),
                     tool_call_id: None,
+                    attachments: Vec::new(),
                 },
             ],
             Some(&[read_file_tool_definition()]),
@@ -644,6 +660,7 @@ async fn ollama_provider_uses_local_v1_endpoint_without_auth_by_default() {
                 role: Role::User,
                 content: "hello".to_owned(),
                 tool_call_id: None,
+                attachments: Vec::new(),
             }],
             None,
         )
@@ -692,6 +709,7 @@ async fn provider_status_errors_translate_to_structured_auth_failures() {
                 role: Role::User,
                 content: "hello".to_owned(),
                 tool_call_id: None,
+                attachments: Vec::new(),
             }],
             None,
         )

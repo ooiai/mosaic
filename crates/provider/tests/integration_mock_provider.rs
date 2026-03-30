@@ -9,6 +9,7 @@ async fn mock_provider_completes_tool_request_through_public_trait() {
                 role: Role::User,
                 content: "What time is it?".to_owned(),
                 tool_call_id: None,
+                attachments: Vec::new(),
             }],
             Some(&[ToolDefinition {
                 name: "time_now".to_owned(),

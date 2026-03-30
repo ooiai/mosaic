@@ -39,7 +39,11 @@ impl AgentRuntime {
             trace.record_extension_usage(usage);
         }
 
-        let parsed_input = Self::parse_direct_tool_input(tool.metadata(), &req.input);
+        let attachments = Self::request_attachments(&req);
+        let parsed_input = Self::with_attachment_metadata(
+            Self::parse_direct_tool_input(tool.metadata(), &req.input),
+            &attachments,
+        );
         let outcome = match self
             .invoke_tool_with_guardrails(
                 session.as_ref().map(|record| record.id.as_str()),
@@ -106,6 +110,7 @@ impl AgentRuntime {
                 Ok(contexts) => contexts,
                 Err(err) => return self.fail_run(trace, err),
             };
+        let attachments = Self::request_attachments(&req);
 
         if let Some(session_ref) = session.as_mut() {
             if let Err(err) = self.append_session_message(
@@ -122,6 +127,7 @@ impl AgentRuntime {
             .execute_assistant_run(
                 req.system,
                 req.input,
+                &attachments,
                 &reference_contexts,
                 &profile,
                 session.as_mut(),
@@ -164,6 +170,7 @@ impl AgentRuntime {
                 Ok(contexts) => contexts,
                 Err(err) => return self.fail_run(trace, err),
             };
+        let attachments = Self::request_attachments(&req);
         let skill_input =
             Self::augment_input_with_reference_context(&req.input, &reference_contexts);
 
@@ -185,7 +192,7 @@ impl AgentRuntime {
         }
 
         let output = match self
-            .execute_skill_for_trace(skill_name.clone(), skill_input, &mut trace)
+            .execute_skill_for_trace(skill_name.clone(), skill_input, &attachments, &mut trace)
             .await
         {
             Ok(output) => output,
@@ -258,6 +265,7 @@ impl AgentRuntime {
         let model_selections = Arc::new(Mutex::new(Vec::new()));
         let capability_traces = Arc::new(Mutex::new(Vec::new()));
         let runner = WorkflowRunner::new();
+        let attachments = Self::request_attachments(&req);
         let workflow_input =
             Self::augment_input_with_reference_context(&req.input, &reference_contexts);
 
@@ -270,6 +278,7 @@ impl AgentRuntime {
                     .ingress
                     .as_ref()
                     .and_then(|ingress| ingress.channel.clone()),
+                attachments: attachments.clone(),
                 tool_traces: tool_traces.clone(),
                 skill_traces: skill_traces.clone(),
                 model_selections: model_selections.clone(),

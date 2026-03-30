@@ -218,6 +218,10 @@ pub(crate) fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
         config.runtime = runtime;
     }
 
+    if let Some(attachments) = patch.attachments {
+        config.attachments = attachments;
+    }
+
     if !patch.tools.is_empty() {
         config.tools = patch.tools;
     }

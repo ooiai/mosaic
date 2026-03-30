@@ -70,6 +70,15 @@ pub fn redact_mosaic_config(config: &MosaicConfig) -> RedactedMosaicConfig {
             max_workflow_provider_round_trips: config.runtime.max_workflow_provider_round_trips,
             continue_after_tool_error: config.runtime.continue_after_tool_error,
         },
+        attachments: RedactedAttachmentView {
+            enabled: config.attachments.policy.enabled,
+            cache_dir: config.attachments.policy.cache_dir.clone(),
+            max_size_bytes: config.attachments.policy.max_size_bytes,
+            download_timeout_ms: config.attachments.policy.download_timeout_ms,
+            cleanup_after_hours: config.attachments.policy.cleanup_after_hours,
+            allowed_mime_types: config.attachments.policy.allowed_mime_types.clone(),
+            default_route_mode: config.attachments.routing.default.mode,
+        },
         extension_manifest_count: config.extensions.manifests.len(),
         policies: RedactedPolicyView {
             allow_exec: config.policies.allow_exec,

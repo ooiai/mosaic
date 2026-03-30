@@ -1273,7 +1273,7 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
                     ' '
                 };
                 println!(
-                    "  {} {} | usage={} | type={} | model={} | family={} | tools={} | sessions={} | context_window_chars={} | budget_tier={} | api_key_env={:?} | api_key_present={}",
+                    "  {} {} | usage={} | type={} | model={} | family={} | tools={} | vision={} | sessions={} | context_window_chars={} | budget_tier={} | api_key_env={:?} | api_key_present={}",
                     marker,
                     profile.name,
                     profile.usage.label(),
@@ -1281,6 +1281,7 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
                     profile.model,
                     profile.capabilities.family,
                     profile.capabilities.supports_tools,
+                    profile.capabilities.supports_vision,
                     profile.capabilities.supports_sessions,
                     profile.capabilities.context_window_chars,
                     profile.capabilities.budget_tier,
@@ -1893,6 +1894,8 @@ fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
         profile_hint: None,
         control_command: None,
         original_text: None,
+        attachments: Vec::new(),
+        attachment_failures: Vec::new(),
         gateway_url,
     }
 }
@@ -1917,6 +1920,8 @@ fn remote_cli_ingress(gateway_url: &str) -> IngressTrace {
         profile_hint: None,
         control_command: None,
         original_text: None,
+        attachments: Vec::new(),
+        attachment_failures: Vec::new(),
         gateway_url: Some(gateway_url.to_owned()),
     }
 }

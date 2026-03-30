@@ -5,6 +5,7 @@ pub(crate) struct RuntimeWorkflowExecutor<'a> {
     pub(crate) default_profile: ProviderProfile,
     pub(crate) session_id: Option<String>,
     pub(crate) ingress_channel: Option<String>,
+    pub(crate) attachments: Vec<mosaic_inspect::ChannelAttachment>,
     pub(crate) tool_traces: SharedToolTraceCollector,
     pub(crate) skill_traces: SharedSkillTraceCollector,
     pub(crate) model_selections: SharedModelSelectionCollector,
@@ -31,6 +32,7 @@ impl RuntimeWorkflowExecutor<'_> {
             intent: SchedulingIntent::WorkflowStep,
             estimated_context_chars: input.chars().count(),
             requires_tools: !tools.is_empty(),
+            requires_vision: !self.attachments.is_empty(),
         })?;
 
         Ok((scheduled.profile, scheduled.reason))
@@ -76,6 +78,7 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
                 &profile,
                 system.clone(),
                 input,
+                &self.attachments,
                 tool_defs,
                 &self.tool_traces,
                 &self.capability_traces,
@@ -94,7 +97,12 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
         };
 
         self.runtime
-            .execute_workflow_skill_step(skill.clone(), input, &self.skill_traces)
+            .execute_workflow_skill_step(
+                skill.clone(),
+                input,
+                &self.attachments,
+                &self.skill_traces,
+            )
             .await
     }
 }

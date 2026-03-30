@@ -65,7 +65,8 @@ pub(crate) fn load_extension_set(
                             .with_visibility(workflow.visibility.visibility)
                             .with_invocation_mode(workflow.visibility.invocation_mode)
                             .with_required_policy(workflow.visibility.required_policy.clone())
-                            .with_allowed_channels(workflow.visibility.allowed_channels.clone()),
+                            .with_allowed_channels(workflow.visibility.allowed_channels.clone())
+                            .with_accepts_attachments(workflow.visibility.accepts_attachments),
                     )
                     .with_extension(
                         extension.status.name.clone(),

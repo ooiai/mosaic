@@ -50,6 +50,7 @@ impl AgentRuntime {
             custom_header_keys: metadata.custom_header_keys.clone(),
             supports_tools: profile.capabilities.supports_tools,
             supports_tool_call_shadow_messages: metadata.supports_tool_call_shadow_messages,
+            supports_vision: profile.capabilities.supports_vision,
         }
     }
 
@@ -76,6 +77,7 @@ impl AgentRuntime {
             version_header: profile.anthropic_version.clone(),
             custom_header_keys: profile.custom_headers.keys().cloned().collect(),
             supports_tool_call_shadow_messages: profile.provider_type == "anthropic",
+            supports_vision: profile.capabilities.supports_vision,
         }
     }
 

@@ -1,5 +1,5 @@
 use super::*;
-use mosaic_config::RuntimePolicyConfig;
+use mosaic_config::{AttachmentConfig, RuntimePolicyConfig};
 
 pub(crate) type SharedToolTraceCollector = Arc<Mutex<Vec<ToolTrace>>>;
 pub(crate) type SharedSkillTraceCollector = Arc<Mutex<Vec<SkillTrace>>>;
@@ -32,6 +32,8 @@ pub struct RuntimeContext {
     pub memory_store: Arc<dyn MemoryStore>,
     pub memory_policy: MemoryPolicy,
     pub runtime_policy: RuntimePolicyConfig,
+    pub attachments: AttachmentConfig,
+    pub app_name: Option<String>,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
     pub workflows: Arc<WorkflowRegistry>,

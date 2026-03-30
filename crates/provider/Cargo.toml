@@ -15,6 +15,7 @@ tokio.workspace = true
 tracing.workspace = true
 
 mosaic-config = { path = "../config" }
+mosaic-inspect = { path = "../inspect" }
 mosaic-tool-core = { path = "../tool-core" }
 
 [dev-dependencies]

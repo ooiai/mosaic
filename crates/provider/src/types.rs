@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use mosaic_inspect::ChannelAttachment;
 use serde::{Deserialize, Serialize};
 
 use crate::errors::ProviderError;
@@ -16,6 +17,8 @@ pub struct Message {
     pub role: Role,
     pub content: String,
     pub tool_call_id: Option<String>,
+    #[serde(default)]
+    pub attachments: Vec<ChannelAttachment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -54,6 +57,8 @@ pub struct ProviderTransportMetadata {
     #[serde(default)]
     pub custom_header_keys: Vec<String>,
     pub supports_tool_call_shadow_messages: bool,
+    #[serde(default)]
+    pub supports_vision: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

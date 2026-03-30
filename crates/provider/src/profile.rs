@@ -2,7 +2,8 @@ use std::{collections::BTreeMap, env, sync::Arc};
 
 use anyhow::{Result, anyhow, bail};
 use mosaic_config::{
-    MosaicConfig, ProviderProfileConfig, ProviderType, ProviderUsage, parse_provider_type,
+    MosaicConfig, ProviderAttachmentRoutingConfig, ProviderProfileConfig, ProviderType,
+    ProviderUsage, parse_provider_type,
 };
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,7 @@ pub struct ProviderProfile {
     pub allow_custom_headers: bool,
     pub azure_api_version: Option<String>,
     pub anthropic_version: Option<String>,
+    pub attachment_routing: ProviderAttachmentRoutingConfig,
     pub capabilities: ModelCapabilities,
 }
 
@@ -123,6 +125,12 @@ impl ProviderProfileRegistry {
                     profile.name
                 );
             }
+            if request.requires_vision && !profile.capabilities.supports_vision {
+                bail!(
+                    "profile '{}' does not support multimodal attachment runs",
+                    profile.name
+                );
+            }
             return Ok(ScheduledProfile {
                 profile,
                 reason: "requested_profile".to_owned(),
@@ -133,6 +141,7 @@ impl ProviderProfileRegistry {
             .list()
             .into_iter()
             .filter(|profile| !request.requires_tools || profile.capabilities.supports_tools)
+            .filter(|profile| !request.requires_vision || profile.capabilities.supports_vision)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -281,6 +290,10 @@ pub(crate) fn provider_profile_from_config(
         allow_custom_headers,
         azure_api_version,
         anthropic_version,
+        attachment_routing: ProviderAttachmentRoutingConfig {
+            mode: profile_config.attachments.mode,
+            processor: profile_config.attachments.processor.clone(),
+        },
         capabilities: infer_model_capabilities(
             &profile_config.provider_type,
             &profile_config.model,

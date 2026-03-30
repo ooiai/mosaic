@@ -37,6 +37,7 @@ impl LlmProvider for MockProvider {
             version_header: None,
             custom_header_keys: Vec::new(),
             supports_tool_call_shadow_messages: false,
+            supports_vision: true,
         }
     }
 
@@ -80,6 +81,7 @@ impl LlmProvider for MockProvider {
                                 role: Role::Assistant,
                                 content: format!("mock response: {}", last.content),
                                 tool_call_id: None,
+                                attachments: Vec::new(),
                             }),
                             tool_calls: vec![],
                             finish_reason: Some("stop".to_owned()),
@@ -102,6 +104,7 @@ impl LlmProvider for MockProvider {
                                 role: Role::Assistant,
                                 content: format!("mock response: {}", last.content),
                                 tool_call_id: None,
+                                attachments: Vec::new(),
                             }),
                             tool_calls: vec![],
                             finish_reason: Some("stop".to_owned()),
@@ -113,6 +116,7 @@ impl LlmProvider for MockProvider {
                             role: Role::Assistant,
                             content: format!("mock response: {}", last.content),
                             tool_call_id: None,
+                            attachments: Vec::new(),
                         }),
                         tool_calls: vec![],
                         finish_reason: Some("stop".to_owned()),
@@ -134,6 +138,7 @@ impl LlmProvider for MockProvider {
                         role: Role::Assistant,
                         content: reply,
                         tool_call_id: None,
+                        attachments: Vec::new(),
                     }),
                     tool_calls: vec![],
                     finish_reason: Some("stop".to_owned()),
@@ -144,6 +149,7 @@ impl LlmProvider for MockProvider {
                     role: Role::Assistant,
                     content: "mock response".to_owned(),
                     tool_call_id: None,
+                    attachments: Vec::new(),
                 }),
                 tool_calls: vec![],
                 finish_reason: Some("stop".to_owned()),

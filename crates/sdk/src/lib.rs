@@ -323,6 +323,7 @@ mod tests {
                 base_url: None,
                 api_key_env: None,
                 transport: Default::default(),
+                attachments: Default::default(),
                 vendor: Default::default(),
             },
         );
@@ -341,6 +342,8 @@ mod tests {
                 memory_store: Arc::new(FileMemoryStore::new(session_root.join("memory"))),
                 memory_policy: MemoryPolicy::default(),
                 runtime_policy: config.runtime.clone(),
+                attachments: config.attachments.clone(),
+                app_name: None,
                 tools: Arc::new(tools),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
@@ -417,6 +420,8 @@ mod tests {
                     control_command: None,
                     original_text: None,
                     gateway_url: Some(base_url.clone()),
+                    attachments: vec![],
+                    attachment_failures: vec![],
                 }),
             })
             .await

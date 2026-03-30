@@ -346,6 +346,8 @@ fn spawn_interactive_run(
                     profile_hint: Some(profile.clone()),
                     control_command: None,
                     original_text: None,
+                    attachments: Vec::new(),
+                    attachment_failures: Vec::new(),
                     gateway_url: None,
                 }),
             };
@@ -400,6 +402,8 @@ fn spawn_interactive_run(
                     profile_hint: Some(profile.clone()),
                     control_command: None,
                     original_text: None,
+                    attachments: Vec::new(),
+                    attachment_failures: Vec::new(),
                     gateway_url: Some(gateway_url),
                 }),
             };

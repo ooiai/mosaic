@@ -6,8 +6,9 @@ use mosaic_runtime::events::RunEvent;
 use serde::{Deserialize, Serialize};
 
 pub use mosaic_inspect::{
-    ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace, ChannelOutboundMessage,
-    IngressTrace, RouteDecisionTrace, RouteMode,
+    AttachmentFailureTrace, AttachmentKind, AttachmentRouteMode, AttachmentRouteTrace,
+    ChannelAttachment, ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace,
+    ChannelOutboundMessage, IngressTrace, RouteDecisionTrace, RouteMode,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -117,6 +118,8 @@ pub struct ChannelInboundMessage {
     pub reply_target: String,
     pub message_id: String,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<ChannelAttachment>,
     pub profile_hint: Option<String>,
     pub session_hint: Option<String>,
     pub received_at: DateTime<Utc>,
@@ -486,6 +489,8 @@ mod tests {
                 control_command: None,
                 original_text: None,
                 gateway_url: Some("http://127.0.0.1:8080".to_owned()),
+                attachments: vec![],
+                attachment_failures: vec![],
             }),
         };
 
@@ -553,6 +558,8 @@ mod tests {
                     control_command: None,
                     original_text: None,
                     gateway_url: None,
+                    attachments: vec![],
+                    attachment_failures: vec![],
                 }),
             },
         };

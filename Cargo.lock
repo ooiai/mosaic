@@ -1248,6 +1248,7 @@ dependencies = [
  "axum",
  "futures",
  "mosaic-config",
+ "mosaic-inspect",
  "mosaic-tool-core",
  "reqwest",
  "serde",

@@ -38,6 +38,7 @@ impl AzureProvider {
             version_header: None,
             custom_header_keys: custom_headers.keys().cloned().collect(),
             supports_tool_call_shadow_messages: false,
+            supports_vision: deployment.starts_with("gpt-"),
         };
         Self {
             inner: OpenAiStyleProvider {

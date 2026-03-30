@@ -36,6 +36,8 @@ pub(crate) fn ingress_trace_from_channel_message(message: &ChannelInboundMessage
         profile_hint: message.profile_hint.clone(),
         control_command: None,
         original_text: None,
+        attachments: message.attachments.clone(),
+        attachment_failures: Vec::new(),
         gateway_url: None,
     }
 }
@@ -713,6 +715,7 @@ pub(crate) fn normalize_webchat_message(message: InboundMessage) -> ChannelInbou
         reply_target,
         message_id,
         text: message.input,
+        attachments: Vec::new(),
         profile_hint: message.profile.or_else(|| {
             ingress
                 .as_ref()
@@ -842,6 +845,7 @@ impl GatewayHandle {
                             .clone()
                             .unwrap_or_else(|| "unknown".to_owned()),
                         text: submission.input.clone(),
+                        attachments: ingress.attachments.clone(),
                         profile_hint: submission.profile.clone(),
                         session_hint: submission.session_id.clone(),
                         received_at: ingress.received_at.unwrap_or_else(Utc::now),
@@ -914,6 +918,7 @@ mod tests {
                 base_url: None,
                 api_key_env: None,
                 transport: Default::default(),
+                attachments: Default::default(),
                 vendor: Default::default(),
             },
         );
@@ -931,6 +936,8 @@ mod tests {
                 )),
                 memory_policy: MemoryPolicy::default(),
                 runtime_policy: config.runtime.clone(),
+                attachments: config.attachments.clone(),
+                app_name: None,
                 tools: Arc::new(ToolRegistry::new()),
                 skills: Arc::new(SkillRegistry::new()),
                 workflows: Arc::new(WorkflowRegistry::new()),
@@ -966,6 +973,7 @@ mod tests {
                 reply_target: "telegram:chat:1".to_owned(),
                 message_id: "99".to_owned(),
                 text: "/mosaic tool read_file README.md".to_owned(),
+                attachments: Vec::new(),
                 profile_hint: None,
                 session_hint: Some("demo".to_owned()),
                 received_at: Utc::now(),

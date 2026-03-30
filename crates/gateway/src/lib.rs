@@ -78,6 +78,8 @@ pub struct GatewayRuntimeComponents {
     pub memory_store: Arc<dyn MemoryStore>,
     pub memory_policy: MemoryPolicy,
     pub runtime_policy: mosaic_config::RuntimePolicyConfig,
+    pub attachments: mosaic_config::AttachmentConfig,
+    pub app_name: Option<String>,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
     pub workflows: Arc<WorkflowRegistry>,
@@ -104,6 +106,8 @@ impl GatewayRuntimeComponents {
             memory_store: self.memory_store.clone(),
             memory_policy: self.memory_policy.clone(),
             runtime_policy: self.runtime_policy.clone(),
+            attachments: self.attachments.clone(),
+            app_name: self.app_name.clone(),
             tools: self.tools.clone(),
             skills: self.skills.clone(),
             workflows: self.workflows.clone(),
@@ -343,6 +347,7 @@ impl StoredRunRecord {
         self.status = trace.lifecycle_status();
         self.updated_at = Utc::now();
         self.finished_at = trace.finished_at;
+        self.ingress = trace.ingress.clone();
         self.output_preview = trace
             .output
             .as_deref()
@@ -799,6 +804,12 @@ impl GatewayHandle {
             memory_store: current.memory_store.clone(),
             memory_policy: current.memory_policy.clone(),
             runtime_policy: current.runtime_policy.clone(),
+            attachments: loaded.config.attachments.clone(),
+            app_name: source
+                .app_config
+                .as_ref()
+                .and_then(|app| app.app.as_ref())
+                .and_then(|app| app.name.clone()),
             tools: Arc::new(extension_set.tools),
             skills: Arc::new(extension_set.skills),
             workflows: Arc::new(extension_set.workflows),
@@ -994,6 +1005,8 @@ impl GatewayHandle {
                 profile_hint: registration.profile.clone(),
                 control_command: None,
                 original_text: None,
+                attachments: Vec::new(),
+                attachment_failures: Vec::new(),
                 gateway_url: None,
             }),
         })?
@@ -1727,6 +1740,7 @@ fn broadcast_envelope(state: &GatewayState, envelope: GatewayEventEnvelope) {
     let _ = state.events.send(envelope);
 }
 
+mod attachments;
 mod audit;
 mod auth;
 mod capability;

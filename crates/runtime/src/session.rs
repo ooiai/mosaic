@@ -69,6 +69,7 @@ impl AgentRuntime {
                 },
                 content: message.content.clone(),
                 tool_call_id: message.tool_call_id.clone(),
+                attachments: Vec::new(),
             })
             .collect()
     }
@@ -205,6 +206,7 @@ impl AgentRuntime {
                 role: Role::System,
                 content: format!("Referenced session context:\n{}", context),
                 tool_call_id: None,
+                attachments: Vec::new(),
             })
             .collect::<Vec<_>>();
 
@@ -252,6 +254,7 @@ impl AgentRuntime {
             role: Role::System,
             content: format!("Compressed conversation summary:\n{}", summary),
             tool_call_id: None,
+            attachments: Vec::new(),
         });
         if let Some(compressed_context) = session.memory.compressed_context.as_deref() {
             trace.add_memory_read(MemoryReadTrace {

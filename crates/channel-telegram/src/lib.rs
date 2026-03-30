@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use chrono::Utc;
-use mosaic_control_protocol::ChannelInboundMessage;
+use mosaic_control_protocol::{AttachmentKind, ChannelAttachment, ChannelInboundMessage};
 use mosaic_inspect::{
     ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace, ChannelOutboundMessage,
 };
@@ -26,9 +26,36 @@ pub struct TelegramMessage {
     pub message_id: i64,
     pub text: Option<String>,
     pub caption: Option<String>,
+    #[serde(default)]
+    pub photo: Vec<TelegramPhotoSize>,
+    pub document: Option<TelegramDocument>,
     pub message_thread_id: Option<i64>,
     pub chat: TelegramChat,
     pub from: Option<TelegramUser>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TelegramPhotoSize {
+    pub file_id: String,
+    pub width: i64,
+    pub height: i64,
+    pub file_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TelegramDocument {
+    pub file_id: String,
+    pub file_name: Option<String>,
+    pub mime_type: Option<String>,
+    pub file_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TelegramFile {
+    pub file_id: String,
+    pub file_unique_id: Option<String>,
+    pub file_size: Option<u64>,
+    pub file_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -237,6 +264,37 @@ impl TelegramOutboundClient {
         Ok(())
     }
 
+    pub async fn get_file(&self, file_id: &str) -> Result<TelegramFile> {
+        let response = self
+            .client
+            .get(format!("{}/bot{}/getFile", self.base_url, self.bot_token))
+            .query(&[("file_id", file_id)])
+            .send()
+            .await?;
+        self.expect_api_result::<TelegramFile>(response).await
+    }
+
+    pub async fn download_file_bytes(&self, file_path: &str) -> Result<Vec<u8>> {
+        let response = self
+            .client
+            .get(format!(
+                "{}/file/bot{}/{}",
+                self.base_url,
+                self.bot_token,
+                file_path.trim_start_matches('/')
+            ))
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            bail!(
+                "telegram file download failed with status {}",
+                status.as_u16()
+            );
+        }
+        Ok(response.bytes().await?.to_vec())
+    }
+
     pub async fn send_test_message(
         &self,
         chat_id: i64,
@@ -335,10 +393,17 @@ pub fn normalize_update(update: TelegramUpdate) -> Result<ChannelInboundMessage>
 
     let input = message
         .text
-        .or(message.caption)
+        .clone()
+        .or(message.caption.clone())
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("telegram update does not contain text or caption content"))?;
+        .unwrap_or_default();
+    let attachments = attachments_from_message(&message);
+    if input.is_empty() && attachments.is_empty() {
+        return Err(anyhow!(
+            "telegram update does not contain text, caption, photo, or document content"
+        ));
+    }
 
     let thread_id = message.message_thread_id.map(|value| value.to_string());
     let session_hint = match thread_id.as_deref() {
@@ -378,11 +443,54 @@ pub fn normalize_update(update: TelegramUpdate) -> Result<ChannelInboundMessage>
         ),
         message_id: message.message_id.to_string(),
         text: input,
+        attachments,
         profile_hint: None,
         session_hint: Some(session_hint),
         received_at: Utc::now(),
         raw_event_id: update_id.to_string(),
     })
+}
+
+fn attachments_from_message(message: &TelegramMessage) -> Vec<ChannelAttachment> {
+    let mut attachments = Vec::new();
+    let caption = message
+        .caption
+        .clone()
+        .filter(|value| !value.trim().is_empty());
+
+    if let Some(photo) = message
+        .photo
+        .iter()
+        .max_by_key(|size| size.file_size.unwrap_or((size.width * size.height) as u64))
+    {
+        attachments.push(ChannelAttachment {
+            id: format!("telegram-photo-{}", photo.file_id),
+            kind: AttachmentKind::Image,
+            filename: Some(format!("telegram-photo-{}.jpg", message.message_id)),
+            mime_type: Some("image/jpeg".to_owned()),
+            size_bytes: photo.file_size,
+            source_ref: Some(format!("telegram:file_id:{}", photo.file_id)),
+            remote_url: None,
+            local_cache_path: None,
+            caption: caption.clone(),
+        });
+    }
+
+    if let Some(document) = message.document.as_ref() {
+        attachments.push(ChannelAttachment {
+            id: format!("telegram-document-{}", document.file_id),
+            kind: AttachmentKind::Document,
+            filename: document.file_name.clone(),
+            mime_type: document.mime_type.clone(),
+            size_bytes: document.file_size,
+            source_ref: Some(format!("telegram:file_id:{}", document.file_id)),
+            remote_url: None,
+            local_cache_path: None,
+            caption,
+        });
+    }
+
+    attachments
 }
 
 fn display_name_for_user(user: &TelegramUser) -> String {
@@ -606,6 +714,8 @@ mod tests {
                 message_id: 10,
                 text: Some("hello telegram".to_owned()),
                 caption: None,
+                photo: vec![],
+                document: None,
                 message_thread_id: None,
                 chat: TelegramChat {
                     id: 42,
@@ -644,6 +754,8 @@ mod tests {
                 message_id: 11,
                 text: Some("thread hello".to_owned()),
                 caption: None,
+                photo: vec![],
+                document: None,
                 message_thread_id: Some(99),
                 chat: TelegramChat {
                     id: -100123,
@@ -685,6 +797,8 @@ mod tests {
                 message_id: 12,
                 text: None,
                 caption: None,
+                photo: vec![],
+                document: None,
                 message_thread_id: None,
                 chat: TelegramChat {
                     id: 42,
@@ -701,7 +815,109 @@ mod tests {
         })
         .expect_err("telegram updates without text should fail");
 
-        assert!(error.to_string().contains("text or caption"));
+        assert!(
+            error
+                .to_string()
+                .contains("text, caption, photo, or document")
+        );
+    }
+
+    #[test]
+    fn normalizes_photo_only_updates_into_image_attachments() {
+        let normalized = normalize_update(TelegramUpdate {
+            update_id: 4,
+            message: Some(TelegramMessage {
+                message_id: 13,
+                text: None,
+                caption: None,
+                photo: vec![
+                    TelegramPhotoSize {
+                        file_id: "small-photo".to_owned(),
+                        width: 64,
+                        height: 64,
+                        file_size: Some(128),
+                    },
+                    TelegramPhotoSize {
+                        file_id: "large-photo".to_owned(),
+                        width: 1024,
+                        height: 1024,
+                        file_size: Some(4096),
+                    },
+                ],
+                document: None,
+                message_thread_id: None,
+                chat: TelegramChat {
+                    id: 77,
+                    chat_type: "private".to_owned(),
+                    title: None,
+                    username: Some("photo_user".to_owned()),
+                    first_name: Some("Photo".to_owned()),
+                    last_name: None,
+                },
+                from: Some(TelegramUser {
+                    id: 70,
+                    username: Some("photo_user".to_owned()),
+                    first_name: "Photo".to_owned(),
+                    last_name: None,
+                }),
+            }),
+            edited_message: None,
+            channel_post: None,
+        })
+        .expect("telegram photo update should normalize");
+
+        assert!(normalized.text.is_empty());
+        assert_eq!(normalized.attachments.len(), 1);
+        assert_eq!(normalized.attachments[0].kind, AttachmentKind::Image);
+        assert_eq!(
+            normalized.attachments[0].source_ref.as_deref(),
+            Some("telegram:file_id:large-photo")
+        );
+    }
+
+    #[test]
+    fn normalizes_document_updates_into_file_attachments() {
+        let normalized = normalize_update(TelegramUpdate {
+            update_id: 5,
+            message: Some(TelegramMessage {
+                message_id: 14,
+                text: None,
+                caption: Some("summarize this".to_owned()),
+                photo: vec![],
+                document: Some(TelegramDocument {
+                    file_id: "doc-1".to_owned(),
+                    file_name: Some("notes.txt".to_owned()),
+                    mime_type: Some("text/plain".to_owned()),
+                    file_size: Some(256),
+                }),
+                message_thread_id: None,
+                chat: TelegramChat {
+                    id: 88,
+                    chat_type: "private".to_owned(),
+                    title: None,
+                    username: Some("doc_user".to_owned()),
+                    first_name: Some("Doc".to_owned()),
+                    last_name: None,
+                },
+                from: Some(TelegramUser {
+                    id: 71,
+                    username: Some("doc_user".to_owned()),
+                    first_name: "Doc".to_owned(),
+                    last_name: None,
+                }),
+            }),
+            edited_message: None,
+            channel_post: None,
+        })
+        .expect("telegram document update should normalize");
+
+        assert_eq!(normalized.text, "summarize this");
+        assert_eq!(normalized.attachments.len(), 1);
+        assert_eq!(normalized.attachments[0].kind, AttachmentKind::Document);
+        assert_eq!(
+            normalized.attachments[0].filename.as_deref(),
+            Some("notes.txt")
+        );
     }
 
     #[tokio::test]
