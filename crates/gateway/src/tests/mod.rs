@@ -33,7 +33,7 @@ fn mock_profile_config() -> ProviderProfileConfig {
 }
 
 #[derive(Default)]
-struct MemorySessionStore {
+pub(crate) struct MemorySessionStore {
     sessions: Mutex<BTreeMap<String, SessionRecord>>,
 }
 
@@ -124,6 +124,81 @@ fn gateway() -> GatewayHandle {
             workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace"),
             runs_dir: std::env::temp_dir(),
             audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit"),
+            extensions: Vec::new(),
+            policies: PolicyConfig::default(),
+            deployment: config.deployment.clone(),
+            auth: config.auth.clone(),
+            audit: config.audit.clone(),
+            observability: config.observability.clone(),
+        },
+    )
+}
+
+fn gateway_with_filtered_workflow() -> GatewayHandle {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "demo-provider".to_owned();
+    config
+        .profiles
+        .insert("demo-provider".to_owned(), mock_profile_config());
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let mut tools = ToolRegistry::new();
+    tools.register(Arc::new(mosaic_tool_core::TimeNowTool::new()));
+    let mut skills = SkillRegistry::new();
+    skills.register_native(Arc::new(SummarizeSkill));
+    let mut workflows = WorkflowRegistry::new();
+    workflows.register(Workflow {
+        name: "quick_brief".to_owned(),
+        description: Some("Summarize input with one skill step".to_owned()),
+        visibility: mosaic_tool_core::CapabilityExposure::default(),
+        steps: vec![WorkflowStep {
+            name: "summarize".to_owned(),
+            kind: WorkflowStepKind::Skill {
+                skill: "summarize".to_owned(),
+                input: "{{input}}".to_owned(),
+            },
+        }],
+    });
+    workflows.register_with_metadata(
+        Workflow {
+            name: "telegram_only".to_owned(),
+            description: Some("Only available from telegram".to_owned()),
+            visibility: mosaic_tool_core::CapabilityExposure::default(),
+            steps: vec![WorkflowStep {
+                name: "summarize".to_owned(),
+                kind: WorkflowStepKind::Skill {
+                    skill: "summarize".to_owned(),
+                    input: "{{input}}".to_owned(),
+                },
+            }],
+        },
+        mosaic_workflow::WorkflowMetadata::new("telegram_only").with_exposure(
+            mosaic_tool_core::CapabilityExposure::new("workspace_config")
+                .with_invocation_mode(mosaic_tool_core::CapabilityInvocationMode::ExplicitOnly)
+                .with_allowed_channels(vec!["telegram".to_owned()]),
+        ),
+    );
+
+    GatewayHandle::new_local(
+        Handle::current(),
+        GatewayRuntimeComponents {
+            profiles: Arc::new(profiles),
+            provider_override: Some(Arc::new(MockProvider)),
+            session_store: Arc::new(MemorySessionStore::default()),
+            memory_store: Arc::new(FileMemoryStore::new(
+                std::env::temp_dir().join("mosaic-gateway-tests-memory-filtered"),
+            )),
+            memory_policy: MemoryPolicy::default(),
+            runtime_policy: config.runtime.clone(),
+            tools: Arc::new(tools),
+            skills: Arc::new(skills),
+            workflows: Arc::new(workflows),
+            node_store: test_node_store(),
+            mcp_manager: None,
+            cron_store: test_cron_store(),
+            workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace-filtered"),
+            runs_dir: std::env::temp_dir(),
+            audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit-filtered"),
             extensions: Vec::new(),
             policies: PolicyConfig::default(),
             deployment: config.deployment.clone(),
@@ -864,6 +939,224 @@ async fn channel_explicit_tool_skill_and_workflow_commands_route_through_gateway
         Some("/mosaic workflow quick_brief operator handoff")
     );
     assert!(workflow.output.starts_with("summary:"));
+}
+
+#[tokio::test]
+async fn mosaic_root_and_help_render_grouped_dynamic_catalogs() {
+    let gateway = gateway();
+
+    let catalog = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("catalog-demo".to_owned()),
+            input: "/mosaic".to_owned(),
+            profile: Some("demo-provider".to_owned()),
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:catalog".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:catalog".to_owned()),
+            message_id: Some("message-catalog".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("catalog command should submit")
+        .wait()
+        .await
+        .expect("catalog command should succeed");
+
+    assert!(
+        catalog
+            .output
+            .contains("Mosaic commands available in this conversation.")
+    );
+    assert!(catalog.output.contains("\nSession\n"));
+    assert!(catalog.output.contains("\nRuntime\n"));
+    assert!(catalog.output.contains("\nTools\n"));
+    assert!(catalog.output.contains("\nSkills\n"));
+    assert!(catalog.output.contains("\nWorkflows\n"));
+    assert!(catalog.output.contains("\nGateway\n"));
+    assert_eq!(
+        catalog
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_category.as_deref()),
+        None
+    );
+    assert_eq!(
+        catalog
+            .trace
+            .ingress
+            .as_ref()
+            .and_then(|ingress| ingress.control_command.as_deref()),
+        Some("catalog")
+    );
+    assert!(
+        catalog
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.catalog_scope.as_deref())
+            .is_some_and(|scope| scope.contains("channel=webchat"))
+    );
+
+    let tools = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("catalog-demo".to_owned()),
+            input: "/mosaic help tools".to_owned(),
+            profile: Some("demo-provider".to_owned()),
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:catalog".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:catalog".to_owned()),
+            message_id: Some("message-tools".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("help tools should submit")
+        .wait()
+        .await
+        .expect("help tools should succeed");
+
+    assert!(
+        tools
+            .output
+            .contains("Tools commands available in this conversation.")
+    );
+    assert!(tools.output.contains("/mosaic tool time_now"));
+    assert!(!tools.output.contains("\nSkills\n"));
+    assert_eq!(
+        tools
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.selected_category.as_deref()),
+        Some("tools")
+    );
+}
+
+#[tokio::test]
+async fn mosaic_help_workflows_respects_channel_visibility() {
+    let gateway = gateway_with_filtered_workflow();
+    let components = gateway.snapshot_components();
+    let webchat = crate::command_catalog::build_command_catalog(
+        &components,
+        &crate::command_catalog::ChannelCommandContext {
+            channel: "webchat".to_owned(),
+            session_id: Some("workflow-help".to_owned()),
+            profile: "demo-provider".to_owned(),
+        },
+        Some(crate::command_catalog::ChannelCommandCategory::Workflows),
+    )
+    .render();
+    let telegram = crate::command_catalog::build_command_catalog(
+        &components,
+        &crate::command_catalog::ChannelCommandContext {
+            channel: "telegram".to_owned(),
+            session_id: Some("telegram-1".to_owned()),
+            profile: "demo-provider".to_owned(),
+        },
+        Some(crate::command_catalog::ChannelCommandCategory::Workflows),
+    )
+    .render();
+
+    assert!(webchat.contains("/mosaic workflow quick_brief <input>"));
+    assert!(!webchat.contains("telegram_only"));
+    assert!(telegram.contains("telegram_only"));
+}
+
+#[tokio::test]
+async fn channel_session_and_profile_commands_bind_follow_up_messages() {
+    let gateway = gateway();
+
+    let session_switch = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("webchat-default".to_owned()),
+            input: "/mosaic session new ops".to_owned(),
+            profile: Some("demo-provider".to_owned()),
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:binding".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:binding".to_owned()),
+            message_id: Some("message-session-new".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("session new should submit")
+        .wait()
+        .await
+        .expect("session new should succeed");
+    assert!(
+        session_switch
+            .output
+            .contains("conversation bound to new session ops")
+    );
+    assert_eq!(session_switch.trace.session_id.as_deref(), Some("ops"));
+
+    let profile_switch = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("webchat-default".to_owned()),
+            input: "/mosaic profile demo-provider".to_owned(),
+            profile: Some("demo-provider".to_owned()),
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:binding".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:binding".to_owned()),
+            message_id: Some("message-profile".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("profile should submit")
+        .wait()
+        .await
+        .expect("profile should succeed");
+    assert!(
+        profile_switch
+            .output
+            .contains("conversation profile set to demo-provider")
+    );
+
+    let follow_up = gateway
+        .submit_webchat_message(InboundMessage {
+            session_id: Some("webchat-default".to_owned()),
+            input: "hello after binding".to_owned(),
+            profile: None,
+            display_name: Some("guest".to_owned()),
+            actor_id: Some("guest-1".to_owned()),
+            conversation_id: Some("webchat:binding".to_owned()),
+            thread_id: None,
+            thread_title: None,
+            reply_target: Some("webchat:binding".to_owned()),
+            message_id: Some("message-follow-up".to_owned()),
+            received_at: None,
+            raw_event_id: None,
+            ingress: None,
+        })
+        .expect("follow-up should submit")
+        .wait()
+        .await
+        .expect("follow-up should succeed");
+
+    assert_eq!(follow_up.trace.session_id.as_deref(), Some("ops"));
+    assert_eq!(
+        follow_up
+            .trace
+            .effective_profile
+            .as_ref()
+            .map(|profile| profile.profile.as_str()),
+        Some("demo-provider")
+    );
 }
 
 #[tokio::test]

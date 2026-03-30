@@ -49,6 +49,10 @@ pub struct RouteDecisionTrace {
     pub capability_source: Option<String>,
     #[serde(default)]
     pub profile_used: Option<String>,
+    #[serde(default)]
+    pub selected_category: Option<String>,
+    #[serde(default)]
+    pub catalog_scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

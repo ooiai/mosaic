@@ -32,6 +32,7 @@ mosaic-tool-core = { path = "../tool-core" }
 mosaic-workflow = { path = "../workflow" }
 
 [dev-dependencies]
+async-trait.workspace = true
 mosaic-config = { path = "../config" }
 mosaic-channel-telegram = { path = "../channel-telegram" }
 reqwest.workspace = true

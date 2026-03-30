@@ -556,6 +556,11 @@ pub fn render_inspect_report(
                     option_string(route.capability_source.clone()),
                 ),
                 ("profile_used", option_string(route.profile_used.clone())),
+                (
+                    "selected_category",
+                    option_string(route.selected_category.clone()),
+                ),
+                ("catalog_scope", option_string(route.catalog_scope.clone())),
             ],
         ));
     }

@@ -202,6 +202,12 @@ struct GatewayMetricsState {
     broadcast_lag_events_total: u64,
 }
 
+#[derive(Debug, Clone, Default)]
+struct ChannelConversationBinding {
+    session_id: Option<String>,
+    profile: Option<String>,
+}
+
 #[derive(Debug)]
 struct GatewayReplayWindow {
     capacity: usize,
@@ -545,6 +551,7 @@ struct GatewayState {
     components: Mutex<GatewayRuntimeComponents>,
     reload_source: Option<GatewayReloadSource>,
     events: broadcast::Sender<GatewayEventEnvelope>,
+    conversation_bindings: Mutex<BTreeMap<String, ChannelConversationBinding>>,
     capability_jobs: Arc<Mutex<BTreeMap<String, CapabilityJobDto>>>,
     run_store: Arc<GatewayRunStore>,
     active_runs: Mutex<BTreeMap<String, ActiveRunHandle>>,
@@ -583,6 +590,7 @@ impl GatewayHandle {
                 components: Mutex::new(components),
                 reload_source,
                 events,
+                conversation_bindings: Mutex::new(BTreeMap::new()),
                 capability_jobs: Arc::new(Mutex::new(BTreeMap::new())),
                 run_store: Arc::new(GatewayRunStore::new(runs_dir)),
                 active_runs: Mutex::new(BTreeMap::new()),
@@ -1722,6 +1730,7 @@ fn broadcast_envelope(state: &GatewayState, envelope: GatewayEventEnvelope) {
 mod audit;
 mod auth;
 mod capability;
+mod command_catalog;
 mod dto;
 mod http;
 mod ingress;

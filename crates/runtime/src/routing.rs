@@ -97,6 +97,8 @@ impl PlannedRoute {
             selection_reason,
             capability_source,
             profile_used: profile_used.map(ToOwned::to_owned),
+            selected_category: None,
+            catalog_scope: None,
         }
     }
 }

@@ -138,6 +138,8 @@ fn persists_and_recovers_route_decision_metadata() {
         selection_reason: "explicit /mosaic skill command".to_owned(),
         capability_source: Some("builtin.core".to_owned()),
         profile_used: Some("demo-provider".to_owned()),
+        selected_category: None,
+        catalog_scope: None,
     });
     trace.finish_ok("summary: summarize this for handoff".to_owned());
 
