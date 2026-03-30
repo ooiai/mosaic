@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use mosaic_config::AttachmentRouteModeConfig;
 
 use crate::{
     ProviderAttempt, ProviderCompletion, ProviderError, ProviderErrorKind,
@@ -38,6 +39,10 @@ impl LlmProvider for MockProvider {
             custom_header_keys: Vec::new(),
             supports_tool_call_shadow_messages: false,
             supports_vision: true,
+            supports_documents: true,
+            supports_audio: false,
+            supports_video: false,
+            preferred_attachment_mode: AttachmentRouteModeConfig::ProviderNative,
         }
     }
 

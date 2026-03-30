@@ -26,6 +26,7 @@ impl RuntimeWorkflowExecutor<'_> {
                 "workflow_skill_default".to_owned(),
             ));
         };
+        let attachment_requirements = AgentRuntime::attachment_requirements(&self.attachments);
 
         let scheduled = self.runtime.ctx.profiles.schedule(SchedulingRequest {
             requested_profile: profile.clone().or(Some(self.default_profile.name.clone())),
@@ -33,7 +34,10 @@ impl RuntimeWorkflowExecutor<'_> {
             intent: SchedulingIntent::WorkflowStep,
             estimated_context_chars: input.chars().count(),
             requires_tools: !tools.is_empty(),
-            requires_vision: !self.attachments.is_empty(),
+            requires_vision: attachment_requirements.requires_vision,
+            requires_documents: attachment_requirements.requires_documents,
+            requires_audio: attachment_requirements.requires_audio,
+            requires_video: attachment_requirements.requires_video,
         })?;
 
         Ok((scheduled.profile, scheduled.reason))

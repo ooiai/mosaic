@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use mosaic_config::AttachmentRouteModeConfig;
 use mosaic_inspect::ChannelAttachment;
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +60,14 @@ pub struct ProviderTransportMetadata {
     pub supports_tool_call_shadow_messages: bool,
     #[serde(default)]
     pub supports_vision: bool,
+    #[serde(default)]
+    pub supports_documents: bool,
+    #[serde(default)]
+    pub supports_audio: bool,
+    #[serde(default)]
+    pub supports_video: bool,
+    #[serde(default)]
+    pub preferred_attachment_mode: AttachmentRouteModeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

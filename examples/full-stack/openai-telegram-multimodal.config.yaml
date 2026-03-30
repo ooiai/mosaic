@@ -1,0 +1,94 @@
+schema_version: 1
+active_profile: openai
+provider_defaults:
+  timeout_ms: 45000
+  max_retries: 2
+  retry_backoff_ms: 250
+profiles:
+  openai:
+    type: openai
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+  openai-vision:
+    type: openai
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+runtime:
+  max_provider_round_trips: 8
+  max_workflow_provider_round_trips: 6
+  continue_after_tool_error: false
+extensions:
+  manifests:
+    - path: .mosaic/extensions/telegram-e2e.yaml
+      version_pin: 0.1.0
+      enabled: true
+deployment:
+  profile: local
+  workspace_name: mosaic-telegram-multimodal
+auth:
+  telegram_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
+telegram:
+  bots:
+    media:
+      bot_token_env: MOSAIC_TELEGRAM_BOT_TOKEN
+      webhook_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
+      route_key: media
+      webhook_path: /ingress/telegram/media
+      default_profile: openai-vision
+      allowed_tools:
+        - read_file
+      allowed_skills:
+        - summarize_notes
+      allowed_workflows:
+        - summarize_operator_note
+      attachments:
+        mode: provider_native
+        multimodal_profile: openai-vision
+        allowed_attachment_kinds:
+          - image
+          - document
+        max_attachment_size_mb: 25
+session_store:
+  root_dir: .mosaic/sessions
+inspect:
+  runs_dir: .mosaic/runs
+audit:
+  root_dir: .mosaic/audit
+  retention_days: 30
+  event_replay_window: 512
+  redact_inputs: true
+observability:
+  enable_metrics: true
+  enable_readiness: true
+  slow_consumer_lag_threshold: 64
+attachments:
+  policy:
+    enabled: true
+    cache_dir: .mosaic/cache/attachments
+    max_size_bytes: 26214400
+    download_timeout_ms: 15000
+    allowed_mime_types:
+      - image/jpeg
+      - image/png
+      - application/pdf
+      - text/plain
+    cleanup_after_hours: 24
+  routing:
+    default:
+      mode: disabled
+    channel_overrides:
+      telegram:
+        mode: provider_native
+        multimodal_profile: openai-vision
+        allowed_attachment_kinds:
+          - image
+          - document
+        max_attachment_size_mb: 25
+policies:
+  allow_exec: false
+  allow_webhook: true
+  allow_cron: false
+  allow_mcp: false
+  hot_reload_enabled: false

@@ -2,7 +2,9 @@
 
 Mosaic reads configuration from YAML and merges multiple sources into one runtime view.
 
-## File locations
+This guide focuses on the operator-visible config knobs, especially the Telegram bot registry and attachment routing added in k1-k4.
+
+## File Locations
 
 Workspace config:
 
@@ -16,7 +18,7 @@ Optional user config:
 ~/.config/mosaic/config.yaml
 ```
 
-## Merge order
+## Merge Order
 
 Later sources override earlier ones.
 
@@ -30,7 +32,7 @@ Current environment override support:
 
 - `MOSAIC_ACTIVE_PROFILE`
 
-## Minimal workspace config
+## Minimal Workspace Config
 
 ```yaml
 schema_version: 1
@@ -43,7 +45,7 @@ profiles:
     api_key_env: OPENAI_API_KEY
 ```
 
-## Top-level fields
+## Top-Level Fields
 
 ### `schema_version`
 
@@ -53,7 +55,7 @@ profiles:
 ### `active_profile`
 
 - default: `gpt-5.4-mini`
-- purpose: selects the provider profile used by the runtime unless overridden by session, ingress, or CLI
+- purpose: selects the provider profile used by the runtime unless overridden by session, ingress, bot policy, or CLI
 
 ### `profiles`
 
@@ -84,6 +86,11 @@ Profile fields:
 - `vendor.azure_api_version`: Azure API version override
 - `vendor.anthropic_version`: Anthropic version header override
 - `vendor.allow_custom_headers`: must be `true` before custom headers are accepted
+- `attachments.mode`: provider-level attachment default
+- `attachments.multimodal_profile`: profile to switch to for provider-native attachments
+- `attachments.specialized_processor_profile`: profile to switch to for specialized processor attachment work
+- `attachments.allowed_attachment_kinds`: optional kind allowlist
+- `attachments.max_attachment_size_mb`: optional per-profile size limit
 
 ### `provider_defaults`
 
@@ -124,52 +131,158 @@ deployment:
 auth:
   operator_token_env: MOSAIC_OPERATOR_TOKEN
   webchat_shared_secret_env: MOSAIC_WEBCHAT_SHARED_SECRET
-  telegram_secret_token_env: MOSAIC_TELEGRAM_SECRET
+  telegram_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
 ```
 
 All fields are optional in `local` mode. In `production`, `operator_token_env` is required by validation.
 
-### `session_store`
+For single-bot Telegram workspaces, `auth.telegram_secret_token_env` is usually enough. For multi-bot Telegram workspaces, each bot can override its own webhook secret env under `telegram.bots.<name>.webhook_secret_token_env`.
+
+### `telegram`
+
+`telegram.bots` is the bot registry for bot-aware workspaces.
+
+Single-bot baseline:
 
 ```yaml
-session_store:
-  root_dir: .mosaic/sessions
+telegram:
+  bots:
+    primary:
+      bot_token_env: MOSAIC_TELEGRAM_BOT_TOKEN
+      webhook_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
+      route_key: primary
+      webhook_path: /ingress/telegram/primary
+      default_profile: openai
+      allowed_tools:
+        - read_file
+      allowed_skills:
+        - summarize_notes
+      allowed_workflows:
+        - summarize_operator_note
 ```
 
-### `inspect`
+Multi-bot baseline:
 
 ```yaml
-inspect:
-  runs_dir: .mosaic/runs
+telegram:
+  bots:
+    ops:
+      bot_token_env: MOSAIC_TELEGRAM_OPS_BOT_TOKEN
+      webhook_secret_token_env: MOSAIC_TELEGRAM_OPS_SECRET_TOKEN
+      route_key: ops
+      webhook_path: /ingress/telegram/ops
+      default_profile: openai
+      allowed_tools:
+        - read_file
+    media:
+      bot_token_env: MOSAIC_TELEGRAM_MEDIA_BOT_TOKEN
+      webhook_secret_token_env: MOSAIC_TELEGRAM_MEDIA_SECRET_TOKEN
+      route_key: media
+      webhook_path: /ingress/telegram/media
+      default_profile: openai-vision
+      allowed_skills:
+        - summarize_notes
+      allowed_workflows:
+        - summarize_operator_note
 ```
 
-### `audit`
+Per-bot fields:
+
+- `bot_token_env`: env var that holds the Telegram Bot API token
+- `webhook_secret_token_env`: env var used to validate inbound webhook requests for that bot
+- `route_key`: short bot route used in `/ingress/telegram/<route>`
+- `webhook_path`: optional explicit path; if omitted, it defaults from the route key
+- `default_profile`: profile selected for that bot when the incoming message does not override it
+- `allowed_tools`: explicit tool allowlist for that bot
+- `allowed_skills`: explicit skill allowlist for that bot
+- `allowed_workflows`: explicit workflow allowlist for that bot
+- `attachments`: per-bot attachment route override
+
+### `attachments`
+
+This block has two parts:
+
+1. policy: download and cache rules
+2. routing: where attachments should go after normalization
+
+Example:
 
 ```yaml
-audit:
-  root_dir: .mosaic/audit
-  retention_days: 14
-  event_replay_window: 256
-  redact_inputs: true
+attachments:
+  policy:
+    enabled: true
+    cache_dir: .mosaic/cache/attachments
+    max_size_bytes: 26214400
+    download_timeout_ms: 15000
+    allowed_mime_types:
+      - image/jpeg
+      - image/png
+      - application/pdf
+    cleanup_after_hours: 24
+  routing:
+    default:
+      mode: disabled
+    channel_overrides:
+      telegram:
+        mode: provider_native
+        multimodal_profile: openai-vision
+        allowed_attachment_kinds:
+          - image
+          - document
+        max_attachment_size_mb: 25
+    bot_overrides:
+      legacy-bot-route:
+        mode: specialized_processor
+        processor: summarize_notes
+        specialized_processor_profile: openai
+        allowed_attachment_kinds:
+          - document
+        max_attachment_size_mb: 10
 ```
 
-### `observability`
+Routing fields:
 
-```yaml
-observability:
-  enable_metrics: true
-  enable_readiness: true
-  slow_consumer_lag_threshold: 32
-```
+- `mode`: `provider_native`, `specialized_processor`, or `disabled`
+- `processor`: named processor to use when `mode: specialized_processor`
+- `multimodal_profile`: profile to select when a provider-native multimodal run is required
+- `specialized_processor_profile`: profile to select when running the specialized processor
+- `allowed_attachment_kinds`: attachment kind allowlist using `image`, `document`, `audio`, `video`, `other`
+- `max_attachment_size_mb`: optional route-specific size limit
+
+Preferred new pattern:
+
+- use `telegram.bots.<name>.attachments` for new per-bot policy
+- keep `attachments.routing.channel_overrides` for shared channel-wide defaults
+- treat `attachments.routing.bot_overrides` as a compatibility layer when you must key by route name
+
+### `tools`, `skills`, `workflows`
+
+These arrays override or register capability exposure from workspace config.
+
+Relevant channel fields:
+
+- `visibility`
+- `invocation_mode`
+- `allowed_channels`
+- `required_policy`
+- `accepts_attachments`
+
+That means a capability can be:
+
+- visible in TUI but hidden from Telegram
+- explicit-only in `/mosaic`
+- attachment-aware only when the manifest or workspace config enables it
 
 ### `extensions`
 
 ```yaml
 extensions:
   manifests:
-    - path: .mosaic/extensions/time-and-summary.yaml
+    - path: .mosaic/extensions/telegram-e2e.yaml
       version_pin: 0.1.0
 ```
+
+This is the normal way to add manifest skills and workflows such as the attachment-aware Telegram examples.
 
 ### `policies`
 
@@ -184,13 +297,15 @@ policies:
 
 These flags gate high-privilege surfaces and extension behavior.
 
-## Commands that show effective config
+## Commands That Show Effective Config
 
 ```bash
 mosaic setup validate
 mosaic setup doctor
 mosaic config show
+mosaic config sources
 mosaic model list
+mosaic adapter status
 ```
 
 For effective per-run policy values:
@@ -199,10 +314,28 @@ For effective per-run policy values:
 mosaic inspect .mosaic/runs/<run-id>.json --verbose
 ```
 
-## Related docs
+Look for:
+
+- `effective_profile`
+- provider multimodal capability summary
+- attachment route and selected profile
+- bot identity and policy scope
+
+## Example Files
+
+- [examples/full-stack/openai-telegram-single-bot.config.yaml](../examples/full-stack/openai-telegram-single-bot.config.yaml)
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml)
+- [examples/full-stack/openai-telegram-multimodal.config.yaml](../examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml)
+- [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json)
+- [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml)
+
+## Related Docs
 
 - [providers.md](./providers.md)
+- [channels.md](./channels.md)
+- [telegram-step-by-step.md](./telegram-step-by-step.md)
+- [telegram-real-e2e.md](./telegram-real-e2e.md)
 - [provider-runtime-policy-matrix.md](./provider-runtime-policy-matrix.md)
 - [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
-- [examples/providers/openai.yaml](../examples/providers/openai.yaml)
-- [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)

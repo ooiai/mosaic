@@ -2,7 +2,7 @@
 
 This guide defines the release gate for Mosaic as a self-hosted agent control plane.
 
-As of j5, release sign-off is not just `cargo test`. It is a combination of:
+As of k5, release sign-off is not just `cargo test`. It is a combination of:
 
 - workspace verification
 - matrix consistency checks
@@ -49,6 +49,8 @@ When Telegram is in release scope, this is also required:
 - execute [telegram-real-e2e.md](./telegram-real-e2e.md)
 - record the session id, trace path, and incident bundle path
 - record the `mosaic adapter telegram webhook info` output used for sign-off
+- record which bot or bots were used for sign-off
+- record whether the image upload, document upload, and `/mosaic help` catalog discovery lanes were part of the scoped release
 
 ### Compatibility addendum lanes
 
@@ -74,7 +76,11 @@ Confirm these are present and up to date:
 - `docs/providers.md`
 - `docs/release.md`
 - `examples/full-stack/openai-webchat.config.yaml`
+- `examples/full-stack/openai-telegram-single-bot.config.yaml`
 - `examples/full-stack/openai-telegram-e2e.config.yaml`
+- `examples/full-stack/openai-telegram-multi-bot.config.yaml`
+- `examples/full-stack/openai-telegram-multimodal.config.yaml`
+- `examples/full-stack/openai-telegram-bot-split.config.yaml`
 - `examples/extensions/telegram-e2e.yaml`
 - `scripts/test-real-integrations.sh`
 - `scripts/test-full-stack-example.sh`
@@ -120,7 +126,9 @@ At minimum, re-check:
 - `mosaic setup doctor`
 - `mosaic adapter status`
 - `mosaic adapter telegram webhook info`
+- `mosaic adapter telegram webhook info --bot <name>`
 - `mosaic adapter telegram test-send --chat-id <chat-id> "mosaic outbound smoke"`
+- `mosaic adapter telegram test-send --bot <name> --chat-id <chat-id> "mosaic outbound smoke"`
 - `mosaic session show <session-id>`
 - `mosaic inspect .mosaic/runs/<run-id>.json --verbose`
 - `mosaic gateway incident <run-id>`

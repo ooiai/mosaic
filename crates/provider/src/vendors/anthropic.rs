@@ -38,6 +38,8 @@ impl AnthropicProvider {
         anthropic_version: String,
         custom_headers: std::collections::BTreeMap<String, String>,
     ) -> Self {
+        let capabilities =
+            crate::capabilities::infer_model_capabilities(ProviderType::Anthropic.as_str(), &model);
         let custom_header_keys = custom_headers.keys().cloned().collect::<Vec<_>>();
         let mut request_headers = custom_headers.into_iter().collect::<Vec<_>>();
         request_headers.push(("anthropic-version".to_owned(), anthropic_version.clone()));
@@ -51,7 +53,11 @@ impl AnthropicProvider {
             version_header: Some(anthropic_version.clone()),
             custom_header_keys,
             supports_tool_call_shadow_messages: true,
-            supports_vision: model.starts_with("claude"),
+            supports_vision: capabilities.supports_vision,
+            supports_documents: capabilities.supports_documents,
+            supports_audio: capabilities.supports_audio,
+            supports_video: capabilities.supports_video,
+            preferred_attachment_mode: capabilities.preferred_attachment_mode,
         };
         Self {
             client: build_http_client(metadata.timeout_ms),

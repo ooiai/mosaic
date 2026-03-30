@@ -1,6 +1,11 @@
 # Channel Setup
 
-This guide covers the current ingress channels and the sample payloads you can use to exercise them.
+This guide describes the operator-facing channel baseline after k1-k4:
+
+- every channel normalizes into one Gateway ingress contract
+- every channel can expose the same `/mosaic` command story
+- attachments are normalized before runtime routing
+- Telegram can run as one bot or as a multi-bot workspace
 
 Examples used by this guide:
 
@@ -8,22 +13,93 @@ Examples used by this guide:
 - [examples/channels/webchat-message.json](../examples/channels/webchat-message.json)
 - [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
 - [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
-- [examples/full-stack/README.md](../examples/full-stack/README.md)
+- [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json)
+- [examples/full-stack/openai-telegram-single-bot.config.yaml](../examples/full-stack/openai-telegram-single-bot.config.yaml)
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml)
 
-## Current ingress paths
+## Unified Channel Story
+
+Regardless of the source channel, Mosaic tries to preserve the same five facts:
+
+1. `channel`: where the message came from
+2. `conversation_id`: the durable conversation or chat identity
+3. `thread_id`: the topic, forum thread, or sub-thread when the channel has one
+4. `text`: the normalized user-visible input
+5. `attachments`: normalized files, images, documents, audio, or video
+
+That is why the same runtime can answer:
+
+- plain assistant chat
+- `/mosaic help`
+- `/mosaic tool ...`
+- `/mosaic skill ...`
+- `/mosaic workflow ...`
+
+without each adapter re-implementing product semantics.
+
+## Current Ingress Paths
 
 Mosaic currently exposes these HTTP channel entrypoints:
 
 - `POST /ingress/webchat`
 - `POST /ingress/telegram`
+- `POST /ingress/telegram/<bot-route>` for multi-bot Telegram workspaces
 
-Both routes are served by:
+All routes are served by:
 
 ```bash
 mosaic gateway serve --http 127.0.0.1:8080
 ```
 
-## Webchat
+## Channel Command Catalog
+
+The channel-native operator story is built around `/mosaic`.
+
+Typical Telegram examples:
+
+```text
+/mosaic help
+/mosaic help tools
+/mosaic session status
+/mosaic tool read_file .mosaic/config.yaml
+/mosaic skill summarize_notes Shift handoff note goes here.
+/mosaic workflow summarize_operator_note Workflow input goes here.
+```
+
+The Gateway command catalog is dynamic. A command only appears when:
+
+- the current channel is allowed
+- the current bot allowlist permits it
+- the capability visibility and invocation mode allow it
+
+That same catalog model is the standard future channels should reuse.
+
+## Attachment Model
+
+Attachments enter the system as normalized channel attachments. Today the main Telegram cases are:
+
+- image uploads
+- document uploads
+
+The Gateway then applies three layers:
+
+1. attachment policy: size, mime type, cache, download timeout
+2. routing policy: `provider_native`, `specialized_processor`, or `disabled`
+3. capability exposure: tool, skill, or workflow must explicitly accept attachments
+
+Sample payloads:
+
+- [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json)
+
+Operator-visible outcomes:
+
+- provider-native multimodal routing into a vision-capable profile
+- specialized processor routing for documents
+- inspect output that records attachment route, selected profile, and failures
+
+## WebChat
 
 Sample payload:
 
@@ -50,13 +126,17 @@ For the release-blocking no-mock lane, use:
 MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat
 ```
 
-## Telegram
+## Telegram Single-Bot Baseline
 
-Sample payload:
+Beginner-friendly config:
+
+- [examples/full-stack/openai-telegram-single-bot.config.yaml](../examples/full-stack/openai-telegram-single-bot.config.yaml)
+
+Sample inbound payload:
 
 - [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
 
-Send it:
+Send it to the legacy single-bot path:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/ingress/telegram \
@@ -67,13 +147,65 @@ curl -X POST http://127.0.0.1:8080/ingress/telegram \
 
 The sample payload maps to session id `telegram--100123-99`.
 
-The repo automation covers the real Gateway Telegram ingress path, but a live Telegram bot token and public webhook endpoint remain a manual operator acceptance lane.
+## Telegram Attachments
 
-If this is your first time wiring Telegram, start with [telegram-step-by-step.md](./telegram-step-by-step.md).
+Photo upload:
 
-For the complete no-mock Telegram bot runbook, continue with [telegram-real-e2e.md](./telegram-real-e2e.md).
+```bash
+curl -X POST http://127.0.0.1:8080/ingress/telegram \
+  -H 'content-type: application/json' \
+  -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_SECRET_TOKEN" \
+  --data @examples/channels/telegram-photo-update.json
+```
 
-## Adapter health checks
+Document upload:
+
+```bash
+curl -X POST http://127.0.0.1:8080/ingress/telegram \
+  -H 'content-type: application/json' \
+  -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_SECRET_TOKEN" \
+  --data @examples/channels/telegram-document-update.json
+```
+
+Use these configs when you want the docs to match the attachment route:
+
+- [examples/full-stack/openai-telegram-multimodal.config.yaml](../examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml)
+
+## Telegram Multi-Bot
+
+Multi-bot baseline:
+
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml)
+
+Each bot gets its own:
+
+- token env
+- webhook secret env
+- webhook path
+- route key
+- default profile
+- tool / skill / workflow allowlist
+- attachment policy override
+
+Example bot-specific curl:
+
+```bash
+curl -X POST http://127.0.0.1:8080/ingress/telegram/media \
+  -H 'content-type: application/json' \
+  -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_MEDIA_SECRET_TOKEN" \
+  --data @examples/channels/telegram-photo-update.json
+```
+
+Operator CLI for multi-bot management:
+
+```bash
+mosaic adapter telegram webhook info --bot media
+mosaic adapter telegram webhook set --bot media --url https://public.example.com/ingress/telegram/media
+mosaic adapter telegram test-send --bot media --chat-id <chat-id> "hello from media bot"
+```
+
+## Adapter Health Checks
 
 Before exposing ingress publicly, check:
 
@@ -82,7 +214,18 @@ mosaic adapter status
 mosaic adapter doctor
 ```
 
-## Golden path example
+## Future Channel Standard
+
+Future adapters should follow the same contract:
+
+- normalize identities and thread context before runtime
+- expose the same `/mosaic` command catalog model
+- emit normalized attachments instead of channel-specific file structs
+- preserve delivery traces and failures in inspect and audit
+
+Do not bind a new channel directly to one hard-coded model or one hard-coded tool chain.
+
+## Golden Path References
 
 If you want the full provider + gateway + channel + inspect walkthrough, continue with:
 

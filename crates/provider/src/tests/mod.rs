@@ -279,6 +279,9 @@ fn summary_scheduling_prefers_lower_budget_profile() {
             estimated_context_chars: 2_000,
             requires_tools: false,
             requires_vision: false,
+            requires_documents: false,
+            requires_audio: false,
+            requires_video: false,
         })
         .expect("summary schedule should succeed");
 
@@ -298,6 +301,9 @@ fn interactive_scheduling_expands_to_larger_context_window() {
             estimated_context_chars: 40_000,
             requires_tools: false,
             requires_vision: false,
+            requires_documents: false,
+            requires_audio: false,
+            requires_video: false,
         })
         .expect("interactive schedule should succeed");
 
@@ -326,6 +332,9 @@ fn channel_policy_prefers_matching_channel_profile() {
             estimated_context_chars: 200,
             requires_tools: false,
             requires_vision: false,
+            requires_documents: false,
+            requires_audio: false,
+            requires_video: false,
         })
         .expect("channel schedule should succeed");
 
@@ -345,6 +354,33 @@ fn registry_profiles_expose_usage_classification() {
     assert_eq!(
         registry.get("mock").map(|profile| profile.usage),
         Some(ProviderUsage::DevOnlyMock)
+    );
+}
+
+#[test]
+fn inferred_capabilities_surface_document_support_and_attachment_mode() {
+    let registry = ProviderProfileRegistry::from_config(&MosaicConfig::default())
+        .expect("registry should build");
+    let gpt = registry
+        .get("gpt-5.4")
+        .expect("default gpt profile should exist");
+    let ollama = registry
+        .list()
+        .into_iter()
+        .find(|profile| profile.provider_type == "ollama")
+        .expect("default ollama profile should exist");
+
+    assert!(gpt.capabilities.supports_vision);
+    assert!(gpt.capabilities.supports_documents);
+    assert_eq!(
+        gpt.capabilities.preferred_attachment_mode,
+        mosaic_config::AttachmentRouteModeConfig::ProviderNative
+    );
+
+    assert!(!ollama.capabilities.supports_documents);
+    assert_eq!(
+        ollama.capabilities.preferred_attachment_mode,
+        mosaic_config::AttachmentRouteModeConfig::SpecializedProcessor
     );
 }
 

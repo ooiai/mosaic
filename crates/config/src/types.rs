@@ -325,12 +325,42 @@ impl AttachmentRouteModeConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentKindConfig {
+    Image,
+    Document,
+    Audio,
+    Video,
+    Other,
+}
+
+impl AttachmentKindConfig {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Image => "image",
+            Self::Document => "document",
+            Self::Audio => "audio",
+            Self::Video => "video",
+            Self::Other => "other",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AttachmentRoutingTargetConfig {
     #[serde(default)]
     pub mode: AttachmentRouteModeConfig,
     #[serde(default)]
     pub processor: Option<String>,
+    #[serde(default)]
+    pub multimodal_profile: Option<String>,
+    #[serde(default)]
+    pub specialized_processor_profile: Option<String>,
+    #[serde(default)]
+    pub allowed_attachment_kinds: Vec<AttachmentKindConfig>,
+    #[serde(default)]
+    pub max_attachment_size_mb: Option<u64>,
 }
 
 impl Default for AttachmentRoutingTargetConfig {
@@ -338,6 +368,10 @@ impl Default for AttachmentRoutingTargetConfig {
         Self {
             mode: AttachmentRouteModeConfig::ProviderNative,
             processor: None,
+            multimodal_profile: None,
+            specialized_processor_profile: None,
+            allowed_attachment_kinds: Vec::new(),
+            max_attachment_size_mb: None,
         }
     }
 }
@@ -348,6 +382,14 @@ pub struct ProviderAttachmentRoutingConfig {
     pub mode: Option<AttachmentRouteModeConfig>,
     #[serde(default)]
     pub processor: Option<String>,
+    #[serde(default)]
+    pub multimodal_profile: Option<String>,
+    #[serde(default)]
+    pub specialized_processor_profile: Option<String>,
+    #[serde(default)]
+    pub allowed_attachment_kinds: Vec<AttachmentKindConfig>,
+    #[serde(default)]
+    pub max_attachment_size_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -476,6 +518,8 @@ pub struct TelegramBotConfig {
     pub allowed_skills: Vec<String>,
     #[serde(default)]
     pub allowed_workflows: Vec<String>,
+    #[serde(default)]
+    pub attachments: Option<AttachmentRoutingTargetConfig>,
 }
 
 impl Default for TelegramBotConfig {
@@ -490,6 +534,7 @@ impl Default for TelegramBotConfig {
             allowed_tools: Vec::new(),
             allowed_skills: Vec::new(),
             allowed_workflows: Vec::new(),
+            attachments: None,
         }
     }
 }
@@ -756,6 +801,7 @@ pub enum DoctorCategory {
     Auth,
     Extensions,
     Providers,
+    Gateway,
 }
 
 impl DoctorCategory {
@@ -765,6 +811,7 @@ impl DoctorCategory {
             Self::Auth => "auth",
             Self::Extensions => "extensions",
             Self::Providers => "providers",
+            Self::Gateway => "gateway",
         }
     }
 }
@@ -865,6 +912,11 @@ pub struct RedactedProfileView {
     pub allow_custom_headers: bool,
     pub azure_api_version: Option<String>,
     pub anthropic_version: Option<String>,
+    pub supports_vision: bool,
+    pub supports_documents: bool,
+    pub supports_audio: bool,
+    pub supports_video: bool,
+    pub preferred_attachment_mode: AttachmentRouteModeConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -935,8 +987,21 @@ pub struct RedactedMosaicConfig {
     pub observability: RedactedObservabilityView,
     pub runtime: RedactedRuntimePolicyView,
     pub attachments: RedactedAttachmentView,
+    pub telegram_bots: Vec<RedactedTelegramBotView>,
     pub extension_manifest_count: usize,
     pub policies: RedactedPolicyView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedAttachmentRouteView {
+    pub scope: String,
+    pub mode: AttachmentRouteModeConfig,
+    pub processor: Option<String>,
+    pub multimodal_profile: Option<String>,
+    pub specialized_processor_profile: Option<String>,
+    #[serde(default)]
+    pub allowed_attachment_kinds: Vec<AttachmentKindConfig>,
+    pub max_attachment_size_mb: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -949,6 +1014,36 @@ pub struct RedactedAttachmentView {
     #[serde(default)]
     pub allowed_mime_types: Vec<String>,
     pub default_route_mode: AttachmentRouteModeConfig,
+    pub default_processor: Option<String>,
+    pub default_multimodal_profile: Option<String>,
+    pub default_specialized_processor_profile: Option<String>,
+    #[serde(default)]
+    pub default_allowed_attachment_kinds: Vec<AttachmentKindConfig>,
+    pub default_max_attachment_size_mb: Option<u64>,
+    #[serde(default)]
+    pub channel_overrides: Vec<RedactedAttachmentRouteView>,
+    #[serde(default)]
+    pub bot_overrides: Vec<RedactedAttachmentRouteView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedTelegramBotView {
+    pub name: String,
+    pub enabled: bool,
+    pub route_key: String,
+    pub webhook_path: String,
+    pub bot_token_env: String,
+    pub bot_token_present: bool,
+    pub webhook_secret_token_env: Option<String>,
+    pub webhook_secret_token_present: bool,
+    pub default_profile: Option<String>,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    #[serde(default)]
+    pub allowed_skills: Vec<String>,
+    #[serde(default)]
+    pub allowed_workflows: Vec<String>,
+    pub attachments: Option<RedactedAttachmentRouteView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]

@@ -142,6 +142,22 @@ Switch the active provider profile in workspace config:
 mosaic model use openai
 ```
 
+## Channel Operator Path
+
+For Telegram and other channel entrypoints, the operator path is:
+
+1. configure the workspace and bot registry
+2. run `mosaic adapter status`
+3. manage webhooks with `mosaic adapter telegram webhook ...`
+4. verify outbound with `mosaic adapter telegram test-send ...`
+5. use `/mosaic help` inside the live Telegram chat to discover the current command catalog
+
+Useful companion docs:
+
+- [channels.md](./channels.md)
+- [telegram-step-by-step.md](./telegram-step-by-step.md)
+- [telegram-real-e2e.md](./telegram-real-e2e.md)
+
 ## Inspect and Incident Response
 
 Show the default run summary for one saved trace:
@@ -248,10 +264,22 @@ Show the live Telegram webhook state:
 mosaic adapter telegram webhook info
 ```
 
+Show the live Telegram webhook state for a named bot:
+
+```bash
+mosaic adapter telegram webhook info --bot primary
+```
+
 Register the Telegram webhook from CLI:
 
 ```bash
 mosaic adapter telegram webhook set --url https://public.example.com/ingress/telegram --drop-pending-updates
+```
+
+Register the Telegram webhook for a named bot from CLI:
+
+```bash
+mosaic adapter telegram webhook set --bot primary --url https://public.example.com/ingress/telegram/primary --drop-pending-updates
 ```
 
 Delete the Telegram webhook from CLI:
@@ -260,11 +288,25 @@ Delete the Telegram webhook from CLI:
 mosaic adapter telegram webhook delete --drop-pending-updates
 ```
 
+Delete the Telegram webhook for a named bot from CLI:
+
+```bash
+mosaic adapter telegram webhook delete --bot primary --drop-pending-updates
+```
+
 Send one direct outbound Telegram smoke message:
 
 ```bash
 mosaic adapter telegram test-send --chat-id 123456789 "hello from mosaic"
 ```
+
+Send one direct outbound Telegram smoke message through a named bot:
+
+```bash
+mosaic adapter telegram test-send --bot primary --chat-id 123456789 "hello from mosaic"
+```
+
+When a workspace has multiple Telegram bots configured, `--bot` is required so the CLI can choose the correct token env, webhook path, and bot policy.
 
 Start a local node:
 

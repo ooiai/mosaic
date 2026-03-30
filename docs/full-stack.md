@@ -12,10 +12,16 @@ Examples used by this guide:
 - [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
 - [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml) for the explicit dev-only mock lane
 - [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
+- [examples/full-stack/openai-telegram-single-bot.config.yaml](../examples/full-stack/openai-telegram-single-bot.config.yaml)
 - [examples/full-stack/openai-telegram-e2e.config.yaml](../examples/full-stack/openai-telegram-e2e.config.yaml)
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml)
+- [examples/full-stack/openai-telegram-multimodal.config.yaml](../examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml)
 - [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml)
 - [examples/channels/webchat-openai-message.json](../examples/channels/webchat-openai-message.json)
 - [examples/channels/telegram-update.json](../examples/channels/telegram-update.json)
+- [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json)
 
 ## What this proves
 
@@ -151,6 +157,7 @@ For the complete Telegram-first runbook, use [telegram-real-e2e.md](./telegram-r
 
 That dedicated runbook adds:
 
+- `/mosaic` channel command catalog discovery
 - a fixed workspace config: [examples/full-stack/openai-telegram-e2e.config.yaml](../examples/full-stack/openai-telegram-e2e.config.yaml)
 - a fixed manifest: [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml)
 - plain conversation proof
@@ -158,6 +165,9 @@ That dedicated runbook adds:
 - explicit `read_file` proof
 - explicit `summarize_notes` skill proof
 - explicit `summarize_operator_note` workflow proof
+- image upload proof
+- document upload proof
+- multi-bot isolation proof when the release scope includes more than one Telegram bot
 - `session`, `inspect`, `audit`, `replay`, and `incident` verification
 
 ## Automated Verification

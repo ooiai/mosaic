@@ -27,6 +27,8 @@ impl OllamaProvider {
         retry_backoff_ms: u64,
         custom_headers: std::collections::BTreeMap<String, String>,
     ) -> Self {
+        let capabilities =
+            crate::capabilities::infer_model_capabilities(ProviderType::Ollama.as_str(), &model);
         let metadata = ProviderTransportMetadata {
             provider_type: ProviderType::Ollama.as_str().to_owned(),
             base_url: Some(base_url.clone()),
@@ -37,8 +39,11 @@ impl OllamaProvider {
             version_header: None,
             custom_header_keys: custom_headers.keys().cloned().collect(),
             supports_tool_call_shadow_messages: false,
-            supports_vision: model.to_ascii_lowercase().contains("vision")
-                || model.to_ascii_lowercase().contains("llava"),
+            supports_vision: capabilities.supports_vision,
+            supports_documents: capabilities.supports_documents,
+            supports_audio: capabilities.supports_audio,
+            supports_video: capabilities.supports_video,
+            preferred_attachment_mode: capabilities.preferred_attachment_mode,
         };
         Self {
             inner: OpenAiStyleProvider {

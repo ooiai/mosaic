@@ -197,6 +197,10 @@ impl LlmProvider for EmptyProvider {
             custom_header_keys: Vec::new(),
             supports_tool_call_shadow_messages: false,
             supports_vision: false,
+            supports_documents: false,
+            supports_audio: false,
+            supports_video: false,
+            preferred_attachment_mode: AttachmentRouteModeConfig::SpecializedProcessor,
         }
     }
 
@@ -238,6 +242,10 @@ impl LlmProvider for RecordingProvider {
             custom_header_keys: Vec::new(),
             supports_tool_call_shadow_messages: false,
             supports_vision: true,
+            supports_documents: true,
+            supports_audio: false,
+            supports_video: false,
+            preferred_attachment_mode: AttachmentRouteModeConfig::ProviderNative,
         }
     }
 
@@ -917,6 +925,150 @@ async fn attachments_can_route_to_specialized_processor_skills() {
             .as_ref()
             .and_then(|route| route.processor.as_deref()),
         Some("attachment_echo")
+    );
+}
+
+#[tokio::test]
+async fn bot_attachment_policy_overrides_workspace_defaults_and_records_scope() {
+    let provider = Arc::new(RecordingProvider::default());
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    config
+        .profiles
+        .insert("mock".to_owned(), mock_profile_config());
+    config.profiles.insert(
+        "gpt-5.4".to_owned(),
+        ProviderProfileConfig {
+            provider_type: "openai".to_owned(),
+            model: "gpt-5.4".to_owned(),
+            base_url: Some("https://api.openai.com/v1".to_owned()),
+            api_key_env: Some("OPENAI_API_KEY".to_owned()),
+            transport: Default::default(),
+            vendor: Default::default(),
+            attachments: Default::default(),
+        },
+    );
+    config.attachments.routing.default.mode = AttachmentRouteModeConfig::SpecializedProcessor;
+    config.attachments.routing.default.processor = Some("attachment_echo".to_owned());
+    config.telegram.bots.insert(
+        "primary".to_owned(),
+        mosaic_config::TelegramBotConfig {
+            bot_token_env: "MOSAIC_TELEGRAM_BOT_TOKEN".to_owned(),
+            attachments: Some(mosaic_config::AttachmentRoutingTargetConfig {
+                mode: AttachmentRouteModeConfig::ProviderNative,
+                processor: None,
+                multimodal_profile: Some("gpt-5.4".to_owned()),
+                specialized_processor_profile: None,
+                allowed_attachment_kinds: vec![mosaic_config::AttachmentKindConfig::Image],
+                max_attachment_size_mb: Some(5),
+            }),
+            ..mosaic_config::TelegramBotConfig::default()
+        },
+    );
+
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(profiles),
+        provider_override: Some(provider.clone()),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: config.runtime.clone(),
+        attachments: config.attachments.clone(),
+        telegram: config.telegram.clone(),
+        app_name: None,
+        tools: Arc::new(ToolRegistry::new()),
+        skills: Arc::new(SkillRegistry::new()),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: None,
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: "describe this image".to_owned(),
+            tool: None,
+            skill: None,
+            workflow: None,
+            session_id: None,
+            profile: None,
+            ingress: Some(IngressTrace {
+                kind: "telegram".to_owned(),
+                channel: Some("telegram".to_owned()),
+                adapter: Some("telegram_webhook".to_owned()),
+                bot_name: Some("primary".to_owned()),
+                bot_route: Some("primary".to_owned()),
+                bot_profile: Some("gpt-5.4".to_owned()),
+                bot_token_env: Some("MOSAIC_TELEGRAM_BOT_TOKEN".to_owned()),
+                bot_secret_env: None,
+                source: Some("telegram".to_owned()),
+                remote_addr: None,
+                display_name: Some("Operator".to_owned()),
+                actor_id: Some("17".to_owned()),
+                conversation_id: Some("telegram:chat:1".to_owned()),
+                thread_id: None,
+                thread_title: None,
+                reply_target: Some("telegram:chat:1:message:12".to_owned()),
+                message_id: Some("12".to_owned()),
+                received_at: Some(Utc::now()),
+                raw_event_id: Some("event-attach-bot-1".to_owned()),
+                session_hint: None,
+                profile_hint: None,
+                control_command: None,
+                original_text: None,
+                attachments: vec![mosaic_inspect::ChannelAttachment {
+                    id: "img-1".to_owned(),
+                    kind: AttachmentKind::Image,
+                    filename: Some("photo.jpg".to_owned()),
+                    mime_type: Some("image/jpeg".to_owned()),
+                    size_bytes: Some(1024),
+                    source_ref: Some("telegram:file_id:img-1".to_owned()),
+                    remote_url: Some("telegram:file_path:files/photo.jpg".to_owned()),
+                    local_cache_path: Some("/tmp/photo.jpg".to_owned()),
+                    caption: Some("operator photo".to_owned()),
+                }],
+                attachment_failures: vec![],
+                gateway_url: None,
+            }),
+        })
+        .await
+        .expect("bot policy multimodal run should succeed");
+
+    assert_eq!(
+        result
+            .trace
+            .attachment_route
+            .as_ref()
+            .and_then(|route| route.policy_scope.as_deref()),
+        Some("bot:primary")
+    );
+    assert_eq!(
+        result
+            .trace
+            .attachment_route
+            .as_ref()
+            .and_then(|route| route.selected_profile.as_deref()),
+        Some("gpt-5.4")
+    );
+    assert_eq!(
+        result
+            .trace
+            .attachment_route
+            .as_ref()
+            .and_then(|route| route.bot_identity.as_deref()),
+        Some("primary")
+    );
+    assert_eq!(
+        result
+            .trace
+            .effective_profile
+            .as_ref()
+            .map(|profile| profile.profile.as_str()),
+        Some("gpt-5.4")
     );
 }
 

@@ -34,7 +34,7 @@ For a local dev-only smoke lane without provider credentials, initialize the wor
 ## Extensions
 
 - [extensions/time-and-summary.yaml](./extensions/time-and-summary.yaml): extension manifest with one manifest skill and one workflow
-- [extensions/telegram-e2e.yaml](./extensions/telegram-e2e.yaml): Telegram-first manifest with `summarize_notes` and `summarize_operator_note`
+- [extensions/telegram-e2e.yaml](./extensions/telegram-e2e.yaml): Telegram-first manifest with attachment-aware `summarize_notes` and `summarize_operator_note`
 
 Validate it by referencing it from `.mosaic/config.yaml`:
 
@@ -58,6 +58,8 @@ mosaic extension list
 - [channels/webchat-message.json](./channels/webchat-message.json): sample payload for `/ingress/webchat` using the built-in real-provider-first profile name
 - [channels/webchat-openai-message.json](./channels/webchat-openai-message.json): release-grade payload for `/ingress/webchat`
 - [channels/telegram-update.json](./channels/telegram-update.json): sample payload for `/ingress/telegram`
+- [channels/telegram-photo-update.json](./channels/telegram-photo-update.json): Telegram image upload payload for multimodal and attachment-aware docs
+- [channels/telegram-document-update.json](./channels/telegram-document-update.json): Telegram document upload payload for attachment and specialized processor docs
 
 Use it with a local HTTP Gateway:
 
@@ -78,7 +80,11 @@ curl -X POST http://127.0.0.1:8080/ingress/webchat \
 - [full-stack/mock-telegram.config.yaml](./full-stack/mock-telegram.config.yaml): fast local Gateway + Telegram dev-only mock config
 - [full-stack/openai-webchat.config.yaml](./full-stack/openai-webchat.config.yaml): release-blocking OpenAI + WebChat config
 - [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): manual Telegram bot sign-off config
+- [full-stack/openai-telegram-single-bot.config.yaml](./full-stack/openai-telegram-single-bot.config.yaml): single-bot Telegram baseline with `/mosaic` catalog and attachment routing
 - [full-stack/openai-telegram-e2e.config.yaml](./full-stack/openai-telegram-e2e.config.yaml): Telegram-first real acceptance config with extension wiring
+- [full-stack/openai-telegram-multi-bot.config.yaml](./full-stack/openai-telegram-multi-bot.config.yaml): multi-bot Telegram routing example
+- [full-stack/openai-telegram-multimodal.config.yaml](./full-stack/openai-telegram-multimodal.config.yaml): Telegram image/document multimodal example
+- [full-stack/openai-telegram-bot-split.config.yaml](./full-stack/openai-telegram-bot-split.config.yaml): bot-specific capability and specialized processor split example
 
 Automated verification:
 

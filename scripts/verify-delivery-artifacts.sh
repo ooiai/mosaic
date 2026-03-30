@@ -17,6 +17,12 @@ for path in \
     examples/deployment/README.md \
     examples/deployment/production.config.yaml \
     examples/deployment/mosaic.service \
+    examples/channels/telegram-photo-update.json \
+    examples/channels/telegram-document-update.json \
+    examples/full-stack/openai-telegram-single-bot.config.yaml \
+    examples/full-stack/openai-telegram-multi-bot.config.yaml \
+    examples/full-stack/openai-telegram-multimodal.config.yaml \
+    examples/full-stack/openai-telegram-bot-split.config.yaml \
     scripts/release-smoke.sh \
     scripts/test-golden-examples.sh \
     scripts/test-real-integrations.sh \

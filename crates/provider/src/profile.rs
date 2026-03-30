@@ -131,6 +131,24 @@ impl ProviderProfileRegistry {
                     profile.name
                 );
             }
+            if request.requires_documents && !profile.capabilities.supports_documents {
+                bail!(
+                    "profile '{}' does not support document attachment runs",
+                    profile.name
+                );
+            }
+            if request.requires_audio && !profile.capabilities.supports_audio {
+                bail!(
+                    "profile '{}' does not support audio attachment runs",
+                    profile.name
+                );
+            }
+            if request.requires_video && !profile.capabilities.supports_video {
+                bail!(
+                    "profile '{}' does not support video attachment runs",
+                    profile.name
+                );
+            }
             return Ok(ScheduledProfile {
                 profile,
                 reason: "requested_profile".to_owned(),
@@ -142,6 +160,11 @@ impl ProviderProfileRegistry {
             .into_iter()
             .filter(|profile| !request.requires_tools || profile.capabilities.supports_tools)
             .filter(|profile| !request.requires_vision || profile.capabilities.supports_vision)
+            .filter(|profile| {
+                !request.requires_documents || profile.capabilities.supports_documents
+            })
+            .filter(|profile| !request.requires_audio || profile.capabilities.supports_audio)
+            .filter(|profile| !request.requires_video || profile.capabilities.supports_video)
             .cloned()
             .collect::<Vec<_>>();
 
@@ -293,6 +316,13 @@ pub(crate) fn provider_profile_from_config(
         attachment_routing: ProviderAttachmentRoutingConfig {
             mode: profile_config.attachments.mode,
             processor: profile_config.attachments.processor.clone(),
+            multimodal_profile: profile_config.attachments.multimodal_profile.clone(),
+            specialized_processor_profile: profile_config
+                .attachments
+                .specialized_processor_profile
+                .clone(),
+            allowed_attachment_kinds: profile_config.attachments.allowed_attachment_kinds.clone(),
+            max_attachment_size_mb: profile_config.attachments.max_attachment_size_mb,
         },
         capabilities: infer_model_capabilities(
             &profile_config.provider_type,

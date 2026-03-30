@@ -1,4 +1,5 @@
 use super::*;
+use mosaic_config::AttachmentRoutingTargetConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ResolvedTelegramBot {
@@ -12,6 +13,7 @@ pub(crate) struct ResolvedTelegramBot {
     pub(crate) allowed_tools: Vec<String>,
     pub(crate) allowed_skills: Vec<String>,
     pub(crate) allowed_workflows: Vec<String>,
+    pub(crate) attachments: Option<AttachmentRoutingTargetConfig>,
     pub(crate) legacy: bool,
 }
 
@@ -63,6 +65,7 @@ pub(crate) fn resolved_telegram_bots(
             allowed_tools: Vec::new(),
             allowed_skills: Vec::new(),
             allowed_workflows: Vec::new(),
+            attachments: None,
             legacy: true,
         }];
     }
@@ -82,6 +85,7 @@ pub(crate) fn resolved_telegram_bots(
             allowed_tools: bot.allowed_tools.clone(),
             allowed_skills: bot.allowed_skills.clone(),
             allowed_workflows: bot.allowed_workflows.clone(),
+            attachments: bot.attachments.clone(),
             legacy: false,
         })
         .collect::<Vec<_>>();
@@ -432,6 +436,29 @@ pub(crate) fn telegram_adapter_statuses(
                     "Telegram ingress is ready, but outbound replies still need the configured bot token env.",
                 ),
             };
+            let detail = format!(
+                "{} scope: tools={} skills={} workflows={} attachments={}",
+                detail,
+                if bot.allowed_tools.is_empty() {
+                    "<all>".to_owned()
+                } else {
+                    bot.allowed_tools.join(", ")
+                },
+                if bot.allowed_skills.is_empty() {
+                    "<all>".to_owned()
+                } else {
+                    bot.allowed_skills.join(", ")
+                },
+                if bot.allowed_workflows.is_empty() {
+                    "<all>".to_owned()
+                } else {
+                    bot.allowed_workflows.join(", ")
+                },
+                bot.attachments
+                    .as_ref()
+                    .map(attachment_policy_summary)
+                    .unwrap_or_else(|| "workspace default".to_owned()),
+            );
             AdapterStatusDto {
                 name: bot.adapter_name(),
                 channel: "telegram".to_owned(),
@@ -450,7 +477,7 @@ pub(crate) fn telegram_adapter_statuses(
                 ],
                 outbound_ready,
                 status: status.to_owned(),
-                detail: detail.to_owned(),
+                detail,
             }
         })
         .collect()
@@ -532,6 +559,19 @@ pub(crate) fn resolve_telegram_ingress_bot(
     )?;
 
     Ok(selected)
+}
+
+fn attachment_policy_summary(target: &AttachmentRoutingTargetConfig) -> String {
+    format!(
+        "mode={} processor={} multimodal_profile={} specialized_processor_profile={}",
+        target.mode.label(),
+        target.processor.as_deref().unwrap_or("<none>"),
+        target.multimodal_profile.as_deref().unwrap_or("<none>"),
+        target
+            .specialized_processor_profile
+            .as_deref()
+            .unwrap_or("<none>"),
+    )
 }
 
 pub(crate) fn ingress_route(

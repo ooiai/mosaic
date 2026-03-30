@@ -60,6 +60,37 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
             &format!("telegram bot '{}' webhook secret", name),
             false,
         ));
+        checks.push(DoctorCheck {
+            status: if bot.enabled {
+                DoctorStatus::Ok
+            } else {
+                DoctorStatus::Warning
+            },
+            category: DoctorCategory::Gateway,
+            message: format!(
+                "telegram bot '{}' route={} profile={} attachments={}",
+                name,
+                bot.route_key(name),
+                bot.default_profile
+                    .as_deref()
+                    .unwrap_or(&config.active_profile),
+                bot.attachments
+                    .as_ref()
+                    .map(|attachments| attachment_policy_summary(attachments))
+                    .unwrap_or_else(|| "workspace default".to_owned()),
+            ),
+        });
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Ok,
+            category: DoctorCategory::Gateway,
+            message: format!(
+                "telegram bot '{}' capability scope tools={} skills={} workflows={}",
+                name,
+                scope_summary(&bot.allowed_tools),
+                scope_summary(&bot.allowed_skills),
+                scope_summary(&bot.allowed_workflows),
+            ),
+        });
     }
 
     for manifest in &config.extensions.manifests {
@@ -173,7 +204,65 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
                 }
             }
         }
+
+        let capabilities = infer_profile_capabilities(&profile.provider_type, &profile.model);
+        checks.push(DoctorCheck {
+            status: DoctorStatus::Ok,
+            category: DoctorCategory::Providers,
+            message: format!(
+                "profile '{}' multimodal capabilities vision={} documents={} audio={} video={} preferred_attachment_mode={}",
+                name,
+                capabilities.supports_vision,
+                capabilities.supports_documents,
+                capabilities.supports_audio,
+                capabilities.supports_video,
+                capabilities.preferred_attachment_mode.label(),
+            ),
+        });
     }
+
+    checks.push(DoctorCheck {
+        status: if config.attachments.policy.enabled {
+            DoctorStatus::Ok
+        } else {
+            DoctorStatus::Warning
+        },
+        category: DoctorCategory::Gateway,
+        message: format!(
+            "workspace attachment routing default={} processor={} multimodal_profile={} specialized_processor_profile={} kinds={} max_attachment_size_mb={}",
+            config.attachments.routing.default.mode.label(),
+            option_string(config.attachments.routing.default.processor.clone()),
+            option_string(config.attachments.routing.default.multimodal_profile.clone()),
+            option_string(
+                config
+                    .attachments
+                    .routing
+                    .default
+                    .specialized_processor_profile
+                    .clone(),
+            ),
+            if config
+                .attachments
+                .routing
+                .default
+                .allowed_attachment_kinds
+                .is_empty()
+            {
+                "<all>".to_owned()
+            } else {
+                config
+                    .attachments
+                    .routing
+                    .default
+                    .allowed_attachment_kinds
+                    .iter()
+                    .map(|kind| kind.label())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+            option_u64(config.attachments.routing.default.max_attachment_size_mb),
+        ),
+    });
 
     DoctorReport { validation, checks }
 }
@@ -262,5 +351,99 @@ fn path_check(
                 format!("{label} does not exist at {}", path.display())
             },
         }
+    }
+}
+
+fn scope_summary(values: &[String]) -> String {
+    if values.is_empty() {
+        "<all>".to_owned()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn attachment_policy_summary(target: &AttachmentRoutingTargetConfig) -> String {
+    format!(
+        "mode={} processor={} multimodal_profile={} specialized_processor_profile={}",
+        target.mode.label(),
+        option_string(target.processor.clone()),
+        option_string(target.multimodal_profile.clone()),
+        option_string(target.specialized_processor_profile.clone()),
+    )
+}
+
+fn option_string(value: Option<String>) -> String {
+    value.unwrap_or_else(|| "<none>".to_owned())
+}
+
+fn option_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "<none>".to_owned())
+}
+
+struct InferredAttachmentCapabilities {
+    supports_vision: bool,
+    supports_documents: bool,
+    supports_audio: bool,
+    supports_video: bool,
+    preferred_attachment_mode: AttachmentRouteModeConfig,
+}
+
+fn infer_profile_capabilities(provider_type: &str, model: &str) -> InferredAttachmentCapabilities {
+    let provider_type = parse_provider_type(provider_type);
+    let normalized = model.to_ascii_lowercase();
+    let supports_vision = if model == "mock" {
+        true
+    } else if normalized.contains("vision") || normalized.contains("llava") {
+        true
+    } else {
+        match provider_type {
+            Some(ProviderType::OpenAi | ProviderType::Azure | ProviderType::OpenAiCompatible) => {
+                normalized.starts_with("gpt-")
+            }
+            Some(ProviderType::Anthropic) => normalized.starts_with("claude"),
+            Some(ProviderType::Ollama) => {
+                normalized.contains("vision") || normalized.contains("llava")
+            }
+            Some(ProviderType::Mock) => true,
+            None => false,
+        }
+    };
+    let supports_documents = if model == "mock" {
+        true
+    } else if normalized.contains("document") || normalized.contains("pdf") {
+        true
+    } else {
+        match provider_type {
+            Some(ProviderType::OpenAi | ProviderType::Azure | ProviderType::OpenAiCompatible) => {
+                normalized.starts_with("gpt-")
+            }
+            Some(ProviderType::Anthropic) => normalized.starts_with("claude"),
+            Some(ProviderType::Mock) => true,
+            Some(ProviderType::Ollama) | None => false,
+        }
+    };
+
+    InferredAttachmentCapabilities {
+        supports_vision,
+        supports_documents,
+        supports_audio: if model == "mock" {
+            false
+        } else {
+            normalized.contains("audio")
+                && !matches!(provider_type, Some(ProviderType::Ollama) | None)
+        },
+        supports_video: if model == "mock" {
+            false
+        } else {
+            normalized.contains("video")
+                && !matches!(provider_type, Some(ProviderType::Ollama) | None)
+        },
+        preferred_attachment_mode: if supports_vision || supports_documents {
+            AttachmentRouteModeConfig::ProviderNative
+        } else {
+            AttachmentRouteModeConfig::SpecializedProcessor
+        },
     }
 }

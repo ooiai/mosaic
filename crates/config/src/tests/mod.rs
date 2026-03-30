@@ -41,7 +41,11 @@ fn provider_and_deployment_example_patches_validate_against_defaults() {
         "examples/providers/ollama.yaml",
         "examples/providers/anthropic.yaml",
         "examples/deployment/production.config.yaml",
+        "examples/full-stack/openai-telegram-single-bot.config.yaml",
         "examples/full-stack/openai-telegram-e2e.config.yaml",
+        "examples/full-stack/openai-telegram-multi-bot.config.yaml",
+        "examples/full-stack/openai-telegram-multimodal.config.yaml",
+        "examples/full-stack/openai-telegram-bot-split.config.yaml",
     ] {
         let patch = load_config_patch(&root.join(rel)).expect("example patch should load");
         let mut config = MosaicConfig::default();
@@ -79,6 +83,21 @@ fn workflow_and_gateway_examples_parse_from_disk() {
     let parsed: serde_json::Value =
         serde_json::from_str(&payload).expect("gateway payload should parse as JSON");
     assert_eq!(parsed["session_id"], "docs-webchat");
+
+    for rel in [
+        "examples/channels/telegram-update.json",
+        "examples/channels/telegram-photo-update.json",
+        "examples/channels/telegram-document-update.json",
+    ] {
+        let payload = fs::read_to_string(root.join(rel))
+            .unwrap_or_else(|_| panic!("channel payload should load: {rel}"));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("channel payload should parse as JSON");
+        assert!(
+            parsed["message"].is_object(),
+            "{rel} should include a message object"
+        );
+    }
 }
 
 #[test]
@@ -295,6 +314,53 @@ fn validate_reports_missing_azure_base_url() {
             .iter()
             .any(|issue| issue.field == "profiles.azure-broken.base_url")
     );
+}
+
+#[test]
+fn validate_reports_invalid_attachment_policy_references() {
+    let mut config = MosaicConfig::default();
+    config.attachments.routing.default.mode = AttachmentRouteModeConfig::SpecializedProcessor;
+    config.attachments.routing.default.processor = None;
+    config.attachments.routing.default.multimodal_profile = Some("missing".to_owned());
+    config.telegram.bots.insert(
+        "primary".to_owned(),
+        TelegramBotConfig {
+            bot_token_env: "MOSAIC_TELEGRAM_BOT_TOKEN".to_owned(),
+            attachments: Some(AttachmentRoutingTargetConfig {
+                mode: AttachmentRouteModeConfig::ProviderNative,
+                processor: None,
+                multimodal_profile: Some("missing-bot-profile".to_owned()),
+                specialized_processor_profile: None,
+                allowed_attachment_kinds: vec![AttachmentKindConfig::Image],
+                max_attachment_size_mb: Some(0),
+            }),
+            ..TelegramBotConfig::default()
+        },
+    );
+
+    let report = validate_mosaic_config(&config);
+
+    assert!(report.has_errors());
+    assert!(report.issues.iter().any(|issue| {
+        issue.field == "attachments.routing.default.processor"
+            && issue.message.contains("requires processor")
+    }));
+    assert!(report.issues.iter().any(|issue| {
+        issue.field == "attachments.routing.default.multimodal_profile"
+            && issue
+                .message
+                .contains("does not match any configured profile")
+    }));
+    assert!(report.issues.iter().any(|issue| {
+        issue.field == "telegram.bots.primary.attachments.multimodal_profile"
+            && issue
+                .message
+                .contains("does not match any configured profile")
+    }));
+    assert!(report.issues.iter().any(|issue| {
+        issue.field == "telegram.bots.primary.attachments.max_attachment_size_mb"
+            && issue.message.contains("greater than zero")
+    }));
 }
 
 #[test]

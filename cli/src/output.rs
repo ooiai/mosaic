@@ -521,6 +521,13 @@ pub fn render_inspect_report(
                 ),
                 ("supports_tools", profile.supports_tools.to_string()),
                 ("supports_vision", profile.supports_vision.to_string()),
+                ("supports_documents", profile.supports_documents.to_string()),
+                ("supports_audio", profile.supports_audio.to_string()),
+                ("supports_video", profile.supports_video.to_string()),
+                (
+                    "preferred_attachment_mode",
+                    profile.preferred_attachment_mode.label().to_owned(),
+                ),
                 (
                     "supports_tool_call_shadow_messages",
                     profile.supports_tool_call_shadow_messages.to_string(),
@@ -572,6 +579,12 @@ pub fn render_inspect_report(
             vec![
                 ("mode", route.mode.label().to_owned()),
                 ("selection_reason", route.selection_reason.clone()),
+                ("bot_identity", option_string(route.bot_identity.clone())),
+                ("policy_scope", option_string(route.policy_scope.clone())),
+                (
+                    "selected_profile",
+                    option_string(route.selected_profile.clone()),
+                ),
                 (
                     "provider_profile",
                     option_string(route.provider_profile.clone()),
@@ -581,6 +594,18 @@ pub fn render_inspect_report(
                     option_string(route.provider_model.clone()),
                 ),
                 ("processor", option_string(route.processor.clone())),
+                (
+                    "allowed_attachment_kinds",
+                    if route.allowed_attachment_kinds.is_empty() {
+                        "<all>".to_owned()
+                    } else {
+                        route.allowed_attachment_kinds.join(", ")
+                    },
+                ),
+                (
+                    "max_attachment_size_mb",
+                    option_u64(route.max_attachment_size_mb),
+                ),
                 ("attachment_count", route.attachment_count.to_string()),
                 (
                     "attachment_kinds",
@@ -1221,6 +1246,68 @@ fn render_redacted_config(
             ),
         ],
     ));
+    blocks.push(render_key_value_block(
+        "attachment policy",
+        vec![
+            ("enabled", redacted.attachments.enabled.to_string()),
+            ("cache_dir", redacted.attachments.cache_dir.clone()),
+            (
+                "max_size_bytes",
+                redacted.attachments.max_size_bytes.to_string(),
+            ),
+            (
+                "download_timeout_ms",
+                redacted.attachments.download_timeout_ms.to_string(),
+            ),
+            (
+                "cleanup_after_hours",
+                redacted.attachments.cleanup_after_hours.to_string(),
+            ),
+            (
+                "default_route_mode",
+                redacted.attachments.default_route_mode.label().to_owned(),
+            ),
+            (
+                "default_processor",
+                option_string(redacted.attachments.default_processor.clone()),
+            ),
+            (
+                "default_multimodal_profile",
+                option_string(redacted.attachments.default_multimodal_profile.clone()),
+            ),
+            (
+                "default_specialized_processor_profile",
+                option_string(
+                    redacted
+                        .attachments
+                        .default_specialized_processor_profile
+                        .clone(),
+                ),
+            ),
+            (
+                "default_allowed_attachment_kinds",
+                if redacted
+                    .attachments
+                    .default_allowed_attachment_kinds
+                    .is_empty()
+                {
+                    "<all>".to_owned()
+                } else {
+                    redacted
+                        .attachments
+                        .default_allowed_attachment_kinds
+                        .iter()
+                        .map(|kind| kind.label())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+            ),
+            (
+                "default_max_attachment_size_mb",
+                option_u64(redacted.attachments.default_max_attachment_size_mb),
+            ),
+        ],
+    ));
     blocks.push(render_list_block(
         "profiles",
         redacted
@@ -1228,7 +1315,7 @@ fn render_redacted_config(
             .iter()
             .map(|profile| {
                 format!(
-                    "{} | usage={} | type={} | model={} | base_url={} | api_key_env={} | api_key_present={} | timeout_ms={} | max_retries={} | retry_backoff_ms={} | allow_custom_headers={} | custom_headers={} | azure_api_version={} | anthropic_version={}",
+                    "{} | usage={} | type={} | model={} | base_url={} | api_key_env={} | api_key_present={} | timeout_ms={} | max_retries={} | retry_backoff_ms={} | allow_custom_headers={} | custom_headers={} | azure_api_version={} | anthropic_version={} | vision={} | documents={} | audio={} | video={} | preferred_attachment_mode={}",
                     profile.name,
                     profile.usage.label(),
                     profile.provider_type,
@@ -1247,12 +1334,103 @@ fn render_redacted_config(
                     },
                     option_string(profile.azure_api_version.clone()),
                     option_string(profile.anthropic_version.clone()),
+                    profile.supports_vision,
+                    profile.supports_documents,
+                    profile.supports_audio,
+                    profile.supports_video,
+                    profile.preferred_attachment_mode.label(),
                 )
             })
             .collect::<Vec<_>>(),
     ));
+    if !redacted.attachments.channel_overrides.is_empty() {
+        blocks.push(render_list_block(
+            "attachment channel overrides",
+            redacted
+                .attachments
+                .channel_overrides
+                .iter()
+                .map(render_attachment_route_override)
+                .collect(),
+        ));
+    }
+    if !redacted.attachments.bot_overrides.is_empty() {
+        blocks.push(render_list_block(
+            "attachment bot overrides",
+            redacted
+                .attachments
+                .bot_overrides
+                .iter()
+                .map(render_attachment_route_override)
+                .collect(),
+        ));
+    }
+    if !redacted.telegram_bots.is_empty() {
+        blocks.push(render_list_block(
+            "telegram bots",
+            redacted
+                .telegram_bots
+                .iter()
+                .map(|bot| {
+                    format!(
+                        "{} | enabled={} | route={} | webhook_path={} | default_profile={} | token_env={} | token_present={} | secret_env={} | secret_present={} | tools={} | skills={} | workflows={} | attachment_policy={}",
+                        bot.name,
+                        bot.enabled,
+                        bot.route_key,
+                        bot.webhook_path,
+                        option_string(bot.default_profile.clone()),
+                        bot.bot_token_env,
+                        bot.bot_token_present,
+                        option_string(bot.webhook_secret_token_env.clone()),
+                        bot.webhook_secret_token_present,
+                        if bot.allowed_tools.is_empty() {
+                            "<all>".to_owned()
+                        } else {
+                            bot.allowed_tools.join(", ")
+                        },
+                        if bot.allowed_skills.is_empty() {
+                            "<all>".to_owned()
+                        } else {
+                            bot.allowed_skills.join(", ")
+                        },
+                        if bot.allowed_workflows.is_empty() {
+                            "<all>".to_owned()
+                        } else {
+                            bot.allowed_workflows.join(", ")
+                        },
+                        bot.attachments
+                            .as_ref()
+                            .map(render_attachment_route_override)
+                            .unwrap_or_else(|| "workspace default".to_owned()),
+                    )
+                })
+                .collect(),
+        ));
+    }
 
     join_blocks(blocks)
+}
+
+fn render_attachment_route_override(route: &mosaic_config::RedactedAttachmentRouteView) -> String {
+    format!(
+        "{} | mode={} | processor={} | multimodal_profile={} | specialized_processor_profile={} | kinds={} | max_attachment_size_mb={}",
+        route.scope,
+        route.mode.label(),
+        option_string(route.processor.clone()),
+        option_string(route.multimodal_profile.clone()),
+        option_string(route.specialized_processor_profile.clone()),
+        if route.allowed_attachment_kinds.is_empty() {
+            "<all>".to_owned()
+        } else {
+            route
+                .allowed_attachment_kinds
+                .iter()
+                .map(|kind| kind.label())
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        option_u64(route.max_attachment_size_mb),
+    )
 }
 
 fn render_key_value_block(title: &str, rows: Vec<(&str, String)>) -> String {
@@ -1556,6 +1734,7 @@ mod tests {
         assert!(rendered.starts_with("config summary:"));
         assert!(rendered.contains("onboarding:"));
         assert!(rendered.contains("deployment:"));
+        assert!(rendered.contains("attachment policy:"));
         assert!(rendered.contains("profiles:"));
     }
 
@@ -1580,6 +1759,12 @@ mod tests {
                     category: DoctorCategory::Storage,
                     message: "session store ready".to_owned(),
                 },
+                DoctorCheck {
+                    status: DoctorStatus::Ok,
+                    category: DoctorCategory::Gateway,
+                    message: "telegram bot 'primary' route=primary profile=mock attachments=workspace default"
+                        .to_owned(),
+                },
             ],
         };
 
@@ -1603,6 +1788,12 @@ mod tests {
                     allow_custom_headers: false,
                     azure_api_version: None,
                     anthropic_version: None,
+                    supports_vision: true,
+                    supports_documents: true,
+                    supports_audio: false,
+                    supports_video: false,
+                    preferred_attachment_mode:
+                        mosaic_config::AttachmentRouteModeConfig::ProviderNative,
                 }],
                 provider_defaults: mosaic_config::RedactedProviderDefaultsView {
                     timeout_ms: None,
@@ -1651,7 +1842,32 @@ mod tests {
                         "application/pdf".to_owned(),
                     ],
                     default_route_mode: mosaic_config::AttachmentRouteModeConfig::ProviderNative,
+                    default_processor: None,
+                    default_multimodal_profile: Some("mock".to_owned()),
+                    default_specialized_processor_profile: None,
+                    default_allowed_attachment_kinds: vec![
+                        mosaic_config::AttachmentKindConfig::Image,
+                        mosaic_config::AttachmentKindConfig::Document,
+                    ],
+                    default_max_attachment_size_mb: Some(10),
+                    channel_overrides: Vec::new(),
+                    bot_overrides: Vec::new(),
                 },
+                telegram_bots: vec![mosaic_config::RedactedTelegramBotView {
+                    name: "primary".to_owned(),
+                    enabled: true,
+                    route_key: "primary".to_owned(),
+                    webhook_path: "/ingress/telegram/primary".to_owned(),
+                    bot_token_env: "MOSAIC_TELEGRAM_BOT_TOKEN".to_owned(),
+                    bot_token_present: false,
+                    webhook_secret_token_env: Some("MOSAIC_TELEGRAM_SECRET_TOKEN".to_owned()),
+                    webhook_secret_token_present: false,
+                    default_profile: Some("mock".to_owned()),
+                    allowed_tools: Vec::new(),
+                    allowed_skills: vec!["summarize".to_owned()],
+                    allowed_workflows: Vec::new(),
+                    attachments: None,
+                }],
                 extension_manifest_count: 0,
                 policies: mosaic_config::RedactedPolicyView {
                     allow_exec: false,
@@ -1667,6 +1883,7 @@ mod tests {
         assert!(rendered.contains("doctor categories:"));
         assert!(rendered.contains("auth | ok=0 warning=1 error=0"));
         assert!(rendered.contains("[warning] auth: operator token missing"));
+        assert!(rendered.contains("[ok] gateway: telegram bot 'primary' route=primary"));
     }
 
     #[test]

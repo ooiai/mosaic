@@ -1,6 +1,6 @@
 # Real vs Mock Acceptance Matrix
 
-This document is the release-facing summary of the j5 testing model.
+This document is the release-facing summary of the k5 testing model.
 
 Mosaic keeps mock paths for speed, but mock paths are never product evidence by themselves.
 
@@ -44,6 +44,9 @@ Use this lane when:
 
 - Telegram is a release target
 - outbound bot delivery must be proven against the real Telegram Bot API
+- `/mosaic` command catalog discovery must be proven in a live channel
+- image and document uploads must be proven in the live Telegram path when attachments are in scope
+- multi-bot webhook routing or per-bot webhook management CLI is in scope
 - the operator needs final evidence that `session`, `inspect`, `audit`, `replay`, and `incident` all match the live Telegram conversation
 
 ### Compatibility addendum lanes

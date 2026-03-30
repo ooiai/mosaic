@@ -1,6 +1,6 @@
 use std::{env, time::Duration};
 
-use mosaic_config::{ProviderType, ProviderUsage, parse_provider_type};
+use mosaic_config::{AttachmentRouteModeConfig, ProviderType, ProviderUsage, parse_provider_type};
 use mosaic_provider::{
     Message, ModelCapabilities, ProviderErrorKind, ProviderProfile, Role, ToolDefinition,
     build_provider_from_profile,
@@ -38,6 +38,10 @@ fn provider_profile(
             supports_tools: true,
             supports_sessions: true,
             supports_vision: true,
+            supports_documents: true,
+            supports_audio: false,
+            supports_video: false,
+            preferred_attachment_mode: AttachmentRouteModeConfig::ProviderNative,
             family: provider_type.to_owned(),
             context_window_chars: 128_000,
             budget_tier: "large".to_owned(),

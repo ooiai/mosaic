@@ -25,9 +25,19 @@ for path in \
     docs/testing.md \
     docs/real-vs-mock-acceptance.md \
     docs/providers.md \
+    docs/cli.md \
+    docs/channels.md \
+    docs/configuration.md \
+    docs/telegram-step-by-step.md \
     docs/release.md \
     docs/telegram-real-e2e.md \
     examples/TESTING.md \
+    examples/channels/telegram-photo-update.json \
+    examples/channels/telegram-document-update.json \
+    examples/full-stack/openai-telegram-single-bot.config.yaml \
+    examples/full-stack/openai-telegram-multi-bot.config.yaml \
+    examples/full-stack/openai-telegram-multimodal.config.yaml \
+    examples/full-stack/openai-telegram-bot-split.config.yaml \
     scripts/test-real-integrations.sh \
     scripts/test-full-stack-example.sh \
     Makefile
@@ -64,6 +74,17 @@ do
 done
 
 for pattern in \
+    'channel command catalog discovery' \
+    'Telegram image upload' \
+    'Telegram document upload' \
+    'specialized processor routing' \
+    'dual-bot Gateway routing' \
+    'per-bot webhook management CLI'
+do
+    require_contains "docs/testing.md" "$pattern"
+done
+
+for pattern in \
     'Telegram-first release-blocking acceptance lane' \
     'OpenAI provider-real lane' \
     'operator-manual release-blocking acceptance' \
@@ -83,12 +104,46 @@ do
 done
 
 for pattern in \
+    '/mosaic help' \
+    'telegram-photo-update.json' \
+    'telegram-document-update.json' \
+    'openai-telegram-multi-bot.config.yaml' \
+    'bot A / bot B isolation' \
     'mosaic adapter telegram webhook set' \
     'mosaic adapter telegram webhook info' \
     'mosaic adapter telegram test-send' \
     '/mosaic workflow summarize_operator_note'
 do
     require_contains "docs/telegram-real-e2e.md" "$pattern"
+done
+
+for pattern in \
+    'mosaic adapter telegram webhook info --bot primary' \
+    'mosaic adapter telegram webhook set --bot primary' \
+    'mosaic adapter telegram test-send --bot primary' \
+    '/mosaic help'
+do
+    require_contains "docs/telegram-step-by-step.md" "$pattern"
+done
+
+for pattern in \
+    'openai-telegram-single-bot.config.yaml' \
+    'openai-telegram-multi-bot.config.yaml' \
+    'openai-telegram-multimodal.config.yaml' \
+    'openai-telegram-bot-split.config.yaml' \
+    'telegram-photo-update.json' \
+    'telegram-document-update.json'
+do
+    require_contains "docs/configuration.md" "$pattern"
+    require_contains "docs/channels.md" "$pattern"
+done
+
+for pattern in \
+    'mosaic adapter telegram webhook info --bot primary' \
+    'mosaic adapter telegram webhook set --bot primary' \
+    'mosaic adapter telegram test-send --bot primary'
+do
+    require_contains "docs/cli.md" "$pattern"
 done
 
 for pattern in \
@@ -103,7 +158,9 @@ done
 for pattern in \
     'make test-matrix' \
     'docs/telegram-real-e2e.md' \
-    'openai-webchat'
+    'openai-webchat' \
+    'openai-telegram-multi-bot.config.yaml' \
+    'telegram-photo-update.json'
 do
     require_contains "examples/TESTING.md" "$pattern"
 done

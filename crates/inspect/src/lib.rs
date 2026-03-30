@@ -275,11 +275,21 @@ pub struct AttachmentRouteTrace {
     pub mode: AttachmentRouteMode,
     pub selection_reason: String,
     #[serde(default)]
+    pub bot_identity: Option<String>,
+    #[serde(default)]
+    pub policy_scope: Option<String>,
+    #[serde(default)]
+    pub selected_profile: Option<String>,
+    #[serde(default)]
     pub provider_profile: Option<String>,
     #[serde(default)]
     pub provider_model: Option<String>,
     #[serde(default)]
     pub processor: Option<String>,
+    #[serde(default)]
+    pub allowed_attachment_kinds: Vec<String>,
+    #[serde(default)]
+    pub max_attachment_size_mb: Option<u64>,
     #[serde(default)]
     pub attachment_count: usize,
     #[serde(default)]
@@ -373,6 +383,14 @@ pub struct EffectiveProfileTrace {
     pub supports_tool_call_shadow_messages: bool,
     #[serde(default)]
     pub supports_vision: bool,
+    #[serde(default)]
+    pub supports_documents: bool,
+    #[serde(default)]
+    pub supports_audio: bool,
+    #[serde(default)]
+    pub supports_video: bool,
+    #[serde(default)]
+    pub preferred_attachment_mode: AttachmentRouteMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1094,6 +1112,10 @@ mod tests {
                 supports_tools: true,
                 supports_tool_call_shadow_messages: false,
                 supports_vision: true,
+                supports_documents: true,
+                supports_audio: false,
+                supports_video: false,
+                preferred_attachment_mode: AttachmentRouteMode::ProviderNative,
             }),
             runtime_policy: Some(RuntimePolicyTrace {
                 max_provider_round_trips: 8,

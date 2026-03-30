@@ -1,6 +1,6 @@
 # Telegram Real E2E Runbook
 
-This is the j5 Telegram-first release-blocking acceptance lane when Telegram is in release scope.
+This is the k5 Telegram-first release-blocking acceptance lane when Telegram is in release scope.
 
 If you have not created a Telegram bot before, start with [telegram-step-by-step.md](./telegram-step-by-step.md) first and then come back here for the stricter acceptance checklist.
 
@@ -8,7 +8,10 @@ Use it when Telegram is a real release target and you need one repeatable path t
 
 - a real Telegram user message reaches Mosaic
 - a real OpenAI-backed reply returns to the same Telegram chat
+- `/mosaic` catalog discovery works in the live channel
 - builtin tools, manifest skills, and workflows all work in a real Telegram session
+- image and document uploads route through the expected attachment policy
+- bot A and bot B remain isolated when the multi-bot lane is in scope
 - `session`, `inspect`, `audit`, `replay`, and `incident` all describe the same run truth
 
 This lane is intentionally no-mock. It does not use fake ingress or a mock provider.
@@ -29,6 +32,11 @@ It is the primary product proof for these crates and surfaces:
 Related files:
 
 - [examples/full-stack/openai-telegram-e2e.config.yaml](../examples/full-stack/openai-telegram-e2e.config.yaml)
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml)
+- [examples/full-stack/openai-telegram-multimodal.config.yaml](../examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml)
+- [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json)
 - [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml)
 - [docs/full-stack.md](./full-stack.md)
 - [docs/real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)
@@ -69,102 +77,39 @@ If your acceptance workspace is outside the repo, copy those two files from the 
 
 ## Config File
 
-`examples/full-stack/openai-telegram-e2e.config.yaml` is the workspace config for this lane:
+`examples/full-stack/openai-telegram-e2e.config.yaml` is the workspace config for this lane. The related operator examples are:
 
-```yaml
-schema_version: 1
-active_profile: openai
-provider_defaults:
-  timeout_ms: 45000
-  max_retries: 2
-  retry_backoff_ms: 250
-profiles:
-  openai:
-    type: openai
-    model: gpt-5.4-mini
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
-    transport:
-      timeout_ms: 60000
-      max_retries: 3
-      retry_backoff_ms: 300
-runtime:
-  max_provider_round_trips: 8
-  max_workflow_provider_round_trips: 6
-  continue_after_tool_error: false
-extensions:
-  manifests:
-    - path: .mosaic/extensions/telegram-e2e.yaml
-      version_pin: 0.1.0
-      enabled: true
-deployment:
-  profile: local
-  workspace_name: mosaic-telegram-real-e2e
-auth:
-  telegram_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
-session_store:
-  root_dir: .mosaic/sessions
-inspect:
-  runs_dir: .mosaic/runs
-audit:
-  root_dir: .mosaic/audit
-  retention_days: 30
-  event_replay_window: 512
-  redact_inputs: true
-observability:
-  enable_metrics: true
-  enable_readiness: true
-  slow_consumer_lag_threshold: 64
-policies:
-  allow_exec: false
-  allow_webhook: true
-  allow_cron: false
-  allow_mcp: false
-  hot_reload_enabled: false
-```
+- `examples/full-stack/openai-telegram-single-bot.config.yaml`
+- `examples/full-stack/openai-telegram-multi-bot.config.yaml`
+- `examples/full-stack/openai-telegram-multimodal.config.yaml`
+- `examples/full-stack/openai-telegram-bot-split.config.yaml`
 
-## Extension Manifest
-
-`examples/extensions/telegram-e2e.yaml` adds the Telegram acceptance skill and workflow:
+The acceptance manifest is:
 
 ```yaml
 name: telegram-e2e
 version: 0.1.0
-description: Telegram-first real acceptance manifest with one explicit skill and one explicit workflow.
+description: Telegram-first real acceptance manifest with one explicit skill and one explicit workflow, both attachment-aware.
 schema_version: 1
 tools: []
 skills:
   - type: manifest
     name: summarize_notes
-    description: Summarize a short operator note inside a real Telegram session.
+    description: Summarize a short operator note or document caption inside a real Telegram session.
     visibility: visible
     invocation_mode: explicit_only
     allowed_channels:
       - telegram
-    tools: []
-    system_prompt: null
-    steps:
-      - kind: echo
-        name: draft
-        input: "{{input}}"
-      - kind: summarize
-        name: summarize
-        input: "{{current}}"
+    accepts_attachments: true
 workflows:
   - name: summarize_operator_note
-    description: Run summarize_notes against an operator note from Telegram.
     visibility:
       source: telegram-e2e
       visibility: visible
       invocation_mode: explicit_only
       allowed_channels:
         - telegram
-    steps:
-      - name: summarize
-        kind: skill
-        skill: summarize_notes
-        input: "{{input}}"
-mcp: null
+      accepts_attachments: true
 ```
 
 ## Environment Variables
@@ -199,6 +144,7 @@ Expected state:
 - `telegram` adapter reports ingress and outbound readiness
 - the extension list includes `telegram-e2e`
 - the loaded capabilities include `summarize_notes` and `summarize_operator_note`
+- `mosaic model list` shows the profile capability summary, including attachment mode where relevant
 
 ## Start Gateway
 
@@ -213,6 +159,11 @@ Expose that listener through your HTTPS reverse proxy or tunnel so the final pub
 ```text
 ${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram
 ```
+
+If you are validating a multi-bot workspace, the final public URLs become:
+
+- `${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/ops`
+- `${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/media`
 
 ## Register the Telegram Webhook
 
@@ -287,6 +238,25 @@ In the saved trace you should see:
 - `route decision:` with `route_mode: assistant`
 - a real `effective_profile` using `openai`
 - one outbound delivery back to Telegram
+
+## Channel Command Catalog Proof
+
+This lane must prove that chat-native capability discovery is live.
+
+Send:
+
+```text
+/mosaic help
+/mosaic help tools
+/mosaic help workflows
+```
+
+Expected result:
+
+- Telegram receives grouped catalog help
+- the groups include `Session`, `Runtime`, `Tools`, `Skills`, `Workflows`, and `Gateway`
+- the visible items match the currently allowed channel and bot policy
+- the trace exposes the channel command catalog scope in inspect output
 
 ## Tool Proof
 
@@ -366,6 +336,56 @@ TRACE_PATH=$(ls -t .mosaic/runs/*.json | head -n 1)
 mosaic inspect "$TRACE_PATH" --verbose
 ```
 
+## Attachment Proof
+
+This lane must prove both the image path and the document path.
+
+### Image Upload
+
+Send a real photo to the bot with a short caption asking for a summary. The matching repo payload shape is:
+
+- [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json)
+
+Expected result:
+
+- the trace contains `attachments: 1`
+- `attachment_route.mode` is visible in inspect
+- `selected_profile` matches the multimodal profile when the workspace uses provider-native multimodal routing
+
+### Document Upload
+
+Send a small PDF or text document and ask for a summary. The matching repo payload shape is:
+
+- [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json)
+
+Expected result:
+
+- the trace records a document attachment
+- inspect shows either provider-native document routing or `specialized_processor`
+- the attachment-aware `summarize_notes` skill can be used explicitly when the bot policy allows it
+
+## Bot A / Bot B Isolation Proof
+
+This is the formal `bot A / bot B isolation` check for the multi-bot lane.
+
+Run this when the multi-bot lane is in scope, using [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml) or [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml).
+
+Register both webhook paths:
+
+```bash
+mosaic adapter telegram webhook set --bot ops --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/ops"
+mosaic adapter telegram webhook set --bot media --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/media"
+mosaic adapter telegram webhook info --bot ops
+mosaic adapter telegram webhook info --bot media
+```
+
+Then prove:
+
+- bot A writes sessions with its own `bot_name` and `bot_route`
+- bot B writes sessions with its own `bot_name` and `bot_route`
+- `mosaic adapter telegram test-send --bot ops ...` and `mosaic adapter telegram test-send --bot media ...` deliver through different bot tokens
+- inspect, audit, and session metadata do not collapse both bots into one route
+
 ## CLI, Inspect, Audit, and Incident Proof
 
 For every Telegram proof above, the operator should be able to reproduce the same facts from CLI only:
@@ -388,6 +408,7 @@ The same run should agree across all surfaces:
 - Telegram reply text
 - session transcript
 - inspect ingress and route decision metadata
+- attachment route and selected profile
 - audit trail
 - replay window
 - `.mosaic/audit/incidents/${RUN_ID}.json`
@@ -408,6 +429,8 @@ The inspect output for the explicit command runs should expose:
 - `selection_reason`
 - `capability_source`
 - `profile_used`
+- `attachment_route`
+- `bot_identity`
 
 ## Troubleshooting
 
@@ -419,7 +442,7 @@ Use this order when the lane fails:
 4. Run `mosaic adapter telegram test-send --chat-id <chat-id> "mosaic outbound smoke"` to isolate outbound delivery from ingress.
 5. Confirm the public HTTPS endpoint really forwards to `127.0.0.1:18080`.
 6. Check `mosaic gateway audit --limit 20` for missing inbound or outbound events.
-7. Check `mosaic inspect "$TRACE_PATH" --verbose` for `provider_failure`, `route decision`, or capability access failures.
+7. Check `mosaic inspect "$TRACE_PATH" --verbose` for `provider_failure`, `route decision`, `attachment_route`, or capability access failures.
 8. If explicit `read_file` fails, verify the requested file is inside the current workspace root.
 9. If the manifest capability is missing, rerun `mosaic extension validate` and confirm `.mosaic/extensions/telegram-e2e.yaml` exists.
 

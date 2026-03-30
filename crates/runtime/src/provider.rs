@@ -51,6 +51,20 @@ impl AgentRuntime {
             supports_tools: profile.capabilities.supports_tools,
             supports_tool_call_shadow_messages: metadata.supports_tool_call_shadow_messages,
             supports_vision: profile.capabilities.supports_vision,
+            supports_documents: profile.capabilities.supports_documents,
+            supports_audio: profile.capabilities.supports_audio,
+            supports_video: profile.capabilities.supports_video,
+            preferred_attachment_mode: match metadata.preferred_attachment_mode {
+                mosaic_config::AttachmentRouteModeConfig::ProviderNative => {
+                    mosaic_inspect::AttachmentRouteMode::ProviderNative
+                }
+                mosaic_config::AttachmentRouteModeConfig::SpecializedProcessor => {
+                    mosaic_inspect::AttachmentRouteMode::SpecializedProcessor
+                }
+                mosaic_config::AttachmentRouteModeConfig::Disabled => {
+                    mosaic_inspect::AttachmentRouteMode::Disabled
+                }
+            },
         }
     }
 
@@ -78,6 +92,10 @@ impl AgentRuntime {
             custom_header_keys: profile.custom_headers.keys().cloned().collect(),
             supports_tool_call_shadow_messages: profile.provider_type == "anthropic",
             supports_vision: profile.capabilities.supports_vision,
+            supports_documents: profile.capabilities.supports_documents,
+            supports_audio: profile.capabilities.supports_audio,
+            supports_video: profile.capabilities.supports_video,
+            preferred_attachment_mode: profile.capabilities.preferred_attachment_mode,
         }
     }
 

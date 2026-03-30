@@ -2,7 +2,7 @@
 
 Mosaic testing is not one bucket of `cargo test`. It is a product-proof system with fixed layers, fixed release roles, and an explicit mapping from each key crate to at least one real or quasi-real acceptance lane.
 
-This document is the source of truth for j5.
+This document is the source of truth for the k5 channel product baseline.
 
 See also:
 
@@ -40,7 +40,7 @@ These lanes must pass in automation before a release is cut:
 
 | Lane | Command | Why it blocks release |
 | --- | --- | --- |
-| test matrix consistency | `make test-matrix` | proves docs, scripts, and release instructions still describe the same lanes |
+| test matrix consistency | `make test-matrix` | proves docs, scripts, examples, and release instructions still describe the same lanes |
 | OpenAI provider-real lane | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | proves at least one first-class external provider works without mock data |
 | Gateway protocol-real lane | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | proves real HTTP server and SSE client paths |
 | MCP protocol-real lane | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | proves real subprocess transport |
@@ -65,27 +65,40 @@ These are real lanes, but they are compatibility proof rather than the default o
 | Anthropic | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | vendor compatibility addendum |
 | Ollama | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-provider --test real_vendors -- --nocapture` | local real-model addendum |
 
+## k5 Channel Product Scenarios
+
+The current channel product baseline adds these operator-visible proofs:
+
+| Scenario | Where it is proven | Classification |
+| --- | --- | --- |
+| channel command catalog discovery | `/mosaic help` and `/mosaic help tools` inside [telegram-real-e2e.md](./telegram-real-e2e.md) | `product-real` |
+| Telegram image upload | Telegram photo lane in [telegram-real-e2e.md](./telegram-real-e2e.md) using [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json) | `product-real` |
+| Telegram document upload | Telegram document lane in [telegram-real-e2e.md](./telegram-real-e2e.md) using [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json) | `product-real` |
+| specialized processor routing | [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml) and the document lane in [telegram-real-e2e.md](./telegram-real-e2e.md) | `product-real` |
+| dual-bot Gateway routing | [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml) plus the bot A / bot B isolation section in [telegram-real-e2e.md](./telegram-real-e2e.md) | `product-real` |
+| per-bot webhook management CLI | `mosaic adapter telegram webhook set --bot ...`, `info --bot ...`, and `test-send --bot ...` in [docs/cli.md](./cli.md) and [telegram-real-e2e.md](./telegram-real-e2e.md) | `product-real` |
+
 ## Crate-by-Crate Product Proof Matrix
 
 Every key crate must map to a primary real proof lane or an explicit supplemental lane.
 
 | Crate | Primary proof lane | Supplemental lane | Highest classification |
 | --- | --- | --- | --- |
-| `mosaic-config` | `mosaic setup init`, `mosaic setup validate`, `mosaic setup doctor`, `mosaic config show` inside `./scripts/test-full-stack-example.sh openai-webchat` | [telegram-real-e2e.md](./telegram-real-e2e.md) workspace bootstrap | `release-blocking acceptance` |
-| `mosaic-provider` | `cargo test -p mosaic-provider --test real_vendors -- --nocapture` | OpenAI + WebChat full-stack and Telegram-first operator runbook | `release-blocking acceptance` |
-| `mosaic-runtime` | OpenAI + WebChat full-stack lane writes real session and trace artifacts | Telegram-first lane proves tool, skill, and workflow routing in a real channel session | `product-real` |
-| `mosaic-tool-core` | Telegram-first lane proves real `time_now` and `read_file` invocations | `crates/tool-core/tests/integration_builtin_tools.rs` for local exec/webhook coverage | `product-real` |
-| `mosaic-skill-core` | Telegram-first lane proves `/mosaic skill summarize_notes` in a real Telegram session | `crates/skill-core/tests/integration_registry.rs` | `product-real` |
-| `mosaic-workflow` | Telegram-first lane proves `/mosaic workflow summarize_operator_note` in a real Telegram session | `crates/workflow/tests/integration_runner.rs` | `product-real` |
-| `mosaic-extension-core` | Telegram-first lane loads `examples/extensions/telegram-e2e.yaml` and exposes capabilities through Gateway and CLI | `crates/extension-core/tests/integration_extension_set.rs` | `product-real` |
-| `mosaic-gateway` | OpenAI + WebChat full-stack lane proves real HTTP, session, audit, replay, and incident flow | Telegram-first lane proves live Telegram webhook ingress and outbound reply | `release-blocking acceptance` |
-| `mosaic-session-core` | OpenAI + WebChat full-stack lane proves persisted sessions and routing metadata | Telegram-first lane proves persisted Telegram session continuity | `product-real` |
-| `mosaic-inspect` | OpenAI + WebChat full-stack lane proves saved trace and incident export | Telegram-first lane proves operator-facing `inspect --verbose` against live Telegram artifacts | `product-real` |
+| `mosaic-config` | `mosaic setup init`, `mosaic setup validate`, `mosaic setup doctor`, and `mosaic config show` inside `./scripts/test-full-stack-example.sh openai-webchat` | Telegram-first workspace bootstrap, bot registry examples, and attachment config examples | `release-blocking acceptance` |
+| `mosaic-provider` | `cargo test -p mosaic-provider --test real_vendors -- --nocapture` | OpenAI + WebChat full-stack, Telegram image upload, Telegram document upload | `release-blocking acceptance` |
+| `mosaic-runtime` | OpenAI + WebChat full-stack lane writes real session and trace artifacts | Telegram-first lane proves tool, skill, workflow, attachment, and route planning in a real channel session | `product-real` |
+| `mosaic-tool-core` | Telegram-first lane proves real `time_now` and `read_file` invocations | local integration tests for builtin exec/webhook coverage | `product-real` |
+| `mosaic-skill-core` | Telegram-first lane proves `/mosaic skill summarize_notes` in a real Telegram session | attachment-aware manifest in [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml) | `product-real` |
+| `mosaic-workflow` | Telegram-first lane proves `/mosaic workflow summarize_operator_note` in a real Telegram session | attachment-aware workflow manifest in [examples/extensions/telegram-e2e.yaml](../examples/extensions/telegram-e2e.yaml) | `product-real` |
+| `mosaic-extension-core` | Telegram-first lane loads `examples/extensions/telegram-e2e.yaml` and exposes capabilities through Gateway and CLI | extension registry integration tests | `product-real` |
+| `mosaic-gateway` | OpenAI + WebChat full-stack lane proves real HTTP, session, audit, replay, and incident flow | Telegram-first lane proves live Telegram webhook ingress, attachment normalization, multi-bot routing, and outbound reply | `release-blocking acceptance` |
+| `mosaic-session-core` | OpenAI + WebChat full-stack lane proves persisted sessions and routing metadata | Telegram-first lane proves persisted Telegram session continuity, bot metadata, and thread continuity | `product-real` |
+| `mosaic-inspect` | OpenAI + WebChat full-stack lane proves saved trace and incident export | Telegram-first lane proves operator-facing `inspect --verbose` against live Telegram artifacts, attachment route, and bot identity | `product-real` |
 | `mosaic-control-protocol` | `cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` proves the real control-plane DTO path | CLI attach flows and remote Gateway operator commands | `protocol-real` |
 | `mosaic-sdk` | `cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | remote operator attach commands in CLI and TUI | `protocol-real` |
-| `mosaic-channel-telegram` | `cargo test -p mosaic-gateway --test real_telegram_ingress -- --nocapture` proves the real webhook contract path | Telegram-first lane proves live inbound normalize plus outbound reply | `product-real` |
+| `mosaic-channel-telegram` | `cargo test -p mosaic-gateway --test real_telegram_ingress -- --nocapture` proves the real webhook contract path | Telegram-first lane proves live inbound normalize plus outbound reply, image uploads, and document uploads | `product-real` |
 | `mosaic-mcp-core` | `cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | `examples/mcp-filesystem.yaml` golden path | `protocol-real` |
-| `mosaic-memory` | OpenAI + WebChat full-stack and Telegram-first lanes persist real session memory and references | `crates/memory/tests/integration_file_store.rs` | `product-real` |
+| `mosaic-memory` | OpenAI + WebChat full-stack and Telegram-first lanes persist real session memory and references | file store integration tests | `product-real` |
 | `mosaic-node-protocol` | local integration file-bus tests | node operator flows in CLI | `local integration` |
 | `mosaic-scheduler-core` | local integration cron store tests | CLI cron flows | `local integration` |
 | `mosaic-cli` | `make test-golden`, `make test-matrix`, and the Telegram-first runbook | command regression tests in `cli/src/main.rs` | `release-blocking acceptance` |
@@ -105,12 +118,16 @@ The Telegram-first release-blocking acceptance lane proves:
 - real OpenAI provider
 - real Telegram inbound message
 - real Telegram outbound reply
+- `/mosaic help` category discovery
 - real builtin tool path
 - real manifest skill path
 - real workflow path
+- real image upload handling
+- real document upload handling
 - real session persistence
 - real inspect, audit, replay, and incident artifacts
 - real CLI operator flow for setup, webhook management, and diagnosis
+- real dual-bot routing when the multi-bot config is in scope
 
 Use [telegram-real-e2e.md](./telegram-real-e2e.md) as the operator runbook. That runbook is the product-level proof for Telegram. Do not replace it with mock payloads when Telegram is in scope.
 
@@ -157,6 +174,8 @@ Real lanes are enabled by `MOSAIC_REAL_TESTS=1`, then narrowed by the secrets an
 | `MOSAIC_WEBCHAT_SHARED_SECRET` | OpenAI + WebChat full-stack ingress |
 | `MOSAIC_TELEGRAM_BOT_TOKEN` | Telegram-first manual acceptance and CLI webhook management |
 | `MOSAIC_TELEGRAM_SECRET_TOKEN` | Telegram webhook auth |
+| `MOSAIC_TELEGRAM_OPS_BOT_TOKEN` / `MOSAIC_TELEGRAM_MEDIA_BOT_TOKEN` | multi-bot Telegram operator lanes |
+| `MOSAIC_TELEGRAM_OPS_SECRET_TOKEN` / `MOSAIC_TELEGRAM_MEDIA_SECRET_TOKEN` | multi-bot webhook auth |
 | `MOSAIC_PUBLIC_WEBHOOK_BASE_URL` | Telegram-first live webhook registration |
 | `MOSAIC_OPERATOR_TOKEN` | optional remote Gateway operator auth |
 

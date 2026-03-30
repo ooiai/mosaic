@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use mosaic_config::{ProviderType, parse_provider_type};
+use mosaic_config::{AttachmentRouteModeConfig, ProviderType, parse_provider_type};
 use mosaic_tool_core::{CapabilityInvocationMode, CapabilityVisibility, ToolMetadata};
 use serde::{Deserialize, Serialize};
 
@@ -10,9 +10,19 @@ pub struct ModelCapabilities {
     pub supports_tools: bool,
     pub supports_sessions: bool,
     pub supports_vision: bool,
+    pub supports_documents: bool,
+    pub supports_audio: bool,
+    pub supports_video: bool,
+    pub preferred_attachment_mode: AttachmentRouteModeConfig,
     pub family: String,
     pub context_window_chars: usize,
     pub budget_tier: String,
+}
+
+impl ModelCapabilities {
+    pub fn infer(provider_type: &str, model: &str) -> Self {
+        infer_model_capabilities(provider_type, model)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -32,6 +42,12 @@ pub struct SchedulingRequest {
     pub requires_tools: bool,
     #[serde(default)]
     pub requires_vision: bool,
+    #[serde(default)]
+    pub requires_documents: bool,
+    #[serde(default)]
+    pub requires_audio: bool,
+    #[serde(default)]
+    pub requires_video: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -99,6 +115,10 @@ pub(crate) fn infer_model_capabilities(provider_type: &str, model: &str) -> Mode
         ),
         supports_sessions: true,
         supports_vision: infer_vision_support(provider_type, model),
+        supports_documents: infer_document_support(provider_type, model),
+        supports_audio: infer_audio_support(provider_type, model),
+        supports_video: infer_video_support(provider_type, model),
+        preferred_attachment_mode: infer_preferred_attachment_mode(provider_type, model),
         family,
         context_window_chars,
         budget_tier: budget_tier.to_owned(),
@@ -142,6 +162,67 @@ fn infer_vision_support(provider_type: Option<ProviderType>, model: &str) -> boo
         Some(ProviderType::Ollama) => normalized.contains("vision") || normalized.contains("llava"),
         Some(ProviderType::Mock) => true,
         None => false,
+    }
+}
+
+fn infer_document_support(provider_type: Option<ProviderType>, model: &str) -> bool {
+    if model == "mock" {
+        return true;
+    }
+
+    let normalized = model.to_ascii_lowercase();
+    if normalized.contains("document") || normalized.contains("pdf") {
+        return true;
+    }
+
+    match provider_type {
+        Some(ProviderType::OpenAi | ProviderType::Azure | ProviderType::OpenAiCompatible) => {
+            normalized.starts_with("gpt-")
+        }
+        Some(ProviderType::Anthropic) => normalized.starts_with("claude"),
+        Some(ProviderType::Mock) => true,
+        Some(ProviderType::Ollama) | None => false,
+    }
+}
+
+fn infer_audio_support(provider_type: Option<ProviderType>, model: &str) -> bool {
+    if model == "mock" {
+        return false;
+    }
+
+    let normalized = model.to_ascii_lowercase();
+    match provider_type {
+        Some(ProviderType::OpenAi | ProviderType::Azure | ProviderType::OpenAiCompatible) => {
+            normalized.contains("audio")
+        }
+        Some(ProviderType::Anthropic) => normalized.contains("audio"),
+        Some(ProviderType::Mock | ProviderType::Ollama) | None => false,
+    }
+}
+
+fn infer_video_support(provider_type: Option<ProviderType>, model: &str) -> bool {
+    if model == "mock" {
+        return false;
+    }
+
+    let normalized = model.to_ascii_lowercase();
+    match provider_type {
+        Some(ProviderType::OpenAi | ProviderType::Azure | ProviderType::OpenAiCompatible) => {
+            normalized.contains("video")
+        }
+        Some(ProviderType::Anthropic) => normalized.contains("video"),
+        Some(ProviderType::Mock | ProviderType::Ollama) | None => false,
+    }
+}
+
+fn infer_preferred_attachment_mode(
+    provider_type: Option<ProviderType>,
+    model: &str,
+) -> AttachmentRouteModeConfig {
+    if infer_vision_support(provider_type, model) || infer_document_support(provider_type, model) {
+        AttachmentRouteModeConfig::ProviderNative
+    } else {
+        AttachmentRouteModeConfig::SpecializedProcessor
     }
 }
 

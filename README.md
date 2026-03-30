@@ -2,7 +2,7 @@
 
 Mosaic is a self-hosted AI assistant control plane.
 
-It gives you one operator surface for sessions, a TUI, a local or HTTP Gateway, traces, capability execution, extensions, nodes, and multi-channel ingress. The goal of this README is simple: get a new operator from zero to a real conversation without reading the source.
+It gives you one operator surface for sessions, a TUI, a local or HTTP Gateway, traces, capability execution, extensions, nodes, and multi-channel ingress. The goal of this README is simple: get a new operator from zero to a real conversation, then point them to the right Telegram, channel, and release docs without reading the source.
 
 ## 3 Minute Quick Start
 
@@ -49,6 +49,26 @@ mosaic session list
 mosaic session show <session-id>
 mosaic inspect .mosaic/runs/<run-id>.json
 ```
+
+## Product Baseline
+
+The current operator baseline is:
+
+- WebChat and Telegram both enter through the Gateway
+- Telegram supports `/mosaic` command discovery inside the chat
+- Telegram attachments can route through a multimodal profile or a specialized processor policy
+- one workspace can host multiple Telegram bots with isolated webhook paths, profiles, and capability scopes
+
+If you want the shortest product path into a real channel, start with:
+
+- [docs/telegram-step-by-step.md](./docs/telegram-step-by-step.md)
+- [examples/full-stack/openai-telegram-single-bot.config.yaml](./examples/full-stack/openai-telegram-single-bot.config.yaml)
+- [examples/extensions/telegram-e2e.yaml](./examples/extensions/telegram-e2e.yaml)
+
+If Telegram is part of release scope, use:
+
+- [docs/telegram-real-e2e.md](./docs/telegram-real-e2e.md)
+- [examples/full-stack/openai-telegram-e2e.config.yaml](./examples/full-stack/openai-telegram-e2e.config.yaml)
 
 ## Install
 
@@ -151,6 +171,47 @@ If you want a quick non-TUI smoke run:
 mosaic run examples/time-now-agent.yaml --session quickstart
 ```
 
+## Channel Command Catalog
+
+Inside Telegram, Mosaic exposes a chat-native operator catalog through `/mosaic`.
+
+Useful starting commands:
+
+```text
+/mosaic help
+/mosaic help tools
+/mosaic session status
+/mosaic tool read_file .mosaic/config.yaml
+/mosaic skill summarize_notes Shift handoff note goes here.
+/mosaic workflow summarize_operator_note Workflow input goes here.
+```
+
+The catalog is dynamic. It only shows the tools, skills, and workflows that are visible in the current channel and allowed for the current bot policy.
+
+## Telegram, Attachments, and Multi-Bot
+
+Single-bot baseline:
+
+- [examples/full-stack/openai-telegram-single-bot.config.yaml](./examples/full-stack/openai-telegram-single-bot.config.yaml)
+
+Multi-bot routing:
+
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](./examples/full-stack/openai-telegram-multi-bot.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](./examples/full-stack/openai-telegram-bot-split.config.yaml)
+
+Image and document uploads:
+
+- [examples/full-stack/openai-telegram-multimodal.config.yaml](./examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [examples/channels/telegram-photo-update.json](./examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](./examples/channels/telegram-document-update.json)
+
+These paths are explained in:
+
+- [docs/channels.md](./docs/channels.md)
+- [docs/configuration.md](./docs/configuration.md)
+- [docs/telegram-step-by-step.md](./docs/telegram-step-by-step.md)
+- [docs/telegram-real-e2e.md](./docs/telegram-real-e2e.md)
+
 ## Documentation
 
 - [Getting Started](./docs/getting-started.md)
@@ -217,7 +278,13 @@ Mosaic is a Cargo workspace. The `cli/` crate is the composition root, while the
 - [examples/providers/](./examples/providers/)
 - [examples/channels/README.md](./examples/channels/README.md)
 - [examples/channels/](./examples/channels/)
+- [examples/channels/telegram-photo-update.json](./examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](./examples/channels/telegram-document-update.json)
 - [examples/workflows/](./examples/workflows/)
+- [examples/full-stack/openai-telegram-single-bot.config.yaml](./examples/full-stack/openai-telegram-single-bot.config.yaml)
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](./examples/full-stack/openai-telegram-multi-bot.config.yaml)
+- [examples/full-stack/openai-telegram-multimodal.config.yaml](./examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](./examples/full-stack/openai-telegram-bot-split.config.yaml)
 - [examples/extensions/](./examples/extensions/)
 - [examples/gateway/](./examples/gateway/)
 - [examples/full-stack/README.md](./examples/full-stack/README.md)

@@ -82,17 +82,20 @@ From the Mosaic repo root:
 
 ```bash
 mosaic setup init
-cp examples/full-stack/openai-telegram-e2e.config.yaml .mosaic/config.yaml
+cp examples/full-stack/openai-telegram-single-bot.config.yaml .mosaic/config.yaml
 cp examples/extensions/telegram-e2e.yaml .mosaic/extensions/telegram-e2e.yaml
 ```
 
 This gives you:
 
 - a real-provider-first Telegram config
-- one manifest skill: `summarize_notes`
-- one workflow: `summarize_operator_note`
+- one bot-aware Telegram baseline
+- one attachment-aware manifest skill: `summarize_notes`
+- one attachment-aware workflow: `summarize_operator_note`
 
 If your runtime workspace is outside the repo, copy those two files into the matching `.mosaic/` paths manually.
+
+If you want the stricter release runbook later, the acceptance workspace lives at [examples/full-stack/openai-telegram-e2e.config.yaml](../examples/full-stack/openai-telegram-e2e.config.yaml).
 
 ## Step 3: Set the Required Environment Variables
 
@@ -152,14 +155,16 @@ Leave this process running.
 Your reverse proxy or tunnel must forward:
 
 ```text
-https://your-public-host.example.com/ingress/telegram
+https://your-public-host.example.com/ingress/telegram/primary
 ```
 
 to:
 
 ```text
-http://127.0.0.1:18080/ingress/telegram
+http://127.0.0.1:18080/ingress/telegram/primary
 ```
+
+If you are still using the legacy single-bot path instead of the bot registry, the inbound path is `/ingress/telegram`.
 
 ## Step 5A: Quick HTTPS URL with `cloudflared`
 
@@ -188,12 +193,6 @@ Then export:
 export MOSAIC_PUBLIC_WEBHOOK_BASE_URL=https://random-name.trycloudflare.com
 ```
 
-Notes:
-
-- this is good for testing and demos
-- the URL changes every time you restart the quick tunnel
-- Cloudflare documents Quick Tunnels as a development feature rather than a production setup
-
 ## Step 5B: Quick HTTPS URL with `ngrok`
 
 If you prefer `ngrok`, start an HTTP endpoint that forwards to your local Mosaic Gateway.
@@ -221,26 +220,24 @@ Then export:
 export MOSAIC_PUBLIC_WEBHOOK_BASE_URL=https://example.ngrok.app
 ```
 
-Notes:
-
-- this is good for webhook testing and local iteration
-- the URL may change unless your ngrok account is configured with a stable domain
-- after `ngrok` is running, Telegram should be pointed at `${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram`
-
 ## Step 6: Register the Telegram Webhook
 
 Once the public HTTPS URL is working, register the webhook from Mosaic CLI:
 
 ```bash
+mosaic adapter telegram webhook set --bot primary --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/primary" --secret-token "$MOSAIC_TELEGRAM_SECRET_TOKEN" --drop-pending-updates
+
 mosaic adapter telegram webhook set \
-  --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram" \
+  --bot primary \
+  --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/primary" \
+  --secret-token "$MOSAIC_TELEGRAM_SECRET_TOKEN" \
   --drop-pending-updates
 ```
 
 Then verify it:
 
 ```bash
-mosaic adapter telegram webhook info
+mosaic adapter telegram webhook info --bot primary
 ```
 
 Check for:
@@ -252,7 +249,7 @@ Check for:
 If you need to remove it later:
 
 ```bash
-mosaic adapter telegram webhook delete --drop-pending-updates
+mosaic adapter telegram webhook delete --bot primary --drop-pending-updates
 ```
 
 ## Step 7: Send the First Real Telegram Message
@@ -275,7 +272,20 @@ Expected result:
 - Mosaic runs the provider
 - the reply returns to the same Telegram chat
 
-## Step 8: Verify That Mosaic Saved the Run
+## Step 8: Discover the Channel Command Catalog
+
+After plain chat works, ask the bot what it can do:
+
+```text
+/mosaic help
+/mosaic help tools
+/mosaic help skills
+/mosaic session status
+```
+
+This proves the dynamic channel command catalog is live for the current bot and channel.
+
+## Step 9: Verify That Mosaic Saved the Run
 
 In another terminal, run:
 
@@ -312,7 +322,7 @@ RUN_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id
 mosaic gateway incident "$RUN_ID"
 ```
 
-## Step 9: Find the `chat_id` for Outbound Smoke Tests
+## Step 10: Find the `chat_id` for Outbound Smoke Tests
 
 `mosaic adapter telegram test-send` needs a real Telegram `chat_id`.
 
@@ -336,18 +346,18 @@ For a supergroup, the value is often negative, for example:
 telegram:chat:-1001234567890
 ```
 
-## Step 10: Run an Outbound Smoke Test
+## Step 11: Run an Outbound Smoke Test
 
 After you know the `chat_id`, ask Mosaic to send a direct outbound Telegram message:
 
 ```bash
-mosaic adapter telegram test-send --chat-id 123456789 "hello from mosaic"
+mosaic adapter telegram test-send --bot primary --chat-id 123456789 "hello from mosaic"
 ```
 
 If you are using a forum topic or thread, add `--thread-id`:
 
 ```bash
-mosaic adapter telegram test-send --chat-id -1001234567890 --thread-id 99 "hello from mosaic"
+mosaic adapter telegram test-send --bot primary --chat-id -1001234567890 --thread-id 99 "hello from mosaic"
 ```
 
 Expected result:
@@ -356,7 +366,7 @@ Expected result:
 - a non-empty `provider_message_id`
 - the message appears in Telegram
 
-## Step 11: Prove Tool, Skill, and Workflow Paths
+## Step 12: Prove Tool, Skill, and Workflow Paths
 
 After plain chat works, test the capability routes from Telegram.
 
@@ -392,7 +402,34 @@ mosaic session show <session-id>
 mosaic inspect "$TRACE_PATH" --verbose
 ```
 
-## Step 12: Common Problems
+## Step 13: Prove Image and Document Uploads
+
+Photo path:
+
+1. send a photo to the bot with a short caption
+2. ask for a brief summary or description
+
+Document path:
+
+1. send a small PDF or text document
+2. ask the bot to summarize it
+
+Repo sample payloads for the same shapes:
+
+- [examples/channels/telegram-photo-update.json](../examples/channels/telegram-photo-update.json)
+- [examples/channels/telegram-document-update.json](../examples/channels/telegram-document-update.json)
+
+Relevant example configs:
+
+- [examples/full-stack/openai-telegram-multimodal.config.yaml](../examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml)
+
+These map to the repo payload shapes:
+
+- `telegram-photo-update.json`
+- `telegram-document-update.json`
+
+## Step 14: Common Problems
 
 ### Telegram webhook registered, but inbound messages never arrive
 
@@ -400,7 +437,7 @@ Check:
 
 - the public URL is really HTTPS
 - the reverse proxy or tunnel really forwards to `127.0.0.1:18080`
-- `mosaic adapter telegram webhook info` shows the same URL you expect
+- `mosaic adapter telegram webhook info --bot primary` shows the same URL you expect
 - `MOSAIC_TELEGRAM_SECRET_TOKEN` matches the workspace config expectation
 
 ### Mosaic receives inbound messages, but no reply is sent
@@ -428,22 +465,42 @@ Run:
 
 ```bash
 mosaic adapter telegram webhook set \
-  --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram" \
+  --bot primary \
+  --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/primary" \
+  --secret-token "$MOSAIC_TELEGRAM_SECRET_TOKEN" \
   --drop-pending-updates
 ```
 
 Then verify again with:
 
 ```bash
-mosaic adapter telegram webhook info
+mosaic adapter telegram webhook info --bot primary
 ```
 
-## Step 13: Clean Up
+## Step 15: Multi-Bot Onboarding Appendix
+
+When you are ready for more than one bot, switch to:
+
+- [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml)
+- [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml)
+
+Then manage each bot explicitly:
+
+```bash
+mosaic adapter telegram webhook set --bot ops --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/ops"
+mosaic adapter telegram webhook set --bot media --url "${MOSAIC_PUBLIC_WEBHOOK_BASE_URL}/ingress/telegram/media"
+mosaic adapter telegram webhook info --bot ops
+mosaic adapter telegram webhook info --bot media
+mosaic adapter telegram test-send --bot ops --chat-id <chat-id> "hello from ops"
+mosaic adapter telegram test-send --bot media --chat-id <chat-id> "hello from media"
+```
+
+## Step 16: Clean Up
 
 When you are done testing:
 
 ```bash
-mosaic adapter telegram webhook delete --drop-pending-updates
+mosaic adapter telegram webhook delete --bot primary --drop-pending-updates
 ```
 
 Your saved artifacts remain in:
@@ -456,5 +513,6 @@ Your saved artifacts remain in:
 
 - [telegram-real-e2e.md](./telegram-real-e2e.md)
 - [channels.md](./channels.md)
+- [configuration.md](./configuration.md)
 - [session-inspect-incident.md](./session-inspect-incident.md)
 - [testing.md](./testing.md)

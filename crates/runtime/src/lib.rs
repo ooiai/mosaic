@@ -121,19 +121,40 @@ impl AgentRuntime {
                 }
             }
         }
+        let effective_requested_profile = requested_profile.clone().or_else(|| {
+            attachment_route
+                .as_ref()
+                .and_then(|route| route.requested_profile.clone())
+        });
 
         let (profile, selection_scope, selection_reason) = match &planned_route {
             crate::routing::PlannedRoute::Tool { .. }
-            | crate::routing::PlannedRoute::Skill { .. } => (
-                base_profile,
-                format!("run:{}", planned_route.mode().label()),
-                if requested_profile.is_some() {
+            | crate::routing::PlannedRoute::Skill { .. } => {
+                let selected = match self
+                    .ctx
+                    .profiles
+                    .resolve(effective_requested_profile.as_deref())
+                {
+                    Ok(profile) => profile,
+                    Err(err) => return self.fail_run(trace, err),
+                };
+                let reason = if requested_profile.is_some() {
                     "requested_profile"
+                } else if attachment_route
+                    .as_ref()
+                    .and_then(|route| route.requested_profile.as_ref())
+                    .is_some()
+                {
+                    "attachment_route_policy"
                 } else {
                     "active_profile"
-                }
-                .to_owned(),
-            ),
+                };
+                (
+                    selected,
+                    format!("run:{}", planned_route.mode().label()),
+                    reason.to_owned(),
+                )
+            }
             crate::routing::PlannedRoute::Workflow { .. }
             | crate::routing::PlannedRoute::Assistant { .. } => {
                 let scheduling_intent =
@@ -143,7 +164,7 @@ impl AgentRuntime {
                         SchedulingIntent::InteractiveRun
                     };
                 let scheduled = match self.ctx.profiles.schedule(SchedulingRequest {
-                    requested_profile: requested_profile.clone(),
+                    requested_profile: effective_requested_profile.clone(),
                     channel: req
                         .ingress
                         .as_ref()
@@ -160,7 +181,19 @@ impl AgentRuntime {
                     ),
                     requires_vision: attachment_route
                         .as_ref()
-                        .map(|route| route.requires_vision)
+                        .map(|route| route.requirements.requires_vision)
+                        .unwrap_or(false),
+                    requires_documents: attachment_route
+                        .as_ref()
+                        .map(|route| route.requirements.requires_documents)
+                        .unwrap_or(false),
+                    requires_audio: attachment_route
+                        .as_ref()
+                        .map(|route| route.requirements.requires_audio)
+                        .unwrap_or(false),
+                    requires_video: attachment_route
+                        .as_ref()
+                        .map(|route| route.requirements.requires_video)
                         .unwrap_or(false),
                 }) {
                     Ok(profile) => profile,
@@ -176,11 +209,12 @@ impl AgentRuntime {
 
         trace.add_model_selection(Self::model_selection_trace(
             selection_scope,
-            requested_profile,
+            effective_requested_profile,
             &profile,
             selection_reason,
         ));
         if let Some(route) = attachment_route.as_mut() {
+            route.trace.selected_profile = Some(profile.name.clone());
             if route.trace.mode == AttachmentRouteMode::ProviderNative {
                 route.trace.provider_profile = Some(profile.name.clone());
                 route.trace.provider_model = Some(profile.model.clone());

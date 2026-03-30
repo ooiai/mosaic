@@ -149,6 +149,14 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
                 );
             }
         }
+        if let Some(attachments) = bot.attachments.as_ref() {
+            validate_attachment_route_target(
+                &mut report,
+                config,
+                &format!("{field_prefix}.attachments"),
+                attachments,
+            );
+        }
     }
 
     if !config.profiles.contains_key(&config.active_profile) {
@@ -258,6 +266,12 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
             &profile.transport,
             Some(&profile.vendor),
         );
+        validate_provider_attachment_routing(
+            &mut report,
+            config,
+            &format!("{field_prefix}.attachments"),
+            &profile.attachments,
+        );
 
         validate_vendor_policy(
             &mut report,
@@ -329,6 +343,29 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
             ValidationLevel::Error,
             "runtime.max_workflow_provider_round_trips",
             "runtime max_workflow_provider_round_trips must be greater than zero",
+        );
+    }
+
+    validate_attachment_route_target(
+        &mut report,
+        config,
+        "attachments.routing.default",
+        &config.attachments.routing.default,
+    );
+    for (channel, target) in &config.attachments.routing.channel_overrides {
+        validate_attachment_route_target(
+            &mut report,
+            config,
+            &format!("attachments.routing.channel_overrides.{channel}"),
+            target,
+        );
+    }
+    for (bot, target) in &config.attachments.routing.bot_overrides {
+        validate_attachment_route_target(
+            &mut report,
+            config,
+            &format!("attachments.routing.bot_overrides.{bot}"),
+            target,
         );
     }
 
@@ -457,6 +494,128 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
     }
 
     report
+}
+
+fn validate_provider_attachment_routing(
+    report: &mut ValidationReport,
+    config: &MosaicConfig,
+    field_prefix: &str,
+    routing: &ProviderAttachmentRoutingConfig,
+) {
+    let has_policy = routing.mode.is_some()
+        || routing.processor.is_some()
+        || routing.multimodal_profile.is_some()
+        || routing.specialized_processor_profile.is_some()
+        || !routing.allowed_attachment_kinds.is_empty()
+        || routing.max_attachment_size_mb.is_some();
+    if !has_policy {
+        return;
+    }
+
+    validate_attachment_profile_reference(
+        report,
+        config,
+        &format!("{field_prefix}.multimodal_profile"),
+        routing.multimodal_profile.as_deref(),
+    );
+    validate_attachment_profile_reference(
+        report,
+        config,
+        &format!("{field_prefix}.specialized_processor_profile"),
+        routing.specialized_processor_profile.as_deref(),
+    );
+
+    if matches!(
+        routing.mode,
+        Some(AttachmentRouteModeConfig::SpecializedProcessor)
+    ) && routing
+        .processor
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.processor"),
+            "specialized_processor routing requires processor to be configured",
+        );
+    }
+
+    if routing.max_attachment_size_mb == Some(0) {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.max_attachment_size_mb"),
+            "max_attachment_size_mb must be greater than zero when provided",
+        );
+    }
+}
+
+fn validate_attachment_route_target(
+    report: &mut ValidationReport,
+    config: &MosaicConfig,
+    field_prefix: &str,
+    target: &AttachmentRoutingTargetConfig,
+) {
+    validate_attachment_profile_reference(
+        report,
+        config,
+        &format!("{field_prefix}.multimodal_profile"),
+        target.multimodal_profile.as_deref(),
+    );
+    validate_attachment_profile_reference(
+        report,
+        config,
+        &format!("{field_prefix}.specialized_processor_profile"),
+        target.specialized_processor_profile.as_deref(),
+    );
+
+    if matches!(target.mode, AttachmentRouteModeConfig::SpecializedProcessor)
+        && target
+            .processor
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none()
+    {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.processor"),
+            "specialized_processor routing requires processor to be configured",
+        );
+    }
+
+    if target.max_attachment_size_mb == Some(0) {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.max_attachment_size_mb"),
+            "max_attachment_size_mb must be greater than zero when provided",
+        );
+    }
+}
+
+fn validate_attachment_profile_reference(
+    report: &mut ValidationReport,
+    config: &MosaicConfig,
+    field: &str,
+    profile_name: Option<&str>,
+) {
+    let Some(profile_name) = profile_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    if !config.profiles.contains_key(profile_name) {
+        report.push(
+            ValidationLevel::Error,
+            field,
+            format!(
+                "attachment routing profile '{}' does not match any configured profile",
+                profile_name
+            ),
+        );
+    }
 }
 
 fn validate_transport_policy(
