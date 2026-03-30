@@ -61,7 +61,7 @@ cli/reports/
 **/assets/**
 .github/agents
 .github/skills
-specs/
+specs/**.md
 
 AGENT.md
 AGENTS.md
