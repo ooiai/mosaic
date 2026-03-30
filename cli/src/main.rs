@@ -106,10 +106,10 @@ const ADAPTER_AFTER_HELP: &str = "When to use it:
 Examples:
   mosaic adapter status
   mosaic adapter doctor
-  mosaic adapter telegram webhook info
-  mosaic adapter telegram webhook set --url https://public.example.com/ingress/telegram
-  mosaic adapter telegram webhook delete --drop-pending-updates
-  mosaic adapter telegram test-send --chat-id 123456789 \"hello from mosaic\"";
+  mosaic adapter telegram webhook info --bot primary
+  mosaic adapter telegram webhook set --bot primary --url https://public.example.com/ingress/telegram/primary
+  mosaic adapter telegram webhook delete --bot primary --drop-pending-updates
+  mosaic adapter telegram test-send --bot primary --chat-id 123456789 \"hello from mosaic\"";
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 enum LogFormat {
@@ -371,6 +371,8 @@ enum TelegramAdapterCommand {
     },
     TestSend {
         #[arg(long)]
+        bot: Option<String>,
+        #[arg(long)]
         chat_id: i64,
         text: String,
         #[arg(long)]
@@ -383,9 +385,11 @@ enum TelegramAdapterCommand {
 #[derive(Debug, Subcommand, PartialEq, Eq)]
 enum TelegramWebhookCommand {
     Set {
+        #[arg(long, help = "Telegram bot logical name from workspace config")]
+        bot: Option<String>,
         #[arg(
             long,
-            help = "Full public Telegram webhook URL. Defaults to $MOSAIC_PUBLIC_WEBHOOK_BASE_URL/ingress/telegram"
+            help = "Full public Telegram webhook URL. Defaults to $MOSAIC_PUBLIC_WEBHOOK_BASE_URL plus the configured bot webhook path"
         )]
         url: Option<String>,
         #[arg(
@@ -404,8 +408,13 @@ enum TelegramWebhookCommand {
         )]
         drop_pending_updates: bool,
     },
-    Info,
+    Info {
+        #[arg(long, help = "Telegram bot logical name from workspace config")]
+        bot: Option<String>,
+    },
     Delete {
+        #[arg(long, help = "Telegram bot logical name from workspace config")]
+        bot: Option<String>,
         #[arg(
             long,
             help = "Ask Telegram to drop pending updates when deleting the webhook"
@@ -1879,6 +1888,11 @@ fn local_cli_ingress(gateway_url: Option<String>) -> IngressTrace {
         kind: "local_cli".to_owned(),
         channel: Some("cli".to_owned()),
         adapter: Some("cli_local".to_owned()),
+        bot_name: None,
+        bot_route: None,
+        bot_profile: None,
+        bot_token_env: None,
+        bot_secret_env: None,
         source: Some("mosaic-cli".to_owned()),
         remote_addr: None,
         display_name: None,
@@ -1905,6 +1919,11 @@ fn remote_cli_ingress(gateway_url: &str) -> IngressTrace {
         kind: "remote_operator".to_owned(),
         channel: Some("cli".to_owned()),
         adapter: Some("cli_remote".to_owned()),
+        bot_name: None,
+        bot_route: None,
+        bot_profile: None,
+        bot_token_env: None,
+        bot_secret_env: None,
         source: Some("mosaic-cli".to_owned()),
         remote_addr: None,
         display_name: None,
@@ -2524,6 +2543,7 @@ mod tests {
                 command: AdapterCommand::Telegram {
                     command: TelegramAdapterCommand::Webhook {
                         command: TelegramWebhookCommand::Set {
+                            bot: None,
                             url: Some("https://public.example.com/ingress/telegram".to_owned()),
                             secret_token: None,
                             allowed_updates: vec!["message".to_owned()],
@@ -2551,6 +2571,7 @@ mod tests {
                 attach: None,
                 command: AdapterCommand::Telegram {
                     command: TelegramAdapterCommand::TestSend {
+                        bot: None,
                         chat_id: 42,
                         text: "hello from mosaic".to_owned(),
                         thread_id: Some(7),

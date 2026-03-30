@@ -52,6 +52,7 @@ pub fn build_runtime_context(
         memory_policy,
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        telegram: config.telegram.clone(),
         app_name: app_config
             .and_then(|app| app.app.as_ref())
             .and_then(|app| app.name.clone()),
@@ -149,6 +150,7 @@ fn build_gateway_components_for_workspace(
         memory_policy,
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        telegram: config.telegram.clone(),
         app_name: app_config
             .and_then(|app| app.app.as_ref())
             .and_then(|app| app.name.clone()),

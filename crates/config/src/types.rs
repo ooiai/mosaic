@@ -222,6 +222,8 @@ pub struct MosaicConfig {
     #[serde(default)]
     pub auth: AuthConfig,
     #[serde(default)]
+    pub telegram: TelegramAdapterConfig,
+    #[serde(default)]
     pub session_store: SessionStoreConfig,
     #[serde(default)]
     pub inspect: InspectConfig,
@@ -255,6 +257,7 @@ impl Default for MosaicConfig {
             provider_defaults: ProviderTransportPolicyConfig::default(),
             deployment: DeploymentConfig::default(),
             auth: AuthConfig::default(),
+            telegram: TelegramAdapterConfig::default(),
             session_store: SessionStoreConfig::default(),
             inspect: InspectConfig::default(),
             audit: AuditConfig::default(),
@@ -446,6 +449,82 @@ pub struct AuthConfig {
     pub operator_token_env: Option<String>,
     pub webchat_shared_secret_env: Option<String>,
     pub telegram_secret_token_env: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TelegramAdapterConfig {
+    #[serde(default)]
+    pub bots: BTreeMap<String, TelegramBotConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TelegramBotConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    pub bot_token_env: String,
+    #[serde(default)]
+    pub webhook_secret_token_env: Option<String>,
+    #[serde(default)]
+    pub route_key: Option<String>,
+    #[serde(default)]
+    pub webhook_path: Option<String>,
+    #[serde(default)]
+    pub default_profile: Option<String>,
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    #[serde(default)]
+    pub allowed_skills: Vec<String>,
+    #[serde(default)]
+    pub allowed_workflows: Vec<String>,
+}
+
+impl Default for TelegramBotConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bot_token_env: String::new(),
+            webhook_secret_token_env: None,
+            route_key: None,
+            webhook_path: None,
+            default_profile: None,
+            allowed_tools: Vec::new(),
+            allowed_skills: Vec::new(),
+            allowed_workflows: Vec::new(),
+        }
+    }
+}
+
+impl TelegramBotConfig {
+    pub fn route_key(&self, name: &str) -> String {
+        self.route_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(name)
+            .to_owned()
+    }
+
+    pub fn webhook_path(&self, name: &str) -> String {
+        self.webhook_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| format!("/ingress/telegram/{}", self.route_key(name)))
+    }
+
+    pub fn allows_tool(&self, name: &str) -> bool {
+        self.allowed_tools.is_empty() || self.allowed_tools.iter().any(|value| value == name)
+    }
+
+    pub fn allows_skill(&self, name: &str) -> bool {
+        self.allowed_skills.is_empty() || self.allowed_skills.iter().any(|value| value == name)
+    }
+
+    pub fn allows_workflow(&self, name: &str) -> bool {
+        self.allowed_workflows.is_empty()
+            || self.allowed_workflows.iter().any(|value| value == name)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -881,6 +960,7 @@ pub(crate) struct MosaicConfigPatch {
     pub provider_defaults: Option<ProviderTransportPolicyConfig>,
     pub deployment: Option<DeploymentConfig>,
     pub auth: Option<AuthConfig>,
+    pub telegram: Option<TelegramAdapterConfig>,
     pub session_store: Option<SessionStoreConfig>,
     pub inspect: Option<InspectConfig>,
     pub audit: Option<AuditConfig>,

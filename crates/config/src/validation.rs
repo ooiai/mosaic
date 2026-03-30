@@ -80,6 +80,77 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         }
     }
 
+    for (name, bot) in &config.telegram.bots {
+        let field_prefix = format!("telegram.bots.{name}");
+        if name.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                field_prefix.clone(),
+                "telegram bot name must not be empty",
+            );
+        }
+        if bot.bot_token_env.trim().is_empty() {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.bot_token_env"),
+                "bot_token_env must not be empty",
+            );
+        }
+        if bot
+            .webhook_secret_token_env
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.webhook_secret_token_env"),
+                "environment variable name must not be empty when provided",
+            );
+        }
+        if bot
+            .route_key
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.route_key"),
+                "route_key must not be empty when provided",
+            );
+        }
+        if let Some(path) = bot
+            .webhook_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            if !path.starts_with('/') {
+                report.push(
+                    ValidationLevel::Error,
+                    format!("{field_prefix}.webhook_path"),
+                    "webhook_path must start with '/'",
+                );
+            }
+        }
+        if let Some(default_profile) = bot
+            .default_profile
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if !config.profiles.contains_key(default_profile) {
+                report.push(
+                    ValidationLevel::Error,
+                    format!("{field_prefix}.default_profile"),
+                    format!(
+                        "telegram bot '{}' default_profile '{}' does not match any configured profile",
+                        name, default_profile
+                    ),
+                );
+            }
+        }
+    }
+
     if !config.profiles.contains_key(&config.active_profile) {
         report.push(
             ValidationLevel::Error,

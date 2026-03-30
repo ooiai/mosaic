@@ -1,5 +1,5 @@
 use super::*;
-use mosaic_config::{AttachmentConfig, RuntimePolicyConfig};
+use mosaic_config::{AttachmentConfig, RuntimePolicyConfig, TelegramAdapterConfig};
 
 pub(crate) type SharedToolTraceCollector = Arc<Mutex<Vec<ToolTrace>>>;
 pub(crate) type SharedSkillTraceCollector = Arc<Mutex<Vec<SkillTrace>>>;
@@ -33,6 +33,7 @@ pub struct RuntimeContext {
     pub memory_policy: MemoryPolicy,
     pub runtime_policy: RuntimePolicyConfig,
     pub attachments: AttachmentConfig,
+    pub telegram: TelegramAdapterConfig,
     pub app_name: Option<String>,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,

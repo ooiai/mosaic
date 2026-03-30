@@ -198,6 +198,10 @@ pub(crate) fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
         config.auth = auth;
     }
 
+    if let Some(telegram) = patch.telegram {
+        config.telegram = telegram;
+    }
+
     if let Some(session_store) = patch.session_store {
         config.session_store = session_store;
     }

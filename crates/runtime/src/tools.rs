@@ -538,7 +538,10 @@ impl AgentRuntime {
         &self,
         allowlist: Option<&[String]>,
         channel: Option<&str>,
+        bot_name: Option<&str>,
     ) -> Result<Vec<ToolDefinition>> {
+        let telegram_bot: Option<&mosaic_config::TelegramBotConfig> =
+            self.telegram_bot_for(channel, bot_name);
         match allowlist {
             Some(names) => names
                 .iter()
@@ -554,6 +557,15 @@ impl AgentRuntime {
                     {
                         bail!("tool is not visible to this session: {}", name);
                     }
+                    if let Some(bot) = telegram_bot {
+                        if !bot.allows_tool(name) {
+                            bail!(
+                                "tool is not visible to telegram bot '{}': {}",
+                                bot_name.unwrap_or("unknown"),
+                                name
+                            );
+                        }
+                    }
                     Ok(tool_definition_from_metadata(metadata))
                 })
                 .collect(),
@@ -565,8 +577,17 @@ impl AgentRuntime {
                     let metadata = tool.metadata();
                     (tool_is_visible_to_model(metadata)
                         && metadata.exposure.allows_conversational(channel))
-                    .then(|| tool_definition_from_metadata(metadata))
+                    .then_some((
+                        metadata.name.clone(),
+                        tool_definition_from_metadata(metadata),
+                    ))
                 })
+                .filter(|(name, _)| {
+                    telegram_bot
+                        .map(|bot| bot.allows_tool(name))
+                        .unwrap_or(true)
+                })
+                .map(|(_, definition)| definition)
                 .collect()),
         }
     }

@@ -28,6 +28,10 @@ pub fn http_router(gateway: GatewayHandle) -> Router {
         .route("/incidents/{id}", get(http_incident_bundle))
         .route("/ingress/webchat", post(http_webchat_ingress))
         .route("/ingress/telegram", post(http_telegram_ingress))
+        .route(
+            "/ingress/telegram/{bot}",
+            post(http_telegram_ingress_for_bot),
+        )
         .route("/events", get(http_events))
         .route("/events/recent", get(http_recent_events))
         .with_state(GatewayHttpState { gateway })
@@ -268,6 +272,11 @@ async fn http_submit_run(
             kind: "remote_operator".to_owned(),
             channel: Some("api".to_owned()),
             adapter: Some("sdk_http".to_owned()),
+            bot_name: None,
+            bot_route: None,
+            bot_profile: None,
+            bot_token_env: None,
+            bot_secret_env: None,
             source: Some("mosaic-sdk".to_owned()),
             remote_addr: None,
             display_name: None,
@@ -326,17 +335,25 @@ async fn http_telegram_ingress(
     headers: HeaderMap,
     Json(update): Json<TelegramUpdate>,
 ) -> HttpResult<RunResponse> {
-    let auth = state.gateway.snapshot_components().auth;
-    authorize_shared_secret_request(
-        &state.gateway,
-        &headers,
-        auth.telegram_secret_token_env.as_deref(),
-        "x-telegram-bot-api-secret-token",
-        "telegram ingress",
-    )?;
+    let bot = resolve_telegram_ingress_bot(&state.gateway, None, &headers)?;
     let submitted = state
         .gateway
-        .submit_telegram_update(update)
+        .submit_telegram_update(&bot, update)
+        .map_err(http_internal_error)?;
+    let result = submitted.wait().await.map_err(http_run_error)?;
+    Ok(Json(run_response(result)))
+}
+
+async fn http_telegram_ingress_for_bot(
+    AxumPath(bot): AxumPath<String>,
+    State(state): State<GatewayHttpState>,
+    headers: HeaderMap,
+    Json(update): Json<TelegramUpdate>,
+) -> HttpResult<RunResponse> {
+    let bot = resolve_telegram_ingress_bot(&state.gateway, Some(bot.as_str()), &headers)?;
+    let submitted = state
+        .gateway
+        .submit_telegram_update(&bot, update)
         .map_err(http_internal_error)?;
     let result = submitted.wait().await.map_err(http_run_error)?;
     Ok(Json(run_response(result)))

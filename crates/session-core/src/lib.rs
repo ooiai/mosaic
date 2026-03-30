@@ -101,6 +101,10 @@ pub struct SessionChannelMetadata {
     pub ingress_kind: Option<String>,
     pub channel: Option<String>,
     pub adapter: Option<String>,
+    pub bot_name: Option<String>,
+    pub bot_route: Option<String>,
+    pub bot_profile: Option<String>,
+    pub bot_token_env: Option<String>,
     pub source: Option<String>,
     pub actor_id: Option<String>,
     pub actor_name: Option<String>,
@@ -229,6 +233,10 @@ impl SessionRecord {
         self.channel_context.ingress_kind = Some(ingress.kind.clone());
         self.channel_context.channel = ingress.channel.clone();
         self.channel_context.adapter = ingress.adapter.clone();
+        self.channel_context.bot_name = ingress.bot_name.clone();
+        self.channel_context.bot_route = ingress.bot_route.clone();
+        self.channel_context.bot_profile = ingress.bot_profile.clone();
+        self.channel_context.bot_token_env = ingress.bot_token_env.clone();
         self.channel_context.source = ingress.source.clone();
         self.channel_context.actor_id = ingress.actor_id.clone();
         self.channel_context.actor_name = ingress.display_name.clone();
@@ -243,6 +251,10 @@ impl SessionRecord {
     pub fn bind_delivery_context(&mut self, delivery: &ChannelDeliveryTrace) {
         self.channel_context.channel = Some(delivery.message.channel.clone());
         self.channel_context.adapter = Some(delivery.message.adapter.clone());
+        self.channel_context.bot_name = delivery.message.bot_name.clone();
+        self.channel_context.bot_route = delivery.message.bot_route.clone();
+        self.channel_context.bot_profile = delivery.message.bot_profile.clone();
+        self.channel_context.bot_token_env = delivery.message.bot_token_env.clone();
         self.channel_context.conversation_id = Some(delivery.message.conversation_id.clone());
         self.channel_context.reply_target = Some(delivery.message.reply_target.clone());
         self.channel_context.last_delivery_id = Some(delivery.result.delivery_id.clone());
@@ -531,6 +543,11 @@ mod tests {
             kind: "webchat".to_owned(),
             channel: Some("webchat".to_owned()),
             adapter: Some("webchat_http".to_owned()),
+            bot_name: None,
+            bot_route: None,
+            bot_profile: None,
+            bot_token_env: None,
+            bot_secret_env: None,
             source: Some("browser".to_owned()),
             remote_addr: None,
             display_name: Some("Guest".to_owned()),

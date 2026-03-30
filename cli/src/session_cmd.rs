@@ -58,6 +58,10 @@ pub(crate) async fn session_cmd(attach: Option<String>, command: SessionCommand)
             println!("session_route: {}", session.gateway.route);
             println!("channel: {:?}", session.channel_context.channel);
             println!("adapter: {:?}", session.channel_context.adapter);
+            println!("bot_name: {:?}", session.channel_context.bot_name);
+            println!("bot_route: {:?}", session.channel_context.bot_route);
+            println!("bot_profile: {:?}", session.channel_context.bot_profile);
+            println!("bot_token_env: {:?}", session.channel_context.bot_token_env);
             println!("actor_id: {:?}", session.channel_context.actor_id);
             println!("actor_name: {:?}", session.channel_context.actor_name);
             println!(
@@ -159,6 +163,10 @@ fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
     println!("session_route: {}", session.gateway.route);
     println!("channel: {:?}", session.channel_context.channel);
     println!("adapter: {:?}", session.channel_context.adapter);
+    println!("bot_name: {:?}", session.channel_context.bot_name);
+    println!("bot_route: {:?}", session.channel_context.bot_route);
+    println!("bot_profile: {:?}", session.channel_context.bot_profile);
+    println!("bot_token_env: {:?}", session.channel_context.bot_token_env);
     println!("actor_id: {:?}", session.channel_context.actor_id);
     println!("actor_name: {:?}", session.channel_context.actor_name);
     println!(

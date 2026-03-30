@@ -116,11 +116,35 @@ pub struct TelegramWebhookInfo {
     pub allowed_updates: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct TelegramBotContext {
+    pub name: Option<String>,
+    pub route: Option<String>,
+    pub default_profile: Option<String>,
+    pub bot_token_env: Option<String>,
+    pub bot_secret_env: Option<String>,
+}
+
 impl TelegramOutboundClient {
     pub fn from_env() -> Result<Option<Self>> {
-        let bot_token = std::env::var("MOSAIC_TELEGRAM_BOT_TOKEN")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
+        Self::from_env_names(None, None)
+    }
+
+    pub fn from_env_names(
+        bot_token_env: Option<&str>,
+        base_url_env: Option<&str>,
+    ) -> Result<Option<Self>> {
+        let bot_token = bot_token_env
+            .and_then(|name| {
+                std::env::var(name)
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .or_else(|| {
+                std::env::var("MOSAIC_TELEGRAM_BOT_TOKEN")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
             .or_else(|| {
                 std::env::var("TELEGRAM_BOT_TOKEN")
                     .ok()
@@ -129,9 +153,22 @@ impl TelegramOutboundClient {
         let Some(bot_token) = bot_token else {
             return Ok(None);
         };
-        let base_url = std::env::var("MOSAIC_TELEGRAM_API_BASE_URL")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
+        let base_url = base_url_env
+            .and_then(|name| {
+                std::env::var(name)
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .or_else(|| {
+                std::env::var("MOSAIC_TELEGRAM_API_BASE_URL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .or_else(|| {
+                std::env::var("TELEGRAM_API_BASE_URL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
             .unwrap_or_else(|| "https://api.telegram.org".to_owned());
         Self::new_with_settings(
             bot_token,
@@ -301,17 +338,22 @@ impl TelegramOutboundClient {
         text: impl Into<String>,
         thread_id: Option<i64>,
         reply_to_message_id: Option<i64>,
+        bot: Option<&TelegramBotContext>,
     ) -> ChannelDeliveryTrace {
         self.send_message(ChannelOutboundMessage {
             channel: "telegram".to_owned(),
             adapter: "telegram_cli".to_owned(),
-            conversation_id: format!("telegram:chat:{chat_id}"),
-            reply_target: reply_target_for_target(chat_id, thread_id, reply_to_message_id),
+            bot_name: bot.and_then(|bot| bot.name.clone()),
+            bot_route: bot.and_then(|bot| bot.route.clone()),
+            bot_profile: bot.and_then(|bot| bot.default_profile.clone()),
+            bot_token_env: bot.and_then(|bot| bot.bot_token_env.clone()),
+            conversation_id: conversation_id_for_chat(chat_id, bot),
+            reply_target: reply_target_for_target(chat_id, thread_id, reply_to_message_id, bot),
             text: text.into(),
             idempotency_key: Uuid::new_v4().to_string(),
             correlation_id: "telegram-cli-test".to_owned(),
             gateway_run_id: "telegram-cli-test".to_owned(),
-            session_id: format!("telegram-cli-{chat_id}"),
+            session_id: session_hint_for_chat(chat_id, thread_id, bot, true),
         })
         .await
     }
@@ -380,6 +422,13 @@ impl TelegramOutboundClient {
 }
 
 pub fn normalize_update(update: TelegramUpdate) -> Result<ChannelInboundMessage> {
+    normalize_update_with_context(update, None)
+}
+
+pub fn normalize_update_with_context(
+    update: TelegramUpdate,
+    bot: Option<&TelegramBotContext>,
+) -> Result<ChannelInboundMessage> {
     let TelegramUpdate {
         update_id,
         message,
@@ -406,10 +455,8 @@ pub fn normalize_update(update: TelegramUpdate) -> Result<ChannelInboundMessage>
     }
 
     let thread_id = message.message_thread_id.map(|value| value.to_string());
-    let session_hint = match thread_id.as_deref() {
-        Some(thread_id) => format!("telegram-{}-{}", message.chat.id, thread_id),
-        None => format!("telegram-{}", message.chat.id),
-    };
+    let session_hint =
+        session_hint_for_chat(message.chat.id, message.message_thread_id, bot, false);
     let display_name = message
         .from
         .as_ref()
@@ -431,20 +478,25 @@ pub fn normalize_update(update: TelegramUpdate) -> Result<ChannelInboundMessage>
     Ok(ChannelInboundMessage {
         channel: "telegram".to_owned(),
         adapter: "telegram_webhook".to_owned(),
+        bot_name: bot.and_then(|bot| bot.name.clone()),
+        bot_route: bot.and_then(|bot| bot.route.clone()),
+        bot_profile: bot.and_then(|bot| bot.default_profile.clone()),
+        bot_token_env: bot.and_then(|bot| bot.bot_token_env.clone()),
         actor_id,
         display_name,
-        conversation_id: format!("telegram:chat:{}", message.chat.id),
+        conversation_id: conversation_id_for_chat(message.chat.id, bot),
         thread_id: thread_id.clone(),
         thread_title,
         reply_target: reply_target_for_message(
             message.chat.id,
             message.message_thread_id,
             message.message_id,
+            bot,
         ),
         message_id: message.message_id.to_string(),
         text: input,
         attachments,
-        profile_hint: None,
+        profile_hint: bot.and_then(|bot| bot.default_profile.clone()),
         session_hint: Some(session_hint),
         received_at: Utc::now(),
         raw_event_id: update_id.to_string(),
@@ -516,12 +568,49 @@ fn display_name_for_chat(chat: &TelegramChat) -> Option<String> {
         .or_else(|| chat.first_name.clone())
 }
 
-fn reply_target_for_message(chat_id: i64, thread_id: Option<i64>, message_id: i64) -> String {
+fn conversation_id_for_chat(chat_id: i64, bot: Option<&TelegramBotContext>) -> String {
+    match bot.and_then(|bot| bot.name.as_deref()) {
+        Some(bot_name) => format!("telegram:bot:{bot_name}:chat:{chat_id}"),
+        None => format!("telegram:chat:{chat_id}"),
+    }
+}
+
+fn session_hint_for_chat(
+    chat_id: i64,
+    thread_id: Option<i64>,
+    bot: Option<&TelegramBotContext>,
+    cli_prefix: bool,
+) -> String {
+    let prefix = if cli_prefix {
+        "telegram-cli"
+    } else {
+        "telegram"
+    };
+    match (bot.and_then(|bot| bot.name.as_deref()), thread_id) {
+        (Some(bot_name), Some(thread_id)) => format!("{prefix}-{bot_name}-{chat_id}-{thread_id}"),
+        (Some(bot_name), None) => format!("{prefix}-{bot_name}-{chat_id}"),
+        (None, Some(thread_id)) => format!("{prefix}-{chat_id}-{thread_id}"),
+        (None, None) => format!("{prefix}-{chat_id}"),
+    }
+}
+
+fn reply_target_for_message(
+    chat_id: i64,
+    thread_id: Option<i64>,
+    message_id: i64,
+    bot: Option<&TelegramBotContext>,
+) -> String {
     match thread_id {
         Some(thread_id) => {
-            format!("telegram:chat:{chat_id}:thread:{thread_id}:message:{message_id}")
+            format!(
+                "{}:thread:{thread_id}:message:{message_id}",
+                conversation_id_for_chat(chat_id, bot)
+            )
         }
-        None => format!("telegram:chat:{chat_id}:message:{message_id}"),
+        None => format!(
+            "{}:message:{message_id}",
+            conversation_id_for_chat(chat_id, bot)
+        ),
     }
 }
 
@@ -529,32 +618,55 @@ fn reply_target_for_target(
     chat_id: i64,
     thread_id: Option<i64>,
     reply_to_message_id: Option<i64>,
+    bot: Option<&TelegramBotContext>,
 ) -> String {
     match (thread_id, reply_to_message_id) {
         (Some(thread_id), Some(message_id)) => {
-            format!("telegram:chat:{chat_id}:thread:{thread_id}:message:{message_id}")
+            format!(
+                "{}:thread:{thread_id}:message:{message_id}",
+                conversation_id_for_chat(chat_id, bot)
+            )
         }
-        (Some(thread_id), None) => format!("telegram:chat:{chat_id}:thread:{thread_id}"),
-        (None, Some(message_id)) => format!("telegram:chat:{chat_id}:message:{message_id}"),
-        (None, None) => format!("telegram:chat:{chat_id}"),
+        (Some(thread_id), None) => {
+            format!(
+                "{}:thread:{thread_id}",
+                conversation_id_for_chat(chat_id, bot)
+            )
+        }
+        (None, Some(message_id)) => {
+            format!(
+                "{}:message:{message_id}",
+                conversation_id_for_chat(chat_id, bot)
+            )
+        }
+        (None, None) => conversation_id_for_chat(chat_id, bot),
     }
 }
 
 fn parse_reply_target(value: &str) -> std::result::Result<TelegramReplyTarget, DeliveryError> {
     let parts = value.split(':').collect::<Vec<_>>();
-    if parts.len() < 3 || parts[0] != "telegram" || parts[1] != "chat" {
+    if parts.len() < 3 || parts[0] != "telegram" {
         return Err(DeliveryError::protocol(format!(
             "unsupported telegram reply target: {value}"
         )));
     }
 
-    let chat_id = parts[2]
-        .parse::<i64>()
-        .map_err(|_| DeliveryError::protocol(format!("invalid telegram chat id: {}", parts[2])))?;
+    let (chat_index, mut index) = match parts.get(1) {
+        Some(&"chat") => (2usize, 3usize),
+        Some(&"bot") if parts.get(3) == Some(&"chat") => (4usize, 5usize),
+        _ => {
+            return Err(DeliveryError::protocol(format!(
+                "unsupported telegram reply target: {value}"
+            )));
+        }
+    };
+
+    let chat_id = parts[chat_index].parse::<i64>().map_err(|_| {
+        DeliveryError::protocol(format!("invalid telegram chat id: {}", parts[chat_index]))
+    })?;
 
     let mut thread_id = None;
     let mut reply_to_message_id = None;
-    let mut index = 3;
     while index + 1 < parts.len() {
         match parts[index] {
             "thread" => {
@@ -952,6 +1064,10 @@ mod tests {
             .send_message(ChannelOutboundMessage {
                 channel: "telegram".to_owned(),
                 adapter: "telegram_webhook".to_owned(),
+                bot_name: None,
+                bot_route: None,
+                bot_profile: None,
+                bot_token_env: None,
                 conversation_id: "telegram:chat:-10042".to_owned(),
                 reply_target: "telegram:chat:-10042:thread:7:message:11".to_owned(),
                 text: "reply".to_owned(),
@@ -1022,6 +1138,10 @@ mod tests {
             .send_message(ChannelOutboundMessage {
                 channel: "telegram".to_owned(),
                 adapter: "telegram_webhook".to_owned(),
+                bot_name: None,
+                bot_route: None,
+                bot_profile: None,
+                bot_token_env: None,
                 conversation_id: "telegram:chat:42".to_owned(),
                 reply_target: "telegram:chat:42:message:10".to_owned(),
                 text: "retry".to_owned(),
@@ -1175,7 +1295,7 @@ mod tests {
 
         let client = TelegramOutboundClient::new("test-token", format!("http://{addr}")).unwrap();
         let delivery = client
-            .send_test_message(42, "hello from cli", Some(7), None)
+            .send_test_message(42, "hello from cli", Some(7), None, None)
             .await;
 
         assert_eq!(delivery.result.status, ChannelDeliveryStatus::Delivered);

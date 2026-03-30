@@ -158,6 +158,16 @@ pub struct IngressTrace {
     pub channel: Option<String>,
     #[serde(default)]
     pub adapter: Option<String>,
+    #[serde(default)]
+    pub bot_name: Option<String>,
+    #[serde(default)]
+    pub bot_route: Option<String>,
+    #[serde(default)]
+    pub bot_profile: Option<String>,
+    #[serde(default)]
+    pub bot_token_env: Option<String>,
+    #[serde(default)]
+    pub bot_secret_env: Option<String>,
     pub source: Option<String>,
     pub remote_addr: Option<String>,
     pub display_name: Option<String>,
@@ -284,6 +294,14 @@ pub struct AttachmentRouteTrace {
 pub struct ChannelOutboundMessage {
     pub channel: String,
     pub adapter: String,
+    #[serde(default)]
+    pub bot_name: Option<String>,
+    #[serde(default)]
+    pub bot_route: Option<String>,
+    #[serde(default)]
+    pub bot_profile: Option<String>,
+    #[serde(default)]
+    pub bot_token_env: Option<String>,
     pub conversation_id: String,
     pub reply_target: String,
     pub text: String,
@@ -964,6 +982,11 @@ mod tests {
             kind: "remote_operator".to_owned(),
             channel: Some("cli".to_owned()),
             adapter: Some("cli_remote".to_owned()),
+            bot_name: None,
+            bot_route: None,
+            bot_profile: None,
+            bot_token_env: None,
+            bot_secret_env: None,
             source: Some("mosaic-cli".to_owned()),
             remote_addr: None,
             display_name: None,
@@ -1176,6 +1199,11 @@ mod tests {
             kind: "webchat".to_owned(),
             channel: Some("webchat".to_owned()),
             adapter: Some("webchat_http".to_owned()),
+            bot_name: None,
+            bot_route: None,
+            bot_profile: None,
+            bot_token_env: None,
+            bot_secret_env: None,
             source: Some("browser".to_owned()),
             remote_addr: Some("127.0.0.1".to_owned()),
             display_name: Some("guest".to_owned()),

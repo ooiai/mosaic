@@ -21,6 +21,11 @@ pub(crate) fn ingress_trace_from_channel_message(message: &ChannelInboundMessage
         kind: message.adapter.clone(),
         channel: Some(message.channel.clone()),
         adapter: Some(message.adapter.clone()),
+        bot_name: message.bot_name.clone(),
+        bot_route: message.bot_route.clone(),
+        bot_profile: message.bot_profile.clone(),
+        bot_token_env: message.bot_token_env.clone(),
+        bot_secret_env: None,
         source: Some(message.adapter.clone()),
         remote_addr: None,
         display_name: message.display_name.clone(),
@@ -695,6 +700,10 @@ pub(crate) fn normalize_webchat_message(message: InboundMessage) -> ChannelInbou
     ChannelInboundMessage {
         channel: "webchat".to_owned(),
         adapter: "webchat_http".to_owned(),
+        bot_name: None,
+        bot_route: None,
+        bot_profile: None,
+        bot_token_env: None,
         actor_id,
         display_name: message.display_name.or_else(|| {
             ingress
@@ -792,6 +801,7 @@ impl GatewayHandle {
             .unwrap_or_else(|_| components.profiles.active_profile_name().to_owned());
         ChannelCommandContext {
             channel: message.channel.clone(),
+            bot_name: message.bot_name.clone(),
             session_id: message.session_hint.clone(),
             profile,
         }
@@ -828,6 +838,10 @@ impl GatewayHandle {
                             .adapter
                             .clone()
                             .unwrap_or_else(|| ingress.kind.clone()),
+                        bot_name: ingress.bot_name.clone(),
+                        bot_route: ingress.bot_route.clone(),
+                        bot_profile: ingress.bot_profile.clone(),
+                        bot_token_env: ingress.bot_token_env.clone(),
                         actor_id: ingress.actor_id.clone(),
                         display_name: ingress.display_name.clone(),
                         conversation_id: ingress
@@ -861,8 +875,15 @@ impl GatewayHandle {
         }
     }
 
-    pub fn submit_telegram_update(&self, update: TelegramUpdate) -> Result<GatewaySubmittedRun> {
-        self.submit_channel_message(normalize_telegram_update(update)?)
+    pub(crate) fn submit_telegram_update(
+        &self,
+        bot: &ResolvedTelegramBot,
+        update: TelegramUpdate,
+    ) -> Result<GatewaySubmittedRun> {
+        self.submit_channel_message(mosaic_channel_telegram::normalize_update_with_context(
+            update,
+            Some(&bot.context()),
+        )?)
     }
 
     pub fn submit_webchat_message(&self, message: InboundMessage) -> Result<GatewaySubmittedRun> {
@@ -937,6 +958,7 @@ mod tests {
                 memory_policy: MemoryPolicy::default(),
                 runtime_policy: config.runtime.clone(),
                 attachments: config.attachments.clone(),
+                telegram: config.telegram.clone(),
                 app_name: None,
                 tools: Arc::new(ToolRegistry::new()),
                 skills: Arc::new(SkillRegistry::new()),
@@ -965,6 +987,10 @@ mod tests {
             ChannelInboundMessage {
                 channel: "telegram".to_owned(),
                 adapter: "telegram_bot".to_owned(),
+                bot_name: None,
+                bot_route: None,
+                bot_profile: None,
+                bot_token_env: None,
                 actor_id: Some("17".to_owned()),
                 display_name: Some("Operator".to_owned()),
                 conversation_id: "telegram:chat:1".to_owned(),

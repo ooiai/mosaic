@@ -121,6 +121,7 @@ impl AgentRuntime {
         }
 
         let channel = Self::request_channel(req);
+        let bot_name = Self::request_bot_name(req);
 
         if let Some(tool_name) = req.tool.as_ref() {
             let tool = self
@@ -129,6 +130,7 @@ impl AgentRuntime {
                 .get(tool_name)
                 .ok_or_else(|| anyhow!("tool not found: {}", tool_name))?;
             Self::ensure_explicit_access(tool_name, "tool", &tool.metadata().exposure, channel)?;
+            self.ensure_bot_capability_access(req, tool_name, "tool")?;
             return Ok(PlannedRoute::Tool {
                 name: tool_name.clone(),
                 reason: "explicit /mosaic tool command".to_owned(),
@@ -143,6 +145,7 @@ impl AgentRuntime {
                 .get(skill_name)
                 .ok_or_else(|| anyhow!("skill not found: {}", skill_name))?;
             Self::ensure_explicit_access(skill_name, "skill", &skill.metadata().exposure, channel)?;
+            self.ensure_bot_capability_access(req, skill_name, "skill")?;
             return Ok(PlannedRoute::Skill {
                 name: skill_name.clone(),
                 reason: "explicit /mosaic skill command".to_owned(),
@@ -162,6 +165,7 @@ impl AgentRuntime {
                 &workflow.metadata.exposure,
                 channel,
             )?;
+            self.ensure_bot_capability_access(req, workflow_name, "workflow")?;
             return Ok(PlannedRoute::Workflow {
                 name: workflow_name.clone(),
                 reason: "explicit /mosaic workflow command".to_owned(),
@@ -169,11 +173,11 @@ impl AgentRuntime {
             });
         }
 
-        if let Some(workflow_route) = self.auto_route_workflow(&req.input, channel) {
+        if let Some(workflow_route) = self.auto_route_workflow(&req.input, channel, bot_name) {
             return Ok(workflow_route);
         }
 
-        if let Some(skill_route) = self.auto_route_skill(&req.input, channel) {
+        if let Some(skill_route) = self.auto_route_skill(&req.input, channel, bot_name) {
             return Ok(skill_route);
         }
 
@@ -244,6 +248,31 @@ impl AgentRuntime {
             .and_then(|ingress| ingress.channel.as_deref())
     }
 
+    fn request_bot_name(req: &RunRequest) -> Option<&str> {
+        req.ingress
+            .as_ref()
+            .and_then(|ingress| ingress.bot_name.as_deref())
+    }
+
+    fn request_telegram_bot<'a>(
+        &'a self,
+        req: &'a RunRequest,
+    ) -> Option<&'a mosaic_config::TelegramBotConfig> {
+        self.telegram_bot_for(Self::request_channel(req), Self::request_bot_name(req))
+    }
+
+    pub(crate) fn telegram_bot_for<'a>(
+        &'a self,
+        channel: Option<&str>,
+        bot_name: Option<&str>,
+    ) -> Option<&'a mosaic_config::TelegramBotConfig> {
+        if channel != Some("telegram") {
+            return None;
+        }
+        let name = bot_name?;
+        self.ctx.telegram.bots.get(name)
+    }
+
     fn ensure_explicit_access(
         name: &str,
         kind: &str,
@@ -274,11 +303,43 @@ impl AgentRuntime {
         Ok(())
     }
 
-    fn auto_route_skill(&self, input: &str, channel: Option<&str>) -> Option<PlannedRoute> {
+    fn ensure_bot_capability_access(&self, req: &RunRequest, name: &str, kind: &str) -> Result<()> {
+        let Some(bot) = self.request_telegram_bot(req) else {
+            return Ok(());
+        };
+        let allowed = match kind {
+            "tool" => bot.allows_tool(name),
+            "skill" => bot.allows_skill(name),
+            "workflow" => bot.allows_workflow(name),
+            _ => true,
+        };
+        if allowed {
+            Ok(())
+        } else {
+            bail!(
+                "{} '{}' is not visible to telegram bot '{}'",
+                kind,
+                name,
+                Self::request_bot_name(req).unwrap_or("unknown")
+            )
+        }
+    }
+
+    fn auto_route_skill(
+        &self,
+        input: &str,
+        channel: Option<&str>,
+        bot_name: Option<&str>,
+    ) -> Option<PlannedRoute> {
         self.ctx.skills.list().into_iter().find_map(|name| {
             let skill = self.ctx.skills.get(&name)?;
             if !skill.metadata().exposure.allows_conversational(channel) {
                 return None;
+            }
+            if let Some(bot) = self.telegram_bot_for(channel, bot_name) {
+                if !bot.allows_skill(&name) {
+                    return None;
+                }
             }
             Self::match_reason(input, &name, None).map(|reason| PlannedRoute::Skill {
                 name,
@@ -288,11 +349,21 @@ impl AgentRuntime {
         })
     }
 
-    fn auto_route_workflow(&self, input: &str, channel: Option<&str>) -> Option<PlannedRoute> {
+    fn auto_route_workflow(
+        &self,
+        input: &str,
+        channel: Option<&str>,
+        bot_name: Option<&str>,
+    ) -> Option<PlannedRoute> {
         self.ctx.workflows.list().into_iter().find_map(|name| {
             let registered = self.ctx.workflows.get_registered(&name)?;
             if !registered.metadata.exposure.allows_conversational(channel) {
                 return None;
+            }
+            if let Some(bot) = self.telegram_bot_for(channel, bot_name) {
+                if !bot.allows_workflow(&name) {
+                    return None;
+                }
             }
             Self::match_reason(
                 input,

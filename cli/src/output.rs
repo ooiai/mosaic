@@ -629,6 +629,13 @@ pub fn render_inspect_report(
                 ("kind", ingress.kind.clone()),
                 ("channel", option_string(ingress.channel.clone())),
                 ("adapter", option_string(ingress.adapter.clone())),
+                ("bot_name", option_string(ingress.bot_name.clone())),
+                ("bot_route", option_string(ingress.bot_route.clone())),
+                ("bot_profile", option_string(ingress.bot_profile.clone())),
+                (
+                    "bot_token_env",
+                    option_string(ingress.bot_token_env.clone()),
+                ),
                 ("source", option_string(ingress.source.clone())),
                 ("actor_id", option_string(ingress.actor_id.clone())),
                 ("display_name", option_string(ingress.display_name.clone())),
@@ -800,9 +807,13 @@ pub fn render_inspect_report(
                 .iter()
                 .map(|delivery| {
                     format!(
-                        "channel={} | adapter={} | target={} | status={} | retries={} | provider_message_id={} | error_kind={} | error={} | delivered_at={}",
+                        "channel={} | adapter={} | bot_name={} | bot_route={} | bot_profile={} | token_env={} | target={} | status={} | retries={} | provider_message_id={} | error_kind={} | error={} | delivered_at={}",
                         delivery.message.channel,
                         delivery.message.adapter,
+                        option_string(delivery.message.bot_name.clone()),
+                        option_string(delivery.message.bot_route.clone()),
+                        option_string(delivery.message.bot_profile.clone()),
+                        option_string(delivery.message.bot_token_env.clone()),
                         delivery.message.reply_target,
                         delivery.result.status.label(),
                         delivery.result.retry_count,

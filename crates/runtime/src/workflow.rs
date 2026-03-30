@@ -5,6 +5,7 @@ pub(crate) struct RuntimeWorkflowExecutor<'a> {
     pub(crate) default_profile: ProviderProfile,
     pub(crate) session_id: Option<String>,
     pub(crate) ingress_channel: Option<String>,
+    pub(crate) ingress_bot_name: Option<String>,
     pub(crate) attachments: Vec<mosaic_inspect::ChannelAttachment>,
     pub(crate) tool_traces: SharedToolTraceCollector,
     pub(crate) skill_traces: SharedSkillTraceCollector,
@@ -66,8 +67,11 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
             ),
         );
         let tool_defs = if profile.capabilities.supports_tools {
-            self.runtime
-                .collect_tool_definitions(Some(tools), self.ingress_channel.as_deref())?
+            self.runtime.collect_tool_definitions(
+                Some(tools),
+                self.ingress_channel.as_deref(),
+                self.ingress_bot_name.as_deref(),
+            )?
         } else {
             Vec::new()
         };

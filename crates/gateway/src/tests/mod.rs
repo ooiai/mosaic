@@ -117,6 +117,7 @@ fn gateway() -> GatewayHandle {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(skills),
@@ -194,6 +195,7 @@ fn gateway_with_filtered_workflow() -> GatewayHandle {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(skills),
@@ -308,6 +310,7 @@ fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: loaded.config.runtime.clone(),
             attachments: loaded.config.attachments.clone(),
+            telegram: loaded.config.telegram.clone(),
             app_name: None,
             tools: Arc::new(extension_set.tools),
             skills: Arc::new(extension_set.skills),
@@ -594,6 +597,7 @@ async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(SkillRegistry::new()),
@@ -1057,6 +1061,7 @@ async fn mosaic_help_workflows_respects_channel_visibility() {
         &components,
         &crate::command_catalog::ChannelCommandContext {
             channel: "webchat".to_owned(),
+            bot_name: None,
             session_id: Some("workflow-help".to_owned()),
             profile: "demo-provider".to_owned(),
         },
@@ -1067,6 +1072,7 @@ async fn mosaic_help_workflows_respects_channel_visibility() {
         &components,
         &crate::command_catalog::ChannelCommandContext {
             channel: "telegram".to_owned(),
+            bot_name: None,
             session_id: Some("telegram-1".to_owned()),
             profile: "demo-provider".to_owned(),
         },
@@ -1207,40 +1213,45 @@ async fn telegram_inbound_run_records_outbound_delivery_audit_and_incident_trace
     }
 
     let gateway = gateway();
+    let bot = crate::auth::resolved_telegram_bot_by_name(&gateway.snapshot_components(), None)
+        .expect("default telegram bot should resolve");
     let mut receiver = gateway.subscribe();
     let submitted = gateway
-        .submit_telegram_update(TelegramUpdate {
-            update_id: 9001,
-            message: Some(mosaic_channel_telegram::TelegramMessage {
-                message_id: 11,
-                text: Some("hello telegram".to_owned()),
-                caption: None,
-                photo: vec![],
-                document: None,
-                message_thread_id: Some(7),
-                chat: mosaic_channel_telegram::TelegramChat {
-                    id: -10042,
-                    chat_type: "supergroup".to_owned(),
-                    title: Some("Control Room".to_owned()),
-                    username: None,
-                    first_name: None,
-                    last_name: None,
-                },
-                from: Some(mosaic_channel_telegram::TelegramUser {
-                    id: 17,
-                    username: Some("operator17".to_owned()),
-                    first_name: "Real".to_owned(),
-                    last_name: Some("Operator".to_owned()),
+        .submit_telegram_update(
+            &bot,
+            TelegramUpdate {
+                update_id: 9001,
+                message: Some(mosaic_channel_telegram::TelegramMessage {
+                    message_id: 11,
+                    text: Some("hello telegram".to_owned()),
+                    caption: None,
+                    photo: vec![],
+                    document: None,
+                    message_thread_id: Some(7),
+                    chat: mosaic_channel_telegram::TelegramChat {
+                        id: -10042,
+                        chat_type: "supergroup".to_owned(),
+                        title: Some("Control Room".to_owned()),
+                        username: None,
+                        first_name: None,
+                        last_name: None,
+                    },
+                    from: Some(mosaic_channel_telegram::TelegramUser {
+                        id: 17,
+                        username: Some("operator17".to_owned()),
+                        first_name: "Real".to_owned(),
+                        last_name: Some("Operator".to_owned()),
+                    }),
                 }),
-            }),
-            edited_message: None,
-            channel_post: None,
-        })
+                edited_message: None,
+                channel_post: None,
+            },
+        )
         .expect("telegram submit should succeed");
     let result = submitted.wait().await.expect("telegram run should succeed");
 
     let session = gateway
-        .load_session("telegram--10042-7")
+        .load_session("telegram-default--10042-7")
         .expect("session load should succeed")
         .expect("telegram session should exist");
     assert_eq!(result.trace.outbound_deliveries.len(), 1);
@@ -1257,7 +1268,7 @@ async fn telegram_inbound_run_records_outbound_delivery_audit_and_incident_trace
     );
     assert_eq!(
         session.channel_context.conversation_id.as_deref(),
-        Some("telegram:chat:-10042")
+        Some("telegram:bot:default:chat:-10042")
     );
     assert_eq!(
         session.channel_context.last_delivery_status.as_deref(),

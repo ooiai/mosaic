@@ -1,13 +1,26 @@
 use std::env;
 
 use anyhow::{Result, anyhow, bail};
-use mosaic_channel_telegram::{TelegramOutboundClient, TelegramWebhookConfig, TelegramWebhookInfo};
+use mosaic_channel_telegram::{
+    TelegramBotContext, TelegramOutboundClient, TelegramWebhookConfig, TelegramWebhookInfo,
+};
 use mosaic_control_protocol::{AdapterStatusDto, ChannelDeliveryStatus};
 
 use crate::{
     AdapterCommand, TelegramAdapterCommand, TelegramWebhookCommand, build_gateway_handle,
     ensure_loaded_config, gateway_client_from_loaded,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SelectedTelegramBot {
+    name: String,
+    route_key: String,
+    webhook_path: String,
+    bot_token_env: String,
+    webhook_secret_token_env: Option<String>,
+    default_profile: Option<String>,
+    legacy: bool,
+}
 
 pub(crate) async fn adapter_cmd(attach: Option<String>, command: AdapterCommand) -> Result<()> {
     match command {
@@ -46,18 +59,20 @@ async fn list_adapters(attach: Option<String>) -> Result<Vec<AdapterStatusDto>> 
 
 async fn telegram_cmd(command: TelegramAdapterCommand) -> Result<()> {
     let loaded = ensure_loaded_config(None)?;
-    let client = telegram_client_from_env()?;
 
     match command {
         TelegramAdapterCommand::Webhook { command } => match command {
             TelegramWebhookCommand::Set {
+                bot,
                 url,
                 secret_token,
                 allowed_updates,
                 drop_pending_updates,
             } => {
-                let url = resolve_telegram_webhook_url(url)?;
-                let secret_token = resolve_telegram_secret_token(&loaded, secret_token)?;
+                let bot = resolve_telegram_bot(&loaded, bot.as_deref())?;
+                let client = telegram_client_for_bot(&bot)?;
+                let url = resolve_telegram_webhook_url(&bot, url)?;
+                let secret_token = resolve_telegram_secret_token(&loaded, &bot, secret_token)?;
                 let info = set_telegram_webhook(
                     &client,
                     url,
@@ -66,39 +81,51 @@ async fn telegram_cmd(command: TelegramAdapterCommand) -> Result<()> {
                     drop_pending_updates,
                 )
                 .await?;
-                print_telegram_webhook_info("telegram webhook updated", &info)?;
-                crate::print_next_steps([
-                    "mosaic adapter telegram webhook info",
-                    "mosaic adapter status",
+                print_telegram_webhook_info("telegram webhook updated", &bot, &info)?;
+                crate::print_next_steps(vec![
+                    format!("mosaic adapter telegram webhook info --bot {}", bot.name),
+                    "mosaic adapter status".to_owned(),
                 ]);
                 Ok(())
             }
-            TelegramWebhookCommand::Info => {
+            TelegramWebhookCommand::Info { bot } => {
+                let bot = resolve_telegram_bot(&loaded, bot.as_deref())?;
+                let client = telegram_client_for_bot(&bot)?;
                 let info = fetch_telegram_webhook_info(&client).await?;
-                print_telegram_webhook_info("telegram webhook", &info)
+                print_telegram_webhook_info("telegram webhook", &bot, &info)
             }
             TelegramWebhookCommand::Delete {
+                bot,
                 drop_pending_updates,
             } => {
+                let bot = resolve_telegram_bot(&loaded, bot.as_deref())?;
+                let client = telegram_client_for_bot(&bot)?;
                 delete_telegram_webhook(&client, drop_pending_updates).await?;
                 println!("telegram webhook deleted");
+                println!("bot: {}", bot.name);
                 println!("drop_pending_updates: {}", drop_pending_updates);
-                crate::print_next_steps([
-                    "mosaic adapter telegram webhook info",
-                    "mosaic adapter status",
+                crate::print_next_steps(vec![
+                    format!("mosaic adapter telegram webhook info --bot {}", bot.name),
+                    "mosaic adapter status".to_owned(),
                 ]);
                 Ok(())
             }
         },
         TelegramAdapterCommand::TestSend {
+            bot,
             chat_id,
             text,
             thread_id,
             reply_to,
         } => {
+            let bot = resolve_telegram_bot(&loaded, bot.as_deref())?;
+            let client = telegram_client_for_bot(&bot)?;
             let delivery =
-                send_telegram_test_message(&client, chat_id, text, thread_id, reply_to).await;
+                send_telegram_test_message(&client, &bot, chat_id, text, thread_id, reply_to).await;
             println!("telegram outbound test:");
+            println!("  bot: {}", bot.name);
+            println!("  route: {}", bot.route_key);
+            println!("  token_env: {}", bot.bot_token_env);
             println!("  chat_id: {}", chat_id);
             println!("  thread_id: {:?}", thread_id);
             println!("  reply_to: {:?}", reply_to);
@@ -115,9 +142,9 @@ async fn telegram_cmd(command: TelegramAdapterCommand) -> Result<()> {
                     "telegram outbound test failed; check the bot token, chat id, and adapter readiness"
                 );
             }
-            crate::print_next_steps([
-                "mosaic adapter status",
-                "mosaic adapter telegram webhook info",
+            crate::print_next_steps(vec![
+                "mosaic adapter status".to_owned(),
+                format!("mosaic adapter telegram webhook info --bot {}", bot.name),
             ]);
             Ok(())
         }
@@ -159,10 +186,25 @@ fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
         if !adapter.capabilities.is_empty() {
             println!("    capabilities: {}", adapter.capabilities.join(", "));
         }
-        println!("    {}", adapter.detail);
-        if adapter.name == "telegram" {
+        if let Some(bot_name) = adapter.bot_name.as_deref() {
             println!(
-                "    operator: use `mosaic adapter telegram webhook info` and `mosaic adapter telegram test-send --chat-id <chat-id> \"hello\"`"
+                "    bot: {} | route={} | profile={} | token_env={}",
+                bot_name,
+                adapter.bot_route.as_deref().unwrap_or("<none>"),
+                adapter.bot_profile.as_deref().unwrap_or("<none>"),
+                adapter.bot_token_env.as_deref().unwrap_or("<none>"),
+            );
+        }
+        println!("    {}", adapter.detail);
+        if adapter.channel == "telegram" {
+            let bot_hint = adapter
+                .bot_name
+                .as_deref()
+                .map(|name| format!(" --bot {name}"))
+                .unwrap_or_default();
+            println!(
+                "    operator: use `mosaic adapter telegram webhook info{}` and `mosaic adapter telegram test-send{} --chat-id <chat-id> \"hello\"`",
+                bot_hint, bot_hint,
             );
         }
     }
@@ -178,22 +220,100 @@ fn print_adapter_doctor(adapters: &[AdapterStatusDto]) -> Result<()> {
     }
     println!("adapter doctor: ok");
     crate::print_next_steps([
-        "mosaic adapter telegram webhook info",
-        "mosaic adapter telegram test-send --chat-id <chat-id> \"hello from mosaic\"",
+        "mosaic adapter telegram webhook info --bot <name>",
+        "mosaic adapter telegram test-send --bot <name> --chat-id <chat-id> \"hello from mosaic\"",
     ]);
     Ok(())
 }
 
-fn telegram_client_from_env() -> Result<TelegramOutboundClient> {
-    TelegramOutboundClient::from_env()?
-        .ok_or_else(|| {
-            anyhow!(
-                "Telegram bot token is not configured; set MOSAIC_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN"
-            )
+fn resolve_telegram_bot(
+    loaded: &mosaic_config::LoadedMosaicConfig,
+    requested: Option<&str>,
+) -> Result<SelectedTelegramBot> {
+    if loaded.config.telegram.bots.is_empty() {
+        let requested = requested.unwrap_or("default");
+        if !matches!(requested, "default" | "telegram") {
+            bail!(
+                "telegram bot '{}' is not configured; this workspace uses the legacy single-bot adapter",
+                requested
+            );
+        }
+        return Ok(SelectedTelegramBot {
+            name: "default".to_owned(),
+            route_key: "default".to_owned(),
+            webhook_path: "/ingress/telegram".to_owned(),
+            bot_token_env: "MOSAIC_TELEGRAM_BOT_TOKEN".to_owned(),
+            webhook_secret_token_env: loaded.config.auth.telegram_secret_token_env.clone(),
+            default_profile: None,
+            legacy: true,
+        });
+    }
+
+    let enabled = loaded
+        .config
+        .telegram
+        .bots
+        .iter()
+        .filter(|(_, bot)| bot.enabled)
+        .map(|(name, bot)| SelectedTelegramBot {
+            name: name.clone(),
+            route_key: bot.route_key(name),
+            webhook_path: bot.webhook_path(name),
+            bot_token_env: bot.bot_token_env.clone(),
+            webhook_secret_token_env: bot.webhook_secret_token_env.clone(),
+            default_profile: bot.default_profile.clone(),
+            legacy: false,
         })
+        .collect::<Vec<_>>();
+
+    match requested {
+        Some(name) => enabled
+            .into_iter()
+            .find(|bot| bot.name == name)
+            .ok_or_else(|| anyhow!("telegram bot '{}' is not enabled in workspace config", name)),
+        None if enabled.len() == 1 => Ok(enabled.into_iter().next().expect("single enabled bot")),
+        None => bail!("multiple telegram bots are configured; pass `--bot <name>` to choose one"),
+    }
 }
 
-fn resolve_telegram_webhook_url(explicit_url: Option<String>) -> Result<String> {
+fn telegram_client_for_bot(bot: &SelectedTelegramBot) -> Result<TelegramOutboundClient> {
+    let token = if bot.legacy {
+        env::var("MOSAIC_TELEGRAM_BOT_TOKEN")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                env::var("TELEGRAM_BOT_TOKEN")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    } else {
+        env::var(&bot.bot_token_env)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+    };
+    let token = token.ok_or_else(|| {
+        anyhow!(
+            "Telegram bot token is not configured for bot `{}`; set {}",
+            bot.name,
+            bot.bot_token_env
+        )
+    })?;
+    let base_url = env::var("MOSAIC_TELEGRAM_API_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("TELEGRAM_API_BASE_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| "https://api.telegram.org".to_owned());
+    TelegramOutboundClient::new(token, base_url)
+}
+
+fn resolve_telegram_webhook_url(
+    bot: &SelectedTelegramBot,
+    explicit_url: Option<String>,
+) -> Result<String> {
     if let Some(url) = explicit_url {
         return Ok(url);
     }
@@ -207,20 +327,27 @@ fn resolve_telegram_webhook_url(explicit_url: Option<String>) -> Result<String> 
             )
         })?;
     Ok(format!(
-        "{}/ingress/telegram",
-        base_url.trim_end_matches('/')
+        "{}{}",
+        base_url.trim_end_matches('/'),
+        bot.webhook_path
     ))
 }
 
 fn resolve_telegram_secret_token(
     loaded: &mosaic_config::LoadedMosaicConfig,
+    bot: &SelectedTelegramBot,
     override_value: Option<String>,
 ) -> Result<Option<String>> {
     if let Some(value) = override_value {
         return Ok(Some(value));
     }
 
-    if let Some(env_name) = loaded.config.auth.telegram_secret_token_env.as_deref() {
+    let configured_env = bot.webhook_secret_token_env.as_deref().or(loaded
+        .config
+        .auth
+        .telegram_secret_token_env
+        .as_deref());
+    if let Some(env_name) = configured_env {
         let value = env::var(env_name)
             .ok()
             .filter(|value| !value.trim().is_empty())
@@ -275,18 +402,37 @@ async fn delete_telegram_webhook(
 
 async fn send_telegram_test_message(
     client: &TelegramOutboundClient,
+    bot: &SelectedTelegramBot,
     chat_id: i64,
     text: String,
     thread_id: Option<i64>,
     reply_to: Option<i64>,
 ) -> mosaic_control_protocol::ChannelDeliveryTrace {
+    let context = TelegramBotContext {
+        name: Some(bot.name.clone()),
+        route: Some(bot.route_key.clone()),
+        default_profile: bot.default_profile.clone(),
+        bot_token_env: Some(bot.bot_token_env.clone()),
+        bot_secret_env: bot.webhook_secret_token_env.clone(),
+    };
     client
-        .send_test_message(chat_id, text, thread_id, reply_to)
+        .send_test_message(chat_id, text, thread_id, reply_to, Some(&context))
         .await
 }
 
-fn print_telegram_webhook_info(label: &str, info: &TelegramWebhookInfo) -> Result<()> {
+fn print_telegram_webhook_info(
+    label: &str,
+    bot: &SelectedTelegramBot,
+    info: &TelegramWebhookInfo,
+) -> Result<()> {
     println!("{label}:");
+    println!("  bot: {}", bot.name);
+    println!("  route: {}", bot.route_key);
+    println!("  token_env: {}", bot.bot_token_env);
+    println!(
+        "  profile: {}",
+        bot.default_profile.as_deref().unwrap_or("<none>")
+    );
     println!("  url: {}", info.url);
     println!("  pending_update_count: {}", info.pending_update_count);
     println!("  has_custom_certificate: {}", info.has_custom_certificate);
@@ -312,6 +458,18 @@ mod tests {
 
     use super::*;
 
+    fn test_bot() -> SelectedTelegramBot {
+        SelectedTelegramBot {
+            name: "primary".to_owned(),
+            route_key: "primary".to_owned(),
+            webhook_path: "/ingress/telegram/primary".to_owned(),
+            bot_token_env: "MOSAIC_TELEGRAM_PRIMARY_BOT_TOKEN".to_owned(),
+            webhook_secret_token_env: Some("MOSAIC_TELEGRAM_PRIMARY_SECRET".to_owned()),
+            default_profile: Some("gpt-5.4-mini".to_owned()),
+            legacy: false,
+        }
+    }
+
     #[test]
     fn resolves_webhook_url_from_public_base_env() {
         // SAFETY: cli tests in this module do not concurrently mutate or read this env var.
@@ -321,8 +479,12 @@ mod tests {
                 "https://public.example.com/base/",
             );
         }
-        let url = resolve_telegram_webhook_url(None).expect("webhook url should resolve");
-        assert_eq!(url, "https://public.example.com/base/ingress/telegram");
+        let url =
+            resolve_telegram_webhook_url(&test_bot(), None).expect("webhook url should resolve");
+        assert_eq!(
+            url,
+            "https://public.example.com/base/ingress/telegram/primary"
+        );
         // SAFETY: cli tests in this module do not concurrently mutate or read this env var.
         unsafe {
             env::remove_var("MOSAIC_PUBLIC_WEBHOOK_BASE_URL");
@@ -418,6 +580,7 @@ mod tests {
 
         let client = TelegramOutboundClient::new("test-token", format!("http://{addr}"))
             .expect("telegram client should build");
+        let bot = test_bot();
 
         let info = set_telegram_webhook(
             &client,
@@ -439,9 +602,15 @@ mod tests {
             .await
             .expect("webhook should delete");
 
-        let delivery =
-            send_telegram_test_message(&client, 42, "hello from cli".to_owned(), Some(7), None)
-                .await;
+        let delivery = send_telegram_test_message(
+            &client,
+            &bot,
+            42,
+            "hello from cli".to_owned(),
+            Some(7),
+            None,
+        )
+        .await;
         assert_eq!(delivery.result.status, ChannelDeliveryStatus::Delivered);
 
         let requests = requests.lock().await;

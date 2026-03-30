@@ -278,6 +278,10 @@ impl AgentRuntime {
                     .ingress
                     .as_ref()
                     .and_then(|ingress| ingress.channel.clone()),
+                ingress_bot_name: req
+                    .ingress
+                    .as_ref()
+                    .and_then(|ingress| ingress.bot_name.clone()),
                 attachments: attachments.clone(),
                 tool_traces: tool_traces.clone(),
                 skill_traces: skill_traces.clone(),

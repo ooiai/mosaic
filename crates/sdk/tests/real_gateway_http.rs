@@ -93,6 +93,7 @@ fn build_components(root: &Path) -> GatewayRuntimeComponents {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        telegram: config.telegram.clone(),
         app_name: None,
         tools: Arc::new(tools),
         skills: Arc::new(skills),

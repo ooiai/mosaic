@@ -106,6 +106,7 @@ impl ChannelCommandEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChannelCommandContext {
     pub(crate) channel: String,
+    pub(crate) bot_name: Option<String>,
     pub(crate) session_id: Option<String>,
     pub(crate) profile: String,
 }
@@ -113,6 +114,9 @@ pub(crate) struct ChannelCommandContext {
 impl ChannelCommandContext {
     pub(crate) fn scope_label(&self) -> String {
         let mut parts = vec![format!("channel={}", self.channel)];
+        if let Some(bot_name) = self.bot_name.as_deref() {
+            parts.push(format!("bot={bot_name}"));
+        }
         if let Some(session_id) = self.session_id.as_deref() {
             parts.push(format!("session={session_id}"));
         }
@@ -198,6 +202,7 @@ pub(crate) fn build_command_catalog(
         .filter(|entry| {
             selected_category.map_or(true, |category| entry.category == category)
                 && entry.visible_in(&context.channel, &components.policies)
+                && entry_visible_for_bot(entry, components, context)
         })
         .collect();
 
@@ -205,6 +210,45 @@ pub(crate) fn build_command_catalog(
         selected_category,
         scope: context.scope_label(),
         entries,
+    }
+}
+
+fn entry_visible_for_bot(
+    entry: &ChannelCommandEntry,
+    components: &GatewayRuntimeComponents,
+    context: &ChannelCommandContext,
+) -> bool {
+    let Some(bot) = context
+        .bot_name
+        .as_deref()
+        .and_then(|name| resolved_telegram_bot_by_name(components, Some(name)))
+    else {
+        return true;
+    };
+
+    match entry.kind {
+        ChannelCommandKind::Tool => {
+            let tool_name = entry
+                .name
+                .strip_prefix("tool.")
+                .unwrap_or(entry.name.as_str());
+            bot.allows_tool(tool_name)
+        }
+        ChannelCommandKind::Skill => {
+            let skill_name = entry
+                .name
+                .strip_prefix("skill.")
+                .unwrap_or(entry.name.as_str());
+            bot.allows_skill(skill_name)
+        }
+        ChannelCommandKind::Workflow => {
+            let workflow_name = entry
+                .name
+                .strip_prefix("workflow.")
+                .unwrap_or(entry.name.as_str());
+            bot.allows_workflow(workflow_name)
+        }
+        _ => true,
     }
 }
 
@@ -668,6 +712,7 @@ mod tests {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
             skills: Arc::new(skills),
@@ -698,6 +743,7 @@ mod tests {
             &components,
             &ChannelCommandContext {
                 channel: "webchat".to_owned(),
+                bot_name: None,
                 session_id: Some("demo".to_owned()),
                 profile: "demo-provider".to_owned(),
             },
@@ -726,6 +772,7 @@ mod tests {
             &components,
             &ChannelCommandContext {
                 channel: "telegram".to_owned(),
+                bot_name: None,
                 session_id: Some("demo".to_owned()),
                 profile: "demo-provider".to_owned(),
             },
@@ -746,6 +793,7 @@ mod tests {
             &components,
             &ChannelCommandContext {
                 channel: "telegram".to_owned(),
+                bot_name: None,
                 session_id: Some("telegram-42".to_owned()),
                 profile: "demo-provider".to_owned(),
             },

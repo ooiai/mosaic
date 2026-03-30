@@ -47,6 +47,20 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
         "telegram ingress secret token",
         false,
     ));
+    for (name, bot) in &config.telegram.bots {
+        checks.push(secret_env_check(
+            DoctorCategory::Auth,
+            Some(bot.bot_token_env.as_str()),
+            &format!("telegram bot '{}' token", name),
+            bot.enabled,
+        ));
+        checks.push(secret_env_check(
+            DoctorCategory::Auth,
+            bot.webhook_secret_token_env.as_deref(),
+            &format!("telegram bot '{}' webhook secret", name),
+            false,
+        ));
+    }
 
     for manifest in &config.extensions.manifests {
         let manifest_path = cwd.join(&manifest.path);

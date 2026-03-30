@@ -20,9 +20,7 @@ use axum::{
 };
 use chrono::Utc;
 use futures::stream;
-use mosaic_channel_telegram::{
-    TelegramOutboundClient, TelegramUpdate, normalize_update as normalize_telegram_update,
-};
+use mosaic_channel_telegram::TelegramUpdate;
 use mosaic_config::{
     AppConfig, AuditConfig, AuthConfig, DeploymentConfig, LoadConfigOptions, ObservabilityConfig,
     PolicyConfig, load_mosaic_config,
@@ -79,6 +77,7 @@ pub struct GatewayRuntimeComponents {
     pub memory_policy: MemoryPolicy,
     pub runtime_policy: mosaic_config::RuntimePolicyConfig,
     pub attachments: mosaic_config::AttachmentConfig,
+    pub telegram: mosaic_config::TelegramAdapterConfig,
     pub app_name: Option<String>,
     pub tools: Arc<ToolRegistry>,
     pub skills: Arc<SkillRegistry>,
@@ -107,6 +106,7 @@ impl GatewayRuntimeComponents {
             memory_policy: self.memory_policy.clone(),
             runtime_policy: self.runtime_policy.clone(),
             attachments: self.attachments.clone(),
+            telegram: self.telegram.clone(),
             app_name: self.app_name.clone(),
             tools: self.tools.clone(),
             skills: self.skills.clone(),
@@ -805,6 +805,7 @@ impl GatewayHandle {
             memory_policy: current.memory_policy.clone(),
             runtime_policy: current.runtime_policy.clone(),
             attachments: loaded.config.attachments.clone(),
+            telegram: loaded.config.telegram.clone(),
             app_name: source
                 .app_config
                 .as_ref()
@@ -860,11 +861,10 @@ impl GatewayHandle {
     }
 
     pub fn list_adapter_statuses(&self) -> Vec<AdapterStatusDto> {
-        let auth = self.snapshot_components().auth;
-        vec![
-            webchat_adapter_status(&auth),
-            telegram_adapter_status(&auth),
-        ]
+        let components = self.snapshot_components();
+        let mut adapters = vec![webchat_adapter_status(&components.auth)];
+        adapters.extend(telegram_adapter_statuses(&components));
+        adapters
     }
 
     pub fn load_session(&self, id: &str) -> Result<Option<SessionRecord>> {
@@ -990,6 +990,11 @@ impl GatewayHandle {
                 kind: "cron".to_owned(),
                 channel: Some("cron".to_owned()),
                 adapter: Some("cron_schedule".to_owned()),
+                bot_name: None,
+                bot_route: None,
+                bot_profile: None,
+                bot_token_env: None,
+                bot_secret_env: None,
                 source: Some(registration.id.clone()),
                 remote_addr: None,
                 display_name: None,
@@ -1569,6 +1574,10 @@ fn build_outbound_message(meta: &GatewayRunMeta, output: &str) -> Option<Channel
     Some(ChannelOutboundMessage {
         channel,
         adapter,
+        bot_name: ingress.bot_name.clone(),
+        bot_route: ingress.bot_route.clone(),
+        bot_profile: ingress.bot_profile.clone(),
+        bot_token_env: ingress.bot_token_env.clone(),
         conversation_id,
         reply_target,
         text: output.to_owned(),
@@ -1580,7 +1589,7 @@ fn build_outbound_message(meta: &GatewayRunMeta, output: &str) -> Option<Channel
 }
 
 async fn dispatch_outbound_replies(
-    _state: &GatewayState,
+    state: &GatewayState,
     meta: &GatewayRunMeta,
     output: &str,
 ) -> Vec<ChannelDeliveryTrace> {
@@ -1589,14 +1598,42 @@ async fn dispatch_outbound_replies(
     };
 
     match message.channel.as_str() {
-        "telegram" => vec![dispatch_telegram_reply(message).await],
+        "telegram" => vec![dispatch_telegram_reply(state, message).await],
         _ => Vec::new(),
     }
 }
 
-async fn dispatch_telegram_reply(message: ChannelOutboundMessage) -> ChannelDeliveryTrace {
-    let Some(client) = TelegramOutboundClient::from_env().unwrap_or_else(|err| {
-        warn!(error = %err, "failed to initialize telegram outbound client");
+async fn dispatch_telegram_reply(
+    state: &GatewayState,
+    message: ChannelOutboundMessage,
+) -> ChannelDeliveryTrace {
+    let resolved_bot = match resolved_telegram_bot_by_name(
+        &state.snapshot_components(),
+        message.bot_name.as_deref(),
+    ) {
+        Some(bot) => bot,
+        None => {
+            return ChannelDeliveryTrace {
+                message,
+                result: mosaic_inspect::ChannelDeliveryResult {
+                    delivery_id: Uuid::new_v4().to_string(),
+                    status: mosaic_inspect::ChannelDeliveryStatus::Failed,
+                    provider_message_id: None,
+                    retry_count: 0,
+                    retryable: false,
+                    error_kind: Some("auth".to_owned()),
+                    error: Some(
+                        "telegram outbound reply could not resolve a configured bot instance"
+                            .to_owned(),
+                    ),
+                    delivered_at: None,
+                },
+            };
+        }
+    };
+
+    let Some(client) = telegram_outbound_client_for_bot(&resolved_bot).unwrap_or_else(|err| {
+        warn!(error = %err, bot = %resolved_bot.name, "failed to initialize telegram outbound client");
         None
     }) else {
         return ChannelDeliveryTrace {
@@ -1609,8 +1646,10 @@ async fn dispatch_telegram_reply(message: ChannelOutboundMessage) -> ChannelDeli
                 retryable: false,
                 error_kind: Some("auth".to_owned()),
                 error: Some(
-                    "telegram outbound replies require TELEGRAM_BOT_TOKEN or MOSAIC_TELEGRAM_BOT_TOKEN"
-                        .to_owned(),
+                    format!(
+                        "telegram outbound replies require configured env `{}` for bot `{}`",
+                        resolved_bot.bot_token_env, resolved_bot.name
+                    ),
                 ),
                 delivered_at: None,
             },

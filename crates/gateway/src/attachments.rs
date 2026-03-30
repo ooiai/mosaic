@@ -1,5 +1,5 @@
 use std::{
-    env, fs,
+    fs,
     path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
@@ -27,7 +27,7 @@ pub(crate) async fn prepare_submission_attachments(
     let mut failures = ingress.attachment_failures.clone();
     for attachment in ingress.attachments.clone() {
         let (attachment, attachment_failures) =
-            prepare_attachment(components, ingress.channel.as_deref(), attachment).await;
+            prepare_attachment(components, ingress, attachment).await;
         prepared.push(attachment);
         failures.extend(attachment_failures);
     }
@@ -44,7 +44,7 @@ pub(crate) async fn prepare_submission_attachments(
 
 async fn prepare_attachment(
     components: &GatewayRuntimeComponents,
-    channel: Option<&str>,
+    ingress: &IngressTrace,
     mut attachment: ChannelAttachment,
 ) -> (ChannelAttachment, Vec<AttachmentFailureTrace>) {
     let mut failures = Vec::new();
@@ -91,18 +91,18 @@ async fn prepare_attachment(
         return (attachment, failures);
     }
 
-    let Some(file_id) = telegram_file_id(channel, &attachment) else {
+    let Some(file_id) = telegram_file_id(ingress.channel.as_deref(), &attachment) else {
         return (attachment, failures);
     };
 
-    let client = match telegram_client(policy.download_timeout_ms) {
+    let client = match telegram_client(components, ingress, policy.download_timeout_ms) {
         Ok(Some(client)) => client,
         Ok(None) => {
             failures.push(AttachmentFailureTrace {
                 attachment_id: attachment.id.clone(),
                 stage: "download".to_owned(),
                 kind: "telegram_client_unavailable".to_owned(),
-                message: "telegram bot token is not configured".to_owned(),
+                message: "telegram bot token is not configured for this bot instance".to_owned(),
             });
             return (attachment, failures);
         }
@@ -229,29 +229,19 @@ fn telegram_file_id(channel: Option<&str>, attachment: &ChannelAttachment) -> Op
         .map(ToOwned::to_owned)
 }
 
-fn telegram_client(timeout_ms: u64) -> Result<Option<TelegramOutboundClient>> {
-    let bot_token = env::var("MOSAIC_TELEGRAM_BOT_TOKEN")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            env::var("TELEGRAM_BOT_TOKEN")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        });
-    let Some(bot_token) = bot_token else {
+fn telegram_client(
+    components: &GatewayRuntimeComponents,
+    ingress: &IngressTrace,
+    timeout_ms: u64,
+) -> Result<Option<TelegramOutboundClient>> {
+    let Some(bot) = resolved_telegram_bot_by_name(components, ingress.bot_name.as_deref()) else {
         return Ok(None);
     };
-    let base_url = env::var("MOSAIC_TELEGRAM_API_BASE_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "https://api.telegram.org".to_owned());
-    TelegramOutboundClient::new_with_settings(
-        bot_token,
-        base_url,
+    telegram_outbound_client_for_bot_with_settings(
+        &bot,
         Duration::from_millis(timeout_ms.max(1)),
         0,
     )
-    .map(Some)
 }
 
 fn cache_path_for_attachment(
@@ -391,6 +381,7 @@ mod tests {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(ToolRegistry::new()),
             skills: Arc::new(SkillRegistry::new()),
@@ -423,6 +414,11 @@ mod tests {
                 kind: "telegram".to_owned(),
                 channel: Some("telegram".to_owned()),
                 adapter: Some("telegram_webhook".to_owned()),
+                bot_name: None,
+                bot_route: None,
+                bot_profile: None,
+                bot_token_env: None,
+                bot_secret_env: None,
                 source: Some("telegram".to_owned()),
                 remote_addr: None,
                 display_name: Some("Operator".to_owned()),

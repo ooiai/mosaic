@@ -236,6 +236,10 @@ impl AgentRuntime {
                     .ingress
                     .as_ref()
                     .and_then(|ingress| ingress.channel.as_deref()),
+                trace
+                    .ingress
+                    .as_ref()
+                    .and_then(|ingress| ingress.bot_name.as_deref()),
             )?
         } else {
             Vec::new()

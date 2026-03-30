@@ -60,6 +60,7 @@ async fn runtime_executes_mock_provider_tool_loop_against_real_session_and_memor
         node_router: Some(Arc::new(FileNodeStore::new(root.join("nodes")))),
         active_extensions: vec![],
         attachments: MosaicConfig::default().attachments,
+        telegram: Default::default(),
         app_name: None,
         event_sink: shared_noop_event_sink(),
     };
