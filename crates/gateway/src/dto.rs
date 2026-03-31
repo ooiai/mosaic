@@ -106,7 +106,10 @@ pub fn cron_registration_dto(registration: &CronRegistration) -> CronRegistratio
     }
 }
 
-pub fn session_detail_dto(session: &SessionRecord) -> SessionDetailDto {
+pub fn session_detail_dto(
+    session: &SessionRecord,
+    node_binding: Option<NodeBindingDto>,
+) -> SessionDetailDto {
     SessionDetailDto {
         id: session.id.clone(),
         title: session.title.clone(),
@@ -123,6 +126,7 @@ pub fn session_detail_dto(session: &SessionRecord) -> SessionDetailDto {
             last_gateway_run_id: session.gateway.last_gateway_run_id.clone(),
             last_correlation_id: session.gateway.last_correlation_id.clone(),
         },
+        node_binding,
         memory_summary: session.memory.latest_summary.clone(),
         compressed_context: session.memory.compressed_context.clone(),
         references: session

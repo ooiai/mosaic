@@ -314,11 +314,35 @@ Start a local node:
 mosaic node serve --id laptop
 ```
 
+Detach a session-specific node binding:
+
+```bash
+mosaic node detach --session docs-demo
+```
+
+Detach the default node binding:
+
+```bash
+mosaic node detach --default
+```
+
+Remove offline or stale node registrations:
+
+```bash
+mosaic node prune --stale
+```
+
 List nodes:
 
 ```bash
 mosaic node list
 ```
+
+Important:
+
+- Telegram baseline does not require node
+- node is optional
+- local tools fall back to local execution when no healthy node is available
 
 ## Delivery and Release
 

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const DEFAULT_STALE_AFTER_SECS: i64 = 15;
-const DEFAULT_AFFINITY_KEY: &str = "__default__";
+pub const DEFAULT_AFFINITY_KEY: &str = "__default__";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -232,11 +232,43 @@ pub struct NodeToolExecutionResult {
     pub result: ToolResult,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeDispatchFailureClass {
+    NoEligibleNode,
+    Unavailable,
+    Stale,
+    Transport,
+    PermissionDenied,
+    RemoteExecutionFailed,
+}
+
+impl NodeDispatchFailureClass {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NoEligibleNode => "no_eligible_node",
+            Self::Unavailable => "node_unavailable",
+            Self::Stale => "node_stale",
+            Self::Transport => "node_transport_failed",
+            Self::PermissionDenied => "node_permission_denied",
+            Self::RemoteExecutionFailed => "node_remote_execution_failed",
+        }
+    }
+
+    pub fn allows_local_fallback(self) -> bool {
+        matches!(
+            self,
+            Self::NoEligibleNode | Self::Unavailable | Self::Stale | Self::Transport
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct NodeToolExecutionError {
     pub node_id: Option<String>,
     pub route: Option<String>,
     pub disconnect_context: Option<String>,
+    pub failure_class: NodeDispatchFailureClass,
     pub message: String,
 }
 
@@ -331,6 +363,36 @@ impl FileNodeStore {
         self.attach_session(DEFAULT_AFFINITY_KEY, node_id)
     }
 
+    pub fn detach_session(&self, session_id: &str) -> Result<bool> {
+        self.ensure_layout()?;
+        let path = self.affinity_path(session_id);
+        if !path.exists() {
+            return Ok(false);
+        }
+        fs::remove_file(path)?;
+        Ok(true)
+    }
+
+    pub fn detach_default(&self) -> Result<bool> {
+        self.detach_session(DEFAULT_AFFINITY_KEY)
+    }
+
+    pub fn list_affinities(&self) -> Result<Vec<NodeAffinityRecord>> {
+        self.ensure_layout()?;
+        let mut records: Vec<NodeAffinityRecord> = Vec::new();
+        for entry in fs::read_dir(self.affinity_dir())? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                let path = entry.path();
+                if path.extension().and_then(|value| value.to_str()) == Some("json") {
+                    records.push(read_json(&path)?);
+                }
+            }
+        }
+        records.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        Ok(records)
+    }
+
     pub fn affinity_for_session(
         &self,
         session_id: Option<&str>,
@@ -341,6 +403,23 @@ impl FileNodeStore {
             }
         }
         self.read_affinity(DEFAULT_AFFINITY_KEY)
+    }
+
+    pub fn prune_stale_nodes(&self) -> Result<Vec<NodeRegistration>> {
+        self.ensure_layout()?;
+        let now = Utc::now();
+        let mut removed = Vec::new();
+        for node in self.list_nodes()? {
+            if node.health(now, self.stale_after_secs) == NodeHealth::Online {
+                continue;
+            }
+            let path = self.registry_path(&node.node_id);
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
+            removed.push(node);
+        }
+        Ok(removed)
     }
 
     pub fn node_capabilities(&self, node_id: &str) -> Result<Vec<NodeCapabilityDeclaration>> {
@@ -545,6 +624,7 @@ impl NodeRouter for FileNodeStore {
                     node_id: None,
                     route: None,
                     disconnect_context: None,
+                    failure_class: NodeDispatchFailureClass::PermissionDenied,
                     message: err.to_string(),
                 }));
             }
@@ -558,6 +638,7 @@ impl NodeRouter for FileNodeStore {
                     node_id: Some(selection.registration.node_id.clone()),
                     route: Some(selection.route.clone()),
                     disconnect_context: selection.registration.last_disconnect_reason.clone(),
+                    failure_class: NodeDispatchFailureClass::Unavailable,
                     message: format!("node unavailable: {}", selection.registration.node_id),
                 }));
             }
@@ -566,6 +647,7 @@ impl NodeRouter for FileNodeStore {
                     node_id: Some(selection.registration.node_id.clone()),
                     route: Some(selection.route.clone()),
                     disconnect_context: selection.registration.last_disconnect_reason.clone(),
+                    failure_class: NodeDispatchFailureClass::Stale,
                     message: format!("node stale: {}", selection.registration.node_id),
                 }));
             }
@@ -580,9 +662,21 @@ impl NodeRouter for FileNodeStore {
             request.input,
         );
         self.dispatch_command(&dispatch)?;
-        let result = self
+        let result = match self
             .await_result(&dispatch.command_id, request.timeout)
-            .await?;
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => {
+                return Ok(NodeToolDispatchOutcome::Failed(NodeToolExecutionError {
+                    node_id: Some(selection.registration.node_id.clone()),
+                    route: Some(selection.route),
+                    disconnect_context: selection.registration.last_disconnect_reason.clone(),
+                    failure_class: NodeDispatchFailureClass::Transport,
+                    message: err.to_string(),
+                }));
+            }
+        };
 
         if result.status != "success" {
             let error = result
@@ -593,6 +687,7 @@ impl NodeRouter for FileNodeStore {
                 node_id: Some(result.node_id),
                 route: Some(selection.route),
                 disconnect_context: result.disconnect_context,
+                failure_class: NodeDispatchFailureClass::RemoteExecutionFailed,
                 message: error,
             }));
         }
@@ -776,5 +871,98 @@ mod tests {
                 .health(Utc::now(), DEFAULT_STALE_AFTER_SECS),
             NodeHealth::Stale
         );
+    }
+
+    #[test]
+    fn detach_and_list_affinities_roundtrip() {
+        let store = temp_store("detach");
+        let registration = NodeRegistration::new(
+            "node-a",
+            "Headless Node",
+            "file",
+            "headless",
+            vec![exec_capability()],
+        );
+        store
+            .register_node(&registration)
+            .expect("registration should persist");
+        store
+            .attach_session("demo", "node-a")
+            .expect("session affinity should persist");
+        store
+            .attach_default("node-a")
+            .expect("default affinity should persist");
+
+        let affinities = store.list_affinities().expect("affinities should list");
+        assert_eq!(affinities.len(), 2);
+        assert!(
+            affinities
+                .iter()
+                .any(|record| record.session_id == DEFAULT_AFFINITY_KEY)
+        );
+        assert!(
+            store
+                .detach_session("demo")
+                .expect("session affinity should detach")
+        );
+        assert!(
+            store
+                .detach_default()
+                .expect("default affinity should detach")
+        );
+        assert!(
+            !store
+                .detach_session("missing")
+                .expect("missing affinity should return false")
+        );
+        assert!(
+            store
+                .list_affinities()
+                .expect("affinities should reload")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn prune_stale_nodes_removes_offline_and_stale_registrations() {
+        let store = temp_store("prune");
+        let online = NodeRegistration::new(
+            "node-online",
+            "Online Node",
+            "file",
+            "headless",
+            vec![exec_capability()],
+        );
+        let mut stale = NodeRegistration::new(
+            "node-stale",
+            "Stale Node",
+            "file",
+            "headless",
+            vec![exec_capability()],
+        );
+        stale.last_heartbeat_at = Utc::now() - chrono::Duration::seconds(60);
+        let mut offline = NodeRegistration::new(
+            "node-offline",
+            "Offline Node",
+            "file",
+            "headless",
+            vec![exec_capability()],
+        );
+        offline.disconnect("operator_shutdown");
+
+        store.register_node(&online).expect("online should persist");
+        store.register_node(&stale).expect("stale should persist");
+        store
+            .register_node(&offline)
+            .expect("offline should persist");
+
+        let removed = store.prune_stale_nodes().expect("prune should succeed");
+        assert_eq!(removed.len(), 2);
+        assert!(removed.iter().any(|node| node.node_id == "node-stale"));
+        assert!(removed.iter().any(|node| node.node_id == "node-offline"));
+
+        let remaining = store.list_nodes().expect("nodes should reload");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].node_id, "node-online");
     }
 }

@@ -251,7 +251,13 @@ async fn http_get_session(
         .load_session(&id)
         .map_err(http_internal_error)?;
     match session {
-        Some(session) => Ok(Json(session_detail_dto(&session))),
+        Some(session) => Ok(Json(session_detail_dto(
+            &session,
+            state
+                .gateway
+                .node_binding(Some(&id))
+                .map_err(http_internal_error)?,
+        ))),
         None => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {

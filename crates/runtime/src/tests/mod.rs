@@ -22,8 +22,8 @@ use mosaic_session_core::{
 };
 use mosaic_skill_core::{SkillOutput, SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{
-    CapabilityKind, PermissionScope, ReadFileTool, TimeNowTool, Tool, ToolMetadata, ToolRegistry,
-    ToolResult, ToolRiskLevel, ToolSource,
+    CapabilityKind, CapabilityMetadata, PermissionScope, ReadFileTool, TimeNowTool, Tool,
+    ToolMetadata, ToolRegistry, ToolResult, ToolRiskLevel, ToolSource,
 };
 use mosaic_workflow::{Workflow, WorkflowRegistry, WorkflowStep, WorkflowStepKind};
 
@@ -368,6 +368,49 @@ impl Tool for FakeMcpReadFileTool {
             is_error: false,
             audit: None,
         })
+    }
+}
+
+struct RequiredNodeTool {
+    meta: ToolMetadata,
+}
+
+impl RequiredNodeTool {
+    fn new() -> Self {
+        Self {
+            meta: ToolMetadata::builtin(
+                "require_node_echo",
+                "Only runs through a node route",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string" }
+                    }
+                }),
+            )
+            .with_capability(CapabilityMetadata::exec().with_node_route(
+                "exec_command",
+                true,
+                true,
+            )),
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for RequiredNodeTool {
+    fn metadata(&self) -> &ToolMetadata {
+        &self.meta
+    }
+
+    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+        Ok(ToolResult::ok(format!(
+            "local fallback should not happen: {}",
+            input
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("missing")
+        )))
     }
 }
 
@@ -1468,6 +1511,230 @@ async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
         Some("session_affinity")
     );
     assert!(result.output.contains("node-routed contents"));
+}
+
+#[tokio::test]
+async fn node_preferred_read_file_falls_back_to_local_when_matching_node_is_offline() {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let workspace_root = std::env::temp_dir().join(format!(
+        "mosaic-runtime-node-fallback-tests-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+    let path = workspace_root.join("README.md");
+    std::fs::write(&path, "local fallback contents").expect("README should be written");
+
+    let mut tools = ToolRegistry::new();
+    tools.register(Arc::new(ReadFileTool::new_with_allowed_roots(vec![
+        workspace_root.clone(),
+    ])));
+    let node_store = Arc::new(FileNodeStore::new(workspace_root.join(".mosaic/nodes")));
+    let mut registration = NodeRegistration::new(
+        "node-offline",
+        "Offline Node",
+        "file-bus",
+        "headless",
+        vec![NodeCapabilityDeclaration {
+            name: "read_file".to_owned(),
+            kind: CapabilityKind::File,
+            permission_scopes: vec![PermissionScope::LocalRead],
+            risk: ToolRiskLevel::Low,
+        }],
+    );
+    registration.disconnect("operator_shutdown");
+    node_store
+        .register_node(&registration)
+        .expect("node registration should persist");
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(profiles),
+        provider_override: Some(Arc::new(MockProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        telegram: Default::default(),
+        app_name: None,
+        tools: Arc::new(tools),
+        skills: Arc::new(SkillRegistry::new()),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: Some(node_store),
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let outcome = runtime
+        .invoke_tool_with_guardrails(
+            Some("fallback-demo"),
+            "read_file".to_owned(),
+            "call-1".to_owned(),
+            serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+        )
+        .await
+        .expect("read_file should fall back locally");
+
+    assert_eq!(outcome.output, "local fallback contents");
+    assert_eq!(outcome.tool_trace.effective_execution_target, "local");
+    assert!(outcome.tool_trace.node_attempted);
+    assert!(outcome.tool_trace.node_fallback_to_local);
+    assert_eq!(
+        outcome.tool_trace.node_failure_class.as_deref(),
+        Some("node_unavailable")
+    );
+    assert_eq!(outcome.tool_trace.node_id.as_deref(), Some("node-offline"));
+    assert_eq!(
+        outcome.tool_trace.capability_route.as_deref(),
+        Some("capability_match")
+    );
+    assert_eq!(outcome.capability_trace.effective_execution_target, "local");
+    assert!(outcome.capability_trace.node_fallback_to_local);
+    assert_eq!(
+        outcome.capability_trace.node_failure_class.as_deref(),
+        Some("node_unavailable")
+    );
+    assert!(
+        outcome
+            .capability_trace
+            .summary
+            .contains("fallback_to_local=true")
+    );
+}
+
+#[tokio::test]
+async fn require_node_tool_does_not_fall_back_when_no_node_is_available() {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let workspace_root = std::env::temp_dir().join(format!(
+        "mosaic-runtime-node-required-tests-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+
+    let mut tools = ToolRegistry::new();
+    tools.register(Arc::new(RequiredNodeTool::new()));
+    let node_store = Arc::new(FileNodeStore::new(workspace_root.join(".mosaic/nodes")));
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(profiles),
+        provider_override: Some(Arc::new(MockProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        telegram: Default::default(),
+        app_name: None,
+        tools: Arc::new(tools),
+        skills: Arc::new(SkillRegistry::new()),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: Some(node_store),
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let failure = runtime
+        .invoke_tool_with_guardrails(
+            Some("required-demo"),
+            "require_node_echo".to_owned(),
+            "call-required".to_owned(),
+            serde_json::json!({ "text": "hello" }),
+        )
+        .await
+        .expect_err("require_node tool should fail without a node");
+
+    let tool_trace = failure.tool_trace.expect("tool trace should exist");
+    assert_eq!(tool_trace.effective_execution_target, "node");
+    assert!(tool_trace.node_attempted);
+    assert!(!tool_trace.node_fallback_to_local);
+    assert_eq!(
+        tool_trace.node_failure_class.as_deref(),
+        Some("no_eligible_node")
+    );
+}
+
+#[tokio::test]
+async fn permission_denied_affinity_does_not_fall_back_to_local_execution() {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    let profiles =
+        ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
+    let workspace_root = std::env::temp_dir().join(format!(
+        "mosaic-runtime-node-permission-tests-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&workspace_root).expect("workspace root should be created");
+    let path = workspace_root.join("README.md");
+    std::fs::write(&path, "permission denied contents").expect("README should be written");
+
+    let mut tools = ToolRegistry::new();
+    tools.register(Arc::new(ReadFileTool::new_with_allowed_roots(vec![
+        workspace_root.clone(),
+    ])));
+    let node_store = Arc::new(FileNodeStore::new(workspace_root.join(".mosaic/nodes")));
+    node_store
+        .register_node(&NodeRegistration::new(
+            "node-exec-only",
+            "Exec Only",
+            "file-bus",
+            "headless",
+            vec![NodeCapabilityDeclaration {
+                name: "exec_command".to_owned(),
+                kind: CapabilityKind::Exec,
+                permission_scopes: vec![PermissionScope::LocalExec],
+                risk: ToolRiskLevel::High,
+            }],
+        ))
+        .expect("node registration should persist");
+    node_store
+        .attach_session("permission-demo", "node-exec-only")
+        .expect("session affinity should persist");
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(profiles),
+        provider_override: Some(Arc::new(MockProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        telegram: Default::default(),
+        app_name: None,
+        tools: Arc::new(tools),
+        skills: Arc::new(SkillRegistry::new()),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: Some(node_store),
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let failure = runtime
+        .invoke_tool_with_guardrails(
+            Some("permission-demo"),
+            "read_file".to_owned(),
+            "call-permission".to_owned(),
+            serde_json::json!({
+                "path": path.display().to_string(),
+            }),
+        )
+        .await
+        .expect_err("permission denied should not fall back to local execution");
+
+    let tool_trace = failure.tool_trace.expect("tool trace should exist");
+    assert_eq!(tool_trace.effective_execution_target, "node");
+    assert!(tool_trace.node_attempted);
+    assert!(!tool_trace.node_fallback_to_local);
+    assert_eq!(
+        tool_trace.node_failure_class.as_deref(),
+        Some("node_permission_denied")
+    );
 }
 
 #[tokio::test]

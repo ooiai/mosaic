@@ -6,7 +6,7 @@ pub(crate) async fn node_cmd(command: NodeCliCommand) -> Result<()> {
         NodeCliCommand::List => {
             let loaded = ensure_loaded_config(None)?;
             let gateway = build_gateway_handle(&loaded, None)?;
-            print_node_list(&gateway.list_nodes()?)
+            print_node_list(&gateway.list_nodes()?, &gateway.list_node_affinities()?)
         }
         NodeCliCommand::Attach { node_id, session } => {
             let loaded = ensure_loaded_config(None)?;
@@ -16,6 +16,87 @@ pub(crate) async fn node_cmd(command: NodeCliCommand) -> Result<()> {
                 Some(session) => println!("attached node {} to session {}", node_id, session),
                 None => println!("attached node {} as the default node route", node_id),
             }
+            Ok(())
+        }
+        NodeCliCommand::Detach { session, default } => {
+            let loaded = ensure_loaded_config(None)?;
+            let gateway = build_gateway_handle(&loaded, None)?;
+            let detached = match (session.as_deref(), default) {
+                (Some(session_id), false) => {
+                    let detached = gateway.detach_node(Some(session_id))?;
+                    if detached {
+                        println!("detached node affinity from session {}", session_id);
+                    } else {
+                        println!("no node affinity found for session {}", session_id);
+                    }
+                    detached
+                }
+                (None, true) => {
+                    let detached = gateway.detach_node(None)?;
+                    if detached {
+                        println!("detached default node affinity");
+                    } else {
+                        println!("no default node affinity found");
+                    }
+                    detached
+                }
+                _ => anyhow::bail!("use exactly one of `--session <id>` or `--default`"),
+            };
+            if detached {
+                crate::print_next_steps(["mosaic node list"]);
+            }
+            Ok(())
+        }
+        NodeCliCommand::Prune { stale } => {
+            if !stale {
+                anyhow::bail!("use `mosaic node prune --stale` to remove offline or stale nodes");
+            }
+            let loaded = ensure_loaded_config(None)?;
+            let gateway = build_gateway_handle(&loaded, None)?;
+            let removed = gateway.prune_stale_nodes()?;
+            if removed.is_empty() {
+                println!("no offline or stale node registrations found");
+                return Ok(());
+            }
+
+            println!("pruned node registrations:");
+            for node in &removed {
+                println!(
+                    "  - {} | health={} | last_disconnect_reason={}",
+                    node.node_id,
+                    node.health(
+                        chrono::Utc::now(),
+                        mosaic_node_protocol::DEFAULT_STALE_AFTER_SECS,
+                    )
+                    .label(),
+                    node.last_disconnect_reason.as_deref().unwrap_or("<none>"),
+                );
+            }
+
+            let removed_ids = removed
+                .iter()
+                .map(|node| node.node_id.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            let dangling = gateway
+                .list_node_affinities()?
+                .into_iter()
+                .filter(|record| removed_ids.contains(record.node_id.as_str()))
+                .collect::<Vec<_>>();
+            if !dangling.is_empty() {
+                println!("dangling affinities:");
+                for record in dangling {
+                    println!(
+                        "  - {} -> {}",
+                        affinity_scope_label(&record.session_id),
+                        record.node_id,
+                    );
+                }
+                println!(
+                    "operator_hint: use `mosaic node detach --session <id>` or `mosaic node detach --default` to clear dangling affinity records"
+                );
+            }
+
+            crate::print_next_steps(["mosaic node list"]);
             Ok(())
         }
         NodeCliCommand::Capabilities { node_id } => {
@@ -142,7 +223,10 @@ async fn execute_headless_node_dispatch(
     node_store.complete_command(&envelope)
 }
 
-fn print_node_list(nodes: &[mosaic_node_protocol::NodeRegistration]) -> Result<()> {
+fn print_node_list(
+    nodes: &[mosaic_node_protocol::NodeRegistration],
+    affinities: &[mosaic_node_protocol::NodeAffinityRecord],
+) -> Result<()> {
     if nodes.is_empty() {
         println!("no nodes found");
         return Ok(());
@@ -166,11 +250,27 @@ fn print_node_list(nodes: &[mosaic_node_protocol::NodeRegistration]) -> Result<(
                 .join(","),
             node.last_heartbeat_at,
         );
+        let references = affinities
+            .iter()
+            .filter(|record| record.node_id == node.node_id)
+            .map(|record| affinity_scope_label(&record.session_id))
+            .collect::<Vec<_>>();
+        if !references.is_empty() {
+            println!("  affinities: {}", references.join(", "));
+        }
         if let Some(reason) = node.last_disconnect_reason.as_deref() {
             println!("  disconnect_reason: {}", reason);
         }
     }
     Ok(())
+}
+
+fn affinity_scope_label(session_id: &str) -> String {
+    if session_id == mosaic_node_protocol::DEFAULT_AFFINITY_KEY {
+        "default".to_owned()
+    } else {
+        format!("session:{}", session_id)
+    }
 }
 
 fn print_node_capabilities(

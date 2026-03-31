@@ -18,7 +18,9 @@ use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
     summarize_fragments,
 };
-use mosaic_node_protocol::{NodeRouter, NodeToolDispatchOutcome, NodeToolExecutionRequest};
+use mosaic_node_protocol::{
+    NodeDispatchFailureClass, NodeRouter, NodeToolDispatchOutcome, NodeToolExecutionRequest,
+};
 use mosaic_provider::{
     LlmProvider, Message, ProviderAttempt, ProviderError, ProviderProfile, ProviderProfileRegistry,
     ProviderTransportMetadata, Role, SchedulingIntent, SchedulingRequest, ToolDefinition,

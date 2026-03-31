@@ -33,6 +33,7 @@ pub(crate) async fn session_cmd(attach: Option<String>, command: SessionCommand)
             let session = gateway
                 .load_session(&id)?
                 .ok_or_else(|| anyhow!("session not found: {}", id))?;
+            let node_binding = gateway.node_binding(Some(&id))?;
 
             println!("id: {}", session.id);
             println!("title: {}", session.title);
@@ -99,7 +100,39 @@ pub(crate) async fn session_cmd(attach: Option<String>, command: SessionCommand)
                 "last_correlation_id: {:?}",
                 session.gateway.last_correlation_id
             );
+            println!(
+                "node_binding: {:?}",
+                node_binding.as_ref().map(|node| &node.node_id)
+            );
+            println!(
+                "node_affinity_scope: {:?}",
+                node_binding.as_ref().map(|node| &node.affinity_scope)
+            );
+            println!(
+                "node_health: {:?}",
+                node_binding.as_ref().map(|node| &node.health)
+            );
+            println!(
+                "node_last_heartbeat_at: {:?}",
+                node_binding
+                    .as_ref()
+                    .and_then(|node| node.last_heartbeat_at)
+            );
+            println!(
+                "node_last_disconnect_reason: {:?}",
+                node_binding
+                    .as_ref()
+                    .and_then(|node| node.last_disconnect_reason.as_deref())
+            );
             println!("message_count: {}", session.transcript.len());
+            if let Some(node_binding) = &node_binding {
+                if node_binding.health != "online" {
+                    println!(
+                        "node_operator_hint: Telegram baseline does not require node; use `mosaic node detach --session {}` or `mosaic node prune --stale` if this binding is no longer intentional",
+                        session.id
+                    );
+                }
+            }
             println!("memory_summary: {:?}", session.memory.latest_summary);
             println!(
                 "compressed_context: {:?}",
@@ -204,7 +237,44 @@ fn print_remote_session_detail(session: &SessionDetailDto) -> Result<()> {
         "last_correlation_id: {:?}",
         session.gateway.last_correlation_id
     );
+    println!(
+        "node_binding: {:?}",
+        session.node_binding.as_ref().map(|node| &node.node_id)
+    );
+    println!(
+        "node_affinity_scope: {:?}",
+        session
+            .node_binding
+            .as_ref()
+            .map(|node| &node.affinity_scope)
+    );
+    println!(
+        "node_health: {:?}",
+        session.node_binding.as_ref().map(|node| &node.health)
+    );
+    println!(
+        "node_last_heartbeat_at: {:?}",
+        session
+            .node_binding
+            .as_ref()
+            .and_then(|node| node.last_heartbeat_at)
+    );
+    println!(
+        "node_last_disconnect_reason: {:?}",
+        session
+            .node_binding
+            .as_ref()
+            .and_then(|node| node.last_disconnect_reason.as_deref())
+    );
     println!("message_count: {}", session.transcript.len());
+    if let Some(node_binding) = &session.node_binding {
+        if node_binding.health != "online" {
+            println!(
+                "node_operator_hint: Telegram baseline does not require node; use `mosaic node detach --session {}` or `mosaic node prune --stale` if this binding is no longer intentional",
+                session.id
+            );
+        }
+    }
     println!("memory_summary: {:?}", session.memory_summary);
     println!("compressed_context: {:?}", session.compressed_context);
     println!("reference_count: {}", session.references.len());

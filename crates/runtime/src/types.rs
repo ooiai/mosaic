@@ -6,23 +6,43 @@ pub(crate) type SharedSkillTraceCollector = Arc<Mutex<Vec<SkillTrace>>>;
 pub(crate) type SharedModelSelectionCollector = Arc<Mutex<Vec<ModelSelectionTrace>>>;
 pub(crate) type SharedCapabilityTraceCollector = Arc<Mutex<Vec<CapabilityInvocationTrace>>>;
 
+#[derive(Debug)]
 pub(crate) struct ToolExecutionOutcome {
     pub(crate) output: String,
     pub(crate) tool_trace: ToolTrace,
     pub(crate) capability_trace: CapabilityInvocationTrace,
 }
 
+#[derive(Debug)]
 pub(crate) struct ToolExecutionFailure {
     pub(crate) error: anyhow::Error,
     pub(crate) tool_trace: Option<ToolTrace>,
     pub(crate) capability_trace: Option<CapabilityInvocationTrace>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct NodeTraceContext {
     pub(crate) node_id: Option<String>,
     pub(crate) capability_route: Option<String>,
     pub(crate) disconnect_context: Option<String>,
+    pub(crate) node_attempted: bool,
+    pub(crate) node_fallback_to_local: bool,
+    pub(crate) node_failure_class: Option<String>,
+    pub(crate) effective_execution_target: String,
+}
+
+impl Default for NodeTraceContext {
+    fn default() -> Self {
+        Self {
+            node_id: None,
+            capability_route: None,
+            disconnect_context: None,
+            node_attempted: false,
+            node_fallback_to_local: false,
+            node_failure_class: None,
+            effective_execution_target: "local".to_owned(),
+        }
+    }
 }
 
 pub struct RuntimeContext {

@@ -396,6 +396,8 @@ pub struct SessionDetailDto {
     #[serde(default)]
     pub run: SessionRunDto,
     pub gateway: SessionGatewayDto,
+    #[serde(default)]
+    pub node_binding: Option<NodeBindingDto>,
     pub memory_summary: Option<String>,
     pub compressed_context: Option<String>,
     pub references: Vec<SessionReferenceDto>,
@@ -407,6 +409,15 @@ pub struct SessionGatewayDto {
     pub route: String,
     pub last_gateway_run_id: Option<String>,
     pub last_correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NodeBindingDto {
+    pub node_id: String,
+    pub affinity_scope: String,
+    pub health: String,
+    pub last_heartbeat_at: Option<DateTime<Utc>>,
+    pub last_disconnect_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

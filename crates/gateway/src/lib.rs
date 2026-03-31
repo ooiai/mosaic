@@ -30,9 +30,10 @@ use mosaic_control_protocol::{
     ChannelOutboundMessage, CronRegistrationDto, CronRegistrationRequest, ErrorResponse,
     EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
     GatewayAuditEventDto, GatewayEvent, HealthResponse, InboundMessage, IncidentBundleDto,
-    MetricsResponse, ReadinessResponse, ReplayWindowResponse, RunDetailDto, RunResponse,
-    RunSubmission, RunSummaryDto, SessionChannelDto, SessionDetailDto, SessionGatewayDto,
-    SessionRunDto, SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto, WebhookJobRequest,
+    MetricsResponse, NodeBindingDto, ReadinessResponse, ReplayWindowResponse, RunDetailDto,
+    RunResponse, RunSubmission, RunSummaryDto, SessionChannelDto, SessionDetailDto,
+    SessionGatewayDto, SessionRunDto, SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto,
+    WebhookJobRequest,
 };
 use mosaic_extension_core::{
     ExtensionStatus, ExtensionValidationReport, load_extension_set, validate_extension_set,
@@ -43,7 +44,10 @@ use mosaic_inspect::{
 };
 use mosaic_mcp_core::McpServerManager;
 use mosaic_memory::{MemoryPolicy, MemoryStore};
-use mosaic_node_protocol::{FileNodeStore, NodeCapabilityDeclaration, NodeRegistration};
+use mosaic_node_protocol::{
+    DEFAULT_AFFINITY_KEY, DEFAULT_STALE_AFTER_SECS, FileNodeStore, NodeAffinityRecord,
+    NodeCapabilityDeclaration, NodeRegistration,
+};
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry, public_error_message};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{RunError, RunResult, RuntimeContext};
@@ -888,6 +892,10 @@ impl GatewayHandle {
         self.snapshot_components().node_store.list_nodes()
     }
 
+    pub fn list_node_affinities(&self) -> Result<Vec<NodeAffinityRecord>> {
+        self.snapshot_components().node_store.list_affinities()
+    }
+
     pub fn node_capabilities(&self, node_id: &str) -> Result<Vec<NodeCapabilityDeclaration>> {
         self.snapshot_components()
             .node_store
@@ -902,6 +910,35 @@ impl GatewayHandle {
             .map(|record| record.node_id))
     }
 
+    pub fn node_binding(&self, session_id: Option<&str>) -> Result<Option<NodeBindingDto>> {
+        let components = self.snapshot_components();
+        let Some(affinity) = components.node_store.affinity_for_session(session_id)? else {
+            return Ok(None);
+        };
+        let registration = components.node_store.load_node(&affinity.node_id)?;
+        let (health, last_heartbeat_at, last_disconnect_reason) = match registration {
+            Some(node) => (
+                node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS)
+                    .label()
+                    .to_owned(),
+                Some(node.last_heartbeat_at),
+                node.last_disconnect_reason,
+            ),
+            None => ("missing".to_owned(), None, None),
+        };
+        Ok(Some(NodeBindingDto {
+            node_id: affinity.node_id,
+            affinity_scope: if affinity.session_id == DEFAULT_AFFINITY_KEY {
+                "default".to_owned()
+            } else {
+                "session".to_owned()
+            },
+            health,
+            last_heartbeat_at,
+            last_disconnect_reason,
+        }))
+    }
+
     pub fn attach_node(&self, node_id: &str, session_id: Option<&str>) -> Result<()> {
         let components = self.snapshot_components();
         if components.node_store.load_node(node_id)?.is_none() {
@@ -912,6 +949,18 @@ impl GatewayHandle {
             Some(session_id) => components.node_store.attach_session(session_id, node_id),
             None => components.node_store.attach_default(node_id),
         }
+    }
+
+    pub fn detach_node(&self, session_id: Option<&str>) -> Result<bool> {
+        let components = self.snapshot_components();
+        match session_id {
+            Some(session_id) => components.node_store.detach_session(session_id),
+            None => components.node_store.detach_default(),
+        }
+    }
+
+    pub fn prune_stale_nodes(&self) -> Result<Vec<NodeRegistration>> {
+        self.snapshot_components().node_store.prune_stale_nodes()
     }
 
     pub fn list_cron_registrations(&self) -> Result<Vec<CronRegistration>> {

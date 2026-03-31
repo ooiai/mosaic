@@ -2,6 +2,12 @@
 
 This guide is the beginner path for connecting Mosaic to a real Telegram bot.
 
+Important baseline:
+
+- this Telegram guide does not require `mosaic node serve`
+- local tools such as `read_file` work without a node
+- nodes are optional and only matter when you intentionally want device-local execution
+
 Use this when you want the exact order of operations:
 
 1. create the bot
@@ -142,6 +148,8 @@ What success should look like:
 
 If this step is red, do not continue to webhook registration yet.
 
+You do not need to start a node in this step.
+
 ## Step 5: Start the Gateway
 
 Start Mosaic on a stable local port:
@@ -172,8 +180,8 @@ If you want the fastest local test setup, you can start a temporary Cloudflare Q
 
 Official reference:
 
-- Cloudflare Quick Tunnels: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/
-- Cloudflare Tunnel setup: https://developers.cloudflare.com/tunnel/setup/
+- Cloudflare Quick Tunnels: <https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/>
+- Cloudflare Tunnel setup: <https://developers.cloudflare.com/tunnel/setup/>
 
 Start the tunnel:
 
@@ -199,8 +207,8 @@ If you prefer `ngrok`, start an HTTP endpoint that forwards to your local Mosaic
 
 Official reference:
 
-- ngrok webhook guide: https://ngrok.com/docs/guides/share-localhost/webhooks
-- ngrok HTTP endpoints: https://ngrok.com/docs/http
+- ngrok webhook guide: <https://ngrok.com/docs/guides/share-localhost/webhooks>
+- ngrok HTTP endpoints: <https://ngrok.com/docs/http>
 
 Start the tunnel:
 
@@ -378,6 +386,12 @@ Send this in Telegram:
 /mosaic tool read_file .mosaic/config.yaml
 ```
 
+Expected behavior:
+
+- if you have no node configured, Mosaic reads the file locally
+- if you intentionally registered a healthy node, Mosaic may prefer that node
+- if a node exists but is stale or offline, Mosaic falls back to local execution
+
 ### Manifest skill
 
 Send this in Telegram:
@@ -458,6 +472,41 @@ Check:
 - the bot has already been opened by that user or group
 - the thread id is correct if you are using a topic
 - the bot token is valid
+
+### Telegram is working, but `/mosaic tool read_file ...` reports a node problem
+
+This usually means Telegram itself is fine and Mosaic is receiving the webhook correctly.
+
+What happened instead is:
+
+- an old node is still registered under `.mosaic/nodes/registry`
+- or a session/default node affinity still points at an old node
+
+Check:
+
+```bash
+mosaic node list
+mosaic session show <session-id>
+```
+
+Clean it up with:
+
+```bash
+mosaic node prune --stale
+mosaic node detach --session <session-id>
+```
+
+If the stale binding is the default node route, use:
+
+```bash
+mosaic node detach --default
+```
+
+Remember:
+
+- Telegram baseline does not require node
+- node is optional
+- starting a node is only necessary if you intentionally want node-routed execution
 
 ### I changed my public URL
 

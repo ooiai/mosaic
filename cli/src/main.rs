@@ -437,6 +437,16 @@ enum NodeCliCommand {
         #[arg(long)]
         session: Option<String>,
     },
+    Detach {
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        default: bool,
+    },
+    Prune {
+        #[arg(long, help = "Remove offline or stale node registrations")]
+        stale: bool,
+    },
     Capabilities {
         node_id: Option<String>,
     },
@@ -956,6 +966,9 @@ next: run `mosaic setup doctor` and compare `.mosaic/config.yaml` with `docs/con
                 "{}",
                 output::render_doctor_report(&doctor, &redact_mosaic_config(&loaded.config))
             );
+            if let Ok(gateway) = build_gateway_handle(&loaded, None) {
+                print_node_diagnostics(&gateway)?;
+            }
 
             if doctor.has_errors() {
                 bail!(
@@ -1420,6 +1433,69 @@ fn print_gateway_status(
     println!(
         "{}",
         output::render_gateway_status(health, readiness, metrics)
+    );
+    Ok(())
+}
+
+fn print_node_diagnostics(gateway: &mosaic_gateway::GatewayHandle) -> Result<()> {
+    let nodes = gateway.list_nodes()?;
+    let affinities = gateway.list_node_affinities()?;
+    let unhealthy = nodes
+        .iter()
+        .filter(|node| {
+            node.health(
+                chrono::Utc::now(),
+                mosaic_node_protocol::DEFAULT_STALE_AFTER_SECS,
+            ) != mosaic_node_protocol::NodeHealth::Online
+        })
+        .collect::<Vec<_>>();
+    let dangling = affinities
+        .iter()
+        .filter(|record| !nodes.iter().any(|node| node.node_id == record.node_id))
+        .collect::<Vec<_>>();
+
+    if unhealthy.is_empty() && dangling.is_empty() {
+        return Ok(());
+    }
+
+    println!();
+    println!("node diagnostics:");
+    if !unhealthy.is_empty() {
+        for node in unhealthy {
+            println!(
+                "  [warning] node routing: {} is {} and still registered for capabilities {}",
+                node.node_id,
+                node.health(
+                    chrono::Utc::now(),
+                    mosaic_node_protocol::DEFAULT_STALE_AFTER_SECS,
+                )
+                .label(),
+                node.capabilities
+                    .iter()
+                    .map(|cap| cap.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+        }
+    }
+    if !dangling.is_empty() {
+        for record in dangling {
+            let scope = if record.session_id == mosaic_node_protocol::DEFAULT_AFFINITY_KEY {
+                "default".to_owned()
+            } else {
+                format!("session {}", record.session_id)
+            };
+            println!(
+                "  [warning] node affinity: {} still points to missing node {}",
+                scope, record.node_id
+            );
+        }
+    }
+    println!(
+        "  operator_hint: Telegram baseline does not require node; local tools fall back to local execution when no healthy node is available"
+    );
+    println!(
+        "  cleanup_hint: use `mosaic node list`, `mosaic node prune --stale`, and `mosaic node detach --session <id>` or `mosaic node detach --default`"
     );
     Ok(())
 }
@@ -2639,6 +2715,25 @@ mod tests {
                     node_id: "node-a".to_owned(),
                     session: Some("demo".to_owned()),
                 },
+            }
+        );
+
+        let cli = Cli::parse_from(["mosaic", "node", "detach", "--session", "demo"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Node {
+                command: super::NodeCliCommand::Detach {
+                    session: Some("demo".to_owned()),
+                    default: false,
+                },
+            }
+        );
+
+        let cli = Cli::parse_from(["mosaic", "node", "prune", "--stale"]);
+        assert_eq!(
+            cli.dispatch(),
+            DispatchCommand::Node {
+                command: super::NodeCliCommand::Prune { stale: true },
             }
         );
     }

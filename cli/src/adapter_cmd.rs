@@ -215,6 +215,11 @@ fn print_adapter_statuses(adapters: &[AdapterStatusDto]) -> Result<()> {
 fn print_adapter_doctor(adapters: &[AdapterStatusDto]) -> Result<()> {
     println!("adapter doctor:");
     print_adapter_statuses(adapters)?;
+    if adapters.iter().any(|adapter| adapter.channel == "telegram") {
+        println!(
+            "operator_note: Telegram baseline does not require node; node-preferred tools fall back locally when no healthy node is available"
+        );
+    }
     if adapters.iter().any(|adapter| adapter.status == "error") {
         bail!("adapter doctor found errors");
     }

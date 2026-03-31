@@ -64,11 +64,19 @@ pub struct ToolTrace {
     pub input: serde_json::Value,
     pub output: Option<String>,
     #[serde(default)]
+    pub node_attempted: bool,
+    #[serde(default)]
+    pub node_fallback_to_local: bool,
+    #[serde(default)]
+    pub node_failure_class: Option<String>,
+    #[serde(default)]
     pub node_id: Option<String>,
     #[serde(default)]
     pub capability_route: Option<String>,
     #[serde(default)]
     pub disconnect_context: Option<String>,
+    #[serde(default = "default_execution_target")]
+    pub effective_execution_target: String,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
 }
@@ -96,11 +104,19 @@ pub struct CapabilityInvocationTrace {
     pub summary: String,
     pub target: Option<String>,
     #[serde(default)]
+    pub node_attempted: bool,
+    #[serde(default)]
+    pub node_fallback_to_local: bool,
+    #[serde(default)]
+    pub node_failure_class: Option<String>,
+    #[serde(default)]
     pub node_id: Option<String>,
     #[serde(default)]
     pub capability_route: Option<String>,
     #[serde(default)]
     pub disconnect_context: Option<String>,
+    #[serde(default = "default_execution_target")]
+    pub effective_execution_target: String,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
@@ -114,6 +130,10 @@ impl CapabilityInvocationTrace {
                 .num_milliseconds()
         })
     }
+}
+
+fn default_execution_target() -> String {
+    "local".to_owned()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1047,9 +1067,13 @@ mod tests {
             source: ToolSource::Builtin,
             input: serde_json::json!({ "text": "hello" }),
             output: Some("hello".to_owned()),
+            node_attempted: false,
+            node_fallback_to_local: false,
+            node_failure_class: None,
             node_id: None,
             capability_route: None,
             disconnect_context: None,
+            effective_execution_target: "local".to_owned(),
             started_at: Utc::now(),
             finished_at: Some(Utc::now()),
         });
@@ -1154,9 +1178,13 @@ mod tests {
                 source: ToolSource::Builtin,
                 input: serde_json::json!({ "text": "hello" }),
                 output: Some("hello".to_owned()),
+                node_attempted: false,
+                node_fallback_to_local: false,
+                node_failure_class: None,
                 node_id: None,
                 capability_route: None,
                 disconnect_context: None,
+                effective_execution_target: "local".to_owned(),
                 started_at,
                 finished_at: Some(started_at + Duration::milliseconds(3)),
             }],

@@ -27,16 +27,51 @@ impl AgentRuntime {
             .await
     }
 
-    pub(crate) fn node_failure_status(message: &str) -> &'static str {
-        if message.contains("permission denied") {
-            "node_permission_denied"
-        } else if message.contains("node stale") {
-            "node_stale"
-        } else if message.contains("node unavailable") || message.contains("no node is available") {
-            "node_unavailable"
-        } else {
-            "failed"
+    pub(crate) fn node_failure_status(failure_class: NodeDispatchFailureClass) -> &'static str {
+        failure_class.label()
+    }
+
+    fn node_trace_for_execution(
+        execution: &mosaic_node_protocol::NodeToolExecutionResult,
+    ) -> NodeTraceContext {
+        NodeTraceContext {
+            node_id: Some(execution.node_id.clone()),
+            capability_route: Some(execution.route.clone()),
+            disconnect_context: execution.disconnect_context.clone(),
+            node_attempted: true,
+            node_fallback_to_local: false,
+            node_failure_class: None,
+            effective_execution_target: "node".to_owned(),
         }
+    }
+
+    fn node_trace_for_failure(
+        node_id: Option<String>,
+        capability_route: Option<String>,
+        disconnect_context: Option<String>,
+        failure_class: NodeDispatchFailureClass,
+        fallback_to_local: bool,
+    ) -> NodeTraceContext {
+        NodeTraceContext {
+            node_id,
+            capability_route,
+            disconnect_context,
+            node_attempted: true,
+            node_fallback_to_local: fallback_to_local,
+            node_failure_class: Some(failure_class.label().to_owned()),
+            effective_execution_target: if fallback_to_local {
+                "local".to_owned()
+            } else {
+                "node".to_owned()
+            },
+        }
+    }
+
+    fn should_fallback_from_node(
+        metadata: &ToolMetadata,
+        failure_class: NodeDispatchFailureClass,
+    ) -> bool {
+        !metadata.capability.node.require_node && failure_class.allows_local_fallback()
     }
 
     pub(crate) async fn invoke_tool_with_guardrails(
@@ -132,6 +167,8 @@ impl AgentRuntime {
 
         let attempts = usize::from(metadata.capability.execution.retry_limit) + 1;
         let timeout = Duration::from_millis(metadata.capability.execution.timeout_ms.max(1));
+        let node_router_available = self.ctx.node_router.is_some();
+        let mut local_node_trace: Option<NodeTraceContext> = None;
 
         if metadata.capability.routes_via_node() {
             match self
@@ -146,11 +183,7 @@ impl AgentRuntime {
             {
                 Ok(NodeToolDispatchOutcome::Completed(execution)) => {
                     let finished_at = Utc::now();
-                    let node_trace = NodeTraceContext {
-                        node_id: Some(execution.node_id),
-                        capability_route: Some(execution.route),
-                        disconnect_context: execution.disconnect_context,
-                    };
+                    let node_trace = Self::node_trace_for_execution(&execution);
                     let result = execution.result;
                     let output = result.content.clone();
                     let tool_trace = ToolTrace {
@@ -159,9 +192,13 @@ impl AgentRuntime {
                         source: metadata.source.clone(),
                         input: tool_input,
                         output: Some(output.clone()),
+                        node_attempted: node_trace.node_attempted,
+                        node_fallback_to_local: node_trace.node_fallback_to_local,
+                        node_failure_class: node_trace.node_failure_class.clone(),
                         node_id: node_trace.node_id.clone(),
                         capability_route: node_trace.capability_route.clone(),
                         disconnect_context: node_trace.disconnect_context.clone(),
+                        effective_execution_target: node_trace.effective_execution_target.clone(),
                         started_at,
                         finished_at: Some(finished_at),
                     };
@@ -195,36 +232,44 @@ impl AgentRuntime {
                     });
                 }
                 Ok(NodeToolDispatchOutcome::Failed(node_error)) => {
-                    let status = Self::node_failure_status(&node_error.message);
+                    let failure_class = node_error.failure_class;
+                    let status = Self::node_failure_status(failure_class);
                     let error = anyhow!(node_error.message.clone());
-                    let node_trace = NodeTraceContext {
-                        node_id: node_error.node_id,
-                        capability_route: node_error.route,
-                        disconnect_context: node_error.disconnect_context,
-                    };
-                    self.emit(RunEvent::CapabilityJobFailed {
-                        job_id: job_id.clone(),
-                        name: tool_name.clone(),
-                        error: error.to_string(),
-                    });
-                    self.emit(RunEvent::ToolFailed {
-                        name: tool_name.clone(),
-                        call_id: call_id.clone(),
-                        error: error.to_string(),
-                    });
-                    return Err(self.build_tool_failure(
-                        error,
-                        job_id,
-                        call_id,
-                        tool_name,
-                        &metadata,
-                        tool_input,
-                        started_at,
-                        None,
-                        None,
-                        Some(node_trace),
-                        status,
-                    ));
+                    let node_trace = Self::node_trace_for_failure(
+                        node_error.node_id,
+                        node_error.route,
+                        node_error.disconnect_context,
+                        failure_class,
+                        Self::should_fallback_from_node(&metadata, failure_class),
+                    );
+                    if Self::should_fallback_from_node(&metadata, failure_class) {
+                        local_node_trace = Some(node_trace.clone());
+                    }
+                    if local_node_trace.is_none() {
+                        self.emit(RunEvent::CapabilityJobFailed {
+                            job_id: job_id.clone(),
+                            name: tool_name.clone(),
+                            error: error.to_string(),
+                        });
+                        self.emit(RunEvent::ToolFailed {
+                            name: tool_name.clone(),
+                            call_id: call_id.clone(),
+                            error: error.to_string(),
+                        });
+                        return Err(self.build_tool_failure(
+                            error,
+                            job_id,
+                            call_id,
+                            tool_name,
+                            &metadata,
+                            tool_input,
+                            started_at,
+                            None,
+                            None,
+                            Some(node_trace),
+                            status,
+                        ));
+                    }
                 }
                 Ok(NodeToolDispatchOutcome::NotHandled) => {
                     if metadata.capability.node.require_node {
@@ -258,26 +303,64 @@ impl AgentRuntime {
                             started_at,
                             None,
                             None,
+                            Some(Self::node_trace_for_failure(
+                                None,
+                                None,
+                                None,
+                                NodeDispatchFailureClass::NoEligibleNode,
+                                false,
+                            )),
+                            Self::node_failure_status(NodeDispatchFailureClass::NoEligibleNode),
+                        ));
+                    }
+                    if node_router_available && metadata.capability.node.prefer_node {
+                        local_node_trace = Some(Self::node_trace_for_failure(
                             None,
-                            "node_unavailable",
+                            None,
+                            None,
+                            NodeDispatchFailureClass::NoEligibleNode,
+                            true,
                         ));
                     }
                 }
                 Err(err) => {
-                    self.emit(RunEvent::CapabilityJobFailed {
-                        job_id: job_id.clone(),
-                        name: tool_name.clone(),
-                        error: err.to_string(),
-                    });
-                    self.emit(RunEvent::ToolFailed {
-                        name: tool_name.clone(),
-                        call_id: call_id.clone(),
-                        error: err.to_string(),
-                    });
-                    return Err(self.build_tool_failure(
-                        err, job_id, call_id, tool_name, &metadata, tool_input, started_at, None,
-                        None, None, "failed",
-                    ));
+                    if Self::should_fallback_from_node(
+                        &metadata,
+                        NodeDispatchFailureClass::Transport,
+                    ) {
+                        local_node_trace = Some(Self::node_trace_for_failure(
+                            None,
+                            None,
+                            None,
+                            NodeDispatchFailureClass::Transport,
+                            true,
+                        ));
+                    }
+                    if local_node_trace.is_none() {
+                        self.emit(RunEvent::CapabilityJobFailed {
+                            job_id: job_id.clone(),
+                            name: tool_name.clone(),
+                            error: err.to_string(),
+                        });
+                        self.emit(RunEvent::ToolFailed {
+                            name: tool_name.clone(),
+                            call_id: call_id.clone(),
+                            error: err.to_string(),
+                        });
+                        return Err(self.build_tool_failure(
+                            err,
+                            job_id,
+                            call_id,
+                            tool_name,
+                            &metadata,
+                            tool_input,
+                            started_at,
+                            None,
+                            None,
+                            None,
+                            Self::node_failure_status(NodeDispatchFailureClass::Transport),
+                        ));
+                    }
                 }
             }
         }
@@ -294,9 +377,30 @@ impl AgentRuntime {
                         source: metadata.source.clone(),
                         input: tool_input,
                         output: Some(output.clone()),
-                        node_id: None,
-                        capability_route: None,
-                        disconnect_context: None,
+                        node_attempted: local_node_trace
+                            .as_ref()
+                            .map(|trace| trace.node_attempted)
+                            .unwrap_or(false),
+                        node_fallback_to_local: local_node_trace
+                            .as_ref()
+                            .map(|trace| trace.node_fallback_to_local)
+                            .unwrap_or(false),
+                        node_failure_class: local_node_trace
+                            .as_ref()
+                            .and_then(|trace| trace.node_failure_class.clone()),
+                        node_id: local_node_trace
+                            .as_ref()
+                            .and_then(|trace| trace.node_id.clone()),
+                        capability_route: local_node_trace
+                            .as_ref()
+                            .and_then(|trace| trace.capability_route.clone()),
+                        disconnect_context: local_node_trace
+                            .as_ref()
+                            .and_then(|trace| trace.disconnect_context.clone()),
+                        effective_execution_target: local_node_trace
+                            .as_ref()
+                            .map(|trace| trace.effective_execution_target.clone())
+                            .unwrap_or_else(|| "local".to_owned()),
                         started_at,
                         finished_at: Some(finished_at),
                     };
@@ -311,7 +415,7 @@ impl AgentRuntime {
                         "success",
                         None,
                         Some(output.as_str()),
-                        None,
+                        local_node_trace.as_ref(),
                     );
                     self.emit(RunEvent::CapabilityJobFinished {
                         job_id: job_id.clone(),
@@ -360,7 +464,7 @@ impl AgentRuntime {
                         started_at,
                         Some(result.content),
                         result.audit.as_ref(),
-                        None,
+                        local_node_trace.clone(),
                         "failed",
                     ));
                 }
@@ -385,8 +489,17 @@ impl AgentRuntime {
                         error: err.to_string(),
                     });
                     return Err(self.build_tool_failure(
-                        err, job_id, call_id, tool_name, &metadata, tool_input, started_at, None,
-                        None, None, "failed",
+                        err,
+                        job_id,
+                        call_id,
+                        tool_name,
+                        &metadata,
+                        tool_input,
+                        started_at,
+                        None,
+                        None,
+                        local_node_trace.clone(),
+                        "failed",
                     ));
                 }
                 Err(_) => {
@@ -424,7 +537,7 @@ impl AgentRuntime {
                         started_at,
                         None,
                         None,
-                        None,
+                        local_node_trace.clone(),
                         "timed_out",
                     ));
                 }
@@ -457,6 +570,17 @@ impl AgentRuntime {
             output: output
                 .clone()
                 .or_else(|| Some(format!("[runtime tool failure] {}", error))),
+            node_attempted: node_trace
+                .as_ref()
+                .map(|trace| trace.node_attempted)
+                .unwrap_or(false),
+            node_fallback_to_local: node_trace
+                .as_ref()
+                .map(|trace| trace.node_fallback_to_local)
+                .unwrap_or(false),
+            node_failure_class: node_trace
+                .as_ref()
+                .and_then(|trace| trace.node_failure_class.clone()),
             node_id: node_trace.as_ref().and_then(|trace| trace.node_id.clone()),
             capability_route: node_trace
                 .as_ref()
@@ -464,6 +588,10 @@ impl AgentRuntime {
             disconnect_context: node_trace
                 .as_ref()
                 .and_then(|trace| trace.disconnect_context.clone()),
+            effective_execution_target: node_trace
+                .as_ref()
+                .map(|trace| trace.effective_execution_target.clone())
+                .unwrap_or_else(|| "local".to_owned()),
             started_at,
             finished_at: Some(finished_at),
         };
@@ -501,10 +629,18 @@ impl AgentRuntime {
         fallback_summary: Option<&str>,
         node_trace: Option<&NodeTraceContext>,
     ) -> CapabilityInvocationTrace {
-        let summary = audit
+        let base_summary = audit
             .map(|audit| audit.side_effect_summary.clone())
             .or_else(|| fallback_summary.map(|value| Self::truncate_preview(value, 180)))
             .unwrap_or_else(|| format!("{} {}", tool_name, status));
+        let summary = match node_trace {
+            Some(trace) if trace.node_fallback_to_local => format!(
+                "{} | fallback_to_local=true | node_failure_class={}",
+                base_summary,
+                trace.node_failure_class.as_deref().unwrap_or("unknown")
+            ),
+            _ => base_summary,
+        };
 
         CapabilityInvocationTrace {
             job_id: job_id.to_owned(),
@@ -516,9 +652,19 @@ impl AgentRuntime {
             status: status.to_owned(),
             summary,
             target: audit.and_then(|audit| audit.target.clone()),
+            node_attempted: node_trace
+                .map(|trace| trace.node_attempted)
+                .unwrap_or(false),
+            node_fallback_to_local: node_trace
+                .map(|trace| trace.node_fallback_to_local)
+                .unwrap_or(false),
+            node_failure_class: node_trace.and_then(|trace| trace.node_failure_class.clone()),
             node_id: node_trace.and_then(|trace| trace.node_id.clone()),
             capability_route: node_trace.and_then(|trace| trace.capability_route.clone()),
             disconnect_context: node_trace.and_then(|trace| trace.disconnect_context.clone()),
+            effective_execution_target: node_trace
+                .map(|trace| trace.effective_execution_target.clone())
+                .unwrap_or_else(|| "local".to_owned()),
             started_at,
             finished_at: Some(finished_at),
             error,

@@ -1028,6 +1028,7 @@ mod tests {
                 last_gateway_run_id: Some("gateway-run-1".to_owned()),
                 last_correlation_id: Some("corr-1".to_owned()),
             },
+            node_binding: None,
             memory_summary: Some("Remote summary".to_owned()),
             compressed_context: Some("Remote compressed context".to_owned()),
             references: vec![mosaic_control_protocol::SessionReferenceDto {

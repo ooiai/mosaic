@@ -960,7 +960,7 @@ pub fn render_inspect_report(
                 .capability_invocations
                 .iter()
                 .map(|invocation| format!(
-                    "job_id={} | tool={} | kind={} | risk={} | status={} | scopes={} | target={} | node_id={} | route={} | duration_ms={} | error={} | summary={}",
+                    "job_id={} | tool={} | kind={} | risk={} | status={} | scopes={} | target={} | exec_target={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | duration_ms={} | error={} | summary={}",
                     invocation.job_id,
                     invocation.tool_name,
                     invocation.kind.label(),
@@ -977,6 +977,10 @@ pub fn render_inspect_report(
                             .join(", ")
                     },
                     option_string(invocation.target.clone()),
+                    invocation.effective_execution_target,
+                    invocation.node_attempted,
+                    invocation.node_fallback_to_local,
+                    option_string(invocation.node_failure_class.clone()),
                     option_string(invocation.node_id.clone()),
                     option_string(invocation.capability_route.clone()),
                     option_i64(invocation.duration_ms()),
@@ -1019,12 +1023,16 @@ pub fn render_inspect_report(
         for call in &trace.tool_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "call_id={} | name={} | source={} | server={} | remote_tool={} | node_id={} | route={} | duration_ms={} | input={} | output_preview={}",
+                "call_id={} | name={} | source={} | server={} | remote_tool={} | exec_target={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | duration_ms={} | input={} | output_preview={}",
                 option_string(call.call_id.clone()),
                 call.name,
                 call.source.label(),
                 option_str(call.source.server_name()),
                 option_str(call.source.remote_tool_name()),
+                call.effective_execution_target,
+                call.node_attempted,
+                call.node_fallback_to_local,
+                option_string(call.node_failure_class.clone()),
                 option_string(call.node_id.clone()),
                 option_string(call.capability_route.clone()),
                 option_i64(call.duration_ms()),
@@ -1928,9 +1936,13 @@ mod tests {
                 source: ToolSource::Builtin,
                 input: serde_json::json!({"text": "hello"}),
                 output: Some("hello".to_owned()),
+                node_attempted: false,
+                node_fallback_to_local: false,
+                node_failure_class: None,
                 node_id: None,
                 capability_route: None,
                 disconnect_context: None,
+                effective_execution_target: "local".to_owned(),
                 started_at,
                 finished_at: Some(finished_at),
             }],
