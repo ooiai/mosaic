@@ -1,9 +1,35 @@
-use std::sync::Arc;
+use std::{
+    fs, process,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use futures::executor::block_on;
 use mosaic_tool_core::{EchoTool, ToolRegistry};
 
-use crate::{ManifestSkillStep, SkillContext, SkillManifest, SkillRegistry, SummarizeSkill};
+use crate::{
+    ManifestSkillStep, MarkdownSkillPack, SkillContext, SkillManifest, SkillRegistry,
+    SkillSourceKind, SummarizeSkill,
+};
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn temp_dir(label: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "mosaic-skill-core-{label}-{}-{nanos}-{count}",
+        process::id()
+    ));
+    fs::create_dir_all(&path).expect("temp dir should exist");
+    path
+}
 
 #[test]
 fn summarize_skill_is_registered_and_returns_summary_text() {
@@ -70,4 +96,59 @@ fn manifest_skill_registers_and_executes_steps() {
         output.structured.as_ref().expect("structured output")["input"],
         "Mosaic"
     );
+}
+
+#[test]
+fn markdown_skill_pack_loads_and_executes_as_template_skill() {
+    let dir = temp_dir("markdown-pack");
+    fs::write(
+        dir.join("SKILL.md"),
+        r#"---
+name: operator_note
+description: Render an operator note template
+version: 0.1.0
+allowed_tools:
+  - read_file
+allowed_channels:
+  - telegram
+invocation_mode: explicit_only
+accepts_attachments: true
+runtime_requirements:
+  - python
+---
+Operator note:
+{{input}}
+"#,
+    )
+    .expect("skill pack should be written");
+    fs::create_dir_all(dir.join("templates")).expect("templates dir should exist");
+
+    let pack = MarkdownSkillPack::load_from_dir(&dir).expect("markdown skill should load");
+    assert_eq!(pack.name(), "operator_note");
+    assert_eq!(pack.version(), Some("0.1.0"));
+    assert_eq!(pack.allowed_tools(), &["read_file".to_owned()]);
+    assert_eq!(pack.allowed_channels(), &["telegram".to_owned()]);
+    assert_eq!(pack.runtime_requirements(), &["python".to_owned()]);
+
+    let metadata = crate::SkillMetadata::markdown_pack(&pack);
+    assert_eq!(metadata.source_kind, SkillSourceKind::MarkdownPack);
+    assert_eq!(metadata.skill_version.as_deref(), Some("0.1.0"));
+
+    let mut registry = SkillRegistry::new();
+    registry.register_markdown_pack(pack);
+    let ctx = SkillContext {
+        tools: Arc::new(ToolRegistry::new()),
+    };
+
+    let output = block_on(
+        registry
+            .get("operator_note")
+            .expect("markdown skill should be registered")
+            .execute(serde_json::json!({ "text": "Check the alerts." }), &ctx),
+    )
+    .expect("markdown skill should execute");
+
+    assert_eq!(output.content, "Operator note:\nCheck the alerts.");
+
+    fs::remove_dir_all(dir).ok();
 }

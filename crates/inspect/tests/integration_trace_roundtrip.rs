@@ -10,7 +10,7 @@ use chrono::Utc;
 use mosaic_inspect::{
     AttachmentFailureTrace, AttachmentKind, AttachmentRouteMode, AttachmentRouteTrace,
     ChannelAttachment, ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace,
-    ChannelOutboundMessage, IngressTrace, RouteDecisionTrace, RouteMode, RunTrace,
+    ChannelOutboundMessage, IngressTrace, RouteDecisionTrace, RouteMode, RunTrace, SkillTrace,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -306,6 +306,44 @@ fn persists_and_recovers_attachment_route_metadata() {
             .as_ref()
             .map(|ingress| ingress.attachment_failures.len()),
         Some(1)
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn persists_and_recovers_skill_trace_source_metadata() {
+    let dir = temp_dir("skill-trace");
+    let mut trace = RunTrace::new("render operator note".to_owned());
+    trace.skill_calls.push(SkillTrace {
+        name: "operator_note".to_owned(),
+        source_kind: Some("markdown_pack".to_owned()),
+        source_path: Some("/tmp/operator-note".to_owned()),
+        skill_version: Some("0.1.0".to_owned()),
+        runtime_requirements: vec!["python".to_owned()],
+        input: serde_json::json!({ "text": "disk usage high" }),
+        output: Some("Operator note:\ndisk usage high".to_owned()),
+        started_at: Utc::now(),
+        finished_at: Some(Utc::now()),
+    });
+    trace.finish_ok("Operator note:\ndisk usage high".to_owned());
+
+    let path = trace.save_to_dir(&dir).expect("trace should save");
+    let bytes = fs::read(path).expect("saved trace should be readable");
+    let loaded: RunTrace = serde_json::from_slice(&bytes).expect("trace should deserialize");
+
+    assert_eq!(loaded.skill_calls.len(), 1);
+    assert_eq!(
+        loaded.skill_calls[0].source_kind.as_deref(),
+        Some("markdown_pack")
+    );
+    assert_eq!(
+        loaded.skill_calls[0].skill_version.as_deref(),
+        Some("0.1.0")
+    );
+    assert_eq!(
+        loaded.skill_calls[0].runtime_requirements,
+        vec!["python".to_owned()]
     );
 
     fs::remove_dir_all(dir).ok();

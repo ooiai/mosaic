@@ -44,7 +44,7 @@ pub(crate) fn plan_extensions(
             },
             schema_version: CURRENT_SCHEMA_VERSION,
             tools: config.tools.clone(),
-            skills: config.skills.clone(),
+            skills: resolve_skill_paths(config.skills.clone(), workspace_root),
             workflows: config.workflows.clone(),
             mcp: config.mcp.clone(),
         });
@@ -87,7 +87,7 @@ pub(crate) fn plan_extensions(
             },
             schema_version: CURRENT_SCHEMA_VERSION,
             tools: app_config.tools.clone(),
-            skills: app_config.skills.clone(),
+            skills: resolve_skill_paths(app_config.skills.clone(), workspace_root),
             workflows: app_config.workflows.clone(),
             mcp: app_config.mcp.clone(),
         });
@@ -166,6 +166,7 @@ fn manifest_planned(
     manifest_ref: &ExtensionManifestRef,
     resolved: PathBuf,
 ) -> PlannedExtension {
+    let manifest_dir = resolved.parent().unwrap_or(Path::new("."));
     let error = match manifest_ref.version_pin.as_deref() {
         Some(expected) if expected != manifest.version => Some(format!(
             "version pin {} does not match manifest version {}",
@@ -210,7 +211,7 @@ fn manifest_planned(
         },
         schema_version: manifest.schema_version,
         tools: manifest.tools,
-        skills: manifest.skills,
+        skills: resolve_skill_paths(manifest.skills, manifest_dir),
         workflows: manifest.workflows,
         mcp: manifest.mcp,
     }
@@ -223,4 +224,29 @@ fn resolve_manifest_path(workspace_root: &Path, path: &str) -> PathBuf {
     } else {
         workspace_root.join(candidate)
     }
+}
+
+fn resolve_skill_paths(skills: Vec<SkillConfig>, base_dir: &Path) -> Vec<SkillConfig> {
+    skills
+        .into_iter()
+        .map(|mut skill| {
+            if skill.skill_type == "markdown_pack" {
+                if let Some(path) = skill
+                    .path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    let candidate = PathBuf::from(path);
+                    let resolved = if candidate.is_absolute() {
+                        candidate
+                    } else {
+                        base_dir.join(candidate)
+                    };
+                    skill.path = Some(resolved.display().to_string());
+                }
+            }
+            skill
+        })
+        .collect()
 }

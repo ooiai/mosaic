@@ -608,8 +608,11 @@ fn skill_summary(metadata: &mosaic_skill_core::SkillMetadata) -> String {
     if metadata.name == "summarize" {
         return "Summarize the provided input".to_owned();
     }
-    if metadata.manifest_backed {
+    if metadata.source_kind == mosaic_skill_core::SkillSourceKind::Manifest {
         return format!("Run manifest skill {}", metadata.name);
+    }
+    if metadata.source_kind == mosaic_skill_core::SkillSourceKind::MarkdownPack {
+        return format!("Run markdown skill pack {}", metadata.name);
     }
     format!("Run skill {}", metadata.name)
 }

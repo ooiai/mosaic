@@ -411,6 +411,43 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
                 format!("skills.{idx}.type"),
                 "skill type must not be empty",
             );
+        } else if !matches!(
+            skill.skill_type.as_str(),
+            "builtin" | "manifest" | "markdown_pack"
+        ) {
+            report.push(
+                ValidationLevel::Error,
+                format!("skills.{idx}.type"),
+                format!(
+                    "unsupported skill type '{}': expected builtin, manifest, or markdown_pack",
+                    skill.skill_type
+                ),
+            );
+        }
+        if skill
+            .path
+            .as_deref()
+            .is_some_and(|path| path.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("skills.{idx}.path"),
+                "skill path must not be empty when provided",
+            );
+        }
+        if skill.skill_type == "markdown_pack"
+            && skill
+                .path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .is_none()
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("skills.{idx}.path"),
+                "markdown_pack skills require a path",
+            );
         }
         if skill
             .allowed_channels
@@ -421,6 +458,17 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
                 ValidationLevel::Error,
                 format!("skills.{idx}.allowed_channels"),
                 "allowed_channels entries must not be empty",
+            );
+        }
+        if skill
+            .runtime_requirements
+            .iter()
+            .any(|value| value.trim().is_empty())
+        {
+            report.push(
+                ValidationLevel::Error,
+                format!("skills.{idx}.runtime_requirements"),
+                "runtime_requirements entries must not be empty",
             );
         }
     }

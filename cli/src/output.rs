@@ -1048,8 +1048,16 @@ pub fn render_inspect_report(
         for call in &trace.skill_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "name={} | duration_ms={} | input={} | output_preview={}",
+                "name={} | source_kind={} | source_path={} | skill_version={} | runtime_requirements={} | duration_ms={} | input={} | output_preview={}",
                 call.name,
+                option_string(call.source_kind.clone()),
+                option_string(call.source_path.clone()),
+                option_string(call.skill_version.clone()),
+                if call.runtime_requirements.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    call.runtime_requirements.join(", ")
+                },
                 option_i64(call.duration_ms()),
                 single_line(&input),
                 option_preview(call.output.as_deref(), 120),

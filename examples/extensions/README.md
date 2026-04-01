@@ -2,6 +2,7 @@
 
 - `time-and-summary.yaml`: extension manifest with one manifest skill and one workflow
 - `telegram-e2e.yaml`: Telegram-first acceptance manifest with explicit skill and workflow routing
+- `markdown-skill-pack.yaml`: extension manifest that registers the `skills/operator-note/SKILL.md` markdown skill pack
 
 Reference it from `.mosaic/config.yaml` and validate:
 

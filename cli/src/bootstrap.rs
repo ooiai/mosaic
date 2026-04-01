@@ -243,6 +243,7 @@ mod tests {
             skills: vec![SkillConfig {
                 skill_type: "builtin".to_owned(),
                 name: "summarize".to_owned(),
+                path: None,
                 description: None,
                 input_schema: serde_json::json!({ "type": "object" }),
                 tools: Vec::new(),
@@ -253,6 +254,7 @@ mod tests {
                 required_policy: None,
                 allowed_channels: Vec::new(),
                 accepts_attachments: false,
+                runtime_requirements: Vec::new(),
             }],
             workflows: Vec::new(),
             agent: AgentConfig { system: None },

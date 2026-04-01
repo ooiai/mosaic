@@ -1,3 +1,4 @@
+mod markdown;
 mod metadata;
 pub mod manifest {
     pub mod executor;
@@ -13,7 +14,8 @@ mod tests;
 
 pub use manifest::executor::ManifestSkill;
 pub use manifest::manifest::{ManifestSkillStep, SkillManifest};
-pub use metadata::{SkillCapabilities, SkillCompatibility, SkillMetadata};
+pub use markdown::{MarkdownSkillFrontmatter, MarkdownSkillPack};
+pub use metadata::{SkillCapabilities, SkillCompatibility, SkillMetadata, SkillSourceKind};
 pub use native::SummarizeSkill;
 pub use registry::{RegisteredSkill, SkillRegistry};
 pub use types::{Skill, SkillContext, SkillOutput};

@@ -591,6 +591,10 @@ impl AgentRuntime {
             Self::with_attachment_metadata(serde_json::json!({ "text": input }), attachments);
         trace.skill_calls.push(SkillTrace {
             name: skill_name.clone(),
+            source_kind: Some(skill.metadata().source_kind.label().to_owned()),
+            source_path: skill.metadata().source_path.clone(),
+            skill_version: skill.metadata().skill_version.clone(),
+            runtime_requirements: skill.metadata().runtime_requirements.clone(),
             input: skill_input.clone(),
             output: None,
             started_at: Utc::now(),
@@ -651,6 +655,10 @@ impl AgentRuntime {
             skill_traces,
             SkillTrace {
                 name: skill_name.clone(),
+                source_kind: Some(skill.metadata().source_kind.label().to_owned()),
+                source_path: skill.metadata().source_path.clone(),
+                skill_version: skill.metadata().skill_version.clone(),
+                runtime_requirements: skill.metadata().runtime_requirements.clone(),
                 input: skill_input.clone(),
                 output: None,
                 started_at: Utc::now(),
@@ -704,7 +712,7 @@ impl AgentRuntime {
         Some(ExtensionUsageTrace {
             name: metadata.extension.clone()?,
             version: metadata
-                .version
+                .extension_version
                 .clone()
                 .unwrap_or_else(|| "unknown".to_owned()),
             component_kind: "skill".to_owned(),

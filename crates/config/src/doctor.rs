@@ -103,6 +103,33 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
         ));
     }
 
+    for skill in &config.skills {
+        if skill.skill_type != "markdown_pack" {
+            continue;
+        }
+        let Some(path) = skill
+            .path
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let skill_path = cwd.join(path);
+        checks.push(path_check(
+            &skill_path,
+            DoctorCategory::Extensions,
+            &format!("markdown skill pack '{}'", skill.name),
+            false,
+        ));
+        checks.push(path_check(
+            &skill_path.join("SKILL.md"),
+            DoctorCategory::Extensions,
+            &format!("markdown skill pack '{}' SKILL.md", skill.name),
+            false,
+        ));
+    }
+
     for (name, profile) in &config.profiles {
         let Some(provider_type) = parse_provider_type(&profile.provider_type) else {
             checks.push(DoctorCheck {

@@ -163,6 +163,8 @@ pub struct SkillConfig {
     #[serde(rename = "type")]
     pub skill_type: String,
     pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
     pub description: Option<String>,
     #[serde(default = "default_skill_input_schema")]
     pub input_schema: serde_json::Value,
@@ -181,6 +183,8 @@ pub struct SkillConfig {
     pub allowed_channels: Vec<String>,
     #[serde(default)]
     pub accepts_attachments: bool,
+    #[serde(default)]
+    pub runtime_requirements: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

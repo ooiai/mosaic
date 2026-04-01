@@ -1,327 +1,209 @@
 # Mosaic
 
-Mosaic is a self-hosted AI assistant control plane.
+<p align="center">
+  <strong>A self-hosted AI assistant control plane.</strong>
+</p>
 
-It gives you one operator surface for sessions, a TUI, a local or HTTP Gateway, traces, capability execution, extensions, nodes, and multi-channel ingress. The goal of this README is simple: get a new operator from zero to a real conversation, then point them to the right Telegram, channel, and release docs without reading the source.
+<p align="center">
+  Long-running, multi-channel, stateful, routable, executable, extensible, and governable.
+</p>
 
-## 3 Minute Quick Start
+<p align="center">
+  <img src="https://img.shields.io/badge/Rust-2024-orange?logo=rust" alt="Rust 2024">
+  <img src="https://img.shields.io/badge/Cargo-Workspace-blue" alt="Cargo Workspace">
+  <img src="https://img.shields.io/badge/Interface-Terminal%20Control%20Plane-0f766e" alt="Terminal Control Plane">
+  <img src="https://img.shields.io/badge/License-MIT-black" alt="MIT License">
+</p>
 
-1. Build or install the CLI.
+---
 
-```bash
-cargo install --path cli
-# or, during development
-cargo run -p mosaic-cli -- --help
+## Table of Contents
+
+- [What Mosaic Is](#what-mosaic-is)
+- [What Mosaic Is Not](#what-mosaic-is-not)
+- [Architecture at a Glance](#architecture-at-a-glance)
+- [Repository Layout](#repository-layout)
+- [Quick Start](#quick-start)
+- [Current Operator Surface](#current-operator-surface)
+- [Engineering Rules](#engineering-rules)
+- [Contributing](#contributing)
+
+## What Mosaic Is
+
+Mosaic is not designed as a single chat frontend. It is a self-hosted control plane for always-on AI agents that can:
+
+- accept input from external channels such as WhatsApp, Telegram, Slack, Discord, and WebChat
+- coordinate sessions, routing, permissions, memory, and event streams through a central Gateway
+- orchestrate primary agents, sub-agents, model scheduling, and context compression
+- expose operator surfaces such as terminal, web, and desktop control interfaces
+- execute tools and device-node actions across browser, exec, canvas, pdf, image, cron, webhook, and file capabilities
+
+In short: Mosaic is closer to an Agent OS than to a chatbot app.
+
+## What Mosaic Is Not
+
+Mosaic should not be treated as:
+
+- a thin "chat UI + LLM API" wrapper
+- a single-request/single-response assistant
+- a product whose architecture is centered on one channel or one model
+- a place where business orchestration is hidden inside adapters or generic infrastructure
+
+## Architecture at a Glance
+
+```mermaid
+flowchart LR
+    A[External Channels<br/>WhatsApp / Telegram / Slack / Discord / WebChat]
+    B[Gateway / Control Plane<br/>Ingress / Auth / Routing / Sessions / Events]
+    C[Agent Runtime<br/>Primary Agent / Sub-Agents / Model Scheduling / Compression]
+    D[Capabilities<br/>Exec / Browser / Canvas / PDF / Image / Cron / Webhook / Files]
+    E[Device Nodes<br/>macOS / iOS / Android / Headless]
+    F[Operator Surfaces<br/>CLI / Web / Desktop]
+    G[Config and Extensions<br/>mosaic.json / skills / plugins / workspace]
+
+    A --> B
+    F --> B
+    G --> B
+    B --> C
+    C --> D
+    C --> E
+    D --> B
+    E --> B
 ```
 
-2. Initialize the workspace config.
+### Core Layers
 
-```bash
-mosaic setup init
+| Layer                       | Responsibility                                                   | Meaning                                      |
+| --------------------------- | ---------------------------------------------------------------- | -------------------------------------------- |
+| Interaction Entry           | Normalize channel payloads and preserve context                  | Put the assistant where users already are    |
+| Control Plane               | Ingress, auth, session mapping, routing, event broadcast         | The Gateway is the system hub                |
+| Agent Runtime               | Agent orchestration, model strategy, compression, planning       | Runtime behavior is more than one model call |
+| Capability Execution        | Run tools with permission boundaries and side-effect control     | Capabilities define both power and risk      |
+| Device Node                 | Expose device-local actions through reconnectable node protocols | Extend agents into real devices              |
+| Configuration and Extension | Control policies, plugins, skills, workspaces, hot reload        | Enable long-term product evolution           |
+
+<details>
+<summary><strong>Architecture principles</strong></summary>
+
+- Channels are entrypoints, not the center of the system.
+- The Gateway coordinates; it should not become a dumping ground.
+- The runtime owns orchestration and collaboration, not just prompt execution.
+- Tools and device nodes must preserve explicit permission boundaries.
+- Configuration should describe behavior, not replace architecture.
+
+</details>
+
+## Repository Layout
+
+Mosaic is organized as a Cargo workspace.
+
+```text
+mosaic/
+|-- Cargo.toml
+|-- Makefile
+|-- README.md
+|-- cli/
+|   |-- Cargo.toml
+|   `-- src/main.rs
+`-- crates/
+    `-- tui/
+        |-- Cargo.toml
+        `-- src/
 ```
 
-3. Configure a real provider in `.mosaic/config.yaml`.
+### Workspace Rules
 
-Use one of these examples:
+| Path           | Role                  | Rule                                                |
+| -------------- | --------------------- | --------------------------------------------------- |
+| `cli/`         | Composition root      | Start first-pass feature work here                  |
+| `crates/`      | Reusable module layer | Move logic here once it is clearly shared or stable |
+| workspace root | Consistency boundary  | Own shared dependencies, linting, and build policy  |
 
-- [examples/providers/openai.yaml](./examples/providers/openai.yaml)
-- [examples/providers/azure.yaml](./examples/providers/azure.yaml)
-- [examples/providers/ollama.yaml](./examples/providers/ollama.yaml)
-- [examples/providers/anthropic.yaml](./examples/providers/anthropic.yaml)
+## Quick Start
 
-4. Validate the config and run doctor.
-
-```bash
-mosaic setup validate
-mosaic setup doctor
-```
-
-5. Start the TUI and send a message.
-
-```bash
-mosaic tui
-```
-
-6. Inspect the session and the saved trace.
-
-```bash
-mosaic session list
-mosaic session show <session-id>
-mosaic inspect .mosaic/runs/<run-id>.json
-```
-
-## Product Baseline
-
-The current operator baseline is:
-
-- WebChat and Telegram both enter through the Gateway
-- Telegram supports `/mosaic` command discovery inside the chat
-- Telegram attachments can route through a multimodal profile or a specialized processor policy
-- one workspace can host multiple Telegram bots with isolated webhook paths, profiles, and capability scopes
-
-If you want the shortest product path into a real channel, start with:
-
-- [docs/telegram-step-by-step.md](./docs/telegram-step-by-step.md)
-- [examples/full-stack/openai-telegram-single-bot.config.yaml](./examples/full-stack/openai-telegram-single-bot.config.yaml)
-- [examples/extensions/telegram-e2e.yaml](./examples/extensions/telegram-e2e.yaml)
-
-If Telegram is part of release scope, use:
-
-- [docs/telegram-real-e2e.md](./docs/telegram-real-e2e.md)
-- [examples/full-stack/openai-telegram-e2e.config.yaml](./examples/full-stack/openai-telegram-e2e.config.yaml)
-
-## Install
-
-### Option A: Install the binary
-
-```bash
-cargo install --path cli
-mosaic --help
-```
-
-### Option B: Run from the workspace
-
-```bash
-cargo run -p mosaic-cli -- --help
-```
-
-### Common developer entrypoints
+Use the root `Makefile` as the standard entrypoint for local CLI workflows.
 
 ```bash
 make build
 make check
-make test-matrix
-make test-golden
-make smoke
-make release-check
+cargo run -p mosaic-cli
 ```
 
-## First Run Path
+### Standard Commands
 
-### 1. Initialize the workspace
+| Command        | Purpose                            |
+| -------------- | ---------------------------------- |
+| `make install` | Install the CLI binary from `cli/` |
+| `make build`   | Build the CLI crate                |
+| `make clean`   | Clean workspace build artifacts    |
+| `make check`   | Run workspace checks               |
 
-```bash
-mosaic setup init
-```
+The installed binary name is `mosaic`.
 
-This creates:
+## Current Operator Surface
 
-- `.mosaic/config.yaml`
-- `.mosaic/sessions/`
-- `.mosaic/runs/`
-- `.mosaic/audit/`
-- `.mosaic/extensions/`
+The repository currently includes the first terminal control-plane slice.
 
-### 2. Configure a provider
+<details open>
+<summary><strong>TUI capabilities</strong></summary>
 
-Open `.mosaic/config.yaml` and finish the real-provider-first template, or merge one of the provider examples from [`examples/providers/`](./examples/providers/README.md). If you want a local dev-only lane without credentials, re-run `mosaic setup init --dev-mock`.
+- left session list
+- center task and conversation timeline
+- top status bar with workspace, session, model, runtime, and gateway state
+- bottom composer for operator instructions
+- right observability panel for logs and activity
+- keyboard-first navigation
+- local mock control commands for stage-2 interaction flows
 
-For OpenAI:
+</details>
 
-```yaml
-active_profile: openai
-profiles:
-  openai:
-    type: openai
-    model: gpt-5.4-mini
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
-```
+<details>
+<summary><strong>Keyboard model</strong></summary>
 
-Then export the credential:
+| Key                     | Action                       |
+| ----------------------- | ---------------------------- |
+| `Tab` / `Shift+Tab`     | Cycle focus between panes    |
+| `j` / `k` or arrow keys | Move within the focused pane |
+| `i`                     | Jump to composer             |
+| `Enter`                 | Submit composer input        |
+| `Ctrl+L`                | Toggle observability panel   |
+| `Esc`                   | Return focus to sessions     |
+| `q` / `Ctrl+C`          | Quit                         |
 
-```bash
-export OPENAI_API_KEY=your_api_key_here
-```
+</details>
 
-For a production service install, continue with:
+<details>
+<summary><strong>Local mock commands</strong></summary>
 
-- [`.env.example`](./.env.example)
-- [examples/deployment/production.config.yaml](./examples/deployment/production.config.yaml)
-- [docs/deployment.md](./docs/deployment.md)
-- [docs/security.md](./docs/security.md)
+| Command                 | Effect                                        |
+| ----------------------- | --------------------------------------------- | ---------- | --------------------------------- |
+| `/help`                 | Show local control commands in the timeline   |
+| `/logs`                 | Toggle the observability panel                |
+| `/gateway connect`      | Mark gateway as connected in the local TUI    |
+| `/gateway disconnect`   | Mark gateway as disconnected in the local TUI |
+| `/runtime <status>`     | Update the runtime status label               |
+| `/session state <active | waiting                                       | degraded>` | Update the selected session state |
+| `/session model <name>` | Update the selected session model             |
 
-### 3. Validate and diagnose
+</details>
 
-```bash
-mosaic setup validate
-mosaic setup doctor
-mosaic model list
-```
+## Engineering Rules
 
-### 4. Start the operator surface
+The repository is guided by a few non-negotiable boundaries:
 
-```bash
-mosaic tui
-```
+- treat Mosaic as a control plane, not a chat app
+- start new one-step feature work in `cli/`
+- extract shared, stable logic into `crates/`
+- keep Gateway semantics inside Mosaic crates, not generic infrastructure
+- preserve compatibility unless a change is intentionally breaking
+- keep authorization, auditability, observability, and interruption paths explicit
 
-Inside the TUI, type a message and press `Enter`.
+## Contributing
 
-### 5. Inspect state and traces
+Before modifying the repository:
 
-```bash
-mosaic session list
-mosaic session show default
-mosaic inspect .mosaic/runs/<run-id>.json
-```
+- read [`AGENTS.md`](./AGENTS.md) for architecture boundaries and repository rules
+- read [`Constraints.md`](./Constraints.md) for the minimal-change constraint
+- prefer the smallest safe change that preserves existing behavior
 
-If you want a quick non-TUI smoke run:
-
-```bash
-mosaic run examples/time-now-agent.yaml --session quickstart
-```
-
-## Channel Command Catalog
-
-Inside Telegram, Mosaic exposes a chat-native operator catalog through `/mosaic`.
-
-Useful starting commands:
-
-```text
-/mosaic help
-/mosaic help tools
-/mosaic session status
-/mosaic tool read_file .mosaic/config.yaml
-/mosaic skill summarize_notes Shift handoff note goes here.
-/mosaic workflow summarize_operator_note Workflow input goes here.
-```
-
-The catalog is dynamic. It only shows the tools, skills, and workflows that are visible in the current channel and allowed for the current bot policy.
-
-## Telegram, Attachments, and Multi-Bot
-
-Single-bot baseline:
-
-- [examples/full-stack/openai-telegram-single-bot.config.yaml](./examples/full-stack/openai-telegram-single-bot.config.yaml)
-
-Multi-bot routing:
-
-- [examples/full-stack/openai-telegram-multi-bot.config.yaml](./examples/full-stack/openai-telegram-multi-bot.config.yaml)
-- [examples/full-stack/openai-telegram-bot-split.config.yaml](./examples/full-stack/openai-telegram-bot-split.config.yaml)
-
-Image and document uploads:
-
-- [examples/full-stack/openai-telegram-multimodal.config.yaml](./examples/full-stack/openai-telegram-multimodal.config.yaml)
-- [examples/channels/telegram-photo-update.json](./examples/channels/telegram-photo-update.json)
-- [examples/channels/telegram-document-update.json](./examples/channels/telegram-document-update.json)
-
-These paths are explained in:
-
-- [docs/channels.md](./docs/channels.md)
-- [docs/configuration.md](./docs/configuration.md)
-- [docs/telegram-step-by-step.md](./docs/telegram-step-by-step.md)
-- [docs/telegram-real-e2e.md](./docs/telegram-real-e2e.md)
-
-## Documentation
-
-- [Getting Started](./docs/getting-started.md)
-- [Configuration Reference](./docs/configuration.md)
-- [Provider Guide](./docs/providers.md)
-- [CLI Reference](./docs/cli.md)
-- [TUI Guide](./docs/tui.md)
-- [Gateway Guide](./docs/gateway.md)
-- [Channel Setup](./docs/channels.md)
-- [Telegram Step-by-Step Setup](./docs/telegram-step-by-step.md)
-- [Full-Stack Guide](./docs/full-stack.md)
-- [Telegram Real E2E Runbook](./docs/telegram-real-e2e.md)
-- [Real vs Mock Acceptance](./docs/real-vs-mock-acceptance.md)
-- [Residual Mock-First Audit](./docs/residual-mock-first-audit.md)
-- [Provider and Runtime Policy Matrix](./docs/provider-runtime-policy-matrix.md)
-- [Session, Inspect, and Incident Flow](./docs/session-inspect-incident.md)
-- [Writer Ownership](./docs/writer-ownership.md)
-- [Deployment Guide](./docs/deployment.md)
-- [Operations Guide](./docs/operations.md)
-- [Security Guide](./docs/security.md)
-- [Testing Guide](./docs/testing.md)
-- [Non-TUI Architecture Audit](./docs/non-tui-architecture-audit.md)
-- [Release Guide](./docs/release.md)
-- [Compatibility Guide](./docs/compatibility.md)
-- [Upgrade Guide](./docs/upgrade.md)
-- [Troubleshooting](./docs/troubleshooting.md)
-
-## Crate Guide
-
-Mosaic is a Cargo workspace. The `cli/` crate is the composition root, while the crates under `crates/` hold reusable system boundaries. Start with these READMEs when you need to understand ownership before changing code.
-
-### Composition Root
-
-- [cli/README.md](./cli/README.md) - operator-facing command entrypoint, bootstrap wiring, and top-level workflow composition
-
-### Core Crates
-
-- [crates/config/README.md](./crates/config/README.md) - config loading, validation, doctor output, and redaction
-- [crates/provider/README.md](./crates/provider/README.md) - provider registry, capability metadata, retry, and vendor adapters
-- [crates/tool-core/README.md](./crates/tool-core/README.md) - tool contracts, registry, built-in tools, and tool metadata
-- [crates/skill-core/README.md](./crates/skill-core/README.md) - skill manifests, native skills, metadata, and registry behavior
-- [crates/runtime/README.md](./crates/runtime/README.md) - agent run orchestration, model selection, tool loop, memory, and workflow dispatch
-- [crates/gateway/README.md](./crates/gateway/README.md) - control-plane hub, ingress routing, run registry, HTTP and SSE surfaces
-- [crates/session-core/README.md](./crates/session-core/README.md) - persistent sessions, transcripts, routes, and session metadata
-- [crates/inspect/README.md](./crates/inspect/README.md) - trace loading, summary formatting, and operator inspection output
-
-### Support Crates
-
-- [crates/memory/README.md](./crates/memory/README.md) - session memory storage, summaries, compression, and search
-- [crates/mcp-core/README.md](./crates/mcp-core/README.md) - MCP stdio server lifecycle and remote tool discovery
-- [crates/sdk/README.md](./crates/sdk/README.md) - external HTTP and SSE client surface for operators and adapters
-- [crates/control-protocol/README.md](./crates/control-protocol/README.md) - stable DTOs for gateway HTTP, SSE, sessions, and runs
-- [crates/node-protocol/README.md](./crates/node-protocol/README.md) - local node registration, heartbeat, dispatch, and affinity contracts
-- [crates/extension-core/README.md](./crates/extension-core/README.md) - extension manifests, validation, policy, and reload-safe registration
-- [crates/scheduler-core/README.md](./crates/scheduler-core/README.md) - capability jobs, cron registration, and scheduler state
-- [crates/channel-telegram/README.md](./crates/channel-telegram/README.md) - Telegram webhook adapter for multi-channel ingress
-- [crates/workflow/README.md](./crates/workflow/README.md) - workflow manifests and step execution runner
-- [crates/tui/README.md](./crates/tui/README.md) - operator console state machine, rendering, and gateway-backed interaction flow
-
-## Examples
-
-- [examples/README.md](./examples/README.md)
-- [examples/TESTING.md](./examples/TESTING.md)
-- [examples/providers/](./examples/providers/)
-- [examples/channels/README.md](./examples/channels/README.md)
-- [examples/channels/](./examples/channels/)
-- [examples/channels/telegram-photo-update.json](./examples/channels/telegram-photo-update.json)
-- [examples/channels/telegram-document-update.json](./examples/channels/telegram-document-update.json)
-- [examples/workflows/](./examples/workflows/)
-- [examples/full-stack/openai-telegram-single-bot.config.yaml](./examples/full-stack/openai-telegram-single-bot.config.yaml)
-- [examples/full-stack/openai-telegram-multi-bot.config.yaml](./examples/full-stack/openai-telegram-multi-bot.config.yaml)
-- [examples/full-stack/openai-telegram-multimodal.config.yaml](./examples/full-stack/openai-telegram-multimodal.config.yaml)
-- [examples/full-stack/openai-telegram-bot-split.config.yaml](./examples/full-stack/openai-telegram-bot-split.config.yaml)
-- [examples/extensions/](./examples/extensions/)
-- [examples/gateway/](./examples/gateway/)
-- [examples/full-stack/README.md](./examples/full-stack/README.md)
-- [examples/full-stack/openai-telegram-e2e.config.yaml](./examples/full-stack/openai-telegram-e2e.config.yaml)
-- [examples/full-stack/openai-webchat.config.yaml](./examples/full-stack/openai-webchat.config.yaml)
-- [examples/full-stack/](./examples/full-stack/)
-- [examples/deployment/](./examples/deployment/)
-
-## Current Provider Support
-
-Mosaic currently supports these provider modes in the runtime:
-
-- `mock` via explicit `mosaic setup init --dev-mock`
-- `openai`
-- `azure`
-- `anthropic`
-- `ollama`
-- `openai-compatible`
-
-Details and examples are in [docs/providers.md](./docs/providers.md).
-
-## Useful First Commands
-
-```bash
-mosaic setup init
-mosaic setup validate
-mosaic setup doctor
-mosaic model list
-mosaic tui
-mosaic session list
-mosaic gateway status
-mosaic inspect .mosaic/runs/<run-id>.json
-make test-golden
-make smoke
-make release-check
-```
-
-## Architecture
-
-Mosaic is still a control plane, not a thin chat wrapper. If you need the architectural rules and contributor boundaries, read [AGENTS.md](./AGENTS.md).
+If repeated logic appears, extract one semantic implementation instead of creating multiple near-duplicates.

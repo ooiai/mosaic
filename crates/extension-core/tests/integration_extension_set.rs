@@ -23,6 +23,7 @@ fn extension_set_loads_example_manifest_into_public_registries() {
     for path in [
         "examples/extensions/time-and-summary.yaml",
         "examples/extensions/telegram-e2e.yaml",
+        "examples/extensions/markdown-skill-pack.yaml",
     ] {
         let mut config = MosaicConfig::default();
         config.extensions = ExtensionsConfig {
@@ -48,8 +49,19 @@ fn extension_set_loads_example_manifest_into_public_registries() {
         )
         .expect("extension set should load");
 
-        assert!(loaded.skills.get("summarize_notes").is_some());
-        assert!(loaded.workflows.get("summarize_operator_note").is_some());
+        if path == "examples/extensions/markdown-skill-pack.yaml" {
+            let skill = loaded
+                .skills
+                .get("operator_note")
+                .expect("markdown skill should be present");
+            assert_eq!(
+                skill.metadata().source_kind,
+                mosaic_skill_core::SkillSourceKind::MarkdownPack
+            );
+        } else {
+            assert!(loaded.skills.get("summarize_notes").is_some());
+            assert!(loaded.workflows.get("summarize_operator_note").is_some());
+        }
     }
 }
 
@@ -69,6 +81,7 @@ fn workspace_config_and_manifest_capabilities_merge_into_final_registry() {
     config.skills = vec![SkillConfig {
         skill_type: "manifest".to_owned(),
         name: "workspace_summary".to_owned(),
+        path: None,
         description: Some("Summarize text from workspace config".to_owned()),
         input_schema: serde_json::json!({ "type": "object" }),
         tools: Vec::new(),
@@ -79,6 +92,7 @@ fn workspace_config_and_manifest_capabilities_merge_into_final_registry() {
         required_policy: None,
         allowed_channels: vec!["webchat".to_owned()],
         accepts_attachments: false,
+        runtime_requirements: Vec::new(),
     }];
     config.workflows = vec![Workflow {
         name: "workspace_flow".to_owned(),

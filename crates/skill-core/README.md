@@ -1,10 +1,10 @@
 # mosaic-skill-core
 
-`mosaic-skill-core` defines the reusable skill layer for Mosaic, including native skills and manifest-backed skills.
+`mosaic-skill-core` defines the reusable skill layer for Mosaic, including native skills, manifest-backed skills, and markdown skill packs.
 
 ## Positioning
 
-This crate is the skill boundary between runtime orchestration and reusable capability modules. It lets Mosaic register native Rust skills and declarative manifest skills under one consistent interface.
+This crate is the skill boundary between runtime orchestration and reusable capability modules. It lets Mosaic register native Rust skills, declarative manifest skills, and directory-based `SKILL.md` markdown skill packs under one consistent interface.
 
 ## Architecture Layer
 
@@ -14,9 +14,10 @@ Agent Runtime Layer.
 
 - Define the `Skill` trait, `SkillContext`, and `SkillOutput`.
 - Carry `SkillMetadata`, compatibility, and capability flags.
-- Provide `SkillRegistry` for native and manifest-backed skills.
+- Provide `SkillRegistry` for native, manifest-backed, and markdown-pack skills.
 - Parse and represent skill manifests through `SkillManifest` and `ManifestSkillStep`.
 - Execute manifest-backed skills through `ManifestSkill`.
+- Parse and load markdown skill packs through `MarkdownSkillPack`.
 - Ship the built-in native `SummarizeSkill`.
 
 ## Out of Scope
@@ -33,10 +34,11 @@ Agent Runtime Layer.
 - Metadata: `SkillMetadata`, `SkillCapabilities`, `SkillCompatibility`.
 - Native skill: `SummarizeSkill`.
 - Manifest support: `SkillManifest`, `ManifestSkillStep`, `ManifestSkill`.
+- Markdown pack support: `MarkdownSkillPack`, `MarkdownSkillFrontmatter`, `SkillSourceKind`.
 
 ## Why This Is In `crates/`
 
-Skills are consumed by runtime execution, extension loading, bootstrap, and tests. The boundary is broader than one CLI command, so it belongs in `crates/` where both native and manifest-backed skill behavior can stay reusable and testable.
+Skills are consumed by runtime execution, extension loading, bootstrap, and tests. The boundary is broader than one CLI command, so it belongs in `crates/` where native, manifest-backed, and markdown-pack skill behavior can stay reusable and testable.
 
 ## Relationships
 
@@ -62,12 +64,13 @@ let metadata = summarize.metadata();
 cargo test -p mosaic-skill-core
 ```
 
-Tests cover native registration and manifest-backed execution.
+Tests cover native registration, manifest-backed execution, and markdown skill pack loading.
 
 ## Current Limitations
 
 - Native skill inventory is intentionally small today.
 - Manifest execution is sequential and intentionally conservative.
+- Markdown skill packs are template-style in v1; dependency isolation and runtime env management land in the sandbox work.
 - Skill metadata is compatible with extensions, but richer version negotiation is still shallow.
 
 ## Roadmap

@@ -1,4 +1,5 @@
 use super::*;
+use mosaic_skill_core::MarkdownSkillPack;
 
 pub(crate) fn validate_extension_set(
     config: &MosaicConfig,
@@ -10,6 +11,7 @@ pub(crate) fn validate_extension_set(
     let mut tool_names = BTreeMap::<String, String>::new();
     let mut skill_names = BTreeMap::<String, String>::new();
     let mut workflow_names = BTreeMap::<String, String>::new();
+    let mut markdown_skill_tools = BTreeMap::<(String, String), Vec<String>>::new();
 
     for extension in &planned {
         if let Some(error) = extension.status.error.clone() {
@@ -66,6 +68,47 @@ pub(crate) fn validate_extension_set(
         }
 
         for skill in &extension.skills {
+            if skill.skill_type == "markdown_pack" {
+                let Some(path) = skill
+                    .path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                else {
+                    issues.push(ExtensionValidationIssue {
+                        extension: Some(extension.status.name.clone()),
+                        message: format!("markdown skill '{}' is missing path", skill.name),
+                    });
+                    continue;
+                };
+                match MarkdownSkillPack::load_from_dir(path) {
+                    Ok(pack) => {
+                        if pack.name() != skill.name {
+                            issues.push(ExtensionValidationIssue {
+                                extension: Some(extension.status.name.clone()),
+                                message: format!(
+                                    "markdown skill pack '{}' resolved to '{}' but config declares '{}'",
+                                    path,
+                                    pack.name(),
+                                    skill.name
+                                ),
+                            });
+                        }
+                        markdown_skill_tools.insert(
+                            (extension.status.name.clone(), skill.name.clone()),
+                            if skill.tools.is_empty() {
+                                pack.allowed_tools().to_vec()
+                            } else {
+                                skill.tools.clone()
+                            },
+                        );
+                    }
+                    Err(err) => issues.push(ExtensionValidationIssue {
+                        extension: Some(extension.status.name.clone()),
+                        message: format!("markdown skill '{}': {}", skill.name, err),
+                    }),
+                }
+            }
             if let Some(previous) =
                 skill_names.insert(skill.name.clone(), extension.status.name.clone())
             {
@@ -111,6 +154,22 @@ pub(crate) fn validate_extension_set(
                             extension: Some(extension.status.name.clone()),
                             message: format!(
                                 "manifest skill '{}' references unknown tool '{}'",
+                                skill.name, tool
+                            ),
+                        });
+                    }
+                }
+            } else if skill.skill_type == "markdown_pack" {
+                let declared_tools = markdown_skill_tools
+                    .get(&(extension.status.name.clone(), skill.name.clone()))
+                    .cloned()
+                    .unwrap_or_default();
+                for tool in &declared_tools {
+                    if !tool_names.contains_key(tool) {
+                        issues.push(ExtensionValidationIssue {
+                            extension: Some(extension.status.name.clone()),
+                            message: format!(
+                                "markdown skill '{}' references unknown tool '{}'",
                                 skill.name, tool
                             ),
                         });

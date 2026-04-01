@@ -1,0 +1,10 @@
+name: markdown.skill.pack
+version: 0.1.0
+description: Example extension manifest that registers a markdown skill pack.
+skills:
+  - type: markdown_pack
+    name: operator_note
+    path: ../skills/operator-note
+    visibility: visible
+    invocation_mode: explicit_only
+    accepts_attachments: true

@@ -1340,6 +1340,7 @@ dependencies = [
  "mosaic-tool-core",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tokio",
 ]
 

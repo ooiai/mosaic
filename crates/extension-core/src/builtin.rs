@@ -22,6 +22,7 @@ pub(crate) fn builtin_planned_extension(policies: &PolicyConfig) -> PlannedExten
         skills: vec![SkillConfig {
             skill_type: "builtin".to_owned(),
             name: "summarize".to_owned(),
+            path: None,
             description: None,
             input_schema: serde_json::json!({ "type": "object" }),
             tools: Vec::new(),
@@ -32,6 +33,7 @@ pub(crate) fn builtin_planned_extension(policies: &PolicyConfig) -> PlannedExten
             required_policy: None,
             allowed_channels: Vec::new(),
             accepts_attachments: false,
+            runtime_requirements: Vec::new(),
         }],
         workflows: Vec::new(),
         mcp: None,
@@ -126,10 +128,77 @@ pub(crate) fn register_skill(
             .with_extension(extension_name.to_owned(), extension_version.to_owned())
             .with_compatibility(compatibility),
         ),
+        ("markdown_pack", _) => {
+            let skill_path = skill
+                .path
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("markdown skill '{}' is missing path", skill.name)
+                })?;
+            let pack = mosaic_skill_core::MarkdownSkillPack::load_from_dir(skill_path)?;
+            if pack.name() != skill.name {
+                bail!(
+                    "markdown skill pack '{}' resolved to '{}' but config declares '{}'",
+                    skill_path,
+                    pack.name(),
+                    skill.name
+                );
+            }
+
+            let declared_tools = if skill.tools.is_empty() {
+                pack.allowed_tools().to_vec()
+            } else {
+                skill.tools.clone()
+            };
+            let runtime_requirements = if skill.runtime_requirements.is_empty() {
+                pack.runtime_requirements().to_vec()
+            } else {
+                skill.runtime_requirements.clone()
+            };
+
+            registry.register_markdown_pack_with_metadata(
+                pack.clone(),
+                SkillMetadata::markdown_pack(&pack)
+                    .with_declared_tools(declared_tools)
+                    .with_runtime_requirements(runtime_requirements)
+                    .with_source_path(Some(skill_path.to_owned()))
+                    .with_skill_version(pack.version().map(ToOwned::to_owned))
+                    .with_exposure(markdown_pack_exposure(skill, extension_source, &pack))
+                    .with_extension(extension_name.to_owned(), extension_version.to_owned())
+                    .with_compatibility(compatibility),
+            );
+        }
         ("builtin", other) => bail!("unsupported builtin skill: {}", other),
         (other, _) => bail!("unsupported skill type: {}", other),
     }
     Ok(())
+}
+
+fn markdown_pack_exposure(
+    skill: &SkillConfig,
+    extension_source: &str,
+    pack: &mosaic_skill_core::MarkdownSkillPack,
+) -> CapabilityExposure {
+    let mut exposure = crate::exposure_from_skill_config(skill, extension_source);
+
+    if exposure.allowed_channels.is_empty() && !pack.allowed_channels().is_empty() {
+        exposure.allowed_channels = pack.allowed_channels().to_vec();
+    }
+    if matches!(
+        exposure.invocation_mode,
+        mosaic_tool_core::CapabilityInvocationMode::Conversational
+    ) {
+        if let Some(invocation_mode) = pack.invocation_mode() {
+            exposure.invocation_mode = invocation_mode;
+        }
+    }
+    if !exposure.accepts_attachments && pack.accepts_attachments() {
+        exposure.accepts_attachments = true;
+    }
+
+    exposure
 }
 
 pub(crate) fn apply_mcp_extension_metadata(

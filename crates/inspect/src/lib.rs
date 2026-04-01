@@ -166,6 +166,14 @@ pub struct ExtensionUsageTrace {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SkillTrace {
     pub name: String,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub skill_version: Option<String>,
+    #[serde(default)]
+    pub runtime_requirements: Vec<String>,
     pub input: serde_json::Value,
     pub output: Option<String>,
     pub started_at: DateTime<Utc>,

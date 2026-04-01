@@ -35,6 +35,11 @@ For a local dev-only smoke lane without provider credentials, initialize the wor
 
 - [extensions/time-and-summary.yaml](./extensions/time-and-summary.yaml): extension manifest with one manifest skill and one workflow
 - [extensions/telegram-e2e.yaml](./extensions/telegram-e2e.yaml): Telegram-first manifest with attachment-aware `summarize_notes` and `summarize_operator_note`
+- [extensions/markdown-skill-pack.yaml](./extensions/markdown-skill-pack.yaml): extension manifest that registers a `SKILL.md` markdown skill pack
+
+## Skills
+
+- [skills/operator-note/SKILL.md](./skills/operator-note/SKILL.md): minimal markdown skill pack example
 
 Validate it by referencing it from `.mosaic/config.yaml`:
 

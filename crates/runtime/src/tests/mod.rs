@@ -1,5 +1,6 @@
 use std::{
     collections::BTreeMap,
+    fs, process,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -20,7 +21,7 @@ use mosaic_provider::{
 use mosaic_session_core::{
     SessionRecord, SessionStore, SessionSummary, TranscriptMessage, TranscriptRole,
 };
-use mosaic_skill_core::{SkillOutput, SkillRegistry, SummarizeSkill};
+use mosaic_skill_core::{MarkdownSkillPack, SkillOutput, SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{
     CapabilityKind, CapabilityMetadata, PermissionScope, ReadFileTool, TimeNowTool, Tool,
     ToolMetadata, ToolRegistry, ToolResult, ToolRiskLevel, ToolSource,
@@ -29,6 +30,14 @@ use mosaic_workflow::{Workflow, WorkflowRegistry, WorkflowStep, WorkflowStepKind
 
 use super::{AgentRuntime, RunRequest, RuntimeContext};
 use crate::events::{NoopEventSink, RunEvent, RunEventSink};
+
+fn temp_dir(label: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock should be after epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("mosaic-runtime-{label}-{}-{nanos}", process::id()))
+}
 
 fn mock_profile_config() -> ProviderProfileConfig {
     ProviderProfileConfig {
@@ -1830,6 +1839,157 @@ async fn workflow_runs_record_step_trace_and_skill_invocation() {
             "RunFinished",
         ]
     );
+}
+
+#[tokio::test]
+async fn markdown_skill_pack_runs_and_records_source_metadata() {
+    let dir = temp_dir("markdown-skill");
+    fs::create_dir_all(&dir).expect("temp dir should exist");
+    fs::write(
+        dir.join("SKILL.md"),
+        r#"---
+name: operator_note
+description: Render an operator note
+version: 0.1.0
+runtime_requirements:
+  - python
+---
+Operator note:
+{{input}}
+"#,
+    )
+    .expect("skill pack should be written");
+
+    let pack = MarkdownSkillPack::load_from_dir(&dir).expect("markdown skill should load");
+    let mut skills = SkillRegistry::new();
+    skills.register_markdown_pack(pack);
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(
+            ProviderProfileRegistry::from_config(&MosaicConfig::default())
+                .expect("profile registry should build"),
+        ),
+        provider_override: Some(Arc::new(MockProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        telegram: Default::default(),
+        app_name: None,
+        tools: Arc::new(ToolRegistry::new()),
+        skills: Arc::new(skills),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: None,
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: "Disk usage high on host-7".to_owned(),
+            tool: None,
+            skill: Some("operator_note".to_owned()),
+            workflow: None,
+            session_id: Some("markdown-skill-demo".to_owned()),
+            profile: None,
+            ingress: None,
+        })
+        .await
+        .expect("markdown skill run should succeed");
+
+    assert_eq!(result.output, "Operator note:\nDisk usage high on host-7");
+    assert_eq!(result.trace.skill_calls.len(), 1);
+    assert_eq!(
+        result.trace.skill_calls[0].source_kind.as_deref(),
+        Some("markdown_pack")
+    );
+    assert_eq!(
+        result.trace.skill_calls[0].skill_version.as_deref(),
+        Some("0.1.0")
+    );
+    assert_eq!(
+        result.trace.skill_calls[0].runtime_requirements,
+        vec!["python".to_owned()]
+    );
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
+async fn workflow_can_call_markdown_skill_pack() {
+    let dir = temp_dir("markdown-workflow");
+    fs::create_dir_all(&dir).expect("temp dir should exist");
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: workflow_note\nversion: 0.1.0\n---\nWorkflow note:\n{{input}}\n",
+    )
+    .expect("skill pack should be written");
+
+    let pack = MarkdownSkillPack::load_from_dir(&dir).expect("markdown skill should load");
+    let mut skills = SkillRegistry::new();
+    skills.register_markdown_pack(pack);
+
+    let mut workflows = WorkflowRegistry::new();
+    workflows.register(Workflow {
+        name: "markdown_flow".to_owned(),
+        description: Some("Call markdown skill".to_owned()),
+        visibility: mosaic_tool_core::CapabilityExposure::default(),
+        steps: vec![WorkflowStep {
+            name: "note".to_owned(),
+            kind: WorkflowStepKind::Skill {
+                skill: "workflow_note".to_owned(),
+                input: "{{input}}".to_owned(),
+            },
+        }],
+    });
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(
+            ProviderProfileRegistry::from_config(&MosaicConfig::default())
+                .expect("profile registry should build"),
+        ),
+        provider_override: Some(Arc::new(MockProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        telegram: Default::default(),
+        app_name: None,
+        tools: Arc::new(ToolRegistry::new()),
+        skills: Arc::new(skills),
+        workflows: Arc::new(workflows),
+        node_router: None,
+        active_extensions: Vec::new(),
+        event_sink: Arc::new(NoopEventSink),
+    });
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: "Escalate the node restart.".to_owned(),
+            tool: None,
+            skill: None,
+            workflow: Some("markdown_flow".to_owned()),
+            session_id: Some("markdown-workflow-demo".to_owned()),
+            profile: None,
+            ingress: None,
+        })
+        .await
+        .expect("workflow run should succeed");
+
+    assert_eq!(result.output, "Workflow note:\nEscalate the node restart.");
+    assert_eq!(result.trace.skill_calls.len(), 1);
+    assert_eq!(
+        result.trace.skill_calls[0].source_kind.as_deref(),
+        Some("markdown_pack")
+    );
+
+    fs::remove_dir_all(dir).ok();
 }
 
 #[tokio::test]

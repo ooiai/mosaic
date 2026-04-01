@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use anyhow::Result;
 
 use crate::{
-    ManifestSkill, Skill, SkillCapabilities, SkillContext, SkillManifest, SkillMetadata,
-    SkillOutput,
+    ManifestSkill, MarkdownSkillPack, Skill, SkillCapabilities, SkillContext, SkillManifest,
+    SkillMetadata, SkillOutput,
 };
 
 enum RegisteredSkillImpl {
@@ -88,6 +88,19 @@ impl SkillRegistry {
                 metadata,
             },
         );
+    }
+
+    pub fn register_markdown_pack(&mut self, pack: MarkdownSkillPack) {
+        let metadata = SkillMetadata::markdown_pack(&pack);
+        self.register_markdown_pack_with_metadata(pack, metadata);
+    }
+
+    pub fn register_markdown_pack_with_metadata(
+        &mut self,
+        pack: MarkdownSkillPack,
+        metadata: SkillMetadata,
+    ) {
+        self.register_native_with_metadata(Arc::new(pack), metadata);
     }
 
     pub fn get(&self, name: &str) -> Option<&RegisteredSkill> {
