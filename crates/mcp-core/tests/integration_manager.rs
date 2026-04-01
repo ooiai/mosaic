@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use mosaic_mcp_core::{McpServerManager, McpServerSpec};
-use mosaic_tool_core::ToolRegistry;
+use mosaic_tool_core::{ToolContext, ToolRegistry};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -38,7 +38,10 @@ async fn mcp_server_manager_registers_and_calls_mock_stdio_tool() {
         .get("mcp.filesystem.read_file")
         .expect("qualified MCP tool should exist");
     let result = tool
-        .call(serde_json::json!({ "path": readme.display().to_string() }))
+        .call(
+            serde_json::json!({ "path": readme.display().to_string() }),
+            &ToolContext::default(),
+        )
         .await
         .expect("remote MCP tool should succeed");
 

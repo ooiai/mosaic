@@ -104,6 +104,9 @@ fn gateway() -> GatewayHandle {
             },
         }],
     });
+    let workspace_root = std::env::temp_dir().join("mosaic-gateway-tests-workspace");
+    let sandbox = crate::build_sandbox_manager(&workspace_root, &config)
+        .expect("sandbox manager should build");
 
     GatewayHandle::new_local(
         Handle::current(),
@@ -117,6 +120,7 @@ fn gateway() -> GatewayHandle {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            sandbox,
             telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
@@ -125,7 +129,7 @@ fn gateway() -> GatewayHandle {
             node_store: test_node_store(),
             mcp_manager: None,
             cron_store: test_cron_store(),
-            workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace"),
+            workspace_root,
             runs_dir: std::env::temp_dir(),
             audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit"),
             extensions: Vec::new(),
@@ -182,6 +186,9 @@ fn gateway_with_filtered_workflow() -> GatewayHandle {
                 .with_allowed_channels(vec!["telegram".to_owned()]),
         ),
     );
+    let workspace_root = std::env::temp_dir().join("mosaic-gateway-tests-workspace-filtered");
+    let sandbox = crate::build_sandbox_manager(&workspace_root, &config)
+        .expect("sandbox manager should build");
 
     GatewayHandle::new_local(
         Handle::current(),
@@ -195,6 +202,7 @@ fn gateway_with_filtered_workflow() -> GatewayHandle {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            sandbox,
             telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
@@ -203,7 +211,7 @@ fn gateway_with_filtered_workflow() -> GatewayHandle {
             node_store: test_node_store(),
             mcp_manager: None,
             cron_store: test_cron_store(),
-            workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace-filtered"),
+            workspace_root,
             runs_dir: std::env::temp_dir(),
             audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit-filtered"),
             extensions: Vec::new(),
@@ -299,6 +307,8 @@ fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
     let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(root.join(".mosaic/cron")));
     let extension_set = load_extension_set(&loaded.config, None, root, cron_store.clone())
         .expect("extension set should load");
+    let sandbox =
+        crate::build_sandbox_manager(root, &loaded.config).expect("sandbox manager should build");
 
     GatewayHandle::new_local_with_reload_source(
         Handle::current(),
@@ -310,6 +320,7 @@ fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: loaded.config.runtime.clone(),
             attachments: loaded.config.attachments.clone(),
+            sandbox,
             telegram: loaded.config.telegram.clone(),
             app_name: None,
             tools: Arc::new(extension_set.tools),
@@ -584,6 +595,9 @@ async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
         }])
         .expect("MCP manager should start"),
     );
+    let workspace_root = std::env::temp_dir().join("mosaic-gateway-tests-workspace");
+    let sandbox = crate::build_sandbox_manager(&workspace_root, &config)
+        .expect("sandbox manager should build");
 
     let gateway = GatewayHandle::new_local(
         Handle::current(),
@@ -597,6 +611,7 @@ async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            sandbox,
             telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
@@ -605,7 +620,7 @@ async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
             node_store: test_node_store(),
             mcp_manager: Some(manager),
             cron_store: test_cron_store(),
-            workspace_root: std::env::temp_dir().join("mosaic-gateway-tests-workspace"),
+            workspace_root,
             runs_dir: std::env::temp_dir(),
             audit_root: std::env::temp_dir().join("mosaic-gateway-tests-audit"),
             extensions: Vec::new(),

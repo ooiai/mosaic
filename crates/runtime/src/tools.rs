@@ -80,6 +80,7 @@ impl AgentRuntime {
         tool_name: String,
         call_id: String,
         tool_input: serde_json::Value,
+        run_workdir: Option<&std::path::Path>,
     ) -> std::result::Result<ToolExecutionOutcome, ToolExecutionFailure> {
         self.emit(RunEvent::ToolCalling {
             name: tool_name.clone(),
@@ -106,6 +107,25 @@ impl AgentRuntime {
         let metadata = tool.metadata().clone();
         let started_at = Utc::now();
         let job_id = Uuid::new_v4().to_string();
+        let tool_sandbox = match self.prepare_tool_sandbox(&metadata, run_workdir) {
+            Ok(sandbox) => sandbox,
+            Err(error) => {
+                self.emit(RunEvent::CapabilityJobFailed {
+                    job_id: job_id.clone(),
+                    name: tool_name.clone(),
+                    error: error.to_string(),
+                });
+                self.emit(RunEvent::ToolFailed {
+                    name: tool_name.clone(),
+                    call_id: call_id.clone(),
+                    error: error.to_string(),
+                });
+                return Err(self.build_tool_failure(
+                    error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None,
+                    None, None, "sandbox",
+                ));
+            }
+        };
         self.emit(RunEvent::CapabilityJobQueued {
             job_id: job_id.clone(),
             name: tool_name.clone(),
@@ -199,6 +219,7 @@ impl AgentRuntime {
                         capability_route: node_trace.capability_route.clone(),
                         disconnect_context: node_trace.disconnect_context.clone(),
                         effective_execution_target: node_trace.effective_execution_target.clone(),
+                        sandbox: None,
                         started_at,
                         finished_at: Some(finished_at),
                     };
@@ -366,11 +387,42 @@ impl AgentRuntime {
         }
 
         for attempt in 1..=attempts {
-            let attempt_result = tokio::time::timeout(timeout, tool.call(tool_input.clone())).await;
+            let tool_ctx = ToolContext {
+                sandbox: tool_sandbox.clone(),
+            };
+            let attempt_result =
+                tokio::time::timeout(timeout, tool.call(tool_input.clone(), &tool_ctx)).await;
             match attempt_result {
                 Ok(Ok(result)) if !result.is_error => {
                     let finished_at = Utc::now();
                     let output = result.content.clone();
+                    let sandbox_trace = tool_sandbox.as_ref().map(|ctx| SandboxEnvTrace {
+                        env_id: ctx.env_id.clone(),
+                        env_kind: ctx.kind.label().to_owned(),
+                        env_scope: ctx.scope.label().to_owned(),
+                        env_name: metadata.name.clone(),
+                        env_path: ctx.env_dir.display().to_string(),
+                        workdir: Some(ctx.workdir.display().to_string()),
+                        dependency_spec: ctx.dependency_spec.clone(),
+                        strategy: self
+                            .ctx
+                            .sandbox
+                            .inspect_env(&ctx.env_id)
+                            .ok()
+                            .map(|record| record.strategy),
+                        status: self
+                            .ctx
+                            .sandbox
+                            .inspect_env(&ctx.env_id)
+                            .ok()
+                            .map(|record| record.status.label().to_owned()),
+                        error: self
+                            .ctx
+                            .sandbox
+                            .inspect_env(&ctx.env_id)
+                            .ok()
+                            .and_then(|record| record.error),
+                    });
                     let tool_trace = ToolTrace {
                         call_id: Some(call_id.clone()),
                         name: tool_name.clone(),
@@ -401,6 +453,7 @@ impl AgentRuntime {
                             .as_ref()
                             .map(|trace| trace.effective_execution_target.clone())
                             .unwrap_or_else(|| "local".to_owned()),
+                        sandbox: sandbox_trace,
                         started_at,
                         finished_at: Some(finished_at),
                     };
@@ -592,6 +645,7 @@ impl AgentRuntime {
                 .as_ref()
                 .map(|trace| trace.effective_execution_target.clone())
                 .unwrap_or_else(|| "local".to_owned()),
+            sandbox: None,
             started_at,
             finished_at: Some(finished_at),
         };

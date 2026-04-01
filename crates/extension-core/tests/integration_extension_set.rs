@@ -77,6 +77,7 @@ fn workspace_config_and_manifest_capabilities_merge_into_final_registry() {
         required_policy: Some("workspace_override".to_owned()),
         allowed_channels: vec!["telegram".to_owned()],
         accepts_attachments: false,
+        sandbox: None,
     }];
     config.skills = vec![SkillConfig {
         skill_type: "manifest".to_owned(),
@@ -93,6 +94,7 @@ fn workspace_config_and_manifest_capabilities_merge_into_final_registry() {
         allowed_channels: vec!["webchat".to_owned()],
         accepts_attachments: false,
         runtime_requirements: Vec::new(),
+        sandbox: None,
     }];
     config.workflows = vec![Workflow {
         name: "workspace_flow".to_owned(),

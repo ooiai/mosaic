@@ -124,9 +124,14 @@ mosaic/
 Use the root `Makefile` as the standard entrypoint for local CLI workflows.
 
 ```bash
-make build
-make check
-cargo run -p mosaic-cli
+mosaic setup init
+mosaic setup validate
+mosaic setup doctor
+mosaic config show
+mosaic model list
+mosaic tui
+mosaic session list
+mosaic inspect .mosaic/runs/<run-id>.json
 ```
 
 ### Standard Commands
@@ -138,7 +143,100 @@ cargo run -p mosaic-cli
 | `make clean`   | Clean workspace build artifacts    |
 | `make check`   | Run workspace checks               |
 
+### Release And Test Commands
+
+- `make test-unit`
+- `make test-integration`
+- `make test-matrix`
+- `make test-golden`
+- `MOSAIC_REAL_TESTS=1 make test-real`
+- `make release-check`
+- `make package`
+
 The installed binary name is `mosaic`.
+
+## Operator Docs
+
+- [`docs/getting-started.md`](./docs/getting-started.md)
+- [`docs/cli.md`](./docs/cli.md)
+- [`docs/channels.md`](./docs/channels.md)
+- [`docs/telegram-step-by-step.md`](./docs/telegram-step-by-step.md)
+- [`docs/full-stack.md`](./docs/full-stack.md)
+- [`docs/telegram-real-e2e.md`](./docs/telegram-real-e2e.md)
+- [`docs/real-vs-mock-acceptance.md`](./docs/real-vs-mock-acceptance.md)
+- [`docs/residual-mock-first-audit.md`](./docs/residual-mock-first-audit.md)
+- [`docs/provider-runtime-policy-matrix.md`](./docs/provider-runtime-policy-matrix.md)
+- [`docs/writer-ownership.md`](./docs/writer-ownership.md)
+- [`docs/deployment.md`](./docs/deployment.md)
+- [`docs/security.md`](./docs/security.md)
+- [`docs/session-inspect-incident.md`](./docs/session-inspect-incident.md)
+- [`docs/testing.md`](./docs/testing.md)
+- [`docs/non-tui-architecture-audit.md`](./docs/non-tui-architecture-audit.md)
+- [`docs/release.md`](./docs/release.md)
+
+## Examples
+
+- [`examples/README.md`](./examples/README.md)
+- [`examples/TESTING.md`](./examples/TESTING.md)
+- [`examples/channels/README.md`](./examples/channels/README.md)
+- [`examples/channels/telegram-photo-update.json`](./examples/channels/telegram-photo-update.json)
+- [`examples/channels/telegram-document-update.json`](./examples/channels/telegram-document-update.json)
+- [`examples/full-stack/README.md`](./examples/full-stack/README.md)
+- [`examples/full-stack/openai-telegram-single-bot.config.yaml`](./examples/full-stack/openai-telegram-single-bot.config.yaml)
+- [`examples/full-stack/openai-telegram-e2e.config.yaml`](./examples/full-stack/openai-telegram-e2e.config.yaml)
+- [`examples/full-stack/openai-telegram-multi-bot.config.yaml`](./examples/full-stack/openai-telegram-multi-bot.config.yaml)
+- [`examples/full-stack/openai-telegram-multimodal.config.yaml`](./examples/full-stack/openai-telegram-multimodal.config.yaml)
+- [`examples/full-stack/openai-telegram-bot-split.config.yaml`](./examples/full-stack/openai-telegram-bot-split.config.yaml)
+- [`examples/full-stack/openai-webchat.config.yaml`](./examples/full-stack/openai-webchat.config.yaml)
+- [`examples/deployment/production.config.yaml`](./examples/deployment/production.config.yaml)
+
+## First Real Flow
+
+The operator-first path is:
+
+1. `mosaic setup init`
+2. `mosaic setup validate`
+3. `mosaic setup doctor`
+4. `mosaic config show`
+5. `mosaic model list`
+6. `mosaic tui`
+7. Use `/mosaic help` inside a real channel or the interactive console.
+8. Inspect the resulting run with `mosaic inspect .mosaic/runs/<run-id>.json`
+
+For the Telegram-first real acceptance lane, start with:
+
+- [`docs/telegram-step-by-step.md`](./docs/telegram-step-by-step.md)
+- [`docs/telegram-real-e2e.md`](./docs/telegram-real-e2e.md)
+- [`docs/full-stack.md`](./docs/full-stack.md)
+
+For release evidence, use:
+
+- `make release-check`
+- `make test-matrix`
+- `make test-golden`
+
+## Crate Guide
+
+- [`./cli/README.md`](./cli/README.md)
+- [`./crates/channel-telegram/README.md`](./crates/channel-telegram/README.md)
+- [`./crates/config/README.md`](./crates/config/README.md)
+- [`./crates/control-protocol/README.md`](./crates/control-protocol/README.md)
+- [`./crates/extension-core/README.md`](./crates/extension-core/README.md)
+- [`./crates/gateway/README.md`](./crates/gateway/README.md)
+- [`./crates/inspect/README.md`](./crates/inspect/README.md)
+- [`./crates/mcp-core/README.md`](./crates/mcp-core/README.md)
+- [`./crates/memory/README.md`](./crates/memory/README.md)
+- [`./crates/node-protocol/README.md`](./crates/node-protocol/README.md)
+- [`./crates/provider/README.md`](./crates/provider/README.md)
+- [`./crates/runtime/README.md`](./crates/runtime/README.md)
+- [`./crates/sandbox-core/README.md`](./crates/sandbox-core/README.md)
+- [`./crates/scheduler-core/README.md`](./crates/scheduler-core/README.md)
+- [`./crates/sdk/README.md`](./crates/sdk/README.md)
+- [`./crates/session-core/README.md`](./crates/session-core/README.md)
+- [`./crates/skill-core/README.md`](./crates/skill-core/README.md)
+- [`./crates/tool-core/README.md`](./crates/tool-core/README.md)
+- [`./crates/tui/README.md`](./crates/tui/README.md)
+- [`./crates/workflow/README.md`](./crates/workflow/README.md)
 
 ## Current Operator Surface
 

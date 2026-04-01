@@ -7,6 +7,7 @@ use super::{
     template::{input_text, render_template},
 };
 use crate::{SkillContext, SkillManifest, SkillOutput};
+use mosaic_tool_core::{ToolContext, ToolSandboxContext};
 
 pub struct ManifestSkill {
     manifest: SkillManifest,
@@ -50,7 +51,17 @@ impl ManifestSkill {
                         .tools
                         .get(tool)
                         .ok_or_else(|| anyhow!("manifest skill tool not found: {tool}"))?;
-                    let result = tool_impl.call(input.clone()).await?;
+                    let tool_ctx = ToolContext {
+                        sandbox: ctx.sandbox.as_ref().map(|sandbox| ToolSandboxContext {
+                            env_id: sandbox.env_id.clone(),
+                            kind: sandbox.kind,
+                            scope: sandbox.scope,
+                            env_dir: sandbox.env_dir.clone(),
+                            workdir: sandbox.workdir.clone(),
+                            dependency_spec: sandbox.dependency_spec.clone(),
+                        }),
+                    };
+                    let result = tool_impl.call(input.clone(), &tool_ctx).await?;
                     result.content
                 }
             };

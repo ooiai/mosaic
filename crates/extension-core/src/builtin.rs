@@ -34,6 +34,7 @@ pub(crate) fn builtin_planned_extension(policies: &PolicyConfig) -> PlannedExten
             allowed_channels: Vec::new(),
             accepts_attachments: false,
             runtime_requirements: Vec::new(),
+            sandbox: None,
         }],
         workflows: Vec::new(),
         mcp: None,
@@ -70,10 +71,11 @@ pub(crate) fn build_builtin_tool(
         (other, _) => bail!("unsupported tool type: {}", other),
     };
 
-    let metadata = inner
+    let mut metadata = inner
         .metadata()
         .clone()
         .with_exposure(crate::exposure_from_tool_config(tool, extension_source));
+    metadata.capability.sandbox = tool.sandbox.clone();
     let inner: Arc<dyn Tool> = Arc::new(ExtensionWrappedTool { inner, metadata });
 
     Ok(wrap_tool(
@@ -98,6 +100,7 @@ pub(crate) fn register_skill(
             Arc::new(SummarizeSkill),
             SkillMetadata::native("summarize")
                 .with_exposure(crate::exposure_from_skill_config(skill, extension_source))
+                .with_sandbox(skill.sandbox.clone())
                 .with_extension(extension_name.to_owned(), extension_version.to_owned())
                 .with_compatibility(compatibility),
         ),
@@ -125,6 +128,7 @@ pub(crate) fn register_skill(
                 steps: skill.steps.clone(),
             })
             .with_exposure(crate::exposure_from_skill_config(skill, extension_source))
+            .with_sandbox(skill.sandbox.clone())
             .with_extension(extension_name.to_owned(), extension_version.to_owned())
             .with_compatibility(compatibility),
         ),
@@ -163,6 +167,7 @@ pub(crate) fn register_skill(
                 SkillMetadata::markdown_pack(&pack)
                     .with_declared_tools(declared_tools)
                     .with_runtime_requirements(runtime_requirements)
+                    .with_sandbox(skill.sandbox.clone())
                     .with_source_path(Some(skill_path.to_owned()))
                     .with_skill_version(pack.version().map(ToOwned::to_owned))
                     .with_exposure(markdown_pack_exposure(skill, extension_source, &pack))
@@ -234,6 +239,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             required_policy: None,
             allowed_channels: Vec::new(),
             accepts_attachments: false,
+            sandbox: None,
         },
         ToolConfig {
             tool_type: "builtin".to_owned(),
@@ -243,6 +249,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             required_policy: None,
             allowed_channels: Vec::new(),
             accepts_attachments: false,
+            sandbox: None,
         },
         ToolConfig {
             tool_type: "builtin".to_owned(),
@@ -252,6 +259,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             required_policy: None,
             allowed_channels: Vec::new(),
             accepts_attachments: false,
+            sandbox: None,
         },
     ];
 
@@ -264,6 +272,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             required_policy: Some("allow_cron".to_owned()),
             allowed_channels: Vec::new(),
             accepts_attachments: false,
+            sandbox: None,
         });
     }
     if policies.allow_exec {
@@ -275,6 +284,12 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             required_policy: Some("allow_exec".to_owned()),
             allowed_channels: Vec::new(),
             accepts_attachments: false,
+            sandbox: Some(mosaic_tool_core::SandboxBinding::new(
+                mosaic_tool_core::SandboxKind::Shell,
+                "exec-command",
+                mosaic_tool_core::SandboxScope::Capability,
+                vec!["sh".to_owned()],
+            )),
         });
     }
     if policies.allow_webhook {
@@ -286,6 +301,7 @@ fn builtin_tool_configs(policies: &PolicyConfig) -> Vec<ToolConfig> {
             required_policy: Some("allow_webhook".to_owned()),
             allowed_channels: Vec::new(),
             accepts_attachments: false,
+            sandbox: None,
         });
     }
 

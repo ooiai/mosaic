@@ -12,7 +12,7 @@ use mosaic_inspect::{
     AttachmentRouteMode, CapabilityInvocationTrace, CompressionTrace, EffectiveProfileTrace,
     ExtensionTrace, ExtensionUsageTrace, IngressTrace, MemoryReadTrace, MemoryWriteTrace,
     ModelSelectionTrace, ProviderAttemptTrace, ProviderFailureTrace, RunFailureTrace, RunTrace,
-    SkillTrace, ToolTrace, WorkflowStepTrace,
+    SandboxEnvTrace, SandboxRunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
 };
 use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
@@ -26,9 +26,12 @@ use mosaic_provider::{
     ProviderTransportMetadata, Role, SchedulingIntent, SchedulingRequest, ToolDefinition,
     tool_definition_from_metadata, tool_is_visible_to_model, validate_step_tools_support,
 };
+use mosaic_sandbox_core::{SandboxBinding, SandboxEnvRecord, SandboxKind, SandboxScope};
 use mosaic_session_core::{SessionRecord, SessionStore, TranscriptRole, session_title_from_input};
-use mosaic_skill_core::{SkillContext, SkillRegistry};
-use mosaic_tool_core::{CapabilityAudit, ToolMetadata, ToolRegistry};
+use mosaic_skill_core::{SkillContext, SkillRegistry, SkillSandboxContext};
+use mosaic_tool_core::{
+    CapabilityAudit, ToolContext, ToolMetadata, ToolRegistry, ToolSandboxContext,
+};
 use mosaic_workflow::{
     Workflow, WorkflowObserver, WorkflowRegistry, WorkflowStep, WorkflowStepExecutor,
     WorkflowStepKind,
@@ -58,6 +61,47 @@ use types::{
 };
 use workflow::{push_capability_trace, push_skill_trace, push_tool_trace, update_skill_trace};
 
+fn derive_sandbox_binding(
+    capability_name: &str,
+    runtime_requirements: &[String],
+    scope: SandboxScope,
+) -> Option<SandboxBinding> {
+    if runtime_requirements.is_empty() {
+        return None;
+    }
+
+    let normalized = runtime_requirements
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    let kind = if normalized
+        .iter()
+        .any(|entry| matches!(entry.as_str(), "python" | "pip" | "uv" | "venv"))
+    {
+        SandboxKind::Python
+    } else if normalized
+        .iter()
+        .any(|entry| matches!(entry.as_str(), "node" | "npm" | "pnpm"))
+    {
+        SandboxKind::Node
+    } else if normalized
+        .iter()
+        .any(|entry| entry.contains("processor") || entry.contains("paddle"))
+    {
+        SandboxKind::Processor
+    } else {
+        SandboxKind::Shell
+    };
+
+    Some(SandboxBinding::new(
+        kind,
+        capability_name,
+        scope,
+        runtime_requirements.to_vec(),
+    ))
+}
+
 impl AgentRuntime {
     pub fn new(ctx: RuntimeContext) -> Self {
         Self { ctx }
@@ -65,6 +109,82 @@ impl AgentRuntime {
 
     fn emit(&self, event: RunEvent) {
         self.ctx.event_sink.emit(event);
+    }
+
+    fn skill_sandbox_binding(
+        metadata: &mosaic_skill_core::SkillMetadata,
+    ) -> Option<SandboxBinding> {
+        metadata.sandbox.clone().or_else(|| {
+            derive_sandbox_binding(
+                &metadata.name,
+                &metadata.runtime_requirements,
+                SandboxScope::Capability,
+            )
+        })
+    }
+
+    fn tool_sandbox_binding(metadata: &ToolMetadata) -> Option<SandboxBinding> {
+        metadata.capability.sandbox.clone()
+    }
+
+    fn sandbox_trace(
+        record: &SandboxEnvRecord,
+        workdir: Option<&std::path::Path>,
+    ) -> SandboxEnvTrace {
+        SandboxEnvTrace {
+            env_id: record.env_id.clone(),
+            env_kind: record.kind.label().to_owned(),
+            env_scope: record.scope.label().to_owned(),
+            env_name: record.env_name.clone(),
+            env_path: record.env_dir.display().to_string(),
+            workdir: workdir.map(|path| path.display().to_string()),
+            dependency_spec: record.dependency_spec.clone(),
+            strategy: Some(record.strategy.clone()),
+            status: Some(record.status.label().to_owned()),
+            error: record.error.clone(),
+        }
+    }
+
+    fn prepare_skill_sandbox(
+        &self,
+        metadata: &mosaic_skill_core::SkillMetadata,
+        run_workdir: Option<&std::path::Path>,
+    ) -> Result<Option<SkillSandboxContext>> {
+        let Some(binding) = Self::skill_sandbox_binding(metadata) else {
+            return Ok(None);
+        };
+        let record = self.ctx.sandbox.ensure_env(&binding)?;
+        Ok(Some(SkillSandboxContext {
+            env_id: record.env_id,
+            kind: record.kind,
+            scope: record.scope,
+            env_dir: record.env_dir,
+            workdir: run_workdir
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| self.ctx.sandbox.paths().work_runs),
+            dependency_spec: record.dependency_spec,
+        }))
+    }
+
+    fn prepare_tool_sandbox(
+        &self,
+        metadata: &ToolMetadata,
+        run_workdir: Option<&std::path::Path>,
+    ) -> Result<Option<ToolSandboxContext>> {
+        let Some(binding) = Self::tool_sandbox_binding(metadata) else {
+            return Ok(None);
+        };
+        let record = self.ctx.sandbox.ensure_env(&binding)?;
+        Ok(Some(ToolSandboxContext {
+            env_id: record.env_id,
+            kind: record.kind,
+            scope: record.scope,
+            env_dir: record.env_dir,
+            workdir: run_workdir
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| self.ctx.sandbox.paths().work_runs),
+            dependency_spec: record.dependency_spec,
+        }))
     }
 
     pub async fn run(&self, req: RunRequest) -> std::result::Result<RunResult, RunError> {
@@ -82,6 +202,12 @@ impl AgentRuntime {
             workflow = ?req.workflow,
             "runtime run started"
         );
+        if let Ok(allocation) = self.ctx.sandbox.create_run_workdir(&trace.run_id) {
+            trace.bind_sandbox_run(SandboxRunTrace {
+                root_dir: allocation.root.display().to_string(),
+                workdir: allocation.workdir.display().to_string(),
+            });
+        }
 
         let requested_profile = req.profile.clone();
         let base_profile = match self.ctx.profiles.resolve(req.profile.as_deref()) {
@@ -368,6 +494,10 @@ impl AgentRuntime {
                             call.name.clone(),
                             call_id.clone(),
                             call.arguments.clone(),
+                            trace
+                                .sandbox_run
+                                .as_ref()
+                                .map(|sandbox| std::path::Path::new(&sandbox.workdir)),
                         )
                         .await
                     {
@@ -448,6 +578,7 @@ impl AgentRuntime {
         tool_defs: Vec<ToolDefinition>,
         tool_traces: &SharedToolTraceCollector,
         capability_traces: &SharedCapabilityTraceCollector,
+        run_workdir: Option<&std::path::Path>,
     ) -> Result<String> {
         let provider = self.provider_for_profile(profile)?;
         let provider_metadata = provider.metadata();
@@ -520,6 +651,7 @@ impl AgentRuntime {
                             call.name.clone(),
                             call_id.clone(),
                             call.arguments.clone(),
+                            run_workdir,
                         )
                         .await
                     {
@@ -595,14 +727,46 @@ impl AgentRuntime {
             source_path: skill.metadata().source_path.clone(),
             skill_version: skill.metadata().skill_version.clone(),
             runtime_requirements: skill.metadata().runtime_requirements.clone(),
+            sandbox: None,
             input: skill_input.clone(),
             output: None,
             started_at: Utc::now(),
             finished_at: None,
         });
 
+        let run_workdir = trace
+            .sandbox_run
+            .as_ref()
+            .map(|sandbox| std::path::PathBuf::from(&sandbox.workdir));
+        let sandbox = self.prepare_skill_sandbox(skill.metadata(), run_workdir.as_deref())?;
+        let sandbox_trace = sandbox.as_ref().map(|ctx| {
+            let record = self
+                .ctx
+                .sandbox
+                .inspect_env(&ctx.env_id)
+                .unwrap_or_else(|_| SandboxEnvRecord {
+                    env_id: ctx.env_id.clone(),
+                    kind: ctx.kind,
+                    scope: ctx.scope,
+                    env_name: skill_name.clone(),
+                    dependency_spec: ctx.dependency_spec.clone(),
+                    strategy: "unknown".to_owned(),
+                    env_dir: ctx.env_dir.clone(),
+                    cache_dir: self.ctx.sandbox.paths().root,
+                    runtime_dir: None,
+                    status: mosaic_sandbox_core::SandboxEnvStatus::LayoutOnly,
+                    error: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                });
+            Self::sandbox_trace(&record, Some(&ctx.workdir))
+        });
+        if let Some(last) = trace.skill_calls.last_mut() {
+            last.sandbox = sandbox_trace;
+        }
         let ctx = SkillContext {
             tools: self.ctx.tools.clone(),
+            sandbox,
         };
 
         match skill.execute(skill_input, &ctx).await {
@@ -635,6 +799,7 @@ impl AgentRuntime {
         input: String,
         attachments: &[mosaic_inspect::ChannelAttachment],
         skill_traces: &SharedSkillTraceCollector,
+        run_workdir: Option<&std::path::Path>,
     ) -> Result<String> {
         let skill = self
             .ctx
@@ -659,6 +824,7 @@ impl AgentRuntime {
                 source_path: skill.metadata().source_path.clone(),
                 skill_version: skill.metadata().skill_version.clone(),
                 runtime_requirements: skill.metadata().runtime_requirements.clone(),
+                sandbox: None,
                 input: skill_input.clone(),
                 output: None,
                 started_at: Utc::now(),
@@ -666,8 +832,35 @@ impl AgentRuntime {
             },
         );
 
+        let sandbox = self.prepare_skill_sandbox(skill.metadata(), run_workdir)?;
+        let sandbox_trace = sandbox.as_ref().map(|ctx| {
+            let record = self
+                .ctx
+                .sandbox
+                .inspect_env(&ctx.env_id)
+                .unwrap_or_else(|_| SandboxEnvRecord {
+                    env_id: ctx.env_id.clone(),
+                    kind: ctx.kind,
+                    scope: ctx.scope,
+                    env_name: skill_name.clone(),
+                    dependency_spec: ctx.dependency_spec.clone(),
+                    strategy: "unknown".to_owned(),
+                    env_dir: ctx.env_dir.clone(),
+                    cache_dir: self.ctx.sandbox.paths().root,
+                    runtime_dir: None,
+                    status: mosaic_sandbox_core::SandboxEnvStatus::LayoutOnly,
+                    error: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                });
+            Self::sandbox_trace(&record, Some(&ctx.workdir))
+        });
+        update_skill_trace(skill_traces, &skill_name, |trace| {
+            trace.sandbox = sandbox_trace.clone();
+        });
         let ctx = SkillContext {
             tools: self.ctx.tools.clone(),
+            sandbox,
         };
 
         match skill.execute(skill_input, &ctx).await {

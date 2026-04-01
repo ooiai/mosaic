@@ -4,6 +4,7 @@ use mosaic_config::{
 };
 use mosaic_inspect::RunTrace;
 use mosaic_runtime::events::{RunEvent, RunEventSink};
+use mosaic_sandbox_core::{SandboxCleanReport, SandboxEnvRecord, SandboxRuntimeStatus};
 use tracing::info;
 
 pub struct CliEventSink;
@@ -432,6 +433,137 @@ pub fn render_gateway_status(
     ])
 }
 
+pub fn render_sandbox_status(
+    workspace: &RedactedMosaicConfig,
+    runtime_statuses: &[SandboxRuntimeStatus],
+    env_count: usize,
+) -> String {
+    let mut blocks = vec![render_key_value_block(
+        "sandbox summary",
+        vec![
+            ("base_dir", workspace.sandbox.base_dir.clone()),
+            (
+                "python_strategy",
+                workspace.sandbox.python_strategy.label().to_owned(),
+            ),
+            (
+                "node_strategy",
+                workspace.sandbox.node_strategy.label().to_owned(),
+            ),
+            ("env_count", env_count.to_string()),
+            (
+                "run_workdirs_after_hours",
+                workspace.sandbox.run_workdirs_after_hours.to_string(),
+            ),
+            (
+                "attachments_after_hours",
+                workspace.sandbox.attachments_after_hours.to_string(),
+            ),
+        ],
+    )];
+
+    blocks.push(render_list_block(
+        "sandbox runtimes",
+        runtime_statuses
+            .iter()
+            .map(|status| {
+                format!(
+                    "{} | strategy={} | available={} | detail={}",
+                    status.kind.label(),
+                    status.strategy,
+                    status.available,
+                    option_string(status.detail.clone()),
+                )
+            })
+            .collect(),
+    ));
+
+    join_blocks(blocks)
+}
+
+pub fn render_sandbox_env_list(records: &[SandboxEnvRecord]) -> String {
+    render_list_block(
+        "sandbox envs",
+        records
+            .iter()
+            .map(|record| {
+                format!(
+                    "{} | kind={} | scope={} | strategy={} | status={} | env_dir={} | runtime_dir={} | deps={}",
+                    record.env_id,
+                    record.kind.label(),
+                    record.scope.label(),
+                    record.strategy,
+                    record.status.label(),
+                    record.env_dir.display(),
+                    record
+                        .runtime_dir
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                    if record.dependency_spec.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        record.dependency_spec.join(", ")
+                    },
+                )
+            })
+            .collect(),
+    )
+}
+
+pub fn render_sandbox_env(record: &SandboxEnvRecord) -> String {
+    join_blocks([
+        render_key_value_block(
+            "sandbox env",
+            vec![
+                ("env_id", record.env_id.clone()),
+                ("kind", record.kind.label().to_owned()),
+                ("scope", record.scope.label().to_owned()),
+                ("env_name", record.env_name.clone()),
+                ("strategy", record.strategy.clone()),
+                ("status", record.status.label().to_owned()),
+                ("env_dir", record.env_dir.display().to_string()),
+                ("cache_dir", record.cache_dir.display().to_string()),
+                (
+                    "runtime_dir",
+                    record
+                        .runtime_dir
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                ),
+                ("created_at", record.created_at.to_rfc3339()),
+                ("updated_at", record.updated_at.to_rfc3339()),
+                ("error", option_string(record.error.clone())),
+            ],
+        ),
+        render_list_block(
+            "dependencies",
+            if record.dependency_spec.is_empty() {
+                Vec::new()
+            } else {
+                record.dependency_spec.clone()
+            },
+        ),
+    ])
+}
+
+pub fn render_sandbox_clean_report(report: &SandboxCleanReport) -> String {
+    render_key_value_block(
+        "sandbox clean",
+        vec![
+            (
+                "removed_run_workdirs",
+                report.removed_run_workdirs.to_string(),
+            ),
+            (
+                "removed_attachment_workdirs",
+                report.removed_attachment_workdirs.to_string(),
+            ),
+        ],
+    )
+}
+
 pub fn render_inspect_report(
     trace: &RunTrace,
     workspace: Option<&RedactedMosaicConfig>,
@@ -623,6 +755,16 @@ pub fn render_inspect_report(
                         route.attachment_filenames.join(", ")
                     },
                 ),
+            ],
+        ));
+    }
+
+    if let Some(sandbox_run) = &trace.sandbox_run {
+        blocks.push(render_key_value_block(
+            "sandbox run",
+            vec![
+                ("root_dir", sandbox_run.root_dir.clone()),
+                ("workdir", sandbox_run.workdir.clone()),
             ],
         ));
     }
@@ -1023,7 +1165,7 @@ pub fn render_inspect_report(
         for call in &trace.tool_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "call_id={} | name={} | source={} | server={} | remote_tool={} | exec_target={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | duration_ms={} | input={} | output_preview={}",
+                "call_id={} | name={} | source={} | server={} | remote_tool={} | exec_target={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
                 option_string(call.call_id.clone()),
                 call.name,
                 call.source.label(),
@@ -1035,6 +1177,15 @@ pub fn render_inspect_report(
                 option_string(call.node_failure_class.clone()),
                 option_string(call.node_id.clone()),
                 option_string(call.capability_route.clone()),
+                call.sandbox
+                    .as_ref()
+                    .map(|sandbox| {
+                        format!(
+                            "{}:{}:{}",
+                            sandbox.env_kind, sandbox.env_scope, sandbox.env_name
+                        )
+                    })
+                    .unwrap_or_else(|| "<none>".to_owned()),
                 option_i64(call.duration_ms()),
                 single_line(&input),
                 option_preview(call.output.as_deref(), 120),
@@ -1048,17 +1199,26 @@ pub fn render_inspect_report(
         for call in &trace.skill_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "name={} | source_kind={} | source_path={} | skill_version={} | runtime_requirements={} | duration_ms={} | input={} | output_preview={}",
+                "name={} | source_kind={} | source_path={} | skill_version={} | runtime_requirements={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
                 call.name,
                 option_string(call.source_kind.clone()),
                 option_string(call.source_path.clone()),
                 option_string(call.skill_version.clone()),
-                if call.runtime_requirements.is_empty() {
-                    "<none>".to_owned()
-                } else {
-                    call.runtime_requirements.join(", ")
-                },
-                option_i64(call.duration_ms()),
+                    if call.runtime_requirements.is_empty() {
+                        "<none>".to_owned()
+                    } else {
+                        call.runtime_requirements.join(", ")
+                    },
+                    call.sandbox
+                        .as_ref()
+                        .map(|sandbox| {
+                            format!(
+                                "{}:{}:{}",
+                                sandbox.env_kind, sandbox.env_scope, sandbox.env_name
+                            )
+                        })
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                    option_i64(call.duration_ms()),
                 single_line(&input),
                 option_preview(call.output.as_deref(), 120),
             ));
@@ -1259,6 +1419,28 @@ fn render_redacted_config(
             (
                 "continue_after_tool_error",
                 redacted.runtime.continue_after_tool_error.to_string(),
+            ),
+        ],
+    ));
+    blocks.push(render_key_value_block(
+        "sandbox",
+        vec![
+            ("base_dir", redacted.sandbox.base_dir.clone()),
+            (
+                "python_strategy",
+                redacted.sandbox.python_strategy.label().to_owned(),
+            ),
+            (
+                "node_strategy",
+                redacted.sandbox.node_strategy.label().to_owned(),
+            ),
+            (
+                "run_workdirs_after_hours",
+                redacted.sandbox.run_workdirs_after_hours.to_string(),
+            ),
+            (
+                "attachments_after_hours",
+                redacted.sandbox.attachments_after_hours.to_string(),
             ),
         ],
     ));
@@ -1846,6 +2028,13 @@ mod tests {
                     max_workflow_provider_round_trips: 8,
                     continue_after_tool_error: false,
                 },
+                sandbox: mosaic_config::RedactedSandboxView {
+                    base_dir: ".mosaic/sandbox".to_owned(),
+                    python_strategy: mosaic_sandbox_core::PythonEnvStrategy::Venv,
+                    node_strategy: mosaic_sandbox_core::NodeEnvStrategy::Npm,
+                    run_workdirs_after_hours: 24,
+                    attachments_after_hours: 24,
+                },
                 attachments: mosaic_config::RedactedAttachmentView {
                     enabled: true,
                     cache_dir: ".mosaic/attachments".to_owned(),
@@ -1914,6 +2103,8 @@ mod tests {
             session_route: Some("gateway.local/session-1".to_owned()),
             ingress: None,
             route_decision: None,
+            attachment_route: None,
+            sandbox_run: None,
             outbound_deliveries: vec![],
             workflow_name: Some("research_brief".to_owned()),
             started_at,
@@ -1937,7 +2128,6 @@ mod tests {
             memory_reads: vec![],
             memory_writes: vec![],
             compression: None,
-            attachment_route: None,
             tool_calls: vec![ToolTrace {
                 call_id: Some("call-1".to_owned()),
                 name: "echo".to_owned(),
@@ -1951,6 +2141,7 @@ mod tests {
                 capability_route: None,
                 disconnect_context: None,
                 effective_execution_target: "local".to_owned(),
+                sandbox: None,
                 started_at,
                 finished_at: Some(finished_at),
             }],

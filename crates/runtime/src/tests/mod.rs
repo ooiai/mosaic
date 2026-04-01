@@ -18,6 +18,7 @@ use mosaic_provider::{
     CompletionResponse, LlmProvider, Message, MockProvider, ProviderCompletion, ProviderError,
     ProviderProfileRegistry, ProviderTransportMetadata, Role, ToolDefinition,
 };
+use mosaic_sandbox_core::{SandboxManager, SandboxSettings};
 use mosaic_session_core::{
     SessionRecord, SessionStore, SessionSummary, TranscriptMessage, TranscriptRole,
 };
@@ -37,6 +38,15 @@ fn temp_dir(label: &str) -> std::path::PathBuf {
         .expect("clock should be after epoch")
         .as_nanos();
     std::env::temp_dir().join(format!("mosaic-runtime-{label}-{}-{nanos}", process::id()))
+}
+
+fn test_sandbox_manager() -> SandboxManager {
+    let root = temp_dir("sandbox");
+    let manager = SandboxManager::new(&root, SandboxSettings::default());
+    manager
+        .ensure_layout()
+        .expect("sandbox layout should be created");
+    manager
 }
 
 fn mock_profile_config() -> ProviderProfileConfig {
@@ -362,7 +372,11 @@ impl Tool for FakeMcpReadFileTool {
         &self.meta
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &mosaic_tool_core::ToolContext,
+    ) -> Result<ToolResult> {
         let path = input
             .get("path")
             .and_then(serde_json::Value::as_str)
@@ -412,7 +426,11 @@ impl Tool for RequiredNodeTool {
         &self.meta
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &mosaic_tool_core::ToolContext,
+    ) -> Result<ToolResult> {
         Ok(ToolResult::ok(format!(
             "local fallback should not happen: {}",
             input
@@ -461,6 +479,7 @@ fn runtime_with_provider_and_workflows(
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -683,6 +702,7 @@ async fn conversational_skill_auto_route_records_route_decision() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -891,6 +911,7 @@ async fn attachments_can_route_to_specialized_processor_skills() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -1028,6 +1049,7 @@ async fn bot_attachment_policy_overrides_workspace_defaults_and_records_scope() 
         memory_policy: MemoryPolicy::default(),
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: config.telegram.clone(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -1361,6 +1383,7 @@ async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -1449,9 +1472,12 @@ async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
                 .expect("pending commands should load");
             if let Some(dispatch) = pending.into_iter().next() {
                 let result = tool
-                    .call(serde_json::json!({
-                        "path": workspace_root.join("README.md").display().to_string(),
-                    }))
+                    .call(
+                        serde_json::json!({
+                            "path": workspace_root.join("README.md").display().to_string(),
+                        }),
+                        &mosaic_tool_core::ToolContext::default(),
+                    )
                     .await
                     .expect("node read_file should succeed");
                 worker_store
@@ -1472,6 +1498,7 @@ async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -1566,6 +1593,7 @@ async fn node_preferred_read_file_falls_back_to_local_when_matching_node_is_offl
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -1584,6 +1612,7 @@ async fn node_preferred_read_file_falls_back_to_local_when_matching_node_is_offl
             serde_json::json!({
                 "path": path.display().to_string(),
             }),
+            None,
         )
         .await
         .expect("read_file should fall back locally");
@@ -1639,6 +1668,7 @@ async fn require_node_tool_does_not_fall_back_when_no_node_is_available() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -1655,6 +1685,7 @@ async fn require_node_tool_does_not_fall_back_when_no_node_is_available() {
             "require_node_echo".to_owned(),
             "call-required".to_owned(),
             serde_json::json!({ "text": "hello" }),
+            None,
         )
         .await
         .expect_err("require_node tool should fail without a node");
@@ -1714,6 +1745,7 @@ async fn permission_denied_affinity_does_not_fall_back_to_local_execution() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -1732,6 +1764,7 @@ async fn permission_denied_affinity_does_not_fall_back_to_local_execution() {
             serde_json::json!({
                 "path": path.display().to_string(),
             }),
+            None,
         )
         .await
         .expect_err("permission denied should not fall back to local execution");
@@ -1769,6 +1802,7 @@ async fn workflow_runs_record_step_trace_and_skill_invocation() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -1875,6 +1909,7 @@ Operator note:
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -1957,6 +1992,7 @@ async fn workflow_can_call_markdown_skill_pack() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -2039,6 +2075,7 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(tools),
@@ -2130,6 +2167,7 @@ async fn skill_failures_emit_skill_failed_then_run_failed() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -2180,6 +2218,7 @@ async fn session_skill_runs_persist_assistant_output() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -2237,6 +2276,7 @@ async fn session_runs_persist_memory_and_record_compression_trace() {
         },
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),
@@ -2312,6 +2352,7 @@ async fn cross_session_reference_records_memory_reads_and_session_links() {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
         attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
         telegram: Default::default(),
         app_name: None,
         tools: Arc::new(ToolRegistry::new()),

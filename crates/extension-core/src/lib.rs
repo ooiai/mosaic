@@ -17,7 +17,7 @@ use mosaic_skill_core::{
 };
 use mosaic_tool_core::{
     CapabilityExposure, CronRegisterTool, EchoTool, ExecTool, ReadFileTool, TimeNowTool, Tool,
-    ToolCompatibility, ToolMetadata, ToolRegistry, WebhookTool,
+    ToolCompatibility, ToolContext, ToolMetadata, ToolRegistry, WebhookTool,
 };
 use mosaic_workflow::{Workflow, WorkflowCompatibility, WorkflowMetadata, WorkflowRegistry};
 use serde::{Deserialize, Serialize};
@@ -96,8 +96,12 @@ impl Tool for ExtensionWrappedTool {
         &self.metadata
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<mosaic_tool_core::ToolResult> {
-        self.inner.call(input).await
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        ctx: &ToolContext,
+    ) -> Result<mosaic_tool_core::ToolResult> {
+        self.inner.call(input, ctx).await
     }
 }
 

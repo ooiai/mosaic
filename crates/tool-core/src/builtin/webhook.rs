@@ -5,7 +5,10 @@ use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
 };
 
-use crate::{CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolMetadata, ToolResult};
+use crate::{
+    CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolContext, ToolMetadata,
+    ToolResult,
+};
 
 pub struct WebhookTool {
     meta: ToolMetadata,
@@ -50,7 +53,7 @@ impl Tool for WebhookTool {
         &self.meta
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let url = input
             .get("url")
             .and_then(serde_json::Value::as_str)

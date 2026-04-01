@@ -77,6 +77,8 @@ pub struct ToolTrace {
     pub disconnect_context: Option<String>,
     #[serde(default = "default_execution_target")]
     pub effective_execution_target: String,
+    #[serde(default)]
+    pub sandbox: Option<SandboxEnvTrace>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
 }
@@ -174,10 +176,37 @@ pub struct SkillTrace {
     pub skill_version: Option<String>,
     #[serde(default)]
     pub runtime_requirements: Vec<String>,
+    #[serde(default)]
+    pub sandbox: Option<SandboxEnvTrace>,
     pub input: serde_json::Value,
     pub output: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxEnvTrace {
+    pub env_id: String,
+    pub env_kind: String,
+    pub env_scope: String,
+    pub env_name: String,
+    pub env_path: String,
+    #[serde(default)]
+    pub workdir: Option<String>,
+    #[serde(default)]
+    pub dependency_spec: Vec<String>,
+    #[serde(default)]
+    pub strategy: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxRunTrace {
+    pub root_dir: String,
+    pub workdir: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -632,6 +661,8 @@ pub struct RunTrace {
     pub governance: Option<GovernanceTrace>,
     pub runtime_policy: Option<RuntimePolicyTrace>,
     #[serde(default)]
+    pub sandbox_run: Option<SandboxRunTrace>,
+    #[serde(default)]
     pub model_selections: Vec<ModelSelectionTrace>,
     #[serde(default)]
     pub memory_reads: Vec<MemoryReadTrace>,
@@ -685,6 +716,7 @@ impl RunTrace {
             provider_attempts: vec![],
             governance: None,
             runtime_policy: None,
+            sandbox_run: None,
             model_selections: vec![],
             memory_reads: vec![],
             memory_writes: vec![],
@@ -775,6 +807,10 @@ impl RunTrace {
 
     pub fn bind_runtime_policy(&mut self, runtime_policy: RuntimePolicyTrace) {
         self.runtime_policy = Some(runtime_policy);
+    }
+
+    pub fn bind_sandbox_run(&mut self, sandbox_run: SandboxRunTrace) {
+        self.sandbox_run = Some(sandbox_run);
     }
 
     pub fn add_model_selection(&mut self, trace: ModelSelectionTrace) {
@@ -1082,6 +1118,7 @@ mod tests {
             capability_route: None,
             disconnect_context: None,
             effective_execution_target: "local".to_owned(),
+            sandbox: None,
             started_at: Utc::now(),
             finished_at: Some(Utc::now()),
         });
@@ -1122,6 +1159,7 @@ mod tests {
             ingress: None,
             route_decision: None,
             attachment_route: None,
+            sandbox_run: None,
             outbound_deliveries: vec![],
             workflow_name: Some("research_brief".to_owned()),
             started_at,
@@ -1193,6 +1231,7 @@ mod tests {
                 capability_route: None,
                 disconnect_context: None,
                 effective_execution_target: "local".to_owned(),
+                sandbox: None,
                 started_at,
                 finished_at: Some(started_at + Duration::milliseconds(3)),
             }],

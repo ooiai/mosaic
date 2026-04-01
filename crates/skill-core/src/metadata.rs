@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use mosaic_sandbox_core::SandboxBinding;
 use mosaic_tool_core::CapabilityExposure;
 
 use crate::{MarkdownSkillPack, manifest::manifest::SkillManifest};
@@ -63,6 +64,8 @@ pub struct SkillMetadata {
     pub declared_tools: Vec<String>,
     #[serde(default)]
     pub runtime_requirements: Vec<String>,
+    #[serde(default)]
+    pub sandbox: Option<SandboxBinding>,
     pub manifest_backed: bool,
     #[serde(default)]
     pub compatibility: SkillCompatibility,
@@ -81,6 +84,7 @@ impl SkillMetadata {
             version: None,
             declared_tools: Vec::new(),
             runtime_requirements: Vec::new(),
+            sandbox: None,
             manifest_backed: false,
             compatibility: SkillCompatibility::default(),
         }
@@ -98,6 +102,7 @@ impl SkillMetadata {
             version: None,
             declared_tools: manifest.tools.clone(),
             runtime_requirements: Vec::new(),
+            sandbox: None,
             manifest_backed: true,
             compatibility: SkillCompatibility::default(),
         }
@@ -115,6 +120,7 @@ impl SkillMetadata {
             version: None,
             declared_tools: pack.allowed_tools().to_vec(),
             runtime_requirements: pack.runtime_requirements().to_vec(),
+            sandbox: None,
             manifest_backed: false,
             compatibility: SkillCompatibility::default(),
         }
@@ -159,6 +165,11 @@ impl SkillMetadata {
 
     pub fn with_runtime_requirements(mut self, runtime_requirements: Vec<String>) -> Self {
         self.runtime_requirements = runtime_requirements;
+        self
+    }
+
+    pub fn with_sandbox(mut self, sandbox: Option<SandboxBinding>) -> Self {
+        self.sandbox = sandbox;
         self
     }
 

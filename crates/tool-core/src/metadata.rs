@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use mosaic_sandbox_core::SandboxBinding;
+
 use crate::sources::{ToolSource, mcp_tool_name};
 
 fn default_true() -> bool {
@@ -259,6 +261,8 @@ pub struct CapabilityMetadata {
     pub long_running: bool,
     #[serde(default)]
     pub node: NodeRouteMetadata,
+    #[serde(default)]
+    pub sandbox: Option<SandboxBinding>,
 }
 
 impl Default for CapabilityMetadata {
@@ -278,6 +282,7 @@ impl CapabilityMetadata {
             healthy: true,
             long_running: false,
             node: NodeRouteMetadata::default(),
+            sandbox: None,
         }
     }
 
@@ -295,6 +300,7 @@ impl CapabilityMetadata {
             healthy: true,
             long_running: false,
             node: NodeRouteMetadata::default(),
+            sandbox: None,
         }
     }
 
@@ -312,6 +318,7 @@ impl CapabilityMetadata {
             healthy: true,
             long_running: false,
             node: NodeRouteMetadata::default(),
+            sandbox: None,
         }
     }
 
@@ -329,6 +336,7 @@ impl CapabilityMetadata {
             healthy: true,
             long_running: false,
             node: NodeRouteMetadata::default(),
+            sandbox: None,
         }
     }
 
@@ -346,6 +354,7 @@ impl CapabilityMetadata {
             healthy: true,
             long_running: true,
             node: NodeRouteMetadata::default(),
+            sandbox: None,
         }
     }
 
@@ -359,6 +368,7 @@ impl CapabilityMetadata {
             healthy: false,
             long_running: false,
             node: NodeRouteMetadata::default(),
+            sandbox: None,
         }
     }
 
@@ -378,6 +388,11 @@ impl CapabilityMetadata {
 
     pub fn routes_via_node(&self) -> bool {
         self.node.capability.is_some()
+    }
+
+    pub fn with_sandbox_binding(mut self, sandbox: Option<SandboxBinding>) -> Self {
+        self.sandbox = sandbox;
+        self
     }
 }
 

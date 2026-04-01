@@ -52,6 +52,7 @@ Operator groups:
   setup/config         bootstrap and explain merged configuration
   tui/run/session/model manage conversations and provider routing
   inspect              explain one saved run
+  sandbox              inspect workspace-local execution environments
   gateway/adapter/node operate the control plane edges and devices
   capability/cron/extension/memory operate automations and state
 
@@ -88,6 +89,15 @@ Examples:
   mosaic config show
   mosaic config sources
   mosaic config show --json";
+const SANDBOX_AFTER_HELP: &str = "When to use it:
+  Use `sandbox` to inspect or rebuild workspace-local execution environments under `.mosaic/sandbox`.
+
+Examples:
+  mosaic sandbox status
+  mosaic sandbox list
+  mosaic sandbox inspect shell-capability-exec-command
+  mosaic sandbox rebuild shell-capability-exec-command
+  mosaic sandbox clean";
 const GATEWAY_AFTER_HELP: &str = "When to use it:
   Use `gateway` to inspect control-plane health, replay audit state, or expose the local Gateway over HTTP.
 
@@ -151,6 +161,11 @@ enum Commands {
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
+    },
+    /// Inspect and manage workspace-local sandbox environments.
+    Sandbox {
+        #[command(subcommand)]
+        command: SandboxCommand,
     },
     /// Start the main operator chat console.
     Tui {
@@ -302,6 +317,16 @@ enum ConfigCommand {
         #[arg(long, help = "Print the config source stack as machine-readable JSON")]
         json: bool,
     },
+}
+
+#[derive(Debug, Subcommand, PartialEq, Eq)]
+#[command(after_help = SANDBOX_AFTER_HELP)]
+enum SandboxCommand {
+    Status,
+    List,
+    Inspect { env: String },
+    Rebuild { env: String },
+    Clean,
 }
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
@@ -560,6 +585,9 @@ enum DispatchCommand {
     Config {
         command: ConfigCommand,
     },
+    Sandbox {
+        command: SandboxCommand,
+    },
     Session {
         attach: Option<String>,
         command: SessionCommand,
@@ -638,6 +666,7 @@ impl Cli {
             },
             Some(Commands::Setup { command }) => DispatchCommand::Setup { command },
             Some(Commands::Config { command }) => DispatchCommand::Config { command },
+            Some(Commands::Sandbox { command }) => DispatchCommand::Sandbox { command },
             Some(Commands::Session { attach, command }) => {
                 DispatchCommand::Session { attach, command }
             }
@@ -692,6 +721,7 @@ async fn main() -> Result<()> {
         } => run_cmd::run_cmd(file, skill, workflow, session, profile, attach, tui, resume).await,
         DispatchCommand::Setup { command } => setup_cmd(command),
         DispatchCommand::Config { command } => config_cmd(command),
+        DispatchCommand::Sandbox { command } => sandbox_cmd(command),
         DispatchCommand::Session { attach, command } => {
             session_cmd::session_cmd(attach, command).await
         }
@@ -1031,6 +1061,49 @@ fn config_cmd(command: ConfigCommand) -> Result<()> {
                 println!("{}", output::render_config_sources(&loaded, &validation));
                 print_next_steps(["mosaic config show", "mosaic setup validate"]);
             }
+            Ok(())
+        }
+    }
+}
+
+fn sandbox_cmd(command: SandboxCommand) -> Result<()> {
+    let loaded = load_config()?;
+    let workspace_root = current_dir()?;
+    let manager = bootstrap::build_sandbox_manager(&loaded.config, &workspace_root)?;
+    let workspace = redact_mosaic_config(&loaded.config);
+
+    match command {
+        SandboxCommand::Status => {
+            let env_count = manager.list_envs()?.len();
+            println!(
+                "{}",
+                output::render_sandbox_status(&workspace, &manager.runtime_statuses(), env_count)
+            );
+            print_next_steps([
+                "mosaic sandbox list",
+                "mosaic setup doctor",
+                "mosaic config show",
+            ]);
+            Ok(())
+        }
+        SandboxCommand::List => {
+            let envs = manager.list_envs()?;
+            println!("{}", output::render_sandbox_env_list(&envs));
+            Ok(())
+        }
+        SandboxCommand::Inspect { env } => {
+            let record = manager.inspect_env(&env)?;
+            println!("{}", output::render_sandbox_env(&record));
+            Ok(())
+        }
+        SandboxCommand::Rebuild { env } => {
+            let record = manager.rebuild_env(&env)?;
+            println!("{}", output::render_sandbox_env(&record));
+            Ok(())
+        }
+        SandboxCommand::Clean => {
+            let report = manager.clean()?;
+            println!("{}", output::render_sandbox_clean_report(&report));
             Ok(())
         }
     }
@@ -2248,6 +2321,7 @@ mod tests {
         ("crates/node-protocol/README.md", "mosaic-node-protocol"),
         ("crates/provider/README.md", "mosaic-provider"),
         ("crates/runtime/README.md", "mosaic-runtime"),
+        ("crates/sandbox-core/README.md", "mosaic-sandbox-core"),
         ("crates/scheduler-core/README.md", "mosaic-scheduler-core"),
         ("crates/sdk/README.md", "mosaic-sdk"),
         ("crates/session-core/README.md", "mosaic-session-core"),
@@ -2270,6 +2344,7 @@ mod tests {
         "./crates/node-protocol/README.md",
         "./crates/provider/README.md",
         "./crates/runtime/README.md",
+        "./crates/sandbox-core/README.md",
         "./crates/scheduler-core/README.md",
         "./crates/sdk/README.md",
         "./crates/session-core/README.md",

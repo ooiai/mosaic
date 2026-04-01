@@ -16,6 +16,7 @@ use mosaic_runtime::{
     RuntimeContext,
     events::{CompositeEventSink, SharedRunEventSink},
 };
+use mosaic_sandbox_core::{SandboxCleanupPolicy, SandboxManager, SandboxSettings};
 use mosaic_scheduler_core::{CronStore, FileCronStore};
 use mosaic_session_core::FileSessionStore;
 use mosaic_tui::{TuiEventBuffer, build_tui_event_buffer, build_tui_event_sink};
@@ -43,6 +44,7 @@ pub fn build_runtime_context(
     let memory_policy = MemoryPolicy::default();
     let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
     let extension_set = load_extension_set(config, app_config, &env::current_dir()?, cron_store)?;
+    let sandbox = Arc::new(build_sandbox_manager(config, &env::current_dir()?)?);
 
     Ok(RuntimeContext {
         profiles,
@@ -52,6 +54,7 @@ pub fn build_runtime_context(
         memory_policy,
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        sandbox,
         telegram: config.telegram.clone(),
         app_name: app_config
             .and_then(|app| app.app.as_ref())
@@ -139,6 +142,7 @@ fn build_gateway_components_for_workspace(
     let runs_dir = resolve_workspace_path(&config.inspect.runs_dir)?;
     let cron_store: Arc<dyn CronStore> = Arc::new(FileCronStore::new(cron_store_root));
     let extension_set = load_extension_set(config, app_config, workspace_root, cron_store.clone())?;
+    let sandbox = Arc::new(build_sandbox_manager(config, workspace_root)?);
 
     let audit_root = resolve_workspace_path(&config.audit.root_dir)?;
 
@@ -150,6 +154,7 @@ fn build_gateway_components_for_workspace(
         memory_policy,
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        sandbox,
         telegram: config.telegram.clone(),
         app_name: app_config
             .and_then(|app| app.app.as_ref())
@@ -192,6 +197,26 @@ fn resolve_workspace_path(path: &str) -> Result<PathBuf> {
     Ok(env::current_dir()?.join(path))
 }
 
+pub fn build_sandbox_manager(
+    config: &MosaicConfig,
+    workspace_root: &Path,
+) -> Result<SandboxManager> {
+    let manager = SandboxManager::new(
+        workspace_root,
+        SandboxSettings {
+            base_dir: PathBuf::from(&config.sandbox.base_dir),
+            python_strategy: config.sandbox.python.strategy,
+            node_strategy: config.sandbox.node.strategy,
+            cleanup: SandboxCleanupPolicy {
+                run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
+                attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
+            },
+        },
+    );
+    manager.ensure_layout()?;
+    Ok(manager)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -229,6 +254,7 @@ mod tests {
                     required_policy: None,
                     allowed_channels: Vec::new(),
                     accepts_attachments: false,
+                    sandbox: None,
                 },
                 ToolConfig {
                     tool_type: "builtin".to_owned(),
@@ -238,6 +264,7 @@ mod tests {
                     required_policy: None,
                     allowed_channels: Vec::new(),
                     accepts_attachments: false,
+                    sandbox: None,
                 },
             ],
             skills: vec![SkillConfig {
@@ -255,6 +282,7 @@ mod tests {
                 allowed_channels: Vec::new(),
                 accepts_attachments: false,
                 runtime_requirements: Vec::new(),
+                sandbox: None,
             }],
             workflows: Vec::new(),
             agent: AgentConfig { system: None },
@@ -407,7 +435,10 @@ mod tests {
 
         let result = tokio::runtime::Runtime::new()
             .expect("tokio runtime should build")
-            .block_on(tool.call(serde_json::json!({ "path": "README.md" })))
+            .block_on(tool.call(
+                serde_json::json!({ "path": "README.md" }),
+                &mosaic_tool_core::ToolContext::default(),
+            ))
             .expect("MCP tool should remain callable");
 
         assert!(result.content.contains("Mosaic"));

@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use tokio::process::Command;
 
 use crate::{
-    CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolMetadata, ToolResult,
+    CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolContext, ToolMetadata,
+    ToolResult,
     policy::{canonicalize_user_path, ensure_allowed_path},
 };
 
@@ -49,7 +50,7 @@ impl Tool for ExecTool {
         &self.meta
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(&self, input: serde_json::Value, ctx: &ToolContext) -> Result<ToolResult> {
         let command = input
             .get("command")
             .and_then(serde_json::Value::as_str)
@@ -75,7 +76,7 @@ impl Tool for ExecTool {
                 ensure_allowed_path(&canonical, &self.allowed_roots, "exec_command")?;
                 Some(canonical)
             }
-            None => None,
+            None => ctx.sandbox.as_ref().map(|sandbox| sandbox.workdir.clone()),
         };
 
         if command.contains(std::path::MAIN_SEPARATOR) || command.contains('/') {
@@ -108,6 +109,7 @@ impl Tool for ExecTool {
                 "command": command,
                 "args": args,
                 "cwd": resolved_cwd.as_ref().map(|path| path.display().to_string()),
+                "sandbox_env_id": ctx.sandbox.as_ref().map(|sandbox| sandbox.env_id.clone()),
                 "stdout": stdout,
                 "stderr": stderr,
                 "exit_code": exit_code,

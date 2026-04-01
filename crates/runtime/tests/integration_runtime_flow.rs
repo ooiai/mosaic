@@ -14,6 +14,7 @@ use mosaic_memory::{FileMemoryStore, MemoryPolicy};
 use mosaic_node_protocol::FileNodeStore;
 use mosaic_provider::ProviderProfileRegistry;
 use mosaic_runtime::{AgentRuntime, RunRequest, RuntimeContext, events::shared_noop_event_sink};
+use mosaic_sandbox_core::{SandboxManager, SandboxSettings};
 use mosaic_session_core::{FileSessionStore, SessionStore};
 use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
 use mosaic_tool_core::{TimeNowTool, ToolRegistry};
@@ -54,6 +55,13 @@ async fn runtime_executes_mock_provider_tool_loop_against_real_session_and_memor
         memory_store: Arc::new(FileMemoryStore::new(root.join("memory"))),
         memory_policy: MemoryPolicy::default(),
         runtime_policy: MosaicConfig::default().runtime,
+        sandbox: Arc::new({
+            let manager = SandboxManager::new(&root, SandboxSettings::default());
+            manager
+                .ensure_layout()
+                .expect("sandbox layout should be created");
+            manager
+        }),
         tools: Arc::new(tools),
         skills: Arc::new(skills),
         workflows: Arc::new(WorkflowRegistry::new()),

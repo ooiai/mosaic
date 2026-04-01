@@ -29,6 +29,7 @@ async fn skill_registry_executes_native_and_manifest_skills() {
 
     let ctx = SkillContext {
         tools: Arc::new(ToolRegistry::new()),
+        sandbox: None,
     };
     let native = registry
         .get("summarize")

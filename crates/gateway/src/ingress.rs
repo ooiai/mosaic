@@ -946,6 +946,9 @@ mod tests {
         let profiles =
             ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
         let runtime = tokio::runtime::Runtime::new().expect("test runtime should build");
+        let workspace_root = std::env::temp_dir().join("mosaic-ingress-tests-workspace");
+        let sandbox = crate::build_sandbox_manager(&workspace_root, &config)
+            .expect("sandbox manager should build");
         let gateway = GatewayHandle::new_local(
             runtime.handle().clone(),
             GatewayRuntimeComponents {
@@ -958,6 +961,7 @@ mod tests {
                 memory_policy: MemoryPolicy::default(),
                 runtime_policy: config.runtime.clone(),
                 attachments: config.attachments.clone(),
+                sandbox,
                 telegram: config.telegram.clone(),
                 app_name: None,
                 tools: Arc::new(ToolRegistry::new()),
@@ -970,7 +974,7 @@ mod tests {
                 cron_store: Arc::new(FileCronStore::new(
                     std::env::temp_dir().join("mosaic-ingress-tests-cron"),
                 )),
-                workspace_root: std::env::temp_dir().join("mosaic-ingress-tests-workspace"),
+                workspace_root,
                 runs_dir: std::env::temp_dir().join("mosaic-ingress-tests-runs"),
                 audit_root: std::env::temp_dir().join("mosaic-ingress-tests-audit"),
                 extensions: Vec::new(),

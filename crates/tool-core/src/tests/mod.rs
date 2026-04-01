@@ -13,7 +13,7 @@ use mosaic_scheduler_core::{CronStore, FileCronStore};
 
 use crate::{
     CapabilityKind, CapabilityMetadata, CronRegisterTool, EchoTool, ExecTool, ReadFileTool,
-    TimeNowTool, Tool, ToolMetadata, ToolRegistry, ToolSource, mcp_tool_name,
+    TimeNowTool, Tool, ToolContext, ToolMetadata, ToolRegistry, ToolSource, mcp_tool_name,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -50,8 +50,11 @@ fn builtin_echo_tool_is_registered_and_callable() {
     registry.register(Arc::new(EchoTool::new()));
 
     let tool = registry.get("echo").expect("echo tool should exist");
-    let result = block_on(tool.call(serde_json::json!({ "text": "hello" })))
-        .expect("echo tool should succeed");
+    let result = block_on(tool.call(
+        serde_json::json!({ "text": "hello" }),
+        &ToolContext::default(),
+    ))
+    .expect("echo tool should succeed");
 
     assert_eq!(result.content, "hello");
     assert_eq!(
@@ -64,7 +67,8 @@ fn builtin_echo_tool_is_registered_and_callable() {
 #[test]
 fn time_now_tool_returns_iso_timestamp() {
     let tool = TimeNowTool::new();
-    let result = block_on(tool.call(serde_json::json!({}))).expect("time_now tool should succeed");
+    let result = block_on(tool.call(serde_json::json!({}), &ToolContext::default()))
+        .expect("time_now tool should succeed");
 
     let parsed = DateTime::parse_from_rfc3339(&result.content)
         .expect("time_now tool should return RFC3339 timestamp");
@@ -84,9 +88,12 @@ fn read_file_tool_reads_text_files_within_allowed_root() {
     fs::write(&path, "hello from file").expect("temp file should be written");
 
     let tool = ReadFileTool::new_with_allowed_roots(vec![dir.clone()]);
-    let result = block_on(tool.call(serde_json::json!({
-        "path": path.display().to_string()
-    })))
+    let result = block_on(tool.call(
+        serde_json::json!({
+            "path": path.display().to_string()
+        }),
+        &ToolContext::default(),
+    ))
     .expect("read_file tool should succeed");
 
     assert_eq!(result.content, "hello from file");
@@ -104,9 +111,12 @@ fn read_file_tool_rejects_paths_outside_allowed_roots() {
     fs::write(&path, "blocked").expect("temp file should be written");
     let tool = ReadFileTool::new_with_allowed_roots(vec![dir]);
 
-    let err = block_on(tool.call(serde_json::json!({
-        "path": path.display().to_string()
-    })))
+    let err = block_on(tool.call(
+        serde_json::json!({
+            "path": path.display().to_string()
+        }),
+        &ToolContext::default(),
+    ))
     .expect_err("read_file should reject paths outside the allowed roots");
 
     assert!(
@@ -119,9 +129,12 @@ fn read_file_tool_rejects_paths_outside_allowed_roots() {
 async fn exec_tool_runs_local_command() {
     let tool = ExecTool::new(vec![std::env::current_dir().expect("cwd should exist")]);
     let result = tool
-        .call(serde_json::json!({
-            "command": "pwd"
-        }))
+        .call(
+            serde_json::json!({
+                "command": "pwd"
+            }),
+            &ToolContext::default(),
+        )
         .await
         .expect("exec tool should run");
 
@@ -139,12 +152,15 @@ async fn cron_register_tool_persists_registration() {
     let tool = CronRegisterTool::new(store.clone());
 
     let result = tool
-        .call(serde_json::json!({
-            "id": "nightly",
-            "schedule": "0 0 * * *",
-            "input": "run nightly",
-            "session_id": "demo"
-        }))
+        .call(
+            serde_json::json!({
+                "id": "nightly",
+                "schedule": "0 0 * * *",
+                "input": "run nightly",
+                "session_id": "demo"
+            }),
+            &ToolContext::default(),
+        )
         .await
         .expect("cron register should succeed");
 

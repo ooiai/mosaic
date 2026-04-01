@@ -156,6 +156,8 @@ pub struct ToolConfig {
     pub allowed_channels: Vec<String>,
     #[serde(default)]
     pub accepts_attachments: bool,
+    #[serde(default)]
+    pub sandbox: Option<SandboxBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -185,6 +187,8 @@ pub struct SkillConfig {
     pub accepts_attachments: bool,
     #[serde(default)]
     pub runtime_requirements: Vec<String>,
+    #[serde(default)]
+    pub sandbox: Option<SandboxBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -238,6 +242,8 @@ pub struct MosaicConfig {
     #[serde(default)]
     pub runtime: RuntimePolicyConfig,
     #[serde(default)]
+    pub sandbox: SandboxConfig,
+    #[serde(default)]
     pub attachments: AttachmentConfig,
     #[serde(default)]
     pub tools: Vec<ToolConfig>,
@@ -267,6 +273,7 @@ impl Default for MosaicConfig {
             audit: AuditConfig::default(),
             observability: ObservabilityConfig::default(),
             runtime: RuntimePolicyConfig::default(),
+            sandbox: SandboxConfig::default(),
             attachments: AttachmentConfig::default(),
             tools: Vec::new(),
             skills: Vec::new(),
@@ -451,6 +458,74 @@ pub struct AttachmentConfig {
     pub policy: AttachmentPolicyConfig,
     #[serde(default)]
     pub routing: AttachmentRoutingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxConfig {
+    #[serde(default = "default_sandbox_base_dir")]
+    pub base_dir: String,
+    #[serde(default)]
+    pub python: PythonSandboxConfig,
+    #[serde(default)]
+    pub node: NodeSandboxConfig,
+    #[serde(default)]
+    pub cleanup: SandboxCleanupConfig,
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            base_dir: default_sandbox_base_dir(),
+            python: PythonSandboxConfig::default(),
+            node: NodeSandboxConfig::default(),
+            cleanup: SandboxCleanupConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PythonSandboxConfig {
+    #[serde(default)]
+    pub strategy: PythonEnvStrategy,
+}
+
+impl Default for PythonSandboxConfig {
+    fn default() -> Self {
+        Self {
+            strategy: PythonEnvStrategy::Venv,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NodeSandboxConfig {
+    #[serde(default)]
+    pub strategy: NodeEnvStrategy,
+}
+
+impl Default for NodeSandboxConfig {
+    fn default() -> Self {
+        Self {
+            strategy: NodeEnvStrategy::Npm,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxCleanupConfig {
+    #[serde(default = "default_sandbox_run_workdirs_after_hours")]
+    pub run_workdirs_after_hours: u64,
+    #[serde(default = "default_sandbox_attachments_after_hours")]
+    pub attachments_after_hours: u64,
+}
+
+impl Default for SandboxCleanupConfig {
+    fn default() -> Self {
+        Self {
+            run_workdirs_after_hours: default_sandbox_run_workdirs_after_hours(),
+            attachments_after_hours: default_sandbox_attachments_after_hours(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -806,6 +881,7 @@ pub enum DoctorCategory {
     Extensions,
     Providers,
     Gateway,
+    Sandbox,
 }
 
 impl DoctorCategory {
@@ -816,6 +892,7 @@ impl DoctorCategory {
             Self::Extensions => "extensions",
             Self::Providers => "providers",
             Self::Gateway => "gateway",
+            Self::Sandbox => "sandbox",
         }
     }
 }
@@ -938,6 +1015,15 @@ pub struct RedactedRuntimePolicyView {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RedactedSandboxView {
+    pub base_dir: String,
+    pub python_strategy: PythonEnvStrategy,
+    pub node_strategy: NodeEnvStrategy,
+    pub run_workdirs_after_hours: u64,
+    pub attachments_after_hours: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RedactedPolicyView {
     pub allow_exec: bool,
     pub allow_webhook: bool,
@@ -990,6 +1076,7 @@ pub struct RedactedMosaicConfig {
     pub audit: RedactedAuditView,
     pub observability: RedactedObservabilityView,
     pub runtime: RedactedRuntimePolicyView,
+    pub sandbox: RedactedSandboxView,
     pub attachments: RedactedAttachmentView,
     pub telegram_bots: Vec<RedactedTelegramBotView>,
     pub extension_manifest_count: usize,
@@ -1065,6 +1152,7 @@ pub(crate) struct MosaicConfigPatch {
     pub audit: Option<AuditConfig>,
     pub observability: Option<ObservabilityConfig>,
     pub runtime: Option<RuntimePolicyConfig>,
+    pub sandbox: Option<SandboxConfig>,
     pub attachments: Option<AttachmentConfig>,
     #[serde(default)]
     pub tools: Vec<ToolConfig>,
@@ -1099,6 +1187,18 @@ fn default_skill_input_schema() -> serde_json::Value {
 
 fn default_schema_version() -> u32 {
     CURRENT_SCHEMA_VERSION
+}
+
+fn default_sandbox_base_dir() -> String {
+    ".mosaic/sandbox".to_owned()
+}
+
+fn default_sandbox_run_workdirs_after_hours() -> u64 {
+    24
+}
+
+fn default_sandbox_attachments_after_hours() -> u64 {
+    24
 }
 
 fn default_active_profile() -> String {

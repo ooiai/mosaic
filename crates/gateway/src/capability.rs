@@ -248,7 +248,12 @@ pub(crate) async fn execute_capability_tool(
     let attempts = usize::from(metadata.capability.execution.retry_limit) + 1;
     let timeout = Duration::from_millis(metadata.capability.execution.timeout_ms.max(1));
     for attempt in 1..=attempts {
-        match tokio::time::timeout(timeout, tool.call(input.clone())).await {
+        match tokio::time::timeout(
+            timeout,
+            tool.call(input.clone(), &mosaic_tool_core::ToolContext::default()),
+        )
+        .await
+        {
             Ok(Ok(result)) if !result.is_error => {
                 job.status = "success".to_owned();
                 job.summary = result

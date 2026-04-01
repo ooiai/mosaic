@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use mosaic_sandbox_core::{NodeEnvStrategy, PythonEnvStrategy, SandboxBinding};
 use mosaic_skill_core::ManifestSkillStep;
 use mosaic_tool_core::{CapabilityInvocationMode, CapabilityVisibility};
 use mosaic_workflow::Workflow;

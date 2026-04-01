@@ -206,8 +206,22 @@ async fn execute_headless_node_dispatch(
     exec_tool: &mosaic_tool_core::ExecTool,
 ) -> Result<()> {
     let result = match dispatch.capability.as_str() {
-        "read_file" => read_file_tool.call(dispatch.input.clone()).await,
-        "exec_command" => exec_tool.call(dispatch.input.clone()).await,
+        "read_file" => {
+            read_file_tool
+                .call(
+                    dispatch.input.clone(),
+                    &mosaic_tool_core::ToolContext::default(),
+                )
+                .await
+        }
+        "exec_command" => {
+            exec_tool
+                .call(
+                    dispatch.input.clone(),
+                    &mosaic_tool_core::ToolContext::default(),
+                )
+                .await
+        }
         capability => Err(anyhow!("unsupported node capability: {}", capability)),
     };
 

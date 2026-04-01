@@ -37,6 +37,7 @@ fn summarize_skill_is_registered_and_returns_summary_text() {
     registry.register(Arc::new(SummarizeSkill));
     let ctx = SkillContext {
         tools: Arc::new(ToolRegistry::new()),
+        sandbox: None,
     };
 
     let output = block_on(
@@ -81,6 +82,7 @@ fn manifest_skill_registers_and_executes_steps() {
 
     let ctx = SkillContext {
         tools: Arc::new(tools),
+        sandbox: None,
     };
 
     let output = block_on(
@@ -138,6 +140,7 @@ Operator note:
     registry.register_markdown_pack(pack);
     let ctx = SkillContext {
         tools: Arc::new(ToolRegistry::new()),
+        sandbox: None,
     };
 
     let output = block_on(

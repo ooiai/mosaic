@@ -50,6 +50,10 @@ impl AgentRuntime {
                 tool_name.clone(),
                 format!("direct_tool_{}", trace.run_id),
                 parsed_input,
+                trace
+                    .sandbox_run
+                    .as_ref()
+                    .map(|sandbox| std::path::Path::new(&sandbox.workdir)),
             )
             .await
         {
@@ -283,6 +287,10 @@ impl AgentRuntime {
                     .as_ref()
                     .and_then(|ingress| ingress.bot_name.clone()),
                 attachments: attachments.clone(),
+                run_workdir: trace
+                    .sandbox_run
+                    .as_ref()
+                    .map(|sandbox| std::path::PathBuf::from(&sandbox.workdir)),
                 tool_traces: tool_traces.clone(),
                 skill_traces: skill_traces.clone(),
                 model_selections: model_selections.clone(),

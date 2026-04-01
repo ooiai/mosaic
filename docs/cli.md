@@ -13,6 +13,7 @@ mosaic --help
 ## Operator Groupings
 
 - `setup` and `config`: bootstrap the workspace, validate it, and explain the merged config.
+- `sandbox`: inspect workspace-local execution environments.
 - `tui`, `run`, `session`, and `model`: operate conversations and provider routing.
 - `inspect`: explain one saved run trace.
 - `gateway`, `adapter`, and `node`: operate the control plane and its edges.
@@ -72,6 +73,36 @@ Emit the merged config as machine-readable JSON:
 
 ```bash
 mosaic config show --json
+```
+
+Inspect workspace-local sandbox state:
+
+```bash
+mosaic sandbox status
+```
+
+List known sandbox environments:
+
+```bash
+mosaic sandbox list
+```
+
+Inspect one sandbox environment:
+
+```bash
+mosaic sandbox inspect shell-capability-exec-command
+```
+
+Rebuild one sandbox environment:
+
+```bash
+mosaic sandbox rebuild shell-capability-exec-command
+```
+
+Clean run and attachment workdirs under `.mosaic/sandbox`:
+
+```bash
+mosaic sandbox clean
 ```
 
 ## Conversations and Models

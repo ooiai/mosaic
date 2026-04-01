@@ -303,6 +303,7 @@ mod tests {
     use mosaic_memory::{FileMemoryStore, MemoryPolicy};
     use mosaic_node_protocol::FileNodeStore;
     use mosaic_provider::{MockProvider, ProviderProfileRegistry};
+    use mosaic_sandbox_core::{SandboxManager, SandboxSettings};
     use mosaic_scheduler_core::FileCronStore;
     use mosaic_session_core::FileSessionStore;
     use mosaic_skill_core::SkillRegistry;
@@ -333,6 +334,13 @@ mod tests {
         tools.register(Arc::new(TimeNowTool::new()));
         let session_root =
             std::env::temp_dir().join(format!("mosaic-sdk-tests-{}", uuid::Uuid::new_v4()));
+        let sandbox = Arc::new({
+            let manager = SandboxManager::new(&session_root, SandboxSettings::default());
+            manager
+                .ensure_layout()
+                .expect("sandbox layout should be created");
+            manager
+        });
         let gateway = GatewayHandle::new_local(
             tokio::runtime::Handle::current(),
             GatewayRuntimeComponents {
@@ -343,6 +351,7 @@ mod tests {
                 memory_policy: MemoryPolicy::default(),
                 runtime_policy: config.runtime.clone(),
                 attachments: config.attachments.clone(),
+                sandbox,
                 telegram: config.telegram.clone(),
                 app_name: None,
                 tools: Arc::new(tools),

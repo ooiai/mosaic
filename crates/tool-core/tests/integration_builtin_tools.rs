@@ -10,7 +10,7 @@ use std::{
 };
 
 use mosaic_scheduler_core::{CronStore, FileCronStore};
-use mosaic_tool_core::{CronRegisterTool, ExecTool, ReadFileTool, Tool, WebhookTool};
+use mosaic_tool_core::{CronRegisterTool, ExecTool, ReadFileTool, Tool, ToolContext, WebhookTool};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -54,14 +54,20 @@ async fn builtin_tools_execute_against_real_files_processes_and_http() {
 
     let read_file = ReadFileTool::new_with_allowed_roots(vec![dir.clone()]);
     let read_result = read_file
-        .call(serde_json::json!({ "path": file_path.display().to_string() }))
+        .call(
+            serde_json::json!({ "path": file_path.display().to_string() }),
+            &ToolContext::default(),
+        )
         .await
         .expect("read_file should succeed");
     assert_eq!(read_result.content, "hello from tool-core");
 
     let exec = ExecTool::new(vec![dir.clone()]);
     let exec_result = exec
-        .call(serde_json::json!({ "command": "printf", "args": ["tool-core-exec"] }))
+        .call(
+            serde_json::json!({ "command": "printf", "args": ["tool-core-exec"] }),
+            &ToolContext::default(),
+        )
         .await
         .expect("exec should succeed");
     assert!(exec_result.content.contains("tool-core-exec"));
@@ -69,11 +75,14 @@ async fn builtin_tools_execute_against_real_files_processes_and_http() {
     let (url, server) = spawn_http_server("webhook-ok");
     let webhook = WebhookTool::new();
     let webhook_result = webhook
-        .call(serde_json::json!({
-            "url": url,
-            "method": "POST",
-            "body": "hello"
-        }))
+        .call(
+            serde_json::json!({
+                "url": url,
+                "method": "POST",
+                "body": "hello"
+            }),
+            &ToolContext::default(),
+        )
         .await
         .expect("webhook should succeed");
     server
@@ -83,11 +92,14 @@ async fn builtin_tools_execute_against_real_files_processes_and_http() {
 
     let cron_store = std::sync::Arc::new(FileCronStore::new(dir.join("cron")));
     let cron = CronRegisterTool::new(cron_store.clone());
-    cron.call(serde_json::json!({
-        "id": "nightly",
-        "schedule": "0 1 * * *",
-        "input": "run report"
-    }))
+    cron.call(
+        serde_json::json!({
+            "id": "nightly",
+            "schedule": "0 1 * * *",
+            "input": "run report"
+        }),
+        &ToolContext::default(),
+    )
     .await
     .expect("cron registration should succeed");
     assert!(

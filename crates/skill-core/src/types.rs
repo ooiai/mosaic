@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use mosaic_sandbox_core::{SandboxKind, SandboxScope};
 use mosaic_tool_core::ToolRegistry;
 use serde::{Deserialize, Serialize};
 
@@ -11,8 +12,19 @@ pub struct SkillOutput {
     pub structured: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillSandboxContext {
+    pub env_id: String,
+    pub kind: SandboxKind,
+    pub scope: SandboxScope,
+    pub env_dir: std::path::PathBuf,
+    pub workdir: std::path::PathBuf,
+    pub dependency_spec: Vec<String>,
+}
+
 pub struct SkillContext {
     pub tools: Arc<ToolRegistry>,
+    pub sandbox: Option<SkillSandboxContext>,
 }
 
 #[async_trait]

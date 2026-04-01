@@ -14,6 +14,7 @@ pub use metadata::{
     CapabilityMetadata, CapabilityVisibility, NodeRouteMetadata, PermissionScope,
     ToolCompatibility, ToolExecutionPolicy, ToolMetadata, ToolRiskLevel,
 };
+pub use mosaic_sandbox_core::{SandboxBinding, SandboxKind, SandboxScope};
 pub use registry::ToolRegistry;
 pub use sources::{ToolSource, mcp_tool_name};
-pub use types::{Tool, ToolResult};
+pub use types::{Tool, ToolContext, ToolResult, ToolSandboxContext};

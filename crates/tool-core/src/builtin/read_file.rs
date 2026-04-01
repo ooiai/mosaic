@@ -7,7 +7,8 @@ use anyhow::{Result, anyhow, bail};
 use async_trait::async_trait;
 
 use crate::{
-    CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolMetadata, ToolResult,
+    CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolContext, ToolMetadata,
+    ToolResult,
     policy::{canonicalize_user_path, ensure_allowed_path},
 };
 
@@ -57,7 +58,7 @@ impl Tool for ReadFileTool {
         &self.meta
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let path = input
             .get("path")
             .and_then(serde_json::Value::as_str)

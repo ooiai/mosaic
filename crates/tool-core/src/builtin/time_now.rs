@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 
-use crate::{Tool, ToolMetadata, ToolResult};
+use crate::{Tool, ToolContext, ToolMetadata, ToolResult};
 
 pub struct TimeNowTool {
     meta: ToolMetadata,
@@ -35,7 +35,7 @@ impl Tool for TimeNowTool {
         &self.meta
     }
 
-    async fn call(&self, _input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(&self, _input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let now = Utc::now().to_rfc3339();
 
         Ok(ToolResult {

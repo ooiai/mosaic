@@ -18,6 +18,7 @@ use mosaic_gateway::GatewayRuntimeComponents;
 use mosaic_memory::{FileMemoryStore, MemoryPolicy};
 use mosaic_node_protocol::FileNodeStore;
 use mosaic_provider::ProviderProfileRegistry;
+use mosaic_sandbox_core::{SandboxManager, SandboxSettings};
 use mosaic_scheduler_core::FileCronStore;
 use mosaic_session_core::FileSessionStore;
 use mosaic_skill_core::{SkillRegistry, SummarizeSkill};
@@ -78,6 +79,13 @@ pub fn build_components(root: &Path) -> GatewayRuntimeComponents {
 
     let mut skills = SkillRegistry::new();
     skills.register_native(Arc::new(SummarizeSkill));
+    let sandbox = Arc::new({
+        let manager = SandboxManager::new(&workspace_root, SandboxSettings::default());
+        manager
+            .ensure_layout()
+            .expect("sandbox layout should be created");
+        manager
+    });
 
     GatewayRuntimeComponents {
         profiles: Arc::new(
@@ -91,6 +99,7 @@ pub fn build_components(root: &Path) -> GatewayRuntimeComponents {
         memory_policy: MemoryPolicy::default(),
         runtime_policy: config.runtime.clone(),
         attachments: config.attachments.clone(),
+        sandbox,
         telegram: config.telegram.clone(),
         app_name: None,
         tools: Arc::new(tools),

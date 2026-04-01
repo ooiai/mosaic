@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::{Tool, ToolMetadata, ToolResult};
+use crate::{Tool, ToolContext, ToolMetadata, ToolResult};
 
 pub struct EchoTool {
     meta: ToolMetadata,
@@ -37,7 +37,7 @@ impl Tool for EchoTool {
         &self.meta
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let text = input
             .get("text")
             .and_then(serde_json::Value::as_str)

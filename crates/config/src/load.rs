@@ -1,4 +1,5 @@
 use super::*;
+use mosaic_sandbox_core::{SandboxCleanupPolicy, SandboxManager, SandboxSettings};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InitWorkspaceConfigOptions {
@@ -73,6 +74,19 @@ pub fn init_workspace_config(
     fs::create_dir_all(cwd.join(&config.inspect.runs_dir))?;
     fs::create_dir_all(cwd.join(&config.audit.root_dir))?;
     fs::create_dir_all(cwd.join(".mosaic/extensions"))?;
+    let sandbox = SandboxManager::new(
+        cwd,
+        SandboxSettings {
+            base_dir: PathBuf::from(&config.sandbox.base_dir),
+            python_strategy: config.sandbox.python.strategy,
+            node_strategy: config.sandbox.node.strategy,
+            cleanup: SandboxCleanupPolicy {
+                run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
+                attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
+            },
+        },
+    );
+    sandbox.ensure_layout()?;
 
     Ok(path)
 }
@@ -220,6 +234,10 @@ pub(crate) fn merge_patch(config: &mut MosaicConfig, patch: MosaicConfigPatch) {
 
     if let Some(runtime) = patch.runtime {
         config.runtime = runtime;
+    }
+
+    if let Some(sandbox) = patch.sandbox {
+        config.sandbox = sandbox;
     }
 
     if let Some(attachments) = patch.attachments {

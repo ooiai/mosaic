@@ -51,6 +51,7 @@ use mosaic_node_protocol::{
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry, public_error_message};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{RunError, RunResult, RuntimeContext};
+use mosaic_sandbox_core::{SandboxCleanupPolicy, SandboxManager, SandboxSettings};
 use mosaic_scheduler_core::{CronRegistration, CronStore};
 use mosaic_session_core::{
     SessionChannelMetadata, SessionRecord, SessionStore, SessionSummary, TranscriptRole,
@@ -72,6 +73,26 @@ pub use mosaic_control_protocol::{
 const DEFAULT_AUDIT_QUERY_LIMIT: usize = 50;
 const DEFAULT_REPLAY_QUERY_LIMIT: usize = 50;
 
+fn build_sandbox_manager(
+    workspace_root: &FsPath,
+    config: &mosaic_config::MosaicConfig,
+) -> Result<Arc<SandboxManager>> {
+    let manager = Arc::new(SandboxManager::new(
+        workspace_root,
+        SandboxSettings {
+            base_dir: PathBuf::from(&config.sandbox.base_dir),
+            python_strategy: config.sandbox.python.strategy,
+            node_strategy: config.sandbox.node.strategy,
+            cleanup: SandboxCleanupPolicy {
+                run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
+                attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
+            },
+        },
+    ));
+    manager.ensure_layout()?;
+    Ok(manager)
+}
+
 #[derive(Clone)]
 pub struct GatewayRuntimeComponents {
     pub profiles: Arc<ProviderProfileRegistry>,
@@ -81,6 +102,7 @@ pub struct GatewayRuntimeComponents {
     pub memory_policy: MemoryPolicy,
     pub runtime_policy: mosaic_config::RuntimePolicyConfig,
     pub attachments: mosaic_config::AttachmentConfig,
+    pub sandbox: Arc<SandboxManager>,
     pub telegram: mosaic_config::TelegramAdapterConfig,
     pub app_name: Option<String>,
     pub tools: Arc<ToolRegistry>,
@@ -110,6 +132,7 @@ impl GatewayRuntimeComponents {
             memory_policy: self.memory_policy.clone(),
             runtime_policy: self.runtime_policy.clone(),
             attachments: self.attachments.clone(),
+            sandbox: self.sandbox.clone(),
             telegram: self.telegram.clone(),
             app_name: self.app_name.clone(),
             tools: self.tools.clone(),
@@ -801,6 +824,7 @@ impl GatewayHandle {
         };
 
         let profiles = Arc::new(ProviderProfileRegistry::from_config(&loaded.config)?);
+        let sandbox = build_sandbox_manager(&source.workspace_root, &loaded.config)?;
         let updated = GatewayRuntimeComponents {
             profiles,
             provider_override: current.provider_override.clone(),
@@ -809,6 +833,7 @@ impl GatewayHandle {
             memory_policy: current.memory_policy.clone(),
             runtime_policy: current.runtime_policy.clone(),
             attachments: loaded.config.attachments.clone(),
+            sandbox,
             telegram: loaded.config.telegram.clone(),
             app_name: source
                 .app_config

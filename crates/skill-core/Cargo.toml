@@ -12,6 +12,7 @@ serde_json.workspace = true
 serde_yaml.workspace = true
 
 mosaic-tool-core = { path = "../tool-core" }
+mosaic-sandbox-core = { path = "../sandbox-core" }
 
 [dev-dependencies]
 futures.workspace = true

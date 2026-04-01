@@ -102,6 +102,13 @@ pub fn redact_mosaic_config(config: &MosaicConfig) -> RedactedMosaicConfig {
             max_workflow_provider_round_trips: config.runtime.max_workflow_provider_round_trips,
             continue_after_tool_error: config.runtime.continue_after_tool_error,
         },
+        sandbox: RedactedSandboxView {
+            base_dir: config.sandbox.base_dir.clone(),
+            python_strategy: config.sandbox.python.strategy,
+            node_strategy: config.sandbox.node.strategy,
+            run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
+            attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
+        },
         attachments: RedactedAttachmentView {
             enabled: config.attachments.policy.enabled,
             cache_dir: config.attachments.policy.cache_dir.clone(),

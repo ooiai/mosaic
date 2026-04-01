@@ -114,6 +114,48 @@ runtime:
 
 This block controls runtime loop ceilings and whether tool failures may be fed back into the conversation and retried.
 
+### `sandbox`
+
+`sandbox` defines the workspace-local execution environment baseline under `.mosaic/sandbox`.
+
+Example:
+
+```yaml
+sandbox:
+  base_dir: .mosaic/sandbox
+  python:
+    strategy: venv
+  node:
+    strategy: npm
+  cleanup:
+    run_workdirs_after_hours: 24
+    attachments_after_hours: 24
+```
+
+Fields:
+
+- `base_dir`: workspace-local sandbox root
+- `python.strategy`: `venv`, `uv`, or `disabled`
+- `node.strategy`: `npm`, `pnpm`, `layout_only`, or `disabled`
+- `cleanup.run_workdirs_after_hours`: how long run workdirs under `.mosaic/sandbox/work/runs` are retained
+- `cleanup.attachments_after_hours`: how long sandbox-managed attachment workdirs are retained
+
+Capability bindings may also declare a sandbox env:
+
+```yaml
+tools:
+  - type: builtin
+    name: exec_command
+    sandbox:
+      kind: shell
+      env_name: exec-command
+      scope: capability
+      dependency_spec:
+        - sh
+```
+
+The runtime uses these bindings to resolve per-capability env identity while still allocating a per-run workdir for each run.
+
 ### `deployment`
 
 ```yaml

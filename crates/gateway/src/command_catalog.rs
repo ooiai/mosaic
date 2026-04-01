@@ -630,7 +630,7 @@ mod tests {
     use mosaic_skill_core::SummarizeSkill;
     use mosaic_tool_core::{
         CapabilityExposure, CapabilityInvocationMode, CapabilityVisibility, TimeNowTool, Tool,
-        ToolMetadata, ToolResult, ToolSource,
+        ToolContext, ToolMetadata, ToolResult, ToolSource,
     };
 
     use super::*;
@@ -646,7 +646,7 @@ mod tests {
             &self.metadata
         }
 
-        async fn call(&self, _input: serde_json::Value) -> Result<ToolResult> {
+        async fn call(&self, _input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolResult> {
             Ok(ToolResult::ok("ok"))
         }
     }
@@ -704,6 +704,9 @@ mod tests {
 
         let mut skills = SkillRegistry::new();
         skills.register_native(Arc::new(SummarizeSkill));
+        let workspace_root = std::env::temp_dir().join("mosaic-command-catalog-workspace");
+        let sandbox = crate::build_sandbox_manager(&workspace_root, &config)
+            .expect("sandbox manager should build");
 
         GatewayRuntimeComponents {
             profiles: Arc::new(profiles),
@@ -715,6 +718,7 @@ mod tests {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            sandbox,
             telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(tools),
@@ -727,7 +731,7 @@ mod tests {
             cron_store: Arc::new(FileCronStore::new(
                 std::env::temp_dir().join("mosaic-command-catalog-cron"),
             )),
-            workspace_root: std::env::temp_dir().join("mosaic-command-catalog-workspace"),
+            workspace_root,
             runs_dir: std::env::temp_dir().join("mosaic-command-catalog-runs"),
             audit_root: std::env::temp_dir().join("mosaic-command-catalog-audit"),
             extensions: Vec::new(),

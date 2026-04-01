@@ -270,7 +270,11 @@ impl Tool for McpToolAdapter {
         &self.metadata
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(
+        &self,
+        input: serde_json::Value,
+        _ctx: &mosaic_tool_core::ToolContext,
+    ) -> Result<ToolResult> {
         self.client.call_tool(&self.remote_name, input).await
     }
 }

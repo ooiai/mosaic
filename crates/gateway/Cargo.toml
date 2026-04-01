@@ -24,6 +24,7 @@ mosaic-node-protocol = { path = "../node-protocol" }
 mosaic-inspect = { path = "../inspect" }
 mosaic-mcp-core = { path = "../mcp-core" }
 mosaic-provider = { path = "../provider" }
+mosaic-sandbox-core = { path = "../sandbox-core" }
 mosaic-runtime = { path = "../runtime" }
 mosaic-scheduler-core = { path = "../scheduler-core" }
 mosaic-session-core = { path = "../session-core" }

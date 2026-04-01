@@ -4,7 +4,10 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use mosaic_scheduler_core::{CronRegistration, CronStore};
 
-use crate::{CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolMetadata, ToolResult};
+use crate::{
+    CapabilityAudit, CapabilityKind, CapabilityMetadata, Tool, ToolContext, ToolMetadata,
+    ToolResult,
+};
 
 pub struct CronRegisterTool {
     meta: ToolMetadata,
@@ -43,7 +46,7 @@ impl Tool for CronRegisterTool {
         &self.meta
     }
 
-    async fn call(&self, input: serde_json::Value) -> Result<ToolResult> {
+    async fn call(&self, input: serde_json::Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let id = input
             .get("id")
             .and_then(serde_json::Value::as_str)

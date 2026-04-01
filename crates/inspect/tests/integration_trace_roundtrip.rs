@@ -321,6 +321,7 @@ fn persists_and_recovers_skill_trace_source_metadata() {
         source_path: Some("/tmp/operator-note".to_owned()),
         skill_version: Some("0.1.0".to_owned()),
         runtime_requirements: vec!["python".to_owned()],
+        sandbox: None,
         input: serde_json::json!({ "text": "disk usage high" }),
         output: Some("Operator note:\ndisk usage high".to_owned()),
         started_at: Utc::now(),

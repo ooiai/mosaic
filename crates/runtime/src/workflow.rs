@@ -7,6 +7,7 @@ pub(crate) struct RuntimeWorkflowExecutor<'a> {
     pub(crate) ingress_channel: Option<String>,
     pub(crate) ingress_bot_name: Option<String>,
     pub(crate) attachments: Vec<mosaic_inspect::ChannelAttachment>,
+    pub(crate) run_workdir: Option<std::path::PathBuf>,
     pub(crate) tool_traces: SharedToolTraceCollector,
     pub(crate) skill_traces: SharedSkillTraceCollector,
     pub(crate) model_selections: SharedModelSelectionCollector,
@@ -90,6 +91,7 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
                 tool_defs,
                 &self.tool_traces,
                 &self.capability_traces,
+                self.run_workdir.as_deref(),
             )
             .await
     }
@@ -110,6 +112,7 @@ impl WorkflowStepExecutor for RuntimeWorkflowExecutor<'_> {
                 input,
                 &self.attachments,
                 &self.skill_traces,
+                self.run_workdir.as_deref(),
             )
             .await
     }

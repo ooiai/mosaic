@@ -1,4 +1,5 @@
 use super::*;
+use mosaic_sandbox_core::{SandboxCleanupPolicy, SandboxManager, SandboxSettings};
 
 pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> DoctorReport {
     let cwd = cwd.as_ref();
@@ -28,6 +29,70 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
         "audit directory",
         true,
     ));
+
+    let sandbox = SandboxManager::new(
+        cwd,
+        SandboxSettings {
+            base_dir: PathBuf::from(&config.sandbox.base_dir),
+            python_strategy: config.sandbox.python.strategy,
+            node_strategy: config.sandbox.node.strategy,
+            cleanup: SandboxCleanupPolicy {
+                run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
+                attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
+            },
+        },
+    );
+    let sandbox_paths = sandbox.paths();
+    checks.push(path_check(
+        &sandbox_paths.root,
+        DoctorCategory::Sandbox,
+        "sandbox root directory",
+        true,
+    ));
+    checks.push(path_check(
+        &sandbox_paths.work_runs,
+        DoctorCategory::Sandbox,
+        "sandbox run work directory",
+        true,
+    ));
+    checks.push(path_check(
+        &sandbox_paths.attachments,
+        DoctorCategory::Sandbox,
+        "sandbox attachment directory",
+        true,
+    ));
+    for status in sandbox.runtime_statuses() {
+        checks.push(DoctorCheck {
+            status: if status.available {
+                DoctorStatus::Ok
+            } else {
+                DoctorStatus::Warning
+            },
+            category: DoctorCategory::Sandbox,
+            message: format!(
+                "sandbox runtime kind={} strategy={} available={} detail={}",
+                status.kind.label(),
+                status.strategy,
+                status.available,
+                status.detail.unwrap_or_else(|| "<none>".to_owned()),
+            ),
+        });
+    }
+    let env_count = sandbox
+        .list_envs()
+        .map(|envs| envs.len())
+        .unwrap_or_default();
+    checks.push(DoctorCheck {
+        status: DoctorStatus::Ok,
+        category: DoctorCategory::Sandbox,
+        message: format!(
+            "sandbox layout base_dir={} env_count={} cleanup(run_workdirs_after_hours={}, attachments_after_hours={})",
+            sandbox_paths.root.display(),
+            env_count,
+            config.sandbox.cleanup.run_workdirs_after_hours,
+            config.sandbox.cleanup.attachments_after_hours,
+        ),
+    });
 
     checks.push(secret_env_check(
         DoctorCategory::Auth,

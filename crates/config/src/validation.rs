@@ -346,6 +346,28 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         );
     }
 
+    if config.sandbox.base_dir.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            "sandbox.base_dir",
+            "sandbox base_dir must not be empty",
+        );
+    }
+    if config.sandbox.cleanup.run_workdirs_after_hours == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "sandbox.cleanup.run_workdirs_after_hours",
+            "sandbox run_workdirs_after_hours must be greater than zero",
+        );
+    }
+    if config.sandbox.cleanup.attachments_after_hours == 0 {
+        report.push(
+            ValidationLevel::Error,
+            "sandbox.cleanup.attachments_after_hours",
+            "sandbox attachments_after_hours must be greater than zero",
+        );
+    }
+
     validate_attachment_route_target(
         &mut report,
         config,
@@ -395,6 +417,11 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
                 "allowed_channels entries must not be empty",
             );
         }
+        validate_sandbox_binding(
+            &mut report,
+            &format!("tools.{idx}.sandbox"),
+            tool.sandbox.as_ref(),
+        );
     }
 
     for (idx, skill) in config.skills.iter().enumerate() {
@@ -471,6 +498,11 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
                 "runtime_requirements entries must not be empty",
             );
         }
+        validate_sandbox_binding(
+            &mut report,
+            &format!("skills.{idx}.sandbox"),
+            skill.sandbox.as_ref(),
+        );
     }
 
     for (idx, workflow) in config.workflows.iter().enumerate() {
@@ -542,6 +574,36 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
     }
 
     report
+}
+
+fn validate_sandbox_binding(
+    report: &mut ValidationReport,
+    field_prefix: &str,
+    binding: Option<&SandboxBinding>,
+) {
+    let Some(binding) = binding else {
+        return;
+    };
+
+    if binding.env_name.trim().is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.env_name"),
+            "sandbox env_name must not be empty",
+        );
+    }
+
+    if binding
+        .dependency_spec
+        .iter()
+        .any(|entry| entry.trim().is_empty())
+    {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.dependency_spec"),
+            "sandbox dependency_spec entries must not be empty",
+        );
+    }
 }
 
 fn validate_provider_attachment_routing(

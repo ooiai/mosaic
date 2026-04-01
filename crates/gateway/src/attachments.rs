@@ -369,6 +369,8 @@ mod tests {
             },
         );
         configure(&mut config);
+        let sandbox =
+            crate::build_sandbox_manager(&root, &config).expect("sandbox manager should build");
 
         GatewayRuntimeComponents {
             profiles: Arc::new(
@@ -381,6 +383,7 @@ mod tests {
             memory_policy: MemoryPolicy::default(),
             runtime_policy: config.runtime.clone(),
             attachments: config.attachments.clone(),
+            sandbox,
             telegram: config.telegram.clone(),
             app_name: None,
             tools: Arc::new(ToolRegistry::new()),
