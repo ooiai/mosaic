@@ -42,9 +42,9 @@ fn render_header(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
     let workspace = display_workspace_path(&app.workspace_path);
     let gateway = if app.gateway_connected {
-        "gateway: live"
+        format!("gateway: live ({})", app.gateway_target_label())
     } else {
-        "gateway: paused"
+        format!("gateway: paused ({})", app.gateway_target_label())
     };
     let header = Paragraph::new(Line::from(vec![
         Span::styled(workspace, Style::default().fg(Color::Gray)),
@@ -151,7 +151,7 @@ fn render_composer(frame: &mut Frame<'_>, app: &App, area: Rect) {
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect) {
     let footer = Paragraph::new(Line::from(vec![Span::styled(
-        "/ commands · Tab accept · ↑↓ select · Enter send · PgUp/PgDn scroll · Ctrl+C quit",
+        "/ opens the /mosaic catalog · Tab accept · ↑↓ select · Enter send · PgUp/PgDn scroll · Ctrl+C quit",
         Style::default().fg(Color::DarkGray),
     )]));
     frame.render_widget(footer, area);
@@ -250,7 +250,7 @@ fn render_command_palette(frame: &mut Frame<'_>, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Commands")
+                .title("Mosaic Commands")
                 .border_style(Style::default().fg(Color::DarkGray)),
         )
         .wrap(Wrap { trim: false });
@@ -421,7 +421,7 @@ mod tests {
         assert!(screen.contains("Conversation"));
         assert!(screen.contains("Composer"));
         assert!(screen.contains("session sess-gateway-001"));
-        assert!(screen.contains("/ commands · Tab accept"));
+        assert!(screen.contains("/ opens the /mosaic catalog"));
     }
 
     #[test]
@@ -431,9 +431,9 @@ mod tests {
 
         let screen = render_to_text(&app, 120, 28);
 
-        assert!(screen.contains("Commands"));
-        assert!(screen.contains("/model list"));
-        assert!(screen.contains("Model"));
+        assert!(screen.contains("Mosaic Commands"));
+        assert!(screen.contains("/mosaic"));
+        assert!(screen.contains("/mosaic help"));
     }
 
     #[test]

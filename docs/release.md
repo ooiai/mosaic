@@ -61,10 +61,11 @@ When TUI behavior is in release scope, also verify the local operator lane:
 - `cargo test -p mosaic-tui`
 - `mosaic tui`
 - submit one normal message and confirm a real run starts
-- confirm `/` opens the command popup and `Tab` completes the highlighted command
-- confirm `/session show`, `/model list`, `/adapter status`, `/node list`, `/node show <id>`, and `/inspect last` render inline operator cards
+- confirm `/` opens the `/mosaic` command popup and `Tab` completes the highlighted command
+- confirm `/mosaic session show`, `/mosaic model list`, `/mosaic adapter status`, `/mosaic node list`, `/mosaic node show <id>`, and `/mosaic inspect last` render inline operator cards
+- confirm short aliases such as `/session show` and `/inspect last` still resolve to the same actions
 - confirm inline tool, MCP, node-routed tool, skill, or workflow blocks remain visible when the scoped release affects those surfaces
-- confirm `/inspect last` explains route kind, source kind, execution target, and failure origin for the affected capability paths
+- confirm `/mosaic inspect last` explains route kind, source kind, execution target, and failure origin for the affected capability paths
 - confirm [tui.md](./tui.md), [getting-started.md](./getting-started.md), [testing.md](./testing.md), and [release.md](./release.md) were updated when the local operator contract changed
 
 ### Compatibility addendum lanes

@@ -66,7 +66,7 @@ An MCP tool may appear in a capability trace that also includes sandbox and poli
 Operators should verify MCP behavior through:
 
 - CLI `mosaic inspect --verbose`
-- TUI `/inspect last`
+- TUI `/mosaic inspect last`
 
 The expected taxonomy is:
 

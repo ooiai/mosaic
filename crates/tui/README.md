@@ -17,6 +17,7 @@ Control Plane Layer.
 - Bridge runtime events into the transcript through `TuiEventBuffer` and `TuiEventSink`.
 - Support local and remote gateway-backed interactive sessions through `InteractiveGateway` and `InteractiveSessionContext`.
 - Surface tools, skills, workflows, and provider/runtime progress inline in the conversation stream.
+- Treat `/mosaic ...` as the canonical slash-command contract while preserving short aliases for local operator speed.
 
 ## Out of Scope
 
@@ -62,6 +63,7 @@ cargo test -p mosaic-tui
 - The UI is terminal-only.
 - Telegram remains the strongest release-grade real GUI acceptance lane while the TUI hardens.
 - Command completion currently uses a popup plus `Tab` accept model; richer inline argument completion is still evolving.
+- Command discovery is canonical `/mosaic ...`; aliases remain compatibility shortcuts rather than the primary documented contract.
 
 ## Roadmap
 

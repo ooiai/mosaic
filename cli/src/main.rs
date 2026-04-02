@@ -3516,10 +3516,11 @@ mod tests {
         let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
         for required in [
             "The Mosaic TUI is now a chat-first terminal operator surface.",
-            "/sandbox status",
-            "/sandbox inspect <env>",
-            "/sandbox rebuild <env>",
-            "/sandbox clean",
+            "/mosaic sandbox status",
+            "/mosaic sandbox inspect <env>",
+            "/mosaic sandbox rebuild <env>",
+            "/mosaic sandbox clean",
+            "Short aliases like `/session show` and `/model list` still work",
         ] {
             assert!(tui.contains(required), "tui guide missing {required}");
         }
@@ -3831,21 +3832,23 @@ mod tests {
             "specs/completed/plan_l9.md",
             "specs/completed/plan_l10.md",
             "specs/completed/plan_l11.md",
+            "specs/completed/plan_l11-2.md",
             "specs/completed/plan_l11-1.md",
+            "specs/completed/plan_l12.md",
+            "specs/completed/plan_l13.md",
+            "specs/completed/plan_l14.md",
             "specs/completed/plan_k1.md",
             "specs/completed/plan_i1.md",
-            "specs/plan_l12.md",
-            "specs/plan_l13.md",
-            "specs/plan_l14.md",
             "completed (working tree)",
             "uncommitted workspace",
             "`97a0291`",
             "plan_l11.md",
+            "plan_l11-2.md",
             "plan_l11-1.md",
             "plan_l12.md",
             "plan_l13.md",
             "plan_l14.md",
-            "pending",
+            "No pending plans are currently tracked in `specs/`.",
         ] {
             assert!(planlog.contains(required), "PLANLOG missing {required}");
         }
@@ -3857,14 +3860,15 @@ mod tests {
             "specs/completed/plan_l9.md",
             "specs/completed/plan_l10.md",
             "specs/completed/plan_l11.md",
+            "specs/completed/plan_l11-2.md",
             "specs/completed/plan_l11-1.md",
+            "specs/completed/plan_l12.md",
+            "specs/completed/plan_l13.md",
+            "specs/completed/plan_l14.md",
             "specs/completed/plan_k1.md",
             "specs/completed/plan_i1.md",
             "specs/completed/plan_d2.md",
             "specs/completed/plan_k6.md",
-            "specs/plan_l12.md",
-            "specs/plan_l13.md",
-            "specs/plan_l14.md",
         ] {
             assert!(
                 root.join(relative).is_file(),
@@ -3877,33 +3881,49 @@ mod tests {
     fn follow_on_l_series_plans_reflect_chat_first_tui_baseline() {
         let root = repo_root();
 
-        let l12 = fs::read_to_string(root.join("specs/plan_l12.md")).expect("plan_l12 should load");
+        let l12 = fs::read_to_string(root.join("specs/completed/plan_l12.md"))
+            .expect("plan_l12 should load");
         for required in [
             "chat-first TUI",
             "transcript-driven TUI sandbox operations",
-            "/sandbox status",
-            "/sandbox inspect <env>",
+            "/mosaic sandbox status",
+            "/mosaic sandbox inspect <env>",
             "TUI slash-command and inline-card regression tests for sandbox flows",
         ] {
             assert!(l12.contains(required), "plan_l12 missing {required}");
         }
 
-        let l13 = fs::read_to_string(root.join("specs/plan_l13.md")).expect("plan_l13 should load");
+        let l11_2 = fs::read_to_string(root.join("specs/completed/plan_l11-2.md"))
+            .expect("plan_l11-2 should load");
+        for required in [
+            "/mosaic ...",
+            "short aliases",
+            "gateway-backed",
+            "input reliability",
+            "slash popup",
+        ] {
+            assert!(l11_2.contains(required), "plan_l11-2 missing {required}");
+        }
+
+        let l13 = fs::read_to_string(root.join("specs/completed/plan_l13.md"))
+            .expect("plan_l13 should load");
         for required in [
             "chat-first TUI discovery and execution visibility",
             "TUI slash-command discovery and transcript rendering for markdown skills",
-            "slash completion for `/skill <name>`",
-            "TUI `/skill` discoverability and transcript rendering tests",
+            "slash completion for `/mosaic skill <name>`",
+            "TUI `/mosaic skill` discoverability and transcript rendering tests",
         ] {
             assert!(l13.contains(required), "plan_l13 missing {required}");
         }
 
-        let l14 = fs::read_to_string(root.join("specs/plan_l14.md")).expect("plan_l14 should load");
+        let l14 = fs::read_to_string(root.join("specs/completed/plan_l14.md"))
+            .expect("plan_l14 should load");
         for required in [
             "CLI, TUI, Telegram",
             "CLI/TUI/docs/testing for capability execution proof",
             "Add TUI local operator proof for capability execution",
             "TUI transcript/operator-card tests for tool, MCP, node, and workflow explanations",
+            "/mosaic inspect last",
         ] {
             assert!(l14.contains(required), "plan_l14 missing {required}");
         }
@@ -3915,9 +3935,9 @@ mod tests {
 
         let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
         for required in [
-            "/adapter status",
-            "/node list",
-            "/node show <id>",
+            "/mosaic adapter status",
+            "/mosaic node list",
+            "/mosaic node show <id>",
             "capability proof",
             "execution target",
         ] {
@@ -3928,8 +3948,8 @@ mod tests {
             fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
         for required in [
             "CLI, TUI, Telegram",
-            "/adapter status",
-            "/node list",
+            "/mosaic adapter status",
+            "/mosaic node list",
             "execution_target=mcp_server",
             "inline capability proof",
         ] {
@@ -3942,9 +3962,9 @@ mod tests {
         let release =
             fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
         for required in [
-            "/adapter status",
-            "/node list",
-            "/node show <id>",
+            "/mosaic adapter status",
+            "/mosaic node list",
+            "/mosaic node show <id>",
             "execution target",
             "CLI, TUI, or Telegram sign-off",
         ] {
@@ -3956,7 +3976,11 @@ mod tests {
 
         let examples = fs::read_to_string(root.join("examples/capabilities/README.md"))
             .expect("capabilities examples guide should load");
-        for required in ["/adapter status", "/node list", "/inspect last"] {
+        for required in [
+            "/mosaic adapter status",
+            "/mosaic node list",
+            "/mosaic inspect last",
+        ] {
             assert!(
                 examples.contains(required),
                 "capabilities examples guide missing {required}"
@@ -3967,7 +3991,7 @@ mod tests {
             .expect("mcp readme should load");
         for required in [
             "Operator Proof",
-            "/inspect last",
+            "/mosaic inspect last",
             "execution_target=mcp_server",
         ] {
             assert!(
@@ -3980,8 +4004,8 @@ mod tests {
             .expect("node readme should load");
         for required in [
             "Operator Proof",
-            "/node list",
-            "/node show <id>",
+            "/mosaic node list",
+            "/mosaic node show <id>",
             "execution_target=node",
         ] {
             assert!(

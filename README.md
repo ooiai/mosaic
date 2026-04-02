@@ -226,7 +226,7 @@ For the Telegram-first real acceptance lane, start with:
 
 Current operator reality:
 
-- `mosaic tui` is the primary local chat-first operator surface today
+- `mosaic tui` is the primary local chat-first operator surface today and routes normal turns through the attached Gateway/runtime
 - Telegram is the strongest real external interactive GUI acceptance surface and still carries the release-facing channel lane
 - if a change affects TUI slash commands, transcript behavior, inline capability visibility, or local operator diagnostics, update `docs/tui.md`, `docs/getting-started.md`, `docs/testing.md`, and `docs/release.md` in the same change set
 - if a change affects Telegram commands, capability discovery, skills, attachments, sandbox readiness, or multi-bot behavior, update the Telegram guides and matching examples in the same change set
@@ -314,7 +314,7 @@ Until TUI reaches the same product completeness and release proof as the Telegra
 - bottom composer for normal turns and slash commands
 - popup command catalog opened by `/`
 - inline tool, skill, workflow, and provider/runtime event cards
-- real run actions such as `/run stop`, `/run retry`, `/inspect last`, `/tool`, `/skill`, and `/workflow`
+- real run actions such as `/mosaic run stop`, `/mosaic run retry`, `/mosaic inspect last`, `/mosaic tool`, `/mosaic skill`, and `/mosaic workflow`
 
 </details>
 
@@ -339,18 +339,21 @@ Until TUI reaches the same product completeness and release proof as the Telegra
 
 | Command                 | Effect                                        |
 | ----------------------- | --------------------------------------------- |
-| `/help`                 | Show the command catalog in the transcript    |
-| `/session list`         | List known sessions inline                    |
-| `/session show`         | Show current session metadata inline          |
-| `/model list`           | List available runtime profiles               |
-| `/model use <profile>`  | Change the profile for future turns           |
-| `/gateway status`       | Show gateway and node summary                 |
-| `/run stop`             | Cancel the active run                         |
-| `/run retry`            | Retry the last run                            |
-| `/inspect last`         | Inspect the latest run inline                 |
-| `/tool <name> <input>`  | Submit an explicit tool run                   |
-| `/skill <name> <input>` | Submit an explicit skill run                  |
-| `/workflow <name> <input>` | Submit an explicit workflow run            |
+| `/mosaic`                 | Show the grouped command catalog in the transcript |
+| `/mosaic help [category]` | Narrow the catalog to one command family          |
+| `/mosaic session list`    | List known sessions inline                        |
+| `/mosaic session show`    | Show current session metadata inline              |
+| `/mosaic model list`      | List available runtime profiles                   |
+| `/mosaic model use <profile>` | Change the profile for future turns          |
+| `/mosaic gateway status`  | Show gateway and node summary                     |
+| `/mosaic run stop`        | Cancel the active run                             |
+| `/mosaic run retry`       | Retry the last run                                |
+| `/mosaic inspect last`    | Inspect the latest run inline                     |
+| `/mosaic tool <name> <input>` | Submit an explicit tool run                 |
+| `/mosaic skill <name> <input>` | Submit an explicit skill run               |
+| `/mosaic workflow <name> <input>` | Submit an explicit workflow run         |
+
+Short aliases such as `/help`, `/session ...`, `/model ...`, `/sandbox ...`, `/inspect ...`, `/tool ...`, `/skill ...`, and `/workflow ...` still work for operator speed, but `/mosaic ...` is the canonical documented contract.
 
 </details>
 

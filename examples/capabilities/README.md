@@ -36,10 +36,10 @@ mosaic inspect .mosaic/runs/<run-id>.json --verbose
 For the local operator lane, you can also verify the same distinctions from the chat-first TUI:
 
 ```text
-/adapter status
-/node list
-/tool read_file README.md
-/inspect last
+/mosaic adapter status
+/mosaic node list
+/mosaic tool read_file README.md
+/mosaic inspect last
 ```
 
 The inline inspect card should show the capability proof summary for builtin tools, MCP tools, node-routed tools, skills, and workflows.

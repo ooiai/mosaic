@@ -42,6 +42,23 @@ impl CommandCategory {
             Self::Ui => "ui",
         }
     }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "gateway" => Some(Self::Gateway),
+            "adapter" | "adapters" => Some(Self::Adapter),
+            "node" | "nodes" => Some(Self::Node),
+            "session" | "sessions" => Some(Self::Session),
+            "model" | "models" | "profile" | "profiles" => Some(Self::Model),
+            "run" | "runs" => Some(Self::Run),
+            "sandbox" | "sandboxes" => Some(Self::Sandbox),
+            "tool" | "tools" => Some(Self::Tool),
+            "skill" | "skills" => Some(Self::Skill),
+            "workflow" | "workflows" => Some(Self::Workflow),
+            "ui" | "command" | "commands" => Some(Self::Ui),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,160 +70,167 @@ pub struct CommandSpec {
     pub detail: &'static str,
 }
 
-pub const LOCAL_COMMANDS: [CommandSpec; 22] = [
+pub const LOCAL_COMMANDS: [CommandSpec; 23] = [
     CommandSpec {
-        command: "/help",
+        command: "/mosaic",
         category: CommandCategory::Ui,
-        summary: "Show the command reference inside the transcript",
-        usage: "/help",
-        detail: "Lists session, model, run, tool, skill, workflow, gateway, and inspect commands for this TUI session.",
+        summary: "Show the Mosaic command catalog inline",
+        usage: "/mosaic",
+        detail: "Renders the grouped Mosaic command catalog for this gateway-backed TUI session directly into the transcript.",
     },
     CommandSpec {
-        command: "/gateway status",
+        command: "/mosaic help",
+        category: CommandCategory::Ui,
+        summary: "Show grouped help or one command category",
+        usage: "/mosaic help [category]",
+        detail: "Lists grouped commands for this TUI session or narrows the output to one category such as session, model, sandbox, tool, skill, workflow, gateway, node, adapter, or inspect.",
+    },
+    CommandSpec {
+        command: "/mosaic gateway status",
         category: CommandCategory::Gateway,
         summary: "Show gateway transport and readiness",
-        usage: "/gateway status",
-        detail: "Prints the current gateway transport, readiness, node summary, and adapter state into the transcript.",
+        usage: "/mosaic gateway status",
+        detail: "Prints the current gateway transport, readiness, node summary, and adapter state into the transcript. Short alias: /gateway status.",
     },
     CommandSpec {
-        command: "/adapter status",
+        command: "/mosaic adapter status",
         category: CommandCategory::Adapter,
         summary: "Show adapter readiness and outbound state",
-        usage: "/adapter status",
-        detail: "Prints registered adapters, bot bindings, outbound readiness, and channel-facing detail inline in the transcript.",
+        usage: "/mosaic adapter status",
+        detail: "Prints registered adapters, bot bindings, outbound readiness, and channel-facing detail inline in the transcript. Short alias: /adapter status.",
     },
     CommandSpec {
-        command: "/node list",
+        command: "/mosaic node list",
         category: CommandCategory::Node,
         summary: "List node health and affinity state",
-        usage: "/node list",
-        detail: "Shows registered nodes, health, disconnect state, and whether the current session is pinned to a specific node.",
+        usage: "/mosaic node list",
+        detail: "Shows registered nodes, health, disconnect state, and whether the current session is pinned to a specific node. Short alias: /node list.",
     },
     CommandSpec {
-        command: "/node show <id>",
+        command: "/mosaic node show <id>",
         category: CommandCategory::Node,
         summary: "Inspect one node and its declared capabilities",
-        usage: "/node show <id>",
-        detail: "Prints one node's transport, platform, health, disconnect reason, and declared capabilities into the transcript.",
+        usage: "/mosaic node show <id>",
+        detail: "Prints one node's transport, platform, health, disconnect reason, and declared capabilities into the transcript. Short alias: /node show <id>.",
     },
     CommandSpec {
-        command: "/session list",
+        command: "/mosaic session list",
         category: CommandCategory::Session,
         summary: "List known sessions",
-        usage: "/session list",
-        detail: "Shows the sessions currently loaded into this TUI context so the operator can switch without leaving chat.",
+        usage: "/mosaic session list",
+        detail: "Shows the sessions currently loaded into this TUI context so the operator can switch without leaving chat. Short alias: /session list.",
     },
     CommandSpec {
-        command: "/session new <id>",
+        command: "/mosaic session new <id>",
         category: CommandCategory::Session,
         summary: "Create or stage a new session",
-        usage: "/session new <id>",
-        detail: "Creates a new active session target. The next submitted turn persists the session if it does not already exist.",
+        usage: "/mosaic session new <id>",
+        detail: "Creates a new active session target. The next submitted turn persists the session if it does not already exist. Short alias: /session new <id>.",
     },
     CommandSpec {
-        command: "/session show",
+        command: "/mosaic session show",
         category: CommandCategory::Session,
         summary: "Explain the current session binding",
-        usage: "/session show",
-        detail: "Prints the active session route, run ids, channel metadata, memory summary, compressed context, and references.",
+        usage: "/mosaic session show",
+        detail: "Prints the active session route, run ids, channel metadata, memory summary, compressed context, and references. Short alias: /session show.",
     },
     CommandSpec {
-        command: "/session switch <id>",
+        command: "/mosaic session switch <id>",
         category: CommandCategory::Session,
         summary: "Switch the active conversation",
-        usage: "/session switch <id>",
-        detail: "Moves the composer to another session and refreshes that session from the gateway or local runtime store.",
+        usage: "/mosaic session switch <id>",
+        detail: "Moves the composer to another session and refreshes that session from the gateway or local runtime store. Short alias: /session switch <id>.",
     },
     CommandSpec {
-        command: "/model list",
+        command: "/mosaic model list",
         category: CommandCategory::Model,
         summary: "List available runtime profiles",
-        usage: "/model list",
-        detail: "Prints configured runtime profiles with provider type and model so the next turn can be scheduled intentionally.",
+        usage: "/mosaic model list",
+        detail: "Prints configured runtime profiles with provider type and model so the next turn can be scheduled intentionally. Short aliases: /model list and /profile list.",
     },
     CommandSpec {
-        command: "/model use <profile>",
+        command: "/mosaic model use <profile>",
         category: CommandCategory::Model,
         summary: "Switch the profile for future turns",
-        usage: "/model use <profile>",
-        detail: "Updates the active profile used by interactive submissions; the next message will use the new profile.",
+        usage: "/mosaic model use <profile>",
+        detail: "Updates the active profile used by interactive submissions; the next message will use the new profile. Short aliases: /model use <profile> and /profile <name>.",
     },
     CommandSpec {
-        command: "/model show",
+        command: "/mosaic model show",
         category: CommandCategory::Model,
         summary: "Show the current profile and model binding",
-        usage: "/model show",
-        detail: "Explains which runtime profile is selected for the next turn and which provider/model the current session last used.",
+        usage: "/mosaic model show",
+        detail: "Explains which runtime profile is selected for the next turn and which provider/model the current session last used. Short aliases: /model show and /profile show.",
     },
     CommandSpec {
-        command: "/run stop",
+        command: "/mosaic run stop",
         category: CommandCategory::Run,
         summary: "Cancel the active run for this session",
-        usage: "/run stop",
-        detail: "Sends a real cancel request to the attached gateway for the current run when one is active.",
+        usage: "/mosaic run stop",
+        detail: "Sends a real cancel request to the attached gateway for the current run when one is active. Short alias: /run stop.",
     },
     CommandSpec {
-        command: "/run retry",
+        command: "/mosaic run retry",
         category: CommandCategory::Run,
         summary: "Retry the last completed run",
-        usage: "/run retry",
-        detail: "Requests a real retry from the attached gateway using the last known gateway run id for this session.",
+        usage: "/mosaic run retry",
+        detail: "Requests a real retry from the attached gateway using the last known gateway run id for this session. Short alias: /run retry.",
     },
     CommandSpec {
-        command: "/sandbox status",
+        command: "/mosaic sandbox status",
         category: CommandCategory::Sandbox,
         summary: "Show workspace sandbox lifecycle status",
-        usage: "/sandbox status",
-        detail: "Prints Python and Node sandbox strategies, install policies, runtime availability, and current env counts into the transcript.",
+        usage: "/mosaic sandbox status",
+        detail: "Prints Python and Node sandbox strategies, install policies, runtime availability, and current env counts into the transcript. Short alias: /sandbox status.",
     },
     CommandSpec {
-        command: "/sandbox inspect <env>",
+        command: "/mosaic sandbox inspect <env>",
         category: CommandCategory::Sandbox,
         summary: "Inspect one sandbox env record",
-        usage: "/sandbox inspect <env>",
-        detail: "Loads one sandbox env record and renders lifecycle state, install policy, dependencies, and failure details inline.",
+        usage: "/mosaic sandbox inspect <env>",
+        detail: "Loads one sandbox env record and renders lifecycle state, install policy, dependencies, and failure details inline. Short alias: /sandbox inspect <env>.",
     },
     CommandSpec {
-        command: "/sandbox rebuild <env>",
+        command: "/mosaic sandbox rebuild <env>",
         category: CommandCategory::Sandbox,
         summary: "Rebuild a sandbox env",
-        usage: "/sandbox rebuild <env>",
-        detail: "Deletes and recreates one sandbox env so the next capability run can reuse a fresh local execution environment.",
+        usage: "/mosaic sandbox rebuild <env>",
+        detail: "Deletes and recreates one sandbox env so the next capability run can reuse a fresh local execution environment. Short alias: /sandbox rebuild <env>.",
     },
     CommandSpec {
-        command: "/sandbox clean",
+        command: "/mosaic sandbox clean",
         category: CommandCategory::Sandbox,
         summary: "Clean sandbox run and attachment workdirs",
-        usage: "/sandbox clean",
-        detail: "Removes sandbox run workdirs and attachment workdirs without leaving the chat transcript.",
+        usage: "/mosaic sandbox clean",
+        detail: "Removes sandbox run workdirs and attachment workdirs without leaving the chat transcript. Short alias: /sandbox clean.",
     },
     CommandSpec {
-        command: "/inspect last",
+        command: "/mosaic inspect last",
         category: CommandCategory::Inspect,
         summary: "Inspect the most recent run inline",
-        usage: "/inspect last",
-        detail: "Fetches the most recent run detail for the active session and renders the summary inline in the transcript.",
+        usage: "/mosaic inspect last",
+        detail: "Fetches the most recent run detail for the active session and renders the summary inline in the transcript. Short alias: /inspect last.",
     },
     CommandSpec {
-        command: "/tool <name> <input>",
+        command: "/mosaic tool <name> <input>",
         category: CommandCategory::Tool,
         summary: "Invoke a tool explicitly",
-        usage: "/tool <name> <input>",
-        detail: "Submits a real run that explicitly targets one tool and shows the capability events inline in the transcript.",
+        usage: "/mosaic tool <name> <input>",
+        detail: "Submits a real run that explicitly targets one tool and shows the capability events inline in the transcript. Short alias: /tool <name> <input>.",
     },
     CommandSpec {
-        command: "/skill <name> <input>",
+        command: "/mosaic skill <name> <input>",
         category: CommandCategory::Skill,
         summary: "Invoke a skill explicitly",
-        usage: "/skill <name> <input>",
-        detail: "Submits a real run that explicitly targets one skill and streams the result back into the active transcript.",
+        usage: "/mosaic skill <name> <input>",
+        detail: "Submits a real run that explicitly targets one skill and streams the result back into the active transcript. Short alias: /skill <name> <input>.",
     },
     CommandSpec {
-        command: "/workflow <name> <input>",
+        command: "/mosaic workflow <name> <input>",
         category: CommandCategory::Workflow,
         summary: "Invoke a workflow explicitly",
-        usage: "/workflow <name> <input>",
-        detail: "Submits a real run that explicitly targets one workflow and renders step activity inline in the transcript.",
+        usage: "/mosaic workflow <name> <input>",
+        detail: "Submits a real run that explicitly targets one workflow and renders step activity inline in the transcript. Short alias: /workflow <name> <input>.",
     },
 ];
 
@@ -454,6 +478,7 @@ pub struct App {
     pub timeline_scroll: u16,
     pub observability_scroll: u16,
     pub gateway_connected: bool,
+    pub gateway_target: String,
     pub runtime_status: String,
     pub control_model: String,
     pub selected_profile: String,
@@ -501,6 +526,7 @@ impl App {
             timeline_scroll: 0,
             observability_scroll: 0,
             gateway_connected: true,
+            gateway_target: "local".to_owned(),
             runtime_status: "warm".to_owned(),
             control_model: "gpt-5.4-control".to_owned(),
             selected_profile: "gpt-5.4-control".to_owned(),
@@ -566,6 +592,7 @@ impl App {
             timeline_scroll: 0,
             observability_scroll: 0,
             gateway_connected: true,
+            gateway_target: "local".to_owned(),
             runtime_status: "idle".to_owned(),
             control_model: model,
             selected_profile: profile,
@@ -615,6 +642,10 @@ impl App {
     ) {
         self.gateway_summary = gateway_summary;
         self.gateway_detail = gateway_detail;
+    }
+
+    pub fn set_gateway_target(&mut self, target: impl Into<String>) {
+        self.gateway_target = target.into();
     }
 
     pub fn set_node_state(&mut self, node_summary: Option<String>, node_detail: Option<String>) {
@@ -707,7 +738,7 @@ impl App {
         if matches!(key.code, KeyCode::F(1))
             || (matches!(key.code, KeyCode::Char('?')) && self.active_draft().is_empty())
         {
-            self.push_help();
+            self.push_help(None);
             return AppAction::Continue;
         }
 
@@ -1381,7 +1412,8 @@ reason={}",
     pub fn operator_status(&self) -> String {
         if !self.gateway_connected {
             return format!(
-                "Gateway paused. /gateway connect resumes refresh for session {}.",
+                "Gateway paused ({}). Reconnect it before sending another turn for session {}.",
+                self.gateway_target,
                 self.session_label()
             );
         }
@@ -1425,12 +1457,18 @@ reason={}",
 
     pub fn composer_placeholder(&self) -> &'static str {
         match self.input_mode() {
-            InputMode::Chat => "Send a message to the active session. Type / to browse commands.",
+            InputMode::Chat => {
+                "Send a message to the active session. Type / to browse the /mosaic command catalog."
+            }
             InputMode::Command => {
-                "Run a control command. Tab accepts the highlighted command and Enter executes it."
+                "Run a /mosaic command. Tab accepts the highlighted command and Enter executes it."
             }
             InputMode::Search => "Type / to browse commands.",
         }
+    }
+
+    pub fn gateway_target_label(&self) -> &str {
+        &self.gateway_target
     }
 
     pub fn enter_hint(&self) -> String {
@@ -1560,10 +1598,20 @@ reason={}",
             .iter()
             .any(|session| session.id == selected_session_id)
         {
-            let mut placeholder =
-                interactive_session_record(selected_session_id, &self.control_model);
-            placeholder.origin = default_origin;
-            placeholder.runtime = default_runtime;
+            let mut placeholder = self
+                .sessions
+                .iter()
+                .find(|session| session.id == selected_session_id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    interactive_session_record(selected_session_id, &self.control_model)
+                });
+            if placeholder.origin.is_empty() {
+                placeholder.origin = default_origin;
+            }
+            if placeholder.runtime.is_empty() {
+                placeholder.runtime = default_runtime;
+            }
             sessions.push(placeholder);
         }
 
@@ -1772,6 +1820,10 @@ reason={}",
             return false;
         }
 
+        if command_invocation_ready(self.active_draft()) {
+            return false;
+        }
+
         if let Some(completion) = self.selected_skill_completion() {
             return self.active_draft().trim_end() != completion.trim_end();
         }
@@ -1823,11 +1875,18 @@ reason={}",
     }
 
     fn selected_skill_completion(&self) -> Option<String> {
-        let prefix = self
-            .active_draft()
-            .trim_start()
-            .strip_prefix("/skill ")
-            .or_else(|| self.active_draft().trim_start().strip_prefix("/skill"))?;
+        let draft = self.active_draft().trim_start();
+        let (command_prefix, prefix) = if let Some(prefix) = draft.strip_prefix("/mosaic skill ") {
+            ("/mosaic skill ", prefix)
+        } else if let Some(prefix) = draft.strip_prefix("/mosaic skill") {
+            ("/mosaic skill ", prefix)
+        } else if let Some(prefix) = draft.strip_prefix("/skill ") {
+            ("/skill ", prefix)
+        } else if let Some(prefix) = draft.strip_prefix("/skill") {
+            ("/skill ", prefix)
+        } else {
+            return None;
+        };
         let query = prefix.trim();
         let matches = self
             .available_skills
@@ -1841,34 +1900,71 @@ reason={}",
             })
             .collect::<Vec<_>>();
         let selected = matches.get(self.command_menu_index.min(matches.len().saturating_sub(1)))?;
-        Some(format!("/skill {} ", selected.name))
+        Some(format!("{command_prefix}{} ", selected.name))
     }
 
     fn route_command(&mut self, command: &str) -> AppAction {
-        let mut parts = command.split_whitespace();
-        let Some(name) = parts.next() else {
-            self.push_command_error("Usage: /help");
+        let parts = command.split_whitespace().collect::<Vec<_>>();
+        let Some(name) = parts.first().copied() else {
+            self.push_command_error("Usage: /mosaic help");
             return AppAction::Continue;
         };
 
         match name {
+            "mosaic" => match parts.as_slice() {
+                ["mosaic"] => {
+                    self.push_help(None);
+                    AppAction::Continue
+                }
+                ["mosaic", "help"] => {
+                    self.push_help(None);
+                    AppAction::Continue
+                }
+                ["mosaic", "help", category, ..] => {
+                    if let Some(category) = CommandCategory::parse(category) {
+                        self.push_help(Some(category));
+                    } else {
+                        self.push_command_error(format!(
+                            "Unknown /mosaic help category: {}. Use /mosaic help to browse the grouped catalog.",
+                            category
+                        ));
+                    }
+                    AppAction::Continue
+                }
+                ["mosaic", root, rest @ ..] => self.route_command_root(root, rest),
+                _ => AppAction::Continue,
+            },
             "help" => {
-                self.push_help();
+                self.push_help(None);
                 AppAction::Continue
             }
-            "gateway" => self.route_gateway_command(parts.collect()),
-            "adapter" => self.route_adapter_command(parts.collect()),
-            "node" => self.route_node_command(parts.collect()),
-            "sandbox" => self.route_sandbox_command(parts.collect()),
-            "model" => self.route_model_command(parts.collect()),
-            "run" => self.route_run_command(parts.collect()),
-            "inspect" => self.route_inspect_command(parts.collect()),
-            "tool" => self.route_explicit_capability("tool", parts.collect()),
-            "skill" => self.route_explicit_capability("skill", parts.collect()),
-            "workflow" => self.route_explicit_capability("workflow", parts.collect()),
-            "session" => self.route_session_command(parts.collect()),
+            "gateway" | "adapter" | "node" | "sandbox" | "model" | "profile" | "run"
+            | "inspect" | "tool" | "skill" | "workflow" | "session" => {
+                self.route_command_root(name, &parts[1..])
+            }
             _ => {
                 self.push_command_error(unknown_command_message(command));
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn route_command_root(&mut self, name: &str, args: &[&str]) -> AppAction {
+        match name {
+            "gateway" => self.route_gateway_command(args.to_vec()),
+            "adapter" => self.route_adapter_command(args.to_vec()),
+            "node" => self.route_node_command(args.to_vec()),
+            "sandbox" => self.route_sandbox_command(args.to_vec()),
+            "model" => self.route_model_command(args.to_vec()),
+            "profile" => self.route_profile_command(args.to_vec()),
+            "run" => self.route_run_command(args.to_vec()),
+            "inspect" => self.route_inspect_command(args.to_vec()),
+            "tool" => self.route_explicit_capability("tool", args.to_vec()),
+            "skill" => self.route_explicit_capability("skill", args.to_vec()),
+            "workflow" => self.route_explicit_capability("workflow", args.to_vec()),
+            "session" => self.route_session_command(args.to_vec()),
+            _ => {
+                self.push_command_error(unknown_command_message(name));
                 AppAction::Continue
             }
         }
@@ -1917,7 +2013,28 @@ reason={}",
                 AppAction::Continue
             }
             _ => {
-                self.push_command_error("Usage: /model list | /model show | /model use <profile>");
+                self.push_command_error(
+                    "Usage: /mosaic model list | /mosaic model show | /mosaic model use <profile>",
+                );
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn route_profile_command(&mut self, args: Vec<&str>) -> AppAction {
+        match args.as_slice() {
+            [] | ["show"] => self.route_model_command(vec!["show"]),
+            ["list"] => self.route_model_command(vec!["list"]),
+            ["use", rest @ ..] if !rest.is_empty() => {
+                let mut forwarded = vec!["use"];
+                forwarded.extend(rest.iter().copied());
+                self.route_model_command(forwarded)
+            }
+            [profile] => self.route_model_command(vec!["use", profile]),
+            _ => {
+                self.push_command_error(
+                    "Usage: /mosaic profile <name> | /mosaic profile show | /mosaic profile list",
+                );
                 AppAction::Continue
             }
         }
@@ -1930,7 +2047,7 @@ reason={}",
                 AppAction::Continue
             }
             _ => {
-                self.push_command_error("Usage: /gateway status");
+                self.push_command_error("Usage: /mosaic gateway status");
                 AppAction::Continue
             }
         }
@@ -1947,7 +2064,7 @@ reason={}",
                 AppAction::AdapterStatus
             }
             _ => {
-                self.push_command_error("Usage: /adapter status");
+                self.push_command_error("Usage: /mosaic adapter status");
                 AppAction::Continue
             }
         }
@@ -1973,7 +2090,7 @@ reason={}",
                 AppAction::NodeShow(node_id)
             }
             _ => {
-                self.push_command_error("Usage: /node list | /node show <id>");
+                self.push_command_error("Usage: /mosaic node list | /mosaic node show <id>");
                 AppAction::Continue
             }
         }
@@ -2023,7 +2140,7 @@ reason={}",
             }
             _ => {
                 self.push_command_error(
-                    "Usage: /sandbox status | /sandbox inspect <env> | /sandbox rebuild <env> | /sandbox clean",
+                    "Usage: /mosaic sandbox status | /mosaic sandbox inspect <env> | /mosaic sandbox rebuild <env> | /mosaic sandbox clean",
                 );
                 AppAction::Continue
             }
@@ -2078,7 +2195,7 @@ reason={}",
             }
             _ => {
                 self.push_command_error(
-                    "Usage: /session list | /session show | /session switch <id> | /session new <id>",
+                    "Usage: /mosaic session list | /mosaic session show | /mosaic session switch <id> | /mosaic session new <id>",
                 );
                 AppAction::Continue
             }
@@ -2114,7 +2231,7 @@ reason={}",
                 AppAction::RetryRun(run_id)
             }
             _ => {
-                self.push_command_error("Usage: /run stop | /run retry");
+                self.push_command_error("Usage: /mosaic run stop | /mosaic run retry");
                 AppAction::Continue
             }
         }
@@ -2131,7 +2248,7 @@ reason={}",
                 AppAction::InspectRun(run_id)
             }
             _ => {
-                self.push_command_error("Usage: /inspect last");
+                self.push_command_error("Usage: /mosaic inspect last");
                 AppAction::Continue
             }
         }
@@ -2140,9 +2257,9 @@ reason={}",
     fn route_explicit_capability(&mut self, kind: &str, args: Vec<&str>) -> AppAction {
         let Some((name, input)) = split_capability_args(args) else {
             self.push_command_error(match kind {
-                "tool" => "Usage: /tool <name> <input>",
-                "skill" => "Usage: /skill <name> <input>",
-                _ => "Usage: /workflow <name> <input>",
+                "tool" => "Usage: /mosaic tool <name> <input>",
+                "skill" => "Usage: /mosaic skill <name> <input>",
+                _ => "Usage: /mosaic workflow <name> <input>",
             });
             return AppAction::Continue;
         };
@@ -2437,9 +2554,10 @@ references={}",
         );
     }
 
-    fn push_help(&mut self) {
+    fn push_help(&mut self, selected_category: Option<CommandCategory>) {
         let mut grouped = BTreeMap::new();
         for category in [
+            CommandCategory::Ui,
             CommandCategory::Gateway,
             CommandCategory::Adapter,
             CommandCategory::Node,
@@ -2451,8 +2569,10 @@ references={}",
             CommandCategory::Skill,
             CommandCategory::Workflow,
             CommandCategory::Inspect,
-            CommandCategory::Ui,
         ] {
+            if selected_category.is_some_and(|selected| selected != category) {
+                continue;
+            }
             let entries = LOCAL_COMMANDS
                 .iter()
                 .filter(|spec| spec.category == category)
@@ -2465,32 +2585,40 @@ references={}",
             format!(
                 "input.chat    Enter => {}",
                 if self.is_interactive() {
-                    "send to the active session"
+                    "send a real gateway-backed turn to the active session"
                 } else {
                     "queue a mock instruction"
                 }
             ),
-            "input.command / opens the popup, typing filters, Tab completes, Enter executes"
+            "input.command / opens the /mosaic popup, typing filters, Tab completes, Enter executes"
                 .to_owned(),
             "navigation     PageUp/PageDown scroll the transcript, Ctrl+C quits".to_owned(),
+            "aliases        Short forms like /session show and /model list still work, but /mosaic ... is canonical.".to_owned(),
             String::new(),
         ];
         for (category, entries) in grouped {
+            if entries.is_empty() {
+                continue;
+            }
             body.push(format!("[{category}]"));
             body.extend(entries);
             body.push(String::new());
         }
         body.push(format!(
-            "current session={} next-profile={} next-model={} current-run={}",
+            "current session={} next-profile={} next-model={} current-run={} gateway-backed={}",
             self.session_label(),
             self.active_profile(),
             self.control_model,
-            self.current_run_identifier().unwrap_or("<none>")
+            self.current_run_identifier().unwrap_or("<none>"),
+            if self.gateway_connected { "yes" } else { "no" }
         ));
 
         self.push_activity("command", "Displayed TUI command reference.");
         self.push_system_entry(
-            "TUI command reference",
+            match selected_category {
+                Some(category) => format!("Mosaic {} command reference", category.label()),
+                None => "Mosaic command reference".to_owned(),
+            },
             body.join(
                 "
 ",
@@ -2637,10 +2765,70 @@ fn command_completion(command: &str) -> String {
     }
 }
 
+fn command_invocation_ready(draft: &str) -> bool {
+    let command = draft.trim().trim_start_matches('/');
+    if command.is_empty() {
+        return false;
+    }
+
+    let parts = command.split_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["mosaic"] | ["help"] | ["mosaic", "help"] => true,
+        ["mosaic", "help", ..] => true,
+        ["mosaic", root, rest @ ..] => command_root_invocation_ready(root, rest),
+        [root, rest @ ..] => command_root_invocation_ready(root, rest),
+        _ => false,
+    }
+}
+
+fn command_root_invocation_ready(root: &str, args: &[&str]) -> bool {
+    match root {
+        "gateway" | "adapter" => matches!(args, ["status"]),
+        "node" => {
+            matches!(args, ["list"]) || matches!(args, ["show", rest @ ..] if !rest.is_empty())
+        }
+        "session" => {
+            matches!(args, ["list"] | ["show"])
+                || matches!(args, ["switch", rest @ ..] if !rest.is_empty())
+                || matches!(args, ["new", rest @ ..] if !rest.is_empty())
+        }
+        "model" => {
+            matches!(args, ["list"] | ["show"])
+                || matches!(args, ["use", rest @ ..] if !rest.is_empty())
+        }
+        "profile" => {
+            matches!(args, ["list"] | ["show"])
+                || matches!(args, [profile] if !profile.is_empty())
+                || matches!(args, ["use", rest @ ..] if !rest.is_empty())
+        }
+        "run" => matches!(args, ["stop"] | ["retry"]),
+        "sandbox" => {
+            matches!(args, ["status"] | ["clean"])
+                || matches!(args, ["inspect", rest @ ..] if !rest.is_empty())
+                || matches!(args, ["rebuild", rest @ ..] if !rest.is_empty())
+        }
+        "inspect" => matches!(args, ["last"]),
+        "tool" | "skill" | "workflow" => command_capability_invocation_ready(args),
+        _ => false,
+    }
+}
+
+fn command_capability_invocation_ready(args: &[&str]) -> bool {
+    if args.len() < 2 {
+        return false;
+    }
+
+    let input = args[1..].join(" ");
+    !args[0].trim().is_empty() && !input.trim().is_empty()
+}
+
 fn unknown_command_message(command: &str) -> String {
     let suggestions = suggest_commands(command);
     if suggestions.is_empty() {
-        return format!("Unknown command: /{}", command.trim());
+        return format!(
+            "Unknown command: /{}. Use /mosaic help to browse the command catalog.",
+            command.trim()
+        );
     }
 
     format!(
@@ -2666,10 +2854,14 @@ fn suggest_commands(query: &str) -> Vec<CommandSpec> {
         .copied()
         .map(|spec| {
             let searchable = command_search_text(spec.command);
-            let score = if searchable.starts_with(&normalized) {
+            let alias_searchable = command_alias_search_text(spec.command);
+            let score = if searchable.starts_with(&normalized)
+                || alias_searchable.starts_with(&normalized)
+            {
                 0usize
             } else {
                 edit_distance(&normalized, &searchable)
+                    .min(edit_distance(&normalized, &alias_searchable))
             };
             (score, spec)
         })
@@ -2697,10 +2889,7 @@ fn command_matches_query(spec: CommandSpec, normalized_query: &str) -> bool {
     }
 
     let query_tokens = normalized_query.split_whitespace().collect::<Vec<_>>();
-    let command_tokens = command_search_text(spec.command)
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
+    let command_tokens = command_search_tokens(spec.command);
 
     if query_tokens.len() == 1 {
         return command_tokens
@@ -2708,15 +2897,43 @@ fn command_matches_query(spec: CommandSpec, normalized_query: &str) -> bool {
             .any(|token| token.starts_with(query_tokens[0]));
     }
 
+    command_tokens_match_query(&command_tokens, &query_tokens)
+        || if command_tokens
+            .first()
+            .is_some_and(|token| token == "mosaic")
+        {
+            command_tokens_match_query(&command_tokens[1..], &query_tokens)
+        } else {
+            false
+        }
+}
+
+fn command_search_text(command: &str) -> String {
+    normalize_command_text(command)
+}
+
+fn command_alias_search_text(command: &str) -> String {
+    let tokens = command_search_tokens(command);
+    if tokens.first().is_some_and(|token| token == "mosaic") && tokens.len() > 1 {
+        tokens[1..].join(" ")
+    } else {
+        tokens.join(" ")
+    }
+}
+
+fn command_search_tokens(command: &str) -> Vec<String> {
+    command_search_text(command)
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect::<Vec<_>>()
+}
+
+fn command_tokens_match_query(command_tokens: &[String], query_tokens: &[&str]) -> bool {
     query_tokens.len() <= command_tokens.len()
         && query_tokens
             .iter()
             .zip(command_tokens.iter())
             .all(|(query, command)| command.starts_with(query))
-}
-
-fn command_search_text(command: &str) -> String {
-    normalize_command_text(command)
 }
 
 fn normalize_command_text(value: &str) -> String {
@@ -2892,7 +3109,7 @@ mod tests {
                 .timeline
                 .last()
                 .map(|entry| entry.title.as_str()),
-            Some("TUI command reference")
+            Some("Mosaic command reference")
         );
     }
 
@@ -2903,7 +3120,7 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "/gateway status ");
+        assert_eq!(app.active_draft(), "/mosaic gateway status ");
     }
 
     #[test]
@@ -2913,7 +3130,7 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "/model list ");
+        assert_eq!(app.active_draft(), "/mosaic ");
     }
 
     #[test]
@@ -2923,7 +3140,7 @@ mod tests {
         app.gateway_detail = Some("transport=http+sse".to_owned());
         app.node_summary = Some("nodes=1".to_owned());
         app.node_detail = Some("healthy".to_owned());
-        app.active_session_mut().draft = "/gateway status".to_owned();
+        app.active_session_mut().draft = "/mosaic gateway status".to_owned();
 
         app.submit_composer();
 
@@ -2939,7 +3156,7 @@ mod tests {
     #[test]
     fn sandbox_status_command_returns_inline_action() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/sandbox status".to_owned();
+        app.active_session_mut().draft = "/mosaic sandbox status".to_owned();
 
         let action = app.submit_composer();
 
@@ -2956,7 +3173,8 @@ mod tests {
     #[test]
     fn sandbox_rebuild_command_returns_targeted_action() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/sandbox rebuild python-capability-demo".to_owned();
+        app.active_session_mut().draft =
+            "/mosaic sandbox rebuild python-capability-demo".to_owned();
 
         let action = app.submit_composer();
 
@@ -2973,7 +3191,7 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "/sandbox status ");
+        assert_eq!(app.active_draft(), "/mosaic sandbox status ");
     }
 
     #[test]
@@ -2997,9 +3215,29 @@ mod tests {
     }
 
     #[test]
+    fn slash_tab_can_complete_registered_skill_name_for_mosaic_command() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            vec![SkillOption {
+                name: "operator_note".to_owned(),
+            }],
+            false,
+        );
+        app.active_session_mut().draft = "/mosaic skill op".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "/mosaic skill operator_note ");
+    }
+
+    #[test]
     fn adapter_status_command_returns_inline_action() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/adapter status".to_owned();
+        app.active_session_mut().draft = "/mosaic adapter status".to_owned();
 
         let action = app.submit_composer();
 
@@ -3016,14 +3254,147 @@ mod tests {
     #[test]
     fn node_commands_return_expected_actions() {
         let mut list_app = App::new("/tmp/mosaic".into());
-        list_app.active_session_mut().draft = "/node list".to_owned();
+        list_app.active_session_mut().draft = "/mosaic node list".to_owned();
         assert_eq!(list_app.submit_composer(), AppAction::NodeList);
 
         let mut show_app = App::new("/tmp/mosaic".into());
-        show_app.active_session_mut().draft = "/node show headless-1".to_owned();
+        show_app.active_session_mut().draft = "/mosaic node show headless-1".to_owned();
         assert_eq!(
             show_app.submit_composer(),
             AppAction::NodeShow("headless-1".to_owned())
+        );
+    }
+
+    #[test]
+    fn typing_into_the_composer_updates_the_draft_immediately() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+
+        assert_eq!(app.active_draft(), "");
+        app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "hi");
+        assert_eq!(app.input_mode(), InputMode::Chat);
+    }
+
+    #[test]
+    fn sync_session_catalog_preserves_draft_for_missing_active_session_placeholder() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+
+        app.sync_session_catalog(Vec::new(), "demo");
+
+        assert_eq!(app.session_label(), "demo");
+        assert_eq!(app.active_draft(), "hi");
+    }
+
+    #[test]
+    fn enter_submits_a_typed_chat_message_from_the_composer() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        let action = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(
+            action,
+            AppAction::SubmitRun(ComposerRunRequest {
+                input: "ok".to_owned(),
+                tool: None,
+                skill: None,
+                workflow: None,
+            })
+        );
+        assert_eq!(app.active_draft(), "");
+    }
+
+    #[test]
+    fn entering_mosaic_runs_inline_help_instead_of_stalling_on_completion() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/mosaic".to_owned();
+
+        let action = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(action, AppAction::Continue);
+        assert_eq!(app.active_draft(), "");
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Mosaic command reference")
+        );
+    }
+
+    #[test]
+    fn short_alias_commands_execute_without_forcing_canonical_completion() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/session list".to_owned();
+
+        let action = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(action, AppAction::Continue);
+        assert_eq!(app.active_draft(), "");
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Sessions")
+        );
+    }
+
+    #[test]
+    fn mosaic_and_short_session_commands_route_to_the_same_inline_result() {
+        let mut mosaic = App::new("/tmp/mosaic".into());
+        mosaic.active_session_mut().draft = "/mosaic session show".to_owned();
+        mosaic.submit_composer();
+
+        let mut alias = App::new("/tmp/mosaic".into());
+        alias.active_session_mut().draft = "/session show".to_owned();
+        alias.submit_composer();
+
+        assert_eq!(
+            mosaic
+                .active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Session details")
+        );
+        assert_eq!(
+            alias
+                .active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Session details")
         );
     }
 

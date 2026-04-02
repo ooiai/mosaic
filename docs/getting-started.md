@@ -141,7 +141,8 @@ Inside the TUI:
 - press `Enter`
 - watch the transcript stream tool/provider/runtime events inline
 - type `/` to open the command popup
-- try `/session show` or `/inspect last` without leaving the conversation
+- try `/mosaic session show` or `/mosaic inspect last` without leaving the conversation
+- short aliases like `/session show` and `/inspect last` still work, but `/mosaic ...` is the canonical documented surface
 
 ## 6. Verify session state
 

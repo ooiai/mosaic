@@ -67,9 +67,9 @@ Operators should verify node-routed execution through:
 
 - CLI `mosaic node list`
 - CLI `mosaic node capabilities <id>`
-- TUI `/node list`
-- TUI `/node show <id>`
-- CLI `mosaic inspect --verbose` or TUI `/inspect last`
+- TUI `/mosaic node list`
+- TUI `/mosaic node show <id>`
+- CLI `mosaic inspect --verbose` or TUI `/mosaic inspect last`
 
 The expected taxonomy is:
 

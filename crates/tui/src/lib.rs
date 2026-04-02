@@ -8,11 +8,16 @@ pub mod ui;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{io, time::Duration};
+use std::{
+    fs::File,
+    io::{self, IsTerminal, Read},
+    sync::mpsc::{self, Receiver},
+    time::Duration,
+};
 
 use chrono::Utc;
 use crossterm::{
-    event::{self, Event, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -37,6 +42,15 @@ use self::app::{
     App, AppAction, ComposerRunRequest, ProfileOption, SessionRecord as UiSessionRecord,
     SessionState, SkillOption,
 };
+
+enum InputSource {
+    Crossterm,
+    Pipe(Receiver<InputEvent>),
+}
+
+enum InputEvent {
+    Key(KeyEvent),
+}
 
 #[derive(Clone)]
 pub enum InteractiveGateway {
@@ -164,6 +178,7 @@ fn run_app(
 ) -> io::Result<()> {
     let workspace_path = std::env::current_dir()?;
     let mut app = build_app(workspace_path, start_in_resume);
+    let input_source = build_input_source();
 
     loop {
         let saw_terminal_event = drain_run_events(&mut app, &event_buffer);
@@ -174,16 +189,13 @@ fn run_app(
             break;
         }
 
-        if event::poll(Duration::from_millis(200))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    if app.handle_key(key) == AppAction::Quit {
-                        break;
-                    }
+        match poll_input_event(&input_source, Duration::from_millis(200))? {
+            Some(InputEvent::Key(key)) => {
+                if app.handle_key(key) == AppAction::Quit {
+                    break;
                 }
-                Event::Resize(_, _) => {}
-                _ => {}
             }
+            None => {}
         }
 
         app.tick();
@@ -207,6 +219,10 @@ fn run_interactive_app(
         context.available_skills.clone(),
         start_in_resume,
     );
+    app.set_gateway_target(match &context.gateway {
+        InteractiveGateway::Local(_) => "local",
+        InteractiveGateway::Remote(_) => "remote",
+    });
     app.set_extension_state(
         context.extension_summary.clone(),
         context.extension_policy_summary.clone(),
@@ -214,6 +230,7 @@ fn run_interactive_app(
     );
     app.set_gateway_state(None, None);
     app.set_node_state(None, None);
+    let input_source = build_input_source();
     let gateway_link = Arc::new(AtomicBool::new(true));
     let current_session_id = Arc::new(Mutex::new(context.session_id.clone()));
     refresh_interactive_session_from_gateway(
@@ -250,90 +267,83 @@ fn run_interactive_app(
 
         terminal.draw(|frame| ui::render(frame, &app))?;
 
-        if event::poll(Duration::from_millis(200))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match app.handle_key(key) {
-                    AppAction::Quit => break,
-                    AppAction::Continue => {}
-                    AppAction::SubmitRun(request) => {
-                        if gateway_link.load(Ordering::Relaxed) {
-                            let session_id = current_session_id_value(&current_session_id);
-                            spawn_interactive_run(
-                                &context,
-                                session_id,
-                                app.active_profile().to_owned(),
-                                request,
-                            );
-                        } else {
-                            app.push_command_error("Gateway is disconnected for this TUI session");
-                        }
-                    }
-                    AppAction::GatewayConnect => {
-                        gateway_link.store(true, Ordering::Relaxed);
+        match poll_input_event(&input_source, Duration::from_millis(200))? {
+            Some(InputEvent::Key(key)) => match app.handle_key(key) {
+                AppAction::Quit => break,
+                AppAction::Continue => {}
+                AppAction::SubmitRun(request) => {
+                    if gateway_link.load(Ordering::Relaxed) {
                         let session_id = current_session_id_value(&current_session_id);
+                        spawn_interactive_run(
+                            &context,
+                            session_id,
+                            app.active_profile().to_owned(),
+                            request,
+                        );
+                    } else {
+                        app.push_command_error("Gateway is disconnected for this TUI session");
+                    }
+                }
+                AppAction::GatewayConnect => {
+                    gateway_link.store(true, Ordering::Relaxed);
+                    let session_id = current_session_id_value(&current_session_id);
+                    refresh_interactive_session_from_gateway(&mut app, &context, &session_id);
+                }
+                AppAction::GatewayDisconnect => {
+                    gateway_link.store(false, Ordering::Relaxed);
+                }
+                AppAction::AdapterStatus => {
+                    handle_tui_adapter_status(&mut app, &context);
+                }
+                AppAction::NodeList => {
+                    handle_tui_node_list(
+                        &mut app,
+                        &context,
+                        &current_session_id_value(&current_session_id),
+                    );
+                }
+                AppAction::NodeShow(node_id) => {
+                    handle_tui_node_show(
+                        &mut app,
+                        &context,
+                        &current_session_id_value(&current_session_id),
+                        &node_id,
+                    );
+                }
+                AppAction::SandboxStatus => {
+                    handle_tui_sandbox_status(&mut app, &context);
+                }
+                AppAction::SandboxInspect(env_id) => {
+                    handle_tui_sandbox_inspect(&mut app, &context, &env_id);
+                }
+                AppAction::SandboxRebuild(env_id) => {
+                    handle_tui_sandbox_rebuild(&mut app, &context, &env_id);
+                }
+                AppAction::SandboxClean => {
+                    handle_tui_sandbox_clean(&mut app, &context);
+                }
+                AppAction::SwitchSession(session_id) => {
+                    set_current_session_id(&current_session_id, &session_id);
+                    if gateway_link.load(Ordering::Relaxed) {
                         refresh_interactive_session_from_gateway(&mut app, &context, &session_id);
                     }
-                    AppAction::GatewayDisconnect => {
-                        gateway_link.store(false, Ordering::Relaxed);
-                    }
-                    AppAction::AdapterStatus => {
-                        handle_tui_adapter_status(&mut app, &context);
-                    }
-                    AppAction::NodeList => {
-                        handle_tui_node_list(
-                            &mut app,
-                            &context,
-                            &current_session_id_value(&current_session_id),
-                        );
-                    }
-                    AppAction::NodeShow(node_id) => {
-                        handle_tui_node_show(
-                            &mut app,
-                            &context,
-                            &current_session_id_value(&current_session_id),
-                            &node_id,
-                        );
-                    }
-                    AppAction::SandboxStatus => {
-                        handle_tui_sandbox_status(&mut app, &context);
-                    }
-                    AppAction::SandboxInspect(env_id) => {
-                        handle_tui_sandbox_inspect(&mut app, &context, &env_id);
-                    }
-                    AppAction::SandboxRebuild(env_id) => {
-                        handle_tui_sandbox_rebuild(&mut app, &context, &env_id);
-                    }
-                    AppAction::SandboxClean => {
-                        handle_tui_sandbox_clean(&mut app, &context);
-                    }
-                    AppAction::SwitchSession(session_id) => {
-                        set_current_session_id(&current_session_id, &session_id);
-                        if gateway_link.load(Ordering::Relaxed) {
-                            refresh_interactive_session_from_gateway(
-                                &mut app,
-                                &context,
-                                &session_id,
-                            );
-                        }
-                    }
-                    AppAction::CancelRun(run_id) => {
-                        handle_tui_cancel_run(&mut app, &context, &run_id);
-                    }
-                    AppAction::RetryRun(run_id) => {
-                        handle_tui_retry_run(
-                            &mut app,
-                            &context,
-                            &current_session_id_value(&current_session_id),
-                            &run_id,
-                        );
-                    }
-                    AppAction::InspectRun(run_id) => {
-                        handle_tui_inspect_run(&mut app, &context, &run_id);
-                    }
-                },
-                Event::Resize(_, _) => {}
-                _ => {}
-            }
+                }
+                AppAction::CancelRun(run_id) => {
+                    handle_tui_cancel_run(&mut app, &context, &run_id);
+                }
+                AppAction::RetryRun(run_id) => {
+                    handle_tui_retry_run(
+                        &mut app,
+                        &context,
+                        &current_session_id_value(&current_session_id),
+                        &run_id,
+                    );
+                }
+                AppAction::InspectRun(run_id) => {
+                    handle_tui_inspect_run(&mut app, &context, &run_id);
+                }
+            },
+            None => {}
         }
 
         app.tick();
@@ -342,6 +352,74 @@ fn run_interactive_app(
     event_forwarder.abort();
 
     Ok(())
+}
+
+fn build_input_source() -> InputSource {
+    if io::stdin().is_terminal() || File::open("/dev/tty").is_ok() {
+        InputSource::Crossterm
+    } else {
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut stdin = io::stdin().lock();
+            let mut buffer = [0u8; 1];
+            loop {
+                match stdin.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if let Some(event) = decode_input_byte(buffer[0]) {
+                            if sender.send(event).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        InputSource::Pipe(receiver)
+    }
+}
+
+fn poll_input_event(
+    input_source: &InputSource,
+    timeout: Duration,
+) -> io::Result<Option<InputEvent>> {
+    match input_source {
+        InputSource::Crossterm => {
+            if event::poll(timeout)? {
+                match event::read()? {
+                    Event::Key(key) => Ok(Some(InputEvent::Key(key))),
+                    Event::Paste(text) => Ok(text.chars().next().map(|character| {
+                        InputEvent::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                    })),
+                    Event::Resize(_, _) => Ok(None),
+                    _ => Ok(None),
+                }
+            } else {
+                Ok(None)
+            }
+        }
+        InputSource::Pipe(receiver) => match receiver.recv_timeout(timeout) {
+            Ok(event) => Ok(Some(event)),
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
+        },
+    }
+}
+
+fn decode_input_byte(byte: u8) -> Option<InputEvent> {
+    let key = match byte {
+        3 => KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        b'\r' | b'\n' => KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        9 => KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+        8 | 127 => KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        27 => KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        byte if byte.is_ascii_graphic() || byte == b' ' => {
+            KeyEvent::new(KeyCode::Char(byte as char), KeyModifiers::NONE)
+        }
+        _ => return None,
+    };
+    Some(InputEvent::Key(key))
 }
 
 fn current_session_id_value(session_id: &Arc<Mutex<String>>) -> String {
