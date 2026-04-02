@@ -63,6 +63,7 @@ cli/reports/
 .github/skills
 stages
 stages/**.md
+specs
 
 AGENT.md
 AGENTS.md
