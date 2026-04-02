@@ -2,12 +2,18 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
 use mosaic_control_protocol::{IngressTrace, RunDetailDto, RunSummaryDto};
-use mosaic_inspect::RunLifecycleStatus;
+use mosaic_inspect::{RunLifecycleStatus, RunTrace};
 use mosaic_runtime::{AgentRuntime, RunRequest};
 use tokio::sync::watch;
 use uuid::Uuid;
 
 use super::*;
+
+fn trace_for_record(record: &StoredRunRecord) -> Option<RunTrace> {
+    let path = record.trace_path.as_deref()?;
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
+}
 
 impl GatewayHandle {
     pub fn submit_command(&self, command: GatewayCommand) -> Result<GatewaySubmittedRun> {
@@ -27,11 +33,10 @@ impl GatewayHandle {
     }
 
     pub fn load_run(&self, identifier: &str) -> Result<Option<RunDetailDto>> {
-        Ok(self
-            .inner
-            .run_store
-            .resolve(identifier)?
-            .map(|record| record.detail_dto()))
+        Ok(self.inner.run_store.resolve(identifier)?.map(|record| {
+            let trace = trace_for_record(&record);
+            record.detail_dto(trace.as_ref())
+        }))
     }
 
     pub fn cancel_run(&self, identifier: &str) -> Result<RunDetailDto> {
@@ -80,7 +85,8 @@ impl GatewayHandle {
             false,
         );
         self.emit(run_record_envelope(&record));
-        Ok(record.detail_dto())
+        let trace = trace_for_record(&record);
+        Ok(record.detail_dto(trace.as_ref()))
     }
 
     pub fn retry_run(&self, identifier: &str) -> Result<GatewaySubmittedRun> {

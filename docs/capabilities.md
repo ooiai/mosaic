@@ -147,6 +147,15 @@ Examples:
 - `capability_source_kind=native_skill`, `manifest_skill`, or `markdown_skill_pack`
 - usually `execution_target=local`
 
+Markdown skill packs may internally use:
+
+- template rendering
+- reference loading
+- helper scripts
+- sandbox-backed execution envs
+
+Those are still part of the `skill` route, not a separate capability kind.
+
 ### Workflow
 
 - `route_kind=workflow`
@@ -158,10 +167,18 @@ Examples:
 The taxonomy is surfaced in:
 
 - `mosaic inspect --verbose`
+- `mosaic gateway status` and `mosaic gateway incident <run-id>` summaries
+- TUI transcript blocks and `/inspect last`
 - gateway run detail and incident bundles
 - runtime capability traces
 - tool traces and skill traces
 - workflow step traces
+
+For a local operator, the fastest proof loop is usually:
+
+1. run the capability from CLI, TUI, or Telegram
+2. use TUI `/inspect last` or CLI `mosaic inspect --verbose`
+3. read `route_kind`, `capability_source_kind`, `execution_target`, `orchestration_owner`, and `failure_origin`
 
 When debugging a run, the minimum interpretation path is:
 

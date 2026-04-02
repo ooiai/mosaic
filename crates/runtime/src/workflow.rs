@@ -137,11 +137,9 @@ impl WorkflowObserver for RuntimeWorkflowObserver<'_> {
             workflow: workflow.name.clone(),
             step: step.name.clone(),
             kind: step.kind.label().to_owned(),
+            summary: Some(AgentRuntime::workflow_step_summary(step)),
         });
-        let execution_target = match step.kind {
-            WorkflowStepKind::Prompt { .. } => Some(ExecutionTarget::Provider),
-            WorkflowStepKind::Skill { .. } => Some(ExecutionTarget::Local),
-        };
+        let execution_target = Some(AgentRuntime::workflow_step_execution_target(step));
         self.trace.step_traces.push(WorkflowStepTrace {
             name: step.name.clone(),
             kind: step.kind.label().to_owned(),
@@ -162,10 +160,7 @@ impl WorkflowObserver for RuntimeWorkflowObserver<'_> {
         _input: &str,
         output: &str,
     ) {
-        self.runtime.emit(RunEvent::WorkflowStepFinished {
-            workflow: workflow.name.clone(),
-            step: step.name.clone(),
-        });
+        let mut summary = None;
 
         if let Some(trace) = self
             .trace
@@ -176,7 +171,14 @@ impl WorkflowObserver for RuntimeWorkflowObserver<'_> {
         {
             trace.output = Some(output.to_owned());
             trace.finished_at = Some(Utc::now());
+            summary = Some(AgentRuntime::workflow_step_finish_summary(trace));
         }
+
+        self.runtime.emit(RunEvent::WorkflowStepFinished {
+            workflow: workflow.name.clone(),
+            step: step.name.clone(),
+            summary,
+        });
     }
 
     fn step_failed(
@@ -186,11 +188,7 @@ impl WorkflowObserver for RuntimeWorkflowObserver<'_> {
         _input: &str,
         error: &anyhow::Error,
     ) {
-        self.runtime.emit(RunEvent::WorkflowStepFailed {
-            workflow: workflow.name.clone(),
-            step: step.name.clone(),
-            error: error.to_string(),
-        });
+        let mut summary = None;
 
         if let Some(trace) = self
             .trace
@@ -201,7 +199,15 @@ impl WorkflowObserver for RuntimeWorkflowObserver<'_> {
         {
             trace.error = Some(error.to_string());
             trace.finished_at = Some(Utc::now());
+            summary = Some(AgentRuntime::workflow_step_finish_summary(trace));
         }
+
+        self.runtime.emit(RunEvent::WorkflowStepFailed {
+            workflow: workflow.name.clone(),
+            step: step.name.clone(),
+            error: error.to_string(),
+            summary,
+        });
     }
 
     fn workflow_finished(&mut self, workflow: &Workflow, _output: &str) {

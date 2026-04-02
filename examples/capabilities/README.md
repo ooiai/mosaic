@@ -32,3 +32,14 @@ Inspect a real run to see these distinctions:
 ```bash
 mosaic inspect .mosaic/runs/<run-id>.json --verbose
 ```
+
+For the local operator lane, you can also verify the same distinctions from the chat-first TUI:
+
+```text
+/adapter status
+/node list
+/tool read_file README.md
+/inspect last
+```
+
+The inline inspect card should show the capability proof summary for builtin tools, MCP tools, node-routed tools, skills, and workflows.

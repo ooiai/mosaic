@@ -18,3 +18,4 @@ tokio.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
+mosaic-inspect = { path = "../inspect" }

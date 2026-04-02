@@ -4,8 +4,9 @@ This guide is the beginner path for connecting Mosaic to a real Telegram bot.
 
 Maintenance rule:
 
-- Telegram is the current strongest real interactive GUI lane while TUI remains incomplete
-- if a change affects the real Telegram operator path, update this guide, [telegram-real-e2e.md](./telegram-real-e2e.md), and the matching Telegram examples in the same change set
+- Telegram is the strongest real external interactive GUI lane and release-facing channel proof
+- TUI is the primary local chat-first operator surface
+- if a change affects the real Telegram operator path or the TUI/Telegram proof split, update this guide, [telegram-real-e2e.md](./telegram-real-e2e.md), [tui.md](./tui.md), and the matching Telegram examples in the same change set
 
 Important baseline:
 
@@ -158,6 +159,12 @@ If your Telegram lane uses markdown skill packs, helper scripts, or specialized 
 
 - [skills.md](./skills.md)
 - [sandbox.md](./sandbox.md)
+
+Local operators can inspect the same sandbox lifecycle from the chat-first TUI with:
+
+- `/sandbox status`
+- `/sandbox inspect <env>`
+- `/sandbox rebuild <env>`
 
 If this step is red, do not continue to webhook registration yet.
 

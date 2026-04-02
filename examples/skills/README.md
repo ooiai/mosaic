@@ -19,7 +19,18 @@ Use them together with [docs/skills.md](../../docs/skills.md).
 ## Markdown Skill Pack
 
 - [operator-note/SKILL.md](./operator-note/SKILL.md): directory-based markdown skill pack
+- [operator-note/templates/note.md](./operator-note/templates/note.md): pack template used during render
+- [operator-note/references/escalation.md](./operator-note/references/escalation.md): pack reference material
+- [operator-note/scripts/annotate.py](./operator-note/scripts/annotate.py): helper script executed inside the selected sandbox env
 - [../extensions/markdown-skill-pack.yaml](../extensions/markdown-skill-pack.yaml): extension manifest that registers the markdown skill pack
+
+The `operator-note` example now demonstrates the full markdown-pack execution path:
+
+- `SKILL.md` frontmatter
+- `templates/`
+- `references/`
+- `scripts/`
+- workspace-local sandbox execution
 
 ## Validation
 
@@ -34,4 +45,11 @@ Then verify provenance:
 
 ```bash
 mosaic inspect .mosaic/runs/<run-id>.json --verbose
+```
+
+For local chat-first validation, start the TUI and use slash completion:
+
+```bash
+mosaic tui
+# then type: /skill op<Tab>
 ```

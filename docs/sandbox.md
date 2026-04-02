@@ -43,6 +43,7 @@ Typical concerns:
 - run workdirs
 - cached dependencies
 - rebuild, clean, and inspect lifecycle
+- helper-script execution for markdown skill packs
 
 This is what prevents skill or tool dependencies from polluting the host machine or other workspaces.
 
@@ -83,6 +84,7 @@ The goal is:
 - dependencies stay workspace-local
 - skill and tool envs do not write into global Python or Node package locations by default
 - multiple workspaces do not share execution env state unless explicitly designed to
+- markdown skill pack helpers run inside the selected sandbox env instead of the host Python/Node installation
 
 ## Config Model
 
@@ -93,8 +95,22 @@ sandbox:
   base_dir: .mosaic/sandbox
   python:
     strategy: venv
+    install:
+      enabled: true
+      timeout_ms: 120000
+      retry_limit: 0
+      allowed_sources:
+        - registry
+        - file
   node:
     strategy: npm
+    install:
+      enabled: true
+      timeout_ms: 120000
+      retry_limit: 0
+      allowed_sources:
+        - registry
+        - file
   cleanup:
     run_workdirs_after_hours: 24
     attachments_after_hours: 24
@@ -118,8 +134,21 @@ skills:
 Key ideas:
 
 - workspace config defines the default sandbox layout and strategies
+- install policy controls whether dependency installs are allowed, how long they may run, how many retries are attempted, and whether `registry` and/or `file` sources are accepted
 - capability bindings define which env identity a tool or skill should use
 - runtime allocates a run workdir even when a capability env is reused
+
+## Lifecycle States
+
+Sandbox env records now expose explicit lifecycle states:
+
+- `preparing`
+- `ready`
+- `drifted`
+- `failed`
+- `rebuild_required`
+
+Operators should be able to tell whether an env was newly prepared, safely reused, drifted on disk, blocked by install policy, or failed during create/install/health-check.
 
 ## CLI Commands
 
@@ -162,7 +191,8 @@ In taxonomy terms:
 
 ## Sandbox in Telegram Lanes
 
-Telegram is currently the strongest real interactive GUI acceptance lane while TUI remains incomplete.
+Telegram is currently the strongest real external interactive GUI acceptance lane.
+TUI is the primary local chat-first operator surface for sandbox status and inline failure diagnosis.
 
 When a Telegram-exposed skill, tool, or attachment processor depends on sandbox readiness:
 
@@ -170,11 +200,24 @@ When a Telegram-exposed skill, tool, or attachment processor depends on sandbox 
 - update [telegram-real-e2e.md](./telegram-real-e2e.md)
 - update the matching Telegram examples
 
+When the local operator sandbox flow changes, also update:
+
+- [tui.md](./tui.md)
+- [testing.md](./testing.md)
+- [release.md](./release.md)
+
 The Telegram operator path should explicitly call out:
 
 - `mosaic sandbox status`
 - `mosaic sandbox list`
 - any required env identity or rebuild step
+
+The local TUI path should expose the same lifecycle with:
+
+- `/sandbox status`
+- `/sandbox inspect <env>`
+- `/sandbox rebuild <env>`
+- `/sandbox clean`
 
 ## Diagnosing Failures
 
@@ -200,10 +243,9 @@ Look for:
 
 ## Limitations Today
 
-- Python env preparation is deeper than Node env preparation today
 - env creation is workspace-local, not cluster or distributed
-- network and package-install policy is still intentionally conservative
-- richer environment reuse and garbage-collection policy can still deepen
+- install policy is explicit but still intentionally conservative
+- richer long-term drift detection, lockfile ownership, and distributed env reuse can still deepen
 
 ## Quick Start
 

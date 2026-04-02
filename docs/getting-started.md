@@ -139,8 +139,9 @@ Inside the TUI:
 
 - type a message in the composer
 - press `Enter`
-- watch the timeline update
-- press `F1` for shortcuts and slash commands
+- watch the transcript stream tool/provider/runtime events inline
+- type `/` to open the command popup
+- try `/session show` or `/inspect last` without leaving the conversation
 
 ## 6. Verify session state
 

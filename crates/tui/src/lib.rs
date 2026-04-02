@@ -33,7 +33,10 @@ use mosaic_session_core::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::runtime::Handle;
 
-use self::app::{App, AppAction, ProfileOption, SessionRecord as UiSessionRecord, SessionState};
+use self::app::{
+    App, AppAction, ComposerRunRequest, ProfileOption, SessionRecord as UiSessionRecord,
+    SessionState, SkillOption,
+};
 
 #[derive(Clone)]
 pub enum InteractiveGateway {
@@ -88,6 +91,7 @@ pub struct InteractiveSessionContext {
     pub active_profile: String,
     pub active_model: String,
     pub available_profiles: Vec<ProfileOption>,
+    pub available_skills: Vec<SkillOption>,
     pub extension_summary: String,
     pub extension_policy_summary: String,
     pub extension_errors: Vec<String>,
@@ -200,6 +204,7 @@ fn run_interactive_app(
         context.active_profile.clone(),
         context.active_model.clone(),
         context.available_profiles.clone(),
+        context.available_skills.clone(),
         start_in_resume,
     );
     app.set_extension_state(
@@ -250,14 +255,14 @@ fn run_interactive_app(
                 Event::Key(key) if key.kind == KeyEventKind::Press => match app.handle_key(key) {
                     AppAction::Quit => break,
                     AppAction::Continue => {}
-                    AppAction::Submit(input) => {
+                    AppAction::SubmitRun(request) => {
                         if gateway_link.load(Ordering::Relaxed) {
                             let session_id = current_session_id_value(&current_session_id);
                             spawn_interactive_run(
                                 &context,
                                 session_id,
                                 app.active_profile().to_owned(),
-                                input,
+                                request,
                             );
                         } else {
                             app.push_command_error("Gateway is disconnected for this TUI session");
@@ -271,6 +276,36 @@ fn run_interactive_app(
                     AppAction::GatewayDisconnect => {
                         gateway_link.store(false, Ordering::Relaxed);
                     }
+                    AppAction::AdapterStatus => {
+                        handle_tui_adapter_status(&mut app, &context);
+                    }
+                    AppAction::NodeList => {
+                        handle_tui_node_list(
+                            &mut app,
+                            &context,
+                            &current_session_id_value(&current_session_id),
+                        );
+                    }
+                    AppAction::NodeShow(node_id) => {
+                        handle_tui_node_show(
+                            &mut app,
+                            &context,
+                            &current_session_id_value(&current_session_id),
+                            &node_id,
+                        );
+                    }
+                    AppAction::SandboxStatus => {
+                        handle_tui_sandbox_status(&mut app, &context);
+                    }
+                    AppAction::SandboxInspect(env_id) => {
+                        handle_tui_sandbox_inspect(&mut app, &context, &env_id);
+                    }
+                    AppAction::SandboxRebuild(env_id) => {
+                        handle_tui_sandbox_rebuild(&mut app, &context, &env_id);
+                    }
+                    AppAction::SandboxClean => {
+                        handle_tui_sandbox_clean(&mut app, &context);
+                    }
                     AppAction::SwitchSession(session_id) => {
                         set_current_session_id(&current_session_id, &session_id);
                         if gateway_link.load(Ordering::Relaxed) {
@@ -280,6 +315,20 @@ fn run_interactive_app(
                                 &session_id,
                             );
                         }
+                    }
+                    AppAction::CancelRun(run_id) => {
+                        handle_tui_cancel_run(&mut app, &context, &run_id);
+                    }
+                    AppAction::RetryRun(run_id) => {
+                        handle_tui_retry_run(
+                            &mut app,
+                            &context,
+                            &current_session_id_value(&current_session_id),
+                            &run_id,
+                        );
+                    }
+                    AppAction::InspectRun(run_id) => {
+                        handle_tui_inspect_run(&mut app, &context, &run_id);
                     }
                 },
                 Event::Resize(_, _) => {}
@@ -313,18 +362,22 @@ fn spawn_interactive_run(
     context: &InteractiveSessionContext,
     session_id: String,
     profile: String,
-    input: String,
+    request: ComposerRunRequest,
 ) {
     let event_buffer = context.event_buffer.clone();
+    let input = request.input.clone();
+    let tool = request.tool.clone();
+    let skill = request.skill.clone();
+    let workflow = request.workflow.clone();
 
     match context.gateway.clone() {
         InteractiveGateway::Local(gateway) => {
             let request = GatewayRunRequest {
                 system: context.system.clone(),
                 input,
-                tool: None,
-                skill: None,
-                workflow: None,
+                tool,
+                skill,
+                workflow,
                 session_id: Some(session_id.clone()),
                 profile: Some(profile.clone()),
                 ingress: Some(IngressTrace {
@@ -385,9 +438,9 @@ fn spawn_interactive_run(
             let request = GatewayRunRequest {
                 system: context.system.clone(),
                 input,
-                tool: None,
-                skill: None,
-                workflow: None,
+                tool,
+                skill,
+                workflow,
                 session_id: Some(session_id.clone()),
                 profile: Some(profile.clone()),
                 ingress: Some(IngressTrace {
@@ -431,6 +484,421 @@ fn spawn_interactive_run(
                 }
             });
         }
+    }
+}
+
+fn handle_tui_cancel_run(app: &mut App, context: &InteractiveSessionContext, run_id: &str) {
+    let result = match &context.gateway {
+        InteractiveGateway::Local(gateway) => gateway.cancel_run(run_id),
+        InteractiveGateway::Remote(client) => {
+            context.runtime_handle.block_on(client.cancel_run(run_id))
+        }
+    };
+
+    match result {
+        Ok(detail) => {
+            app.push_system_entry(
+                "Run cancel accepted",
+                format!(
+                    "run={}\nstatus={:?}\nerror={}",
+                    detail.summary.gateway_run_id,
+                    detail.summary.status,
+                    detail.summary.error.as_deref().unwrap_or("<none>")
+                ),
+            );
+        }
+        Err(err) => app.push_command_error(format!("Failed to cancel run {run_id}: {err}")),
+    }
+}
+
+fn handle_tui_retry_run(
+    app: &mut App,
+    context: &InteractiveSessionContext,
+    session_id: &str,
+    run_id: &str,
+) {
+    let result = match &context.gateway {
+        InteractiveGateway::Local(gateway) => gateway
+            .retry_run(run_id)
+            .map(|submitted| submitted.gateway_run_id().to_owned()),
+        InteractiveGateway::Remote(client) => context
+            .runtime_handle
+            .block_on(client.retry_run(run_id))
+            .map(|response| response.gateway_run_id),
+    };
+
+    match result {
+        Ok(new_run_id) => {
+            app.push_system_entry(
+                "Run retry accepted",
+                format!(
+                    "previous_run={}\nnew_run={}\nsession={}",
+                    run_id, new_run_id, session_id
+                ),
+            );
+        }
+        Err(err) => app.push_command_error(format!("Failed to retry run {run_id}: {err}")),
+    }
+}
+
+fn handle_tui_inspect_run(app: &mut App, context: &InteractiveSessionContext, run_id: &str) {
+    let result = match &context.gateway {
+        InteractiveGateway::Local(gateway) => gateway.load_run(run_id),
+        InteractiveGateway::Remote(client) => {
+            context.runtime_handle.block_on(client.get_run(run_id))
+        }
+    };
+
+    match result {
+        Ok(Some(detail)) => app.show_run_detail(&detail),
+        Ok(None) => app.push_command_error(format!("Run {run_id} was not found.")),
+        Err(err) => app.push_command_error(format!("Failed to inspect run {run_id}: {err}")),
+    }
+}
+
+fn handle_tui_adapter_status(app: &mut App, context: &InteractiveSessionContext) {
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => {
+            let adapters = gateway.list_adapter_statuses();
+            if adapters.is_empty() {
+                app.push_system_entry("Adapter status", "No adapters are registered.");
+                return;
+            }
+
+            let body = adapters
+                .iter()
+                .map(|adapter| {
+                    let mut line = format!(
+                        "{} | channel={} | transport={} | status={} | outbound_ready={} | path={}",
+                        adapter.name,
+                        adapter.channel,
+                        adapter.transport,
+                        adapter.status,
+                        adapter.outbound_ready,
+                        adapter.ingress_path,
+                    );
+                    if let Some(bot_name) = adapter.bot_name.as_deref() {
+                        line.push_str(&format!(
+                            " | bot={} route={} profile={}",
+                            bot_name,
+                            adapter.bot_route.as_deref().unwrap_or("<none>"),
+                            adapter.bot_profile.as_deref().unwrap_or("<none>"),
+                        ));
+                    }
+                    if !adapter.capabilities.is_empty() {
+                        line.push_str(&format!(
+                            " | capabilities={}",
+                            adapter.capabilities.join(", ")
+                        ));
+                    }
+                    line.push_str(&format!(" | detail={}", adapter.detail));
+                    line
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            app.push_system_entry("Adapter status", body);
+        }
+        InteractiveGateway::Remote(client) => {
+            match context.runtime_handle.block_on(client.list_adapters()) {
+                Ok(adapters) if adapters.is_empty() => {
+                    app.push_system_entry("Adapter status", "No adapters are registered.");
+                }
+                Ok(adapters) => {
+                    let body = adapters
+                        .iter()
+                        .map(|adapter| {
+                            format!(
+                                "{} | channel={} | transport={} | status={} | outbound_ready={} | path={} | detail={}",
+                                adapter.name,
+                                adapter.channel,
+                                adapter.transport,
+                                adapter.status,
+                                adapter.outbound_ready,
+                                adapter.ingress_path,
+                                adapter.detail
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    app.push_system_entry("Adapter status", body);
+                }
+                Err(error) => {
+                    app.push_command_error(format!("Adapter status failed: {error}"));
+                }
+            }
+        }
+    }
+}
+
+fn handle_tui_node_list(app: &mut App, context: &InteractiveSessionContext, session_id: &str) {
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => match (
+            gateway.list_nodes(),
+            gateway.list_node_affinities(),
+            gateway.node_binding(Some(session_id)),
+        ) {
+            (Ok(nodes), Ok(affinities), Ok(binding)) => {
+                if nodes.is_empty() {
+                    app.push_system_entry("Node list", "No nodes are registered.");
+                    return;
+                }
+                let body = nodes
+                    .iter()
+                    .map(|node| {
+                        let health = node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS).label();
+                        let affinity_scopes = affinities
+                            .iter()
+                            .filter(|record| record.node_id == node.node_id)
+                            .map(|record| record.session_id.as_str())
+                            .collect::<Vec<_>>();
+                        let binding_marker = binding
+                            .as_ref()
+                            .filter(|record| record.node_id == node.node_id)
+                            .map(|record| format!(" current_binding={}", record.affinity_scope))
+                            .unwrap_or_default();
+                        format!(
+                            "{} | health={} | transport={} | platform={} | capabilities={} | affinity_scopes={}{} | disconnect_reason={}",
+                            node.node_id,
+                            health,
+                            node.transport,
+                            node.platform,
+                            if node.capabilities.is_empty() {
+                                "<none>".to_owned()
+                            } else {
+                                node.capabilities
+                                    .iter()
+                                    .map(|capability| capability.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            },
+                            if affinity_scopes.is_empty() {
+                                "<none>".to_owned()
+                            } else {
+                                affinity_scopes.join(", ")
+                            },
+                            binding_marker,
+                            node.last_disconnect_reason
+                                .as_deref()
+                                .unwrap_or("<none>")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                app.push_system_entry("Node list", body);
+            }
+            (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => {
+                app.push_command_error(format!("Node list failed: {error}"));
+            }
+        },
+        InteractiveGateway::Remote(_) => app.push_command_error(
+            "Remote node list is not available from the TUI yet; use `mosaic node list` locally against the workspace.",
+        ),
+    }
+}
+
+fn handle_tui_node_show(
+    app: &mut App,
+    context: &InteractiveSessionContext,
+    session_id: &str,
+    node_id: &str,
+) {
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => match (
+            gateway.list_nodes(),
+            gateway.node_binding(Some(session_id)),
+            gateway.node_capabilities(node_id),
+        ) {
+            (Ok(nodes), Ok(binding), Ok(capabilities)) => {
+                let Some(node) = nodes.iter().find(|node| node.node_id == node_id) else {
+                    app.push_command_error(format!("Node {node_id} was not found."));
+                    return;
+                };
+                let health = node.health(Utc::now(), DEFAULT_STALE_AFTER_SECS).label();
+                let bound = binding
+                    .as_ref()
+                    .filter(|record| record.node_id == node_id)
+                    .map(|record| record.affinity_scope.clone())
+                    .unwrap_or_else(|| "<none>".to_owned());
+                let capabilities = if capabilities.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    capabilities
+                        .iter()
+                        .map(|capability| {
+                            format!(
+                                "{} kind={} risk={} scopes={}",
+                                capability.name,
+                                capability.kind.label(),
+                                capability.risk.label(),
+                                if capability.permission_scopes.is_empty() {
+                                    "<none>".to_owned()
+                                } else {
+                                    capability
+                                        .permission_scopes
+                                        .iter()
+                                        .map(|scope| scope.label().to_owned())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+                app.push_system_entry(
+                    "Node inspect",
+                    format!(
+                        "node_id={}\nlabel={}\nhealth={}\ntransport={}\nplatform={}\nregistered_at={}\nlast_heartbeat_at={}\nbound_scope={}\nlast_disconnect_reason={}\ncapabilities=\n{}",
+                        node.node_id,
+                        node.label,
+                        health,
+                        node.transport,
+                        node.platform,
+                        node.registered_at,
+                        node.last_heartbeat_at,
+                        bound,
+                        node.last_disconnect_reason.as_deref().unwrap_or("<none>"),
+                        capabilities
+                    ),
+                );
+            }
+            (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => {
+                app.push_command_error(format!("Node inspect failed: {error}"));
+            }
+        },
+        InteractiveGateway::Remote(_) => app.push_command_error(
+            "Remote node inspect is not available from the TUI yet; use `mosaic node capabilities` or `mosaic node list` locally against the workspace.",
+        ),
+    }
+}
+
+fn handle_tui_sandbox_status(app: &mut App, context: &InteractiveSessionContext) {
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => match gateway.sandbox_status() {
+            Ok(status) => {
+                let runtime_lines = status
+                    .runtime_statuses
+                    .iter()
+                    .map(|runtime| {
+                        format!(
+                            "{} | strategy={} | available={} | detail={}",
+                            runtime.kind.label(),
+                            runtime.strategy,
+                            runtime.available,
+                            runtime.detail.clone().unwrap_or_else(|| "<none>".to_owned())
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                app.push_system_entry(
+                    "Sandbox status",
+                    format!(
+                        "base_dir={}\npython={} install_enabled={}\nnode={} install_enabled={}\nenv_count={}\ncleanup(run_workdirs_after_hours={}, attachments_after_hours={})\nruntimes:\n{}",
+                        status.base_dir,
+                        status.python_strategy,
+                        status.python_install_enabled,
+                        status.node_strategy,
+                        status.node_install_enabled,
+                        status.env_count,
+                        status.run_workdirs_after_hours,
+                        status.attachments_after_hours,
+                        runtime_lines,
+                    ),
+                );
+            }
+            Err(error) => app.push_command_error(format!("Sandbox status failed: {error}")),
+        },
+        InteractiveGateway::Remote(_) => app.push_command_error(
+            "Remote sandbox status is not available from the TUI yet; use local CLI sandbox commands against the workspace.",
+        ),
+    }
+}
+
+fn handle_tui_sandbox_inspect(app: &mut App, context: &InteractiveSessionContext, env_id: &str) {
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => match gateway.sandbox_inspect_env(env_id) {
+            Ok(record) => {
+                let dependencies = if record.dependency_spec.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    record.dependency_spec.join(", ")
+                };
+                let allowed_sources = if record.allowed_sources.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    record
+                        .allowed_sources
+                        .iter()
+                        .map(|source| source.label().to_owned())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                app.push_system_entry(
+                    "Sandbox env",
+                    format!(
+                        "env_id={}\nkind={} scope={}\nstrategy={} status={} transition={}\nenv_dir={}\nruntime_dir={}\ndeps={}\ninstall(enabled={} timeout_ms={} retry_limit={} allowed_sources={})\nfailure_stage={}\nerror={}",
+                        record.env_id,
+                        record.kind.label(),
+                        record.scope.label(),
+                        record.strategy,
+                        record.status.label(),
+                        record.last_transition,
+                        record.env_dir.display(),
+                        record.runtime_dir.as_ref().map(|path| path.display().to_string()).unwrap_or_else(|| "<none>".to_owned()),
+                        dependencies,
+                        record.install_enabled,
+                        record.install_timeout_ms,
+                        record.install_retry_limit,
+                        allowed_sources,
+                        record.failure_stage.unwrap_or_else(|| "<none>".to_owned()),
+                        record.error.unwrap_or_else(|| "<none>".to_owned()),
+                    ),
+                );
+            }
+            Err(error) => app.push_command_error(format!("Sandbox inspect failed: {error}")),
+        },
+        InteractiveGateway::Remote(_) => app.push_command_error(
+            "Remote sandbox inspect is not available from the TUI yet; use local CLI sandbox commands against the workspace.",
+        ),
+    }
+}
+
+fn handle_tui_sandbox_rebuild(app: &mut App, context: &InteractiveSessionContext, env_id: &str) {
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => match gateway.sandbox_rebuild_env(env_id) {
+            Ok(record) => app.push_system_entry(
+                "Sandbox env rebuilt",
+                format!(
+                    "env_id={}\nstatus={}\ntransition={}\nenv_dir={}",
+                    record.env_id,
+                    record.status.label(),
+                    record.last_transition,
+                    record.env_dir.display()
+                ),
+            ),
+            Err(error) => app.push_command_error(format!("Sandbox rebuild failed: {error}")),
+        },
+        InteractiveGateway::Remote(_) => app.push_command_error(
+            "Remote sandbox rebuild is not available from the TUI yet; use local CLI sandbox commands against the workspace.",
+        ),
+    }
+}
+
+fn handle_tui_sandbox_clean(app: &mut App, context: &InteractiveSessionContext) {
+    match &context.gateway {
+        InteractiveGateway::Local(gateway) => match gateway.sandbox_clean() {
+            Ok(report) => app.push_system_entry(
+                "Sandbox clean",
+                format!(
+                    "removed_run_workdirs={}\nremoved_attachment_workdirs={}",
+                    report.removed_run_workdirs, report.removed_attachment_workdirs
+                ),
+            ),
+            Err(error) => app.push_command_error(format!("Sandbox clean failed: {error}")),
+        },
+        InteractiveGateway::Remote(_) => app.push_command_error(
+            "Remote sandbox clean is not available from the TUI yet; use local CLI sandbox commands against the workspace.",
+        ),
     }
 }
 
@@ -695,6 +1163,10 @@ fn local_session_summary_to_ui(summary: &SessionSummary) -> UiSessionRecord {
         state: session_state_from_run_label(summary.run.status.label()),
         unread: 0,
         draft: String::new(),
+        transcript_len: 0,
+        current_run_id: summary.run.current_run_id.clone(),
+        current_gateway_run_id: summary.run.current_gateway_run_id.clone(),
+        last_gateway_run_id: summary.last_gateway_run_id.clone(),
         memory_summary: summary.memory_summary_preview.clone(),
         compressed_context: None,
         references: if summary.reference_count == 0 {
@@ -702,6 +1174,8 @@ fn local_session_summary_to_ui(summary: &SessionSummary) -> UiSessionRecord {
         } else {
             vec![format!("{} session references", summary.reference_count)]
         },
+        streaming_preview: None,
+        streaming_run_id: None,
         timeline: Vec::new(),
     }
 }
@@ -734,6 +1208,10 @@ fn remote_session_summary_to_ui(summary: &SessionSummaryDto) -> UiSessionRecord 
         state: session_state_from_run_label(summary.run.status.label()),
         unread: 0,
         draft: String::new(),
+        transcript_len: 0,
+        current_run_id: summary.run.current_run_id.clone(),
+        current_gateway_run_id: summary.run.current_gateway_run_id.clone(),
+        last_gateway_run_id: summary.last_gateway_run_id.clone(),
         memory_summary: summary.memory_summary_preview.clone(),
         compressed_context: None,
         references: if summary.reference_count == 0 {
@@ -741,6 +1219,8 @@ fn remote_session_summary_to_ui(summary: &SessionSummaryDto) -> UiSessionRecord 
         } else {
             vec![format!("{} session references", summary.reference_count)]
         },
+        streaming_preview: None,
+        streaming_run_id: None,
         timeline: Vec::new(),
     }
 }
@@ -886,10 +1366,17 @@ mod tests {
     }
 
     #[test]
-    fn build_app_uses_explicit_resume_flag() {
+    fn build_app_keeps_chat_first_surface_even_with_resume_flag() {
         let app = build_app("/tmp/mosaic".into(), true);
 
-        assert!(matches!(app.surface, Surface::Resume));
+        assert!(matches!(app.surface, Surface::Console));
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Chat-first TUI")
+        );
     }
 
     #[test]
@@ -931,7 +1418,7 @@ mod tests {
     }
 
     #[test]
-    fn refresh_interactive_session_rebuilds_timeline_from_transcript() {
+    fn refresh_interactive_session_appends_transcript_into_chat_timeline() {
         let store = MemorySessionStore {
             session: Some({
                 let mut session = SessionRecord::new("demo", "Demo", "mock", "mock", "mock");
@@ -945,6 +1432,7 @@ mod tests {
             "demo".to_owned(),
             "mock".to_owned(),
             "mock".to_owned(),
+            Vec::new(),
             Vec::new(),
             false,
         );
@@ -1064,6 +1552,7 @@ mod tests {
             "remote-demo".to_owned(),
             "mock".to_owned(),
             "mock".to_owned(),
+            Vec::new(),
             Vec::new(),
             true,
         );

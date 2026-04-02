@@ -226,8 +226,9 @@ For the Telegram-first real acceptance lane, start with:
 
 Current operator reality:
 
-- Telegram is the strongest real interactive GUI acceptance surface today
-- TUI is still improving and does not yet replace the Telegram release lane
+- `mosaic tui` is the primary local chat-first operator surface today
+- Telegram is the strongest real external interactive GUI acceptance surface and still carries the release-facing channel lane
+- if a change affects TUI slash commands, transcript behavior, inline capability visibility, or local operator diagnostics, update `docs/tui.md`, `docs/getting-started.md`, `docs/testing.md`, and `docs/release.md` in the same change set
 - if a change affects Telegram commands, capability discovery, skills, attachments, sandbox readiness, or multi-bot behavior, update the Telegram guides and matching examples in the same change set
 
 For release evidence, use:
@@ -301,50 +302,55 @@ The shared operator vocabulary lives in:
 
 ## Current Operator Surface
 
-The repository currently includes the first terminal control-plane slice.
+The repository currently includes a chat-first terminal control-plane slice.
 
-Until TUI reaches the same product completeness as the Telegram lane, Telegram remains the primary real interactive acceptance surface for GUI-style operator validation.
+Until TUI reaches the same product completeness and release proof as the Telegram lane, Telegram remains the primary real interactive acceptance surface for GUI-style operator validation.
 
 <details open>
 <summary><strong>TUI capabilities</strong></summary>
 
-- left session list
-- center task and conversation timeline
-- top status bar with workspace, session, model, runtime, and gateway state
-- bottom composer for operator instructions
-- right observability panel for logs and activity
-- keyboard-first navigation
-- local mock control commands for stage-2 interaction flows
+- single-column conversation transcript
+- compact header with workspace, session, profile, runtime, and gateway state
+- bottom composer for normal turns and slash commands
+- popup command catalog opened by `/`
+- inline tool, skill, workflow, and provider/runtime event cards
+- real run actions such as `/run stop`, `/run retry`, `/inspect last`, `/tool`, `/skill`, and `/workflow`
 
 </details>
 
 <details>
 <summary><strong>Keyboard model</strong></summary>
 
-| Key                     | Action                       |
-| ----------------------- | ---------------------------- |
-| `Tab` / `Shift+Tab`     | Cycle focus between panes    |
-| `j` / `k` or arrow keys | Move within the focused pane |
-| `i`                     | Jump to composer             |
-| `Enter`                 | Submit composer input        |
-| `Ctrl+L`                | Toggle observability panel   |
-| `Esc`                   | Return focus to sessions     |
-| `q` / `Ctrl+C`          | Quit                         |
+| Key                 | Action                                |
+| ------------------- | ------------------------------------- |
+| `/`                 | Open the command popup                |
+| `Tab`               | Accept the highlighted command        |
+| `↑` / `↓`           | Move within the command popup         |
+| `Enter`             | Submit composer input or command      |
+| `PageUp` / `PageDown` | Scroll the transcript               |
+| `Esc`               | Clear the draft or close the popup    |
+| `F1` / `?`          | Inject the command reference inline   |
+| `Ctrl+C`            | Quit                                  |
 
 </details>
 
 <details>
-<summary><strong>Local mock commands</strong></summary>
+<summary><strong>TUI slash commands</strong></summary>
 
 | Command                 | Effect                                        |
-| ----------------------- | --------------------------------------------- | ---------- | --------------------------------- |
-| `/help`                 | Show local control commands in the timeline   |
-| `/logs`                 | Toggle the observability panel                |
-| `/gateway connect`      | Mark gateway as connected in the local TUI    |
-| `/gateway disconnect`   | Mark gateway as disconnected in the local TUI |
-| `/runtime <status>`     | Update the runtime status label               |
-| `/session state <active | waiting                                       | degraded>` | Update the selected session state |
-| `/session model <name>` | Update the selected session model             |
+| ----------------------- | --------------------------------------------- |
+| `/help`                 | Show the command catalog in the transcript    |
+| `/session list`         | List known sessions inline                    |
+| `/session show`         | Show current session metadata inline          |
+| `/model list`           | List available runtime profiles               |
+| `/model use <profile>`  | Change the profile for future turns           |
+| `/gateway status`       | Show gateway and node summary                 |
+| `/run stop`             | Cancel the active run                         |
+| `/run retry`            | Retry the last run                            |
+| `/inspect last`         | Inspect the latest run inline                 |
+| `/tool <name> <input>`  | Submit an explicit tool run                   |
+| `/skill <name> <input>` | Submit an explicit skill run                  |
+| `/workflow <name> <input>` | Submit an explicit workflow run            |
 
 </details>
 

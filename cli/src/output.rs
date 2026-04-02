@@ -27,29 +27,64 @@ fn format_run_event(event: &RunEvent) -> String {
             workflow,
             step,
             kind,
-        } => format!(
-            "[run] workflow step started: {}.{} kind={}",
-            workflow, step, kind
-        ),
-        RunEvent::WorkflowStepFinished { workflow, step } => {
-            format!("[run] workflow step finished: {}.{}", workflow, step)
-        }
+            summary,
+        } => match summary.as_deref() {
+            Some(summary) => format!(
+                "[run] workflow step started: {}.{} kind={} ({})",
+                workflow, step, kind, summary
+            ),
+            None => format!(
+                "[run] workflow step started: {}.{} kind={}",
+                workflow, step, kind
+            ),
+        },
+        RunEvent::WorkflowStepFinished {
+            workflow,
+            step,
+            summary,
+        } => match summary.as_deref() {
+            Some(summary) => {
+                format!(
+                    "[run] workflow step finished: {}.{} ({})",
+                    workflow, step, summary
+                )
+            }
+            None => format!("[run] workflow step finished: {}.{}", workflow, step),
+        },
         RunEvent::WorkflowStepFailed {
             workflow,
             step,
             error,
-        } => format!(
-            "[run] workflow step failed: {}.{} error={}",
-            workflow, step, error
-        ),
+            summary,
+        } => match summary.as_deref() {
+            Some(summary) => format!(
+                "[run] workflow step failed: {}.{} error={} ({})",
+                workflow, step, error, summary
+            ),
+            None => format!(
+                "[run] workflow step failed: {}.{} error={}",
+                workflow, step, error
+            ),
+        },
         RunEvent::WorkflowFinished { name } => {
             format!("[run] workflow finished: {}", name)
         }
-        RunEvent::SkillStarted { name } => format!("[run] executing skill: {}", name),
-        RunEvent::SkillFinished { name } => format!("[run] skill finished: {}", name),
-        RunEvent::SkillFailed { name, error } => {
-            format!("[run] skill failed: {} error={}", name, error)
-        }
+        RunEvent::SkillStarted { name, summary } => match summary.as_deref() {
+            Some(summary) => format!("[run] executing skill: {} ({})", name, summary),
+            None => format!("[run] executing skill: {}", name),
+        },
+        RunEvent::SkillFinished { name, summary } => match summary.as_deref() {
+            Some(summary) => format!("[run] skill finished: {} ({})", name, summary),
+            None => format!("[run] skill finished: {}", name),
+        },
+        RunEvent::SkillFailed {
+            name,
+            error,
+            summary,
+        } => match summary.as_deref() {
+            Some(summary) => format!("[run] skill failed: {} error={} ({})", name, error, summary),
+            None => format!("[run] skill failed: {} error={}", name, error),
+        },
         RunEvent::ProviderRequest {
             provider_type,
             profile,
@@ -89,22 +124,43 @@ fn format_run_event(event: &RunEvent) -> String {
             "[run] provider failed: provider={} profile={} model={} kind={} status={:?} error={}",
             provider_type, profile, model, kind, status_code, error
         ),
-        RunEvent::ToolCalling { name, call_id } => {
-            format!("[run] calling tool: {} (call_id={})", name, call_id)
-        }
-        RunEvent::ToolFinished { name, call_id } => {
-            format!("[run] tool finished: {} (call_id={})", name, call_id)
-        }
+        RunEvent::ToolCalling {
+            name,
+            call_id,
+            summary,
+        } => match summary.as_deref() {
+            Some(summary) => format!(
+                "[run] calling tool: {} (call_id={}) ({})",
+                name, call_id, summary
+            ),
+            None => format!("[run] calling tool: {} (call_id={})", name, call_id),
+        },
+        RunEvent::ToolFinished {
+            name,
+            call_id,
+            summary,
+        } => match summary.as_deref() {
+            Some(summary) => format!(
+                "[run] tool finished: {} (call_id={}) ({})",
+                name, call_id, summary
+            ),
+            None => format!("[run] tool finished: {} (call_id={})", name, call_id),
+        },
         RunEvent::ToolFailed {
             name,
             call_id,
             error,
-        } => {
-            format!(
+            summary,
+        } => match summary.as_deref() {
+            Some(summary) => format!(
+                "[run] tool failed: {} (call_id={}) error={} ({})",
+                name, call_id, error, summary
+            ),
+            None => format!(
                 "[run] tool failed: {} (call_id={}) error={}",
                 name, call_id, error
-            )
-        }
+            ),
+        },
         RunEvent::CapabilityJobQueued {
             name, kind, risk, ..
         } => format!(
@@ -556,8 +612,28 @@ pub fn render_sandbox_status(
                 workspace.sandbox.python_strategy.label().to_owned(),
             ),
             (
+                "python_install",
+                format!(
+                    "enabled={} timeout_ms={} retry_limit={} allowed_sources={}",
+                    workspace.sandbox.python_install_enabled,
+                    workspace.sandbox.python_install_timeout_ms,
+                    workspace.sandbox.python_install_retry_limit,
+                    list_or_none(&workspace.sandbox.python_allowed_sources),
+                ),
+            ),
+            (
                 "node_strategy",
                 workspace.sandbox.node_strategy.label().to_owned(),
+            ),
+            (
+                "node_install",
+                format!(
+                    "enabled={} timeout_ms={} retry_limit={} allowed_sources={}",
+                    workspace.sandbox.node_install_enabled,
+                    workspace.sandbox.node_install_timeout_ms,
+                    workspace.sandbox.node_install_retry_limit,
+                    list_or_none(&workspace.sandbox.node_allowed_sources),
+                ),
             ),
             ("env_count", env_count.to_string()),
             (
@@ -597,12 +673,13 @@ pub fn render_sandbox_env_list(records: &[SandboxEnvRecord]) -> String {
             .iter()
             .map(|record| {
                 format!(
-                    "{} | kind={} | scope={} | strategy={} | status={} | env_dir={} | runtime_dir={} | deps={}",
+                    "{} | kind={} | scope={} | strategy={} | status={} | transition={} | env_dir={} | runtime_dir={} | deps={}",
                     record.env_id,
                     record.kind.label(),
                     record.scope.label(),
                     record.strategy,
                     record.status.label(),
+                    record.last_transition,
                     record.env_dir.display(),
                     record
                         .runtime_dir
@@ -631,6 +708,7 @@ pub fn render_sandbox_env(record: &SandboxEnvRecord) -> String {
                 ("env_name", record.env_name.clone()),
                 ("strategy", record.strategy.clone()),
                 ("status", record.status.label().to_owned()),
+                ("last_transition", record.last_transition.clone()),
                 ("env_dir", record.env_dir.display().to_string()),
                 ("cache_dir", record.cache_dir.display().to_string()),
                 (
@@ -643,7 +721,27 @@ pub fn render_sandbox_env(record: &SandboxEnvRecord) -> String {
                 ),
                 ("created_at", record.created_at.to_rfc3339()),
                 ("updated_at", record.updated_at.to_rfc3339()),
+                ("failure_stage", option_string(record.failure_stage.clone())),
                 ("error", option_string(record.error.clone())),
+                (
+                    "install_policy",
+                    format!(
+                        "enabled={} timeout_ms={} retry_limit={} allowed_sources={}",
+                        record.install_enabled,
+                        record.install_timeout_ms,
+                        record.install_retry_limit,
+                        if record.allowed_sources.is_empty() {
+                            "<none>".to_owned()
+                        } else {
+                            record
+                                .allowed_sources
+                                .iter()
+                                .map(|source| source.label().to_owned())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    ),
+                ),
             ],
         ),
         render_list_block(
@@ -1316,6 +1414,44 @@ pub fn render_inspect_report(
         ));
     }
 
+    let capability_explanations = trace.capability_explanations();
+    if !capability_explanations.is_empty() {
+        blocks.push(render_list_block(
+            "capability proof",
+            capability_explanations
+                .iter()
+                .map(|explanation| {
+                    format!(
+                        "{}:{} | route_kind={} | source={} | exec_target={} | orchestration_owner={} | status={} | summary={} | decision_basis={} | failure_origin={}",
+                        explanation.scope,
+                        explanation.name,
+                        explanation.route_kind.as_deref().unwrap_or("<none>"),
+                        explanation
+                            .capability_source_kind
+                            .as_deref()
+                            .unwrap_or("<none>"),
+                        explanation.execution_target.as_deref().unwrap_or("<none>"),
+                        explanation
+                            .orchestration_owner
+                            .as_deref()
+                            .unwrap_or("<none>"),
+                        explanation.status,
+                        truncate(&explanation.summary, 120),
+                        explanation
+                            .decision_basis
+                            .as_deref()
+                            .map(|value| truncate(value, 160))
+                            .unwrap_or_else(|| "<none>".to_owned()),
+                        explanation
+                            .failure_origin
+                            .clone()
+                            .unwrap_or_else(|| "<none>".to_owned()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        ));
+    }
+
     if !trace.memory_writes.is_empty() {
         blocks.push(render_list_block(
             "memory writes",
@@ -1375,8 +1511,21 @@ pub fn render_inspect_report(
                     .as_ref()
                     .map(|sandbox| {
                         format!(
-                            "{}:{}:{}",
-                            sandbox.env_kind, sandbox.env_scope, sandbox.env_name
+                            "{}:{}:{} status={} prepared={} reused={} failure_stage={} reason={}",
+                            sandbox.env_kind,
+                            sandbox.env_scope,
+                            sandbox.env_name,
+                            option_string(sandbox.status.clone()),
+                            sandbox
+                                .prepared
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "<none>".to_owned()),
+                            sandbox
+                                .reused
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "<none>".to_owned()),
+                            option_string(sandbox.failure_stage.clone()),
+                            option_string(sandbox.selection_reason.clone()),
                         )
                     })
                     .unwrap_or_else(|| "<none>".to_owned()),
@@ -1393,7 +1542,7 @@ pub fn render_inspect_report(
         for call in &trace.skill_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "name={} | source_kind={} | capability_source_kind={} | source_name={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | source_path={} | source_version={} | skill_version={} | runtime_requirements={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
+                "name={} | source_kind={} | capability_source_kind={} | source_name={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | source_path={} | source_version={} | skill_version={} | runtime_requirements={} | accepts_attachments={} | markdown_pack={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
                 call.name,
                 option_string(call.source_kind.clone()),
                 call
@@ -1408,21 +1557,54 @@ pub fn render_inspect_report(
                 option_string(call.source_path.clone()),
                 option_string(call.source_version.clone()),
                 option_string(call.skill_version.clone()),
-                    if call.runtime_requirements.is_empty() {
-                        "<none>".to_owned()
-                    } else {
-                        call.runtime_requirements.join(", ")
-                    },
-                    call.sandbox
-                        .as_ref()
-                        .map(|sandbox| {
-                            format!(
-                                "{}:{}:{}",
-                                sandbox.env_kind, sandbox.env_scope, sandbox.env_name
-                            )
-                        })
-                        .unwrap_or_else(|| "<none>".to_owned()),
-                    option_i64(call.duration_ms()),
+                if call.runtime_requirements.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    call.runtime_requirements.join(", ")
+                },
+                call.accepts_attachments.to_string(),
+                call.markdown_pack
+                    .as_ref()
+                    .map(|pack| {
+                        format!(
+                            "pack={} template={} references={} script={} script_runtime={} attachments={} attachment_summary={}",
+                            pack.pack_name,
+                            option_string(pack.template.clone()),
+                            if pack.references.is_empty() {
+                                "<none>".to_owned()
+                            } else {
+                                pack.references.join(", ")
+                            },
+                            option_string(pack.script.clone()),
+                            option_string(pack.script_runtime.clone()),
+                            pack.attachment_count,
+                            option_string(pack.attachment_summary.clone()),
+                        )
+                    })
+                    .unwrap_or_else(|| "<none>".to_owned()),
+                call.sandbox
+                    .as_ref()
+                    .map(|sandbox| {
+                        format!(
+                            "{}:{}:{} status={} prepared={} reused={} failure_stage={} reason={}",
+                            sandbox.env_kind,
+                            sandbox.env_scope,
+                            sandbox.env_name,
+                            option_string(sandbox.status.clone()),
+                            sandbox
+                                .prepared
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "<none>".to_owned()),
+                            sandbox
+                                .reused
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "<none>".to_owned()),
+                            option_string(sandbox.failure_stage.clone()),
+                            option_string(sandbox.selection_reason.clone()),
+                        )
+                    })
+                    .unwrap_or_else(|| "<none>".to_owned()),
+                option_i64(call.duration_ms()),
                 single_line(&input),
                 option_preview(call.output.as_deref(), 120),
             ));
@@ -1646,8 +1828,28 @@ fn render_redacted_config(
                 redacted.sandbox.python_strategy.label().to_owned(),
             ),
             (
+                "python_install",
+                format!(
+                    "enabled={} timeout_ms={} retry_limit={} allowed_sources={}",
+                    redacted.sandbox.python_install_enabled,
+                    redacted.sandbox.python_install_timeout_ms,
+                    redacted.sandbox.python_install_retry_limit,
+                    list_or_none(&redacted.sandbox.python_allowed_sources),
+                ),
+            ),
+            (
                 "node_strategy",
                 redacted.sandbox.node_strategy.label().to_owned(),
+            ),
+            (
+                "node_install",
+                format!(
+                    "enabled={} timeout_ms={} retry_limit={} allowed_sources={}",
+                    redacted.sandbox.node_install_enabled,
+                    redacted.sandbox.node_install_timeout_ms,
+                    redacted.sandbox.node_install_retry_limit,
+                    list_or_none(&redacted.sandbox.node_allowed_sources),
+                ),
             ),
             (
                 "run_workdirs_after_hours",
@@ -2165,11 +2367,12 @@ mod tests {
             workflow: "research_brief".to_owned(),
             step: "draft".to_owned(),
             error: "provider failure".to_owned(),
+            summary: Some("target=provider".to_owned()),
         });
 
         assert_eq!(
             line,
-            "[run] workflow step failed: research_brief.draft error=provider failure"
+            "[run] workflow step failed: research_brief.draft error=provider failure (target=provider)"
         );
     }
 
@@ -2179,11 +2382,12 @@ mod tests {
             name: "read_file".to_owned(),
             call_id: "call_123".to_owned(),
             error: "permission denied".to_owned(),
+            summary: Some("source=builtin".to_owned()),
         });
 
         assert_eq!(
             line,
-            "[run] tool failed: read_file (call_id=call_123) error=permission denied"
+            "[run] tool failed: read_file (call_id=call_123) error=permission denied (source=builtin)"
         );
     }
 
@@ -2310,6 +2514,14 @@ mod tests {
                     base_dir: ".mosaic/sandbox".to_owned(),
                     python_strategy: mosaic_sandbox_core::PythonEnvStrategy::Venv,
                     node_strategy: mosaic_sandbox_core::NodeEnvStrategy::Npm,
+                    python_install_enabled: true,
+                    python_install_timeout_ms: 120_000,
+                    python_install_retry_limit: 0,
+                    python_allowed_sources: vec!["registry".to_owned(), "file".to_owned()],
+                    node_install_enabled: true,
+                    node_install_timeout_ms: 120_000,
+                    node_install_retry_limit: 0,
+                    node_allowed_sources: vec!["registry".to_owned(), "file".to_owned()],
                     run_workdirs_after_hours: 24,
                     attachments_after_hours: 24,
                 },

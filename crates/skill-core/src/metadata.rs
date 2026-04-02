@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use mosaic_sandbox_core::SandboxBinding;
 use mosaic_tool_core::CapabilityExposure;
 
-use crate::{MarkdownSkillPack, manifest::manifest::SkillManifest};
+use crate::{MarkdownScriptRuntime, MarkdownSkillPack, manifest::manifest::SkillManifest};
 
 fn default_compatibility_schema() -> u32 {
     1
@@ -66,9 +66,25 @@ pub struct SkillMetadata {
     pub runtime_requirements: Vec<String>,
     #[serde(default)]
     pub sandbox: Option<SandboxBinding>,
+    #[serde(default)]
+    pub markdown_pack: Option<MarkdownSkillPackMetadata>,
     pub manifest_backed: bool,
     #[serde(default)]
     pub compatibility: SkillCompatibility,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct MarkdownSkillPackMetadata {
+    #[serde(default)]
+    pub template: Option<String>,
+    #[serde(default)]
+    pub references: Vec<String>,
+    #[serde(default)]
+    pub script: Option<String>,
+    #[serde(default)]
+    pub script_runtime: Option<String>,
+    #[serde(default)]
+    pub accepts_attachments: bool,
 }
 
 impl SkillMetadata {
@@ -85,6 +101,7 @@ impl SkillMetadata {
             declared_tools: Vec::new(),
             runtime_requirements: Vec::new(),
             sandbox: None,
+            markdown_pack: None,
             manifest_backed: false,
             compatibility: SkillCompatibility::default(),
         }
@@ -103,15 +120,22 @@ impl SkillMetadata {
             declared_tools: manifest.tools.clone(),
             runtime_requirements: Vec::new(),
             sandbox: None,
+            markdown_pack: None,
             manifest_backed: true,
             compatibility: SkillCompatibility::default(),
         }
     }
 
     pub fn markdown_pack(pack: &MarkdownSkillPack) -> Self {
+        let mut exposure = CapabilityExposure::default()
+            .with_allowed_channels(pack.allowed_channels().to_vec())
+            .with_accepts_attachments(pack.accepts_attachments());
+        if let Some(invocation_mode) = pack.invocation_mode() {
+            exposure = exposure.with_invocation_mode(invocation_mode);
+        }
         Self {
             name: pack.name().to_owned(),
-            exposure: CapabilityExposure::default(),
+            exposure,
             source_kind: SkillSourceKind::MarkdownPack,
             extension: None,
             extension_version: None,
@@ -121,6 +145,16 @@ impl SkillMetadata {
             declared_tools: pack.allowed_tools().to_vec(),
             runtime_requirements: pack.runtime_requirements().to_vec(),
             sandbox: None,
+            markdown_pack: Some(MarkdownSkillPackMetadata {
+                template: pack.template().map(ToOwned::to_owned),
+                references: pack.references().to_vec(),
+                script: pack.script().map(ToOwned::to_owned),
+                script_runtime: pack
+                    .script_runtime()
+                    .map(MarkdownScriptRuntime::label)
+                    .map(ToOwned::to_owned),
+                accepts_attachments: pack.accepts_attachments(),
+            }),
             manifest_backed: false,
             compatibility: SkillCompatibility::default(),
         }

@@ -334,11 +334,23 @@ fn persists_and_recovers_skill_trace_source_metadata() {
         skill_version: Some("0.1.0".to_owned()),
         source_version: Some("0.1.0".to_owned()),
         runtime_requirements: vec!["python".to_owned()],
+        accepts_attachments: true,
         execution_target: mosaic_inspect::ExecutionTarget::Local,
         orchestration_owner: mosaic_inspect::OrchestrationOwner::Runtime,
         policy_source: None,
         sandbox_scope: Some("capability".to_owned()),
         sandbox: None,
+        markdown_pack: Some(mosaic_inspect::MarkdownSkillPackTrace {
+            pack_name: "operator_note".to_owned(),
+            pack_path: "/tmp/operator-note".to_owned(),
+            skill_md: "/tmp/operator-note/SKILL.md".to_owned(),
+            template: Some("note.md".to_owned()),
+            references: vec!["ops.md".to_owned()],
+            script: Some("annotate.py".to_owned()),
+            script_runtime: Some("python".to_owned()),
+            attachment_count: 1,
+            attachment_summary: Some("image:dashboard.png".to_owned()),
+        }),
         input: serde_json::json!({ "text": "disk usage high" }),
         output: Some("Operator note:\ndisk usage high".to_owned()),
         started_at: Utc::now(),
@@ -362,6 +374,14 @@ fn persists_and_recovers_skill_trace_source_metadata() {
     assert_eq!(
         loaded.skill_calls[0].runtime_requirements,
         vec!["python".to_owned()]
+    );
+    assert!(loaded.skill_calls[0].accepts_attachments);
+    assert_eq!(
+        loaded.skill_calls[0]
+            .markdown_pack
+            .as_ref()
+            .and_then(|pack| pack.script.as_deref()),
+        Some("annotate.py")
     );
 
     fs::remove_dir_all(dir).ok();

@@ -59,6 +59,10 @@ impl ManifestSkill {
                             env_dir: sandbox.env_dir.clone(),
                             workdir: sandbox.workdir.clone(),
                             dependency_spec: sandbox.dependency_spec.clone(),
+                            prepared: sandbox.prepared,
+                            reused: sandbox.reused,
+                            selection_reason: sandbox.selection_reason.clone(),
+                            status: sandbox.status.clone(),
                         }),
                     };
                     let result = tool_impl.call(input.clone(), &tool_ctx).await?;

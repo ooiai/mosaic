@@ -486,12 +486,15 @@ impl Default for SandboxConfig {
 pub struct PythonSandboxConfig {
     #[serde(default)]
     pub strategy: PythonEnvStrategy,
+    #[serde(default)]
+    pub install: SandboxInstallPolicy,
 }
 
 impl Default for PythonSandboxConfig {
     fn default() -> Self {
         Self {
             strategy: PythonEnvStrategy::Venv,
+            install: SandboxInstallPolicy::default(),
         }
     }
 }
@@ -500,12 +503,15 @@ impl Default for PythonSandboxConfig {
 pub struct NodeSandboxConfig {
     #[serde(default)]
     pub strategy: NodeEnvStrategy,
+    #[serde(default)]
+    pub install: SandboxInstallPolicy,
 }
 
 impl Default for NodeSandboxConfig {
     fn default() -> Self {
         Self {
             strategy: NodeEnvStrategy::Npm,
+            install: SandboxInstallPolicy::default(),
         }
     }
 }
@@ -1018,6 +1024,14 @@ pub struct RedactedSandboxView {
     pub base_dir: String,
     pub python_strategy: PythonEnvStrategy,
     pub node_strategy: NodeEnvStrategy,
+    pub python_install_enabled: bool,
+    pub python_install_timeout_ms: u64,
+    pub python_install_retry_limit: u8,
+    pub python_allowed_sources: Vec<String>,
+    pub node_install_enabled: bool,
+    pub node_install_timeout_ms: u64,
+    pub node_install_retry_limit: u8,
+    pub node_allowed_sources: Vec<String>,
     pub run_workdirs_after_hours: u64,
     pub attachments_after_hours: u64,
 }

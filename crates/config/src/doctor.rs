@@ -34,8 +34,14 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
         cwd,
         SandboxSettings {
             base_dir: PathBuf::from(&config.sandbox.base_dir),
-            python_strategy: config.sandbox.python.strategy,
-            node_strategy: config.sandbox.node.strategy,
+            python: mosaic_sandbox_core::PythonSandboxSettings {
+                strategy: config.sandbox.python.strategy,
+                install: config.sandbox.python.install.clone(),
+            },
+            node: mosaic_sandbox_core::NodeSandboxSettings {
+                strategy: config.sandbox.node.strategy,
+                install: config.sandbox.node.install.clone(),
+            },
             cleanup: SandboxCleanupPolicy {
                 run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
                 attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
@@ -86,11 +92,43 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
         status: DoctorStatus::Ok,
         category: DoctorCategory::Sandbox,
         message: format!(
-            "sandbox layout base_dir={} env_count={} cleanup(run_workdirs_after_hours={}, attachments_after_hours={})",
+            "sandbox layout base_dir={} env_count={} cleanup(run_workdirs_after_hours={}, attachments_after_hours={}) python_install(enabled={} timeout_ms={} retry_limit={} allowed_sources={}) node_install(enabled={} timeout_ms={} retry_limit={} allowed_sources={})",
             sandbox_paths.root.display(),
             env_count,
             config.sandbox.cleanup.run_workdirs_after_hours,
             config.sandbox.cleanup.attachments_after_hours,
+            config.sandbox.python.install.enabled,
+            config.sandbox.python.install.timeout_ms,
+            config.sandbox.python.install.retry_limit,
+            if config.sandbox.python.install.allowed_sources.is_empty() {
+                "<none>".to_owned()
+            } else {
+                config
+                    .sandbox
+                    .python
+                    .install
+                    .allowed_sources
+                    .iter()
+                    .map(|source| source.label().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            },
+            config.sandbox.node.install.enabled,
+            config.sandbox.node.install.timeout_ms,
+            config.sandbox.node.install.retry_limit,
+            if config.sandbox.node.install.allowed_sources.is_empty() {
+                "<none>".to_owned()
+            } else {
+                config
+                    .sandbox
+                    .node
+                    .install
+                    .allowed_sources
+                    .iter()
+                    .map(|source| source.label().to_owned())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            },
         ),
     });
 

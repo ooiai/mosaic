@@ -11,9 +11,9 @@ use chrono::Utc;
 use mosaic_inspect::{
     AttachmentRouteMode, CapabilityInvocationTrace, CapabilitySourceKind, CompressionTrace,
     EffectiveProfileTrace, ExecutionTarget, ExtensionTrace, ExtensionUsageTrace, FailureOrigin,
-    IngressTrace, MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace, OrchestrationOwner,
-    ProviderAttemptTrace, ProviderFailureTrace, RouteKind, RunFailureTrace, RunTrace,
-    SandboxEnvTrace, SandboxRunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
+    IngressTrace, MarkdownSkillPackTrace, MemoryReadTrace, MemoryWriteTrace, ModelSelectionTrace,
+    OrchestrationOwner, ProviderAttemptTrace, ProviderFailureTrace, RouteKind, RunFailureTrace,
+    RunTrace, SandboxEnvTrace, SandboxRunTrace, SkillTrace, ToolTrace, WorkflowStepTrace,
 };
 use mosaic_memory::{
     MemoryEntryKind, MemoryPolicy, MemoryStore, SessionMemoryRecord, compress_fragments,
@@ -29,7 +29,9 @@ use mosaic_provider::{
 };
 use mosaic_sandbox_core::{SandboxBinding, SandboxEnvRecord, SandboxKind, SandboxScope};
 use mosaic_session_core::{SessionRecord, SessionStore, TranscriptRole, session_title_from_input};
-use mosaic_skill_core::{SkillContext, SkillRegistry, SkillSandboxContext};
+use mosaic_skill_core::{
+    MarkdownSkillExecutionRecord, SkillContext, SkillRegistry, SkillSandboxContext,
+};
 use mosaic_tool_core::{
     CapabilityAudit, ToolContext, ToolMetadata, ToolRegistry, ToolSandboxContext,
 };
@@ -95,12 +97,38 @@ fn derive_sandbox_binding(
         SandboxKind::Shell
     };
 
+    let dependency_spec = runtime_requirements
+        .iter()
+        .filter_map(|entry| runtime_requirement_dependency(entry))
+        .collect::<Vec<_>>();
+
     Some(SandboxBinding::new(
         kind,
         capability_name,
         scope,
-        runtime_requirements.to_vec(),
+        dependency_spec,
     ))
+}
+
+fn runtime_requirement_dependency(entry: &str) -> Option<String> {
+    let trimmed = entry.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    match trimmed {
+        "python" | "pip" | "uv" | "venv" | "python:venv" | "node" | "npm" | "pnpm"
+        | "processor" => None,
+        _ => trimmed
+            .strip_prefix("dep:")
+            .or_else(|| trimmed.strip_prefix("pip:"))
+            .or_else(|| trimmed.strip_prefix("npm:"))
+            .or_else(|| trimmed.strip_prefix("pnpm:"))
+            .or_else(|| trimmed.strip_prefix("python-package:"))
+            .or_else(|| trimmed.strip_prefix("node-package:"))
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty()),
+    }
 }
 
 impl AgentRuntime {
@@ -197,6 +225,101 @@ impl AgentRuntime {
             .or_else(|| metadata.version.clone())
     }
 
+    fn skill_start_summary(metadata: &mosaic_skill_core::SkillMetadata) -> Option<String> {
+        metadata.markdown_pack.as_ref().map(|pack| {
+            let mut parts = vec!["source=markdown_pack".to_owned()];
+            if let Some(path) = metadata.source_path.as_deref() {
+                parts.push(format!("path={path}"));
+            }
+            if let Some(version) = metadata.skill_version.as_deref() {
+                parts.push(format!("version={version}"));
+            }
+            if let Some(template) = pack.template.as_deref() {
+                parts.push(format!("template={template}"));
+            }
+            if !pack.references.is_empty() {
+                parts.push(format!("references={}", pack.references.join(",")));
+            }
+            if let Some(script) = pack.script.as_deref() {
+                parts.push(format!("script={script}"));
+            }
+            if pack.accepts_attachments {
+                parts.push("attachments=accepted".to_owned());
+            }
+            parts.join(" | ")
+        })
+    }
+
+    fn markdown_pack_trace_from_metadata(
+        metadata: &mosaic_skill_core::SkillMetadata,
+    ) -> Option<MarkdownSkillPackTrace> {
+        metadata
+            .markdown_pack
+            .as_ref()
+            .map(|pack| MarkdownSkillPackTrace {
+                pack_name: metadata.name.clone(),
+                pack_path: metadata.source_path.clone().unwrap_or_default(),
+                skill_md: metadata
+                    .source_path
+                    .as_ref()
+                    .map(|path| format!("{path}/SKILL.md"))
+                    .unwrap_or_default(),
+                template: pack.template.clone(),
+                references: pack.references.clone(),
+                script: pack.script.clone(),
+                script_runtime: pack.script_runtime.clone(),
+                attachment_count: 0,
+                attachment_summary: None,
+            })
+    }
+
+    fn markdown_pack_trace_from_output(
+        structured: Option<&serde_json::Value>,
+    ) -> Option<MarkdownSkillPackTrace> {
+        let execution: MarkdownSkillExecutionRecord =
+            serde_json::from_value(structured?.get("markdown_pack")?.clone()).ok()?;
+        Some(MarkdownSkillPackTrace {
+            pack_name: execution.pack_name,
+            pack_path: execution.pack_path,
+            skill_md: execution.skill_md,
+            template: execution.template.map(|asset| asset.name),
+            references: execution
+                .references
+                .into_iter()
+                .map(|asset| asset.name)
+                .collect(),
+            script: execution.script.as_ref().map(|script| script.name.clone()),
+            script_runtime: execution.script.map(|script| script.runtime),
+            attachment_count: execution.attachment_count,
+            attachment_summary: execution.attachment_summary,
+        })
+    }
+
+    fn skill_finish_summary(trace: &SkillTrace) -> Option<String> {
+        trace.markdown_pack.as_ref().map(|pack| {
+            let mut parts = vec![format!("pack={}", pack.pack_name)];
+            if let Some(template) = pack.template.as_deref() {
+                parts.push(format!("template={template}"));
+            }
+            if !pack.references.is_empty() {
+                parts.push(format!("references={}", pack.references.join(",")));
+            }
+            if let Some(script) = pack.script.as_deref() {
+                match pack.script_runtime.as_deref() {
+                    Some(runtime) => parts.push(format!("script={script} ({runtime})")),
+                    None => parts.push(format!("script={script}")),
+                }
+            }
+            if pack.attachment_count > 0 {
+                parts.push(format!("attachments={}", pack.attachment_count));
+            }
+            if let Some(sandbox) = trace.sandbox.as_ref() {
+                parts.push(format!("sandbox={}", sandbox.env_id));
+            }
+            parts.join(" | ")
+        })
+    }
+
     fn workflow_capability_source_kind(
         metadata: &mosaic_workflow::WorkflowMetadata,
     ) -> CapabilitySourceKind {
@@ -247,6 +370,49 @@ impl AgentRuntime {
         ExecutionTarget::WorkflowEngine
     }
 
+    fn workflow_step_execution_target(step: &WorkflowStep) -> ExecutionTarget {
+        match step.kind {
+            WorkflowStepKind::Prompt { .. } => ExecutionTarget::Provider,
+            WorkflowStepKind::Skill { .. } => ExecutionTarget::Local,
+        }
+    }
+
+    fn workflow_step_summary(step: &WorkflowStep) -> String {
+        format!(
+            "kind={} | exec_target={} | orchestration_owner={}",
+            step.kind.label(),
+            Self::workflow_step_execution_target(step).label(),
+            OrchestrationOwner::WorkflowEngine.label()
+        )
+    }
+
+    fn workflow_step_finish_summary(trace: &WorkflowStepTrace) -> String {
+        let mut parts = vec![
+            format!("kind={}", trace.kind),
+            format!(
+                "exec_target={}",
+                trace
+                    .execution_target
+                    .map(|target| target.label().to_owned())
+                    .unwrap_or_else(|| "<none>".to_owned())
+            ),
+            format!(
+                "orchestration_owner={}",
+                trace
+                    .orchestration_owner
+                    .map(|owner| owner.label().to_owned())
+                    .unwrap_or_else(|| "<none>".to_owned())
+            ),
+            format!("status={}", trace.status()),
+        ];
+        if let Some(error) = trace.error.as_deref() {
+            parts.push(format!("error={}", Self::truncate_preview(error, 180)));
+        } else if let Some(output) = trace.output.as_deref() {
+            parts.push(format!("output={}", Self::truncate_preview(output, 120)));
+        }
+        parts.join(" | ")
+    }
+
     fn tool_policy_source(metadata: &ToolMetadata) -> Option<String> {
         metadata.exposure.required_policy.clone()
     }
@@ -279,9 +445,10 @@ impl AgentRuntime {
     }
 
     fn sandbox_trace(
-        record: &SandboxEnvRecord,
+        resolution: &mosaic_sandbox_core::SandboxEnvResolution,
         workdir: Option<&std::path::Path>,
     ) -> SandboxEnvTrace {
+        let record = &resolution.record;
         SandboxEnvTrace {
             env_id: record.env_id.clone(),
             env_kind: record.kind.label().to_owned(),
@@ -293,6 +460,11 @@ impl AgentRuntime {
             strategy: Some(record.strategy.clone()),
             status: Some(record.status.label().to_owned()),
             error: record.error.clone(),
+            selection_reason: Some(resolution.selection_reason.clone()),
+            prepared: Some(resolution.prepared),
+            reused: Some(resolution.reused),
+            failure_stage: record.failure_stage.clone(),
+            last_transition: Some(record.last_transition.clone()),
         }
     }
 
@@ -304,16 +476,32 @@ impl AgentRuntime {
         let Some(binding) = Self::skill_sandbox_binding(metadata) else {
             return Ok(None);
         };
-        let record = self.ctx.sandbox.ensure_env(&binding)?;
+        let resolution = self.ctx.sandbox.ensure_env(&binding)?;
+        if !resolution.record.status.is_ready() {
+            bail!(
+                "sandbox env '{}' is {}: {}",
+                resolution.record.env_id,
+                resolution.record.status.label(),
+                resolution
+                    .record
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "env is not ready for skill execution".to_owned())
+            );
+        }
         Ok(Some(SkillSandboxContext {
-            env_id: record.env_id,
-            kind: record.kind,
-            scope: record.scope,
-            env_dir: record.env_dir,
+            env_id: resolution.record.env_id,
+            kind: resolution.record.kind,
+            scope: resolution.record.scope,
+            env_dir: resolution.record.env_dir,
             workdir: run_workdir
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(|| self.ctx.sandbox.paths().work_runs),
-            dependency_spec: record.dependency_spec,
+            dependency_spec: resolution.record.dependency_spec,
+            prepared: resolution.prepared,
+            reused: resolution.reused,
+            selection_reason: resolution.selection_reason,
+            status: resolution.record.status.label().to_owned(),
         }))
     }
 
@@ -325,16 +513,32 @@ impl AgentRuntime {
         let Some(binding) = Self::tool_sandbox_binding(metadata) else {
             return Ok(None);
         };
-        let record = self.ctx.sandbox.ensure_env(&binding)?;
+        let resolution = self.ctx.sandbox.ensure_env(&binding)?;
+        if !resolution.record.status.is_ready() {
+            bail!(
+                "sandbox env '{}' is {}: {}",
+                resolution.record.env_id,
+                resolution.record.status.label(),
+                resolution
+                    .record
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "env is not ready for tool execution".to_owned())
+            );
+        }
         Ok(Some(ToolSandboxContext {
-            env_id: record.env_id,
-            kind: record.kind,
-            scope: record.scope,
-            env_dir: record.env_dir,
+            env_id: resolution.record.env_id,
+            kind: resolution.record.kind,
+            scope: resolution.record.scope,
+            env_dir: resolution.record.env_dir,
             workdir: run_workdir
                 .map(ToOwned::to_owned)
                 .unwrap_or_else(|| self.ctx.sandbox.paths().work_runs),
-            dependency_spec: record.dependency_spec,
+            dependency_spec: resolution.record.dependency_spec,
+            prepared: resolution.prepared,
+            reused: resolution.reused,
+            selection_reason: resolution.selection_reason,
+            status: resolution.record.status.label().to_owned(),
         }))
     }
 
@@ -903,6 +1107,7 @@ impl AgentRuntime {
 
         self.emit(RunEvent::SkillStarted {
             name: skill_name.clone(),
+            summary: Self::skill_start_summary(skill.metadata()),
         });
 
         let skill_input =
@@ -916,11 +1121,13 @@ impl AgentRuntime {
             skill_version: skill.metadata().skill_version.clone(),
             source_version: Self::skill_source_version(skill.metadata()),
             runtime_requirements: skill.metadata().runtime_requirements.clone(),
+            accepts_attachments: skill.metadata().exposure.accepts_attachments,
             execution_target: Self::skill_execution_target(skill.metadata()),
             orchestration_owner: OrchestrationOwner::Runtime,
             policy_source: Self::skill_policy_source(skill.metadata()),
             sandbox_scope: Self::skill_sandbox_scope(skill.metadata()),
             sandbox: None,
+            markdown_pack: Self::markdown_pack_trace_from_metadata(skill.metadata()),
             input: skill_input.clone(),
             output: None,
             started_at: Utc::now(),
@@ -943,16 +1150,31 @@ impl AgentRuntime {
                     scope: ctx.scope,
                     env_name: skill_name.clone(),
                     dependency_spec: ctx.dependency_spec.clone(),
+                    dependency_fingerprint: String::new(),
                     strategy: "unknown".to_owned(),
                     env_dir: ctx.env_dir.clone(),
                     cache_dir: self.ctx.sandbox.paths().root,
                     runtime_dir: None,
-                    status: mosaic_sandbox_core::SandboxEnvStatus::LayoutOnly,
+                    status: mosaic_sandbox_core::SandboxEnvStatus::Ready,
                     error: None,
+                    failure_stage: None,
+                    install_enabled: true,
+                    install_timeout_ms: 0,
+                    install_retry_limit: 0,
+                    allowed_sources: Vec::new(),
+                    last_transition: "unknown".to_owned(),
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 });
-            Self::sandbox_trace(&record, Some(&ctx.workdir))
+            Self::sandbox_trace(
+                &mosaic_sandbox_core::SandboxEnvResolution {
+                    record,
+                    prepared: ctx.prepared,
+                    reused: ctx.reused,
+                    selection_reason: ctx.selection_reason.clone(),
+                },
+                Some(&ctx.workdir),
+            )
         });
         if let Some(last) = trace.skill_calls.last_mut() {
             last.sandbox = sandbox_trace;
@@ -966,10 +1188,22 @@ impl AgentRuntime {
             Ok(output) => {
                 if let Some(last) = trace.skill_calls.last_mut() {
                     last.output = Some(output.content.clone());
+                    if let Some(pack) =
+                        Self::markdown_pack_trace_from_output(output.structured.as_ref())
+                    {
+                        last.markdown_pack = Some(pack);
+                    }
                     last.finished_at = Some(Utc::now());
                 }
 
-                self.emit(RunEvent::SkillFinished { name: skill_name });
+                let summary = trace
+                    .skill_calls
+                    .last()
+                    .and_then(Self::skill_finish_summary);
+                self.emit(RunEvent::SkillFinished {
+                    name: skill_name,
+                    summary,
+                });
                 Ok(output.content)
             }
             Err(err) => {
@@ -980,6 +1214,10 @@ impl AgentRuntime {
                 self.emit(RunEvent::SkillFailed {
                     name: skill_name,
                     error: err.to_string(),
+                    summary: trace
+                        .skill_calls
+                        .last()
+                        .and_then(Self::skill_finish_summary),
                 });
                 Err(err)
             }
@@ -1005,6 +1243,7 @@ impl AgentRuntime {
 
         self.emit(RunEvent::SkillStarted {
             name: skill_name.clone(),
+            summary: Self::skill_start_summary(skill.metadata()),
         });
 
         let skill_input =
@@ -1020,11 +1259,13 @@ impl AgentRuntime {
                 skill_version: skill.metadata().skill_version.clone(),
                 source_version: Self::skill_source_version(skill.metadata()),
                 runtime_requirements: skill.metadata().runtime_requirements.clone(),
+                accepts_attachments: skill.metadata().exposure.accepts_attachments,
                 execution_target: Self::skill_execution_target(skill.metadata()),
                 orchestration_owner: OrchestrationOwner::WorkflowEngine,
                 policy_source: Self::skill_policy_source(skill.metadata()),
                 sandbox_scope: Self::skill_sandbox_scope(skill.metadata()),
                 sandbox: None,
+                markdown_pack: Self::markdown_pack_trace_from_metadata(skill.metadata()),
                 input: skill_input.clone(),
                 output: None,
                 started_at: Utc::now(),
@@ -1044,16 +1285,31 @@ impl AgentRuntime {
                     scope: ctx.scope,
                     env_name: skill_name.clone(),
                     dependency_spec: ctx.dependency_spec.clone(),
+                    dependency_fingerprint: String::new(),
                     strategy: "unknown".to_owned(),
                     env_dir: ctx.env_dir.clone(),
                     cache_dir: self.ctx.sandbox.paths().root,
                     runtime_dir: None,
-                    status: mosaic_sandbox_core::SandboxEnvStatus::LayoutOnly,
+                    status: mosaic_sandbox_core::SandboxEnvStatus::Ready,
                     error: None,
+                    failure_stage: None,
+                    install_enabled: true,
+                    install_timeout_ms: 0,
+                    install_retry_limit: 0,
+                    allowed_sources: Vec::new(),
+                    last_transition: "unknown".to_owned(),
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 });
-            Self::sandbox_trace(&record, Some(&ctx.workdir))
+            Self::sandbox_trace(
+                &mosaic_sandbox_core::SandboxEnvResolution {
+                    record,
+                    prepared: ctx.prepared,
+                    reused: ctx.reused,
+                    selection_reason: ctx.selection_reason.clone(),
+                },
+                Some(&ctx.workdir),
+            )
         });
         update_skill_trace(skill_traces, &skill_name, |trace| {
             trace.sandbox = sandbox_trace.clone();
@@ -1067,20 +1323,42 @@ impl AgentRuntime {
             Ok(output) => {
                 update_skill_trace(skill_traces, &skill_name, |trace| {
                     trace.output = Some(output.content.clone());
+                    if let Some(pack) =
+                        Self::markdown_pack_trace_from_output(output.structured.as_ref())
+                    {
+                        trace.markdown_pack = Some(pack);
+                    }
                     trace.finished_at = Some(Utc::now());
                 });
-
-                self.emit(RunEvent::SkillFinished { name: skill_name });
+                let summary = skill_traces
+                    .lock()
+                    .expect("skill trace collector should not be poisoned")
+                    .iter()
+                    .rev()
+                    .find(|trace| trace.name == skill_name)
+                    .and_then(Self::skill_finish_summary);
+                self.emit(RunEvent::SkillFinished {
+                    name: skill_name,
+                    summary,
+                });
                 Ok(output.content)
             }
             Err(err) => {
                 update_skill_trace(skill_traces, &skill_name, |trace| {
                     trace.finished_at = Some(Utc::now());
                 });
+                let summary = skill_traces
+                    .lock()
+                    .expect("skill trace collector should not be poisoned")
+                    .iter()
+                    .rev()
+                    .find(|trace| trace.name == skill_name)
+                    .and_then(Self::skill_finish_summary);
 
                 self.emit(RunEvent::SkillFailed {
                     name: skill_name,
                     error: err.to_string(),
+                    summary,
                 });
                 Err(err)
             }

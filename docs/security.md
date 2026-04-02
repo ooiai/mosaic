@@ -64,6 +64,8 @@ Recommended production defaults:
 - disable `allow_exec` unless you truly need local command execution
 - keep `hot_reload_enabled` off unless operators actively manage extension rollout
 - review node registrations before attaching them to production sessions
+- keep sandbox install policy narrow; allow only the dependency sources you intend to trust for that workspace
+- prefer file-only sandbox installs for controlled local helper packages when you do not need registry downloads
 
 ## Audit and redaction
 

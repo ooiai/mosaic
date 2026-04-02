@@ -35,6 +35,7 @@ Agent Runtime Layer.
 - Native skill: `SummarizeSkill`.
 - Manifest support: `SkillManifest`, `ManifestSkillStep`, `ManifestSkill`.
 - Markdown pack support: `MarkdownSkillPack`, `MarkdownSkillFrontmatter`, `SkillSourceKind`.
+- Markdown pack execution records: `MarkdownSkillExecutionRecord`, `MarkdownScriptExecutionRecord`.
 
 ## Why This Is In `crates/`
 
@@ -88,13 +89,13 @@ let metadata = summarize.metadata();
 cargo test -p mosaic-skill-core
 ```
 
-Tests cover native registration, manifest-backed execution, and markdown skill pack loading.
+Tests cover native registration, manifest-backed execution, markdown skill pack loading, and markdown packs that exercise templates, references, helper scripts, and sandbox-linked execution.
 
 ## Current Limitations
 
 - Native skill inventory is intentionally small today.
 - Manifest execution is sequential and intentionally conservative.
-- Markdown skill packs are template-style in v1; dependency isolation and runtime env management land in the sandbox work.
+- Markdown skill packs now support templates, references, and helper scripts, but dependency isolation and env lifecycle still belong to `mosaic-sandbox-core`.
 - Skill metadata is compatible with extensions, but richer version negotiation is still shallow.
 
 ## Roadmap

@@ -4,7 +4,8 @@ These examples are organized for operators, not just tests.
 
 Current operator reality:
 
-- Telegram is the current real interactive acceptance path while TUI remains incomplete
+- `mosaic tui` is the primary local chat-first operator surface
+- Telegram is the current real external interactive acceptance path and release-facing channel lane
 - when Telegram command, skill, attachment, sandbox, or multi-bot behavior changes, the Telegram examples should change with the Telegram docs in the same patch
 
 Repo-wide example verification commands live in [TESTING.md](./TESTING.md).

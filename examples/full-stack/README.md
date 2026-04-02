@@ -2,7 +2,7 @@
 
 These examples bind one provider profile, one Gateway, one ingress path, one persisted session, one trace, and one incident flow into a single operator walkthrough.
 
-Telegram is the current strongest real interactive GUI acceptance lane while TUI remains incomplete, so Telegram-facing config examples are part of the release-facing operator story rather than optional demos.
+Telegram is the current strongest real external interactive GUI acceptance lane, while TUI is the primary local chat-first operator surface, so Telegram-facing config examples remain part of the release-facing channel story rather than optional demos.
 
 Primary files:
 

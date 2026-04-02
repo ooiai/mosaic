@@ -1385,6 +1385,7 @@ dependencies = [
  "crossterm 0.29.0",
  "mosaic-control-protocol",
  "mosaic-gateway",
+ "mosaic-inspect",
  "mosaic-node-protocol",
  "mosaic-runtime",
  "mosaic-sdk",

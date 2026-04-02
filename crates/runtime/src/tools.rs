@@ -1,6 +1,101 @@
 use super::*;
 
 impl AgentRuntime {
+    fn tool_start_summary(
+        metadata: &ToolMetadata,
+        orchestration_owner: OrchestrationOwner,
+    ) -> String {
+        let mut parts = vec![
+            format!(
+                "source={}",
+                match &metadata.source {
+                    mosaic_tool_core::ToolSource::Mcp { .. } => "mcp",
+                    mosaic_tool_core::ToolSource::Builtin => "builtin",
+                }
+            ),
+            format!(
+                "exec_target={}",
+                Self::tool_execution_target(metadata).label()
+            ),
+            format!("orchestration_owner={}", orchestration_owner.label()),
+        ];
+
+        if let mosaic_tool_core::ToolSource::Mcp {
+            server,
+            remote_tool,
+        } = &metadata.source
+        {
+            parts.push(format!("server={server}"));
+            parts.push(format!("remote_tool={remote_tool}"));
+        }
+
+        if metadata.capability.routes_via_node() {
+            let mode = if metadata.capability.node.require_node {
+                "required"
+            } else if metadata.capability.node.prefer_node {
+                "preferred"
+            } else {
+                "enabled"
+            };
+            parts.push(format!("node_route={mode}"));
+        }
+
+        if let Some(policy_source) = Self::tool_policy_source(metadata) {
+            parts.push(format!("policy={policy_source}"));
+        }
+        if let Some(sandbox_scope) = Self::tool_sandbox_scope(metadata) {
+            parts.push(format!("sandbox_scope={sandbox_scope}"));
+        }
+
+        parts.join(" | ")
+    }
+
+    fn tool_finish_summary(
+        trace: &ToolTrace,
+        capability_trace: &CapabilityInvocationTrace,
+    ) -> String {
+        let mut parts = vec![
+            format!(
+                "source={}",
+                trace
+                    .capability_source_kind
+                    .map(|kind| kind.label().to_owned())
+                    .unwrap_or_else(|| trace.source.label().to_owned())
+            ),
+            format!("exec_target={}", trace.execution_target.label()),
+            format!("status={}", capability_trace.status),
+            format!("orchestration_owner={}", trace.orchestration_owner.label()),
+        ];
+
+        if let Some(source_name) = trace.source_name.as_deref() {
+            parts.push(format!("source_name={source_name}"));
+        }
+        if let Some(policy_source) = trace.policy_source.as_deref() {
+            parts.push(format!("policy={policy_source}"));
+        }
+        if let Some(sandbox_scope) = trace.sandbox_scope.as_deref() {
+            parts.push(format!("sandbox_scope={sandbox_scope}"));
+        }
+        if let Some(node_id) = trace.node_id.as_deref() {
+            parts.push(format!("node_id={node_id}"));
+        }
+        if trace.node_fallback_to_local {
+            parts.push("fallback_to_local=true".to_owned());
+        }
+        if let Some(node_failure_class) = trace.node_failure_class.as_deref() {
+            parts.push(format!("node_failure_class={node_failure_class}"));
+        }
+        if let Some(failure_origin) = capability_trace.failure_origin {
+            parts.push(format!("failure_origin={}", failure_origin.label()));
+        }
+        parts.push(format!(
+            "summary={}",
+            Self::truncate_preview(&capability_trace.summary, 120)
+        ));
+
+        parts.join(" | ")
+    }
+
     pub(crate) async fn maybe_dispatch_tool_via_node(
         &self,
         session_id: Option<&str>,
@@ -110,11 +205,6 @@ impl AgentRuntime {
         run_workdir: Option<&std::path::Path>,
         orchestration_owner: OrchestrationOwner,
     ) -> std::result::Result<ToolExecutionOutcome, ToolExecutionFailure> {
-        self.emit(RunEvent::ToolCalling {
-            name: tool_name.clone(),
-            call_id: call_id.clone(),
-        });
-
         let tool = match self.ctx.tools.get(&tool_name) {
             Some(tool) => tool,
             None => {
@@ -123,6 +213,7 @@ impl AgentRuntime {
                     name: tool_name,
                     call_id,
                     error: error.to_string(),
+                    summary: None,
                 });
                 return Err(ToolExecutionFailure {
                     error,
@@ -133,6 +224,11 @@ impl AgentRuntime {
         };
 
         let metadata = tool.metadata().clone();
+        self.emit(RunEvent::ToolCalling {
+            name: tool_name.clone(),
+            call_id: call_id.clone(),
+            summary: Some(Self::tool_start_summary(&metadata, orchestration_owner)),
+        });
         let started_at = Utc::now();
         let job_id = Uuid::new_v4().to_string();
         let tool_sandbox = match self.prepare_tool_sandbox(&metadata, run_workdir) {
@@ -147,6 +243,7 @@ impl AgentRuntime {
                     name: tool_name.clone(),
                     call_id: call_id.clone(),
                     error: error.to_string(),
+                    summary: None,
                 });
                 return Err(self.build_tool_failure(
                     error,
@@ -188,6 +285,7 @@ impl AgentRuntime {
                 name: tool_name.clone(),
                 call_id: call_id.clone(),
                 error: error.to_string(),
+                summary: None,
             });
             return Err(self.build_tool_failure(
                 error,
@@ -221,6 +319,7 @@ impl AgentRuntime {
                 name: tool_name.clone(),
                 call_id: call_id.clone(),
                 error: error.to_string(),
+                summary: None,
             });
             return Err(self.build_tool_failure(
                 error,
@@ -316,6 +415,7 @@ impl AgentRuntime {
                     self.emit(RunEvent::ToolFinished {
                         name: tool_name,
                         call_id,
+                        summary: Some(Self::tool_finish_summary(&tool_trace, &capability_trace)),
                     });
                     return Ok(ToolExecutionOutcome {
                         output,
@@ -347,6 +447,7 @@ impl AgentRuntime {
                             name: tool_name.clone(),
                             call_id: call_id.clone(),
                             error: error.to_string(),
+                            summary: None,
                         });
                         return Err(self.build_tool_failure(
                             error,
@@ -385,6 +486,7 @@ impl AgentRuntime {
                             name: tool_name.clone(),
                             call_id: call_id.clone(),
                             error: error.to_string(),
+                            summary: None,
                         });
                         return Err(self.build_tool_failure(
                             error,
@@ -440,6 +542,7 @@ impl AgentRuntime {
                             name: tool_name.clone(),
                             call_id: call_id.clone(),
                             error: err.to_string(),
+                            summary: None,
                         });
                         return Err(self.build_tool_failure(
                             err,
@@ -470,32 +573,42 @@ impl AgentRuntime {
                 Ok(Ok(result)) if !result.is_error => {
                     let finished_at = Utc::now();
                     let output = result.content.clone();
-                    let sandbox_trace = tool_sandbox.as_ref().map(|ctx| SandboxEnvTrace {
-                        env_id: ctx.env_id.clone(),
-                        env_kind: ctx.kind.label().to_owned(),
-                        env_scope: ctx.scope.label().to_owned(),
-                        env_name: metadata.name.clone(),
-                        env_path: ctx.env_dir.display().to_string(),
-                        workdir: Some(ctx.workdir.display().to_string()),
-                        dependency_spec: ctx.dependency_spec.clone(),
-                        strategy: self
-                            .ctx
-                            .sandbox
-                            .inspect_env(&ctx.env_id)
-                            .ok()
-                            .map(|record| record.strategy),
-                        status: self
-                            .ctx
-                            .sandbox
-                            .inspect_env(&ctx.env_id)
-                            .ok()
-                            .map(|record| record.status.label().to_owned()),
-                        error: self
-                            .ctx
-                            .sandbox
-                            .inspect_env(&ctx.env_id)
-                            .ok()
-                            .and_then(|record| record.error),
+                    let sandbox_trace = tool_sandbox.as_ref().map(|ctx| {
+                        let record =
+                            self.ctx
+                                .sandbox
+                                .inspect_env(&ctx.env_id)
+                                .unwrap_or_else(|_| SandboxEnvRecord {
+                                    env_id: ctx.env_id.clone(),
+                                    kind: ctx.kind,
+                                    scope: ctx.scope,
+                                    env_name: metadata.name.clone(),
+                                    dependency_spec: ctx.dependency_spec.clone(),
+                                    dependency_fingerprint: String::new(),
+                                    strategy: "unknown".to_owned(),
+                                    env_dir: ctx.env_dir.clone(),
+                                    cache_dir: self.ctx.sandbox.paths().root,
+                                    runtime_dir: None,
+                                    status: mosaic_sandbox_core::SandboxEnvStatus::Ready,
+                                    error: None,
+                                    failure_stage: None,
+                                    install_enabled: true,
+                                    install_timeout_ms: 0,
+                                    install_retry_limit: 0,
+                                    allowed_sources: Vec::new(),
+                                    last_transition: "unknown".to_owned(),
+                                    created_at: Utc::now(),
+                                    updated_at: Utc::now(),
+                                });
+                        Self::sandbox_trace(
+                            &mosaic_sandbox_core::SandboxEnvResolution {
+                                record,
+                                prepared: ctx.prepared,
+                                reused: ctx.reused,
+                                selection_reason: ctx.selection_reason.clone(),
+                            },
+                            Some(&ctx.workdir),
+                        )
                     });
                     let tool_trace = ToolTrace {
                         call_id: Some(call_id.clone()),
@@ -565,6 +678,7 @@ impl AgentRuntime {
                     self.emit(RunEvent::ToolFinished {
                         name: tool_name,
                         call_id,
+                        summary: Some(Self::tool_finish_summary(&tool_trace, &capability_trace)),
                     });
                     return Ok(ToolExecutionOutcome {
                         output,
@@ -592,6 +706,7 @@ impl AgentRuntime {
                         name: tool_name.clone(),
                         call_id: call_id.clone(),
                         error: error.to_string(),
+                        summary: None,
                     });
                     return Err(self.build_tool_failure(
                         error,
@@ -627,6 +742,7 @@ impl AgentRuntime {
                         name: tool_name.clone(),
                         call_id: call_id.clone(),
                         error: err.to_string(),
+                        summary: None,
                     });
                     return Err(self.build_tool_failure(
                         err,
@@ -667,6 +783,7 @@ impl AgentRuntime {
                         name: tool_name.clone(),
                         call_id: call_id.clone(),
                         error: error.to_string(),
+                        summary: None,
                     });
                     return Err(self.build_tool_failure(
                         error,

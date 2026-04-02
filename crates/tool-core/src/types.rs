@@ -33,6 +33,10 @@ pub struct ToolSandboxContext {
     pub env_dir: std::path::PathBuf,
     pub workdir: std::path::PathBuf,
     pub dependency_spec: Vec<String>,
+    pub prepared: bool,
+    pub reused: bool,
+    pub selection_reason: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Default)]

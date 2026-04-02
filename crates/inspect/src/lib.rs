@@ -358,6 +358,8 @@ pub struct SkillTrace {
     #[serde(default)]
     pub runtime_requirements: Vec<String>,
     #[serde(default)]
+    pub accepts_attachments: bool,
+    #[serde(default)]
     pub execution_target: ExecutionTarget,
     #[serde(default)]
     pub orchestration_owner: OrchestrationOwner,
@@ -367,10 +369,51 @@ pub struct SkillTrace {
     pub sandbox_scope: Option<String>,
     #[serde(default)]
     pub sandbox: Option<SandboxEnvTrace>,
+    #[serde(default)]
+    pub markdown_pack: Option<MarkdownSkillPackTrace>,
     pub input: serde_json::Value,
     pub output: Option<String>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MarkdownSkillPackTrace {
+    pub pack_name: String,
+    pub pack_path: String,
+    pub skill_md: String,
+    #[serde(default)]
+    pub template: Option<String>,
+    #[serde(default)]
+    pub references: Vec<String>,
+    #[serde(default)]
+    pub script: Option<String>,
+    #[serde(default)]
+    pub script_runtime: Option<String>,
+    #[serde(default)]
+    pub attachment_count: usize,
+    #[serde(default)]
+    pub attachment_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityExplanationTrace {
+    pub scope: String,
+    pub name: String,
+    #[serde(default)]
+    pub route_kind: Option<String>,
+    #[serde(default)]
+    pub capability_source_kind: Option<String>,
+    #[serde(default)]
+    pub execution_target: Option<String>,
+    #[serde(default)]
+    pub orchestration_owner: Option<String>,
+    pub status: String,
+    pub summary: String,
+    #[serde(default)]
+    pub decision_basis: Option<String>,
+    #[serde(default)]
+    pub failure_origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -390,6 +433,16 @@ pub struct SandboxEnvTrace {
     pub status: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub selection_reason: Option<String>,
+    #[serde(default)]
+    pub prepared: Option<bool>,
+    #[serde(default)]
+    pub reused: Option<bool>,
+    #[serde(default)]
+    pub failure_stage: Option<String>,
+    #[serde(default)]
+    pub last_transition: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1235,6 +1288,152 @@ impl RunTrace {
         }
     }
 
+    pub fn capability_explanations(&self) -> Vec<CapabilityExplanationTrace> {
+        let mut explanations = Vec::new();
+
+        for invocation in &self.capability_invocations {
+            let mut decision = Vec::new();
+            if let Some(source_name) = invocation.source_name.as_deref() {
+                decision.push(format!("source={source_name}"));
+            }
+            if let Some(source_path) = invocation.source_path.as_deref() {
+                decision.push(format!("source_path={source_path}"));
+            }
+            if let Some(policy_source) = invocation.policy_source.as_deref() {
+                decision.push(format!("policy={policy_source}"));
+            }
+            if let Some(sandbox_scope) = invocation.sandbox_scope.as_deref() {
+                decision.push(format!("sandbox_scope={sandbox_scope}"));
+            }
+            if let Some(route) = invocation.capability_route.as_deref() {
+                decision.push(format!("node_route={route}"));
+            }
+            if invocation.node_fallback_to_local {
+                decision.push("fallback_to_local=true".to_owned());
+            }
+            if let Some(node_failure_class) = invocation.node_failure_class.as_deref() {
+                decision.push(format!("node_failure_class={node_failure_class}"));
+            }
+            if let Some(node_id) = invocation.node_id.as_deref() {
+                decision.push(format!("node_id={node_id}"));
+            }
+            if let Some(target) = invocation.target.as_deref() {
+                decision.push(format!("target={target}"));
+            }
+
+            explanations.push(CapabilityExplanationTrace {
+                scope: "capability".to_owned(),
+                name: invocation.tool_name.clone(),
+                route_kind: invocation.route_kind.map(|kind| kind.label().to_owned()),
+                capability_source_kind: invocation
+                    .capability_source_kind
+                    .map(|kind| kind.label().to_owned()),
+                execution_target: Some(invocation.execution_target.label().to_owned()),
+                orchestration_owner: Some(invocation.orchestration_owner.label().to_owned()),
+                status: invocation.status.clone(),
+                summary: invocation.summary.clone(),
+                decision_basis: (!decision.is_empty()).then(|| decision.join(" | ")),
+                failure_origin: invocation
+                    .failure_origin
+                    .map(|origin| origin.label().to_owned()),
+            });
+        }
+
+        for skill in &self.skill_calls {
+            let mut decision = Vec::new();
+            if let Some(source_kind) = skill.source_kind.as_deref() {
+                decision.push(format!("source_kind={source_kind}"));
+            }
+            if let Some(source_name) = skill.source_name.as_deref() {
+                decision.push(format!("source={source_name}"));
+            }
+            if let Some(policy_source) = skill.policy_source.as_deref() {
+                decision.push(format!("policy={policy_source}"));
+            }
+            if let Some(sandbox_scope) = skill.sandbox_scope.as_deref() {
+                decision.push(format!("sandbox_scope={sandbox_scope}"));
+            }
+            if let Some(sandbox) = skill.sandbox.as_ref() {
+                decision.push(format!("sandbox_env={}", sandbox.env_id));
+            }
+            if let Some(pack) = skill.markdown_pack.as_ref() {
+                if let Some(template) = pack.template.as_deref() {
+                    decision.push(format!("template={template}"));
+                }
+                if !pack.references.is_empty() {
+                    decision.push(format!("references={}", pack.references.join(",")));
+                }
+                if let Some(script) = pack.script.as_deref() {
+                    decision.push(format!("script={script}"));
+                }
+                if let Some(runtime) = pack.script_runtime.as_deref() {
+                    decision.push(format!("script_runtime={runtime}"));
+                }
+                if pack.attachment_count > 0 {
+                    decision.push(format!("attachments={}", pack.attachment_count));
+                }
+            }
+
+            explanations.push(CapabilityExplanationTrace {
+                scope: "skill".to_owned(),
+                name: skill.name.clone(),
+                route_kind: Some("skill".to_owned()),
+                capability_source_kind: skill
+                    .capability_source_kind
+                    .map(|kind| kind.label().to_owned()),
+                execution_target: Some(skill.execution_target.label().to_owned()),
+                orchestration_owner: Some(skill.orchestration_owner.label().to_owned()),
+                status: if skill.output.is_some() {
+                    "success".to_owned()
+                } else if skill.finished_at.is_some() {
+                    "failed".to_owned()
+                } else {
+                    "running".to_owned()
+                },
+                summary: skill
+                    .output
+                    .as_deref()
+                    .map(|output| truncate_preview(output, 180))
+                    .unwrap_or_else(|| format!("skill {}", skill.name)),
+                decision_basis: (!decision.is_empty()).then(|| decision.join(" | ")),
+                failure_origin: None,
+            });
+        }
+
+        for step in &self.step_traces {
+            let mut decision = vec![format!("kind={}", step.kind)];
+            if let Some(owner) = step.orchestration_owner {
+                decision.push(format!("owner={}", owner.label()));
+            }
+            if let Some(target) = step.execution_target {
+                decision.push(format!("target={}", target.label()));
+            }
+
+            explanations.push(CapabilityExplanationTrace {
+                scope: "workflow_step".to_owned(),
+                name: step.name.clone(),
+                route_kind: Some("workflow".to_owned()),
+                capability_source_kind: None,
+                execution_target: step
+                    .execution_target
+                    .map(|target| target.label().to_owned()),
+                orchestration_owner: step
+                    .orchestration_owner
+                    .map(|owner| owner.label().to_owned()),
+                status: step.status().to_owned(),
+                summary: step
+                    .output
+                    .as_deref()
+                    .map(|output| truncate_preview(output, 180))
+                    .unwrap_or_else(|| truncate_preview(&step.input, 180)),
+                decision_basis: Some(decision.join(" | ")),
+                failure_origin: step.error.as_ref().map(|_| "workflow".to_owned()),
+            });
+        }
+
+        explanations
+    }
+
     pub fn save_to_default_dir(&self) -> Result<PathBuf> {
         self.save_to_dir(PathBuf::from(".mosaic/runs"))
     }
@@ -1246,6 +1445,17 @@ impl RunTrace {
         fs::write(&path, serde_json::to_vec_pretty(self)?)?;
         Ok(path)
     }
+}
+
+fn truncate_preview(value: &str, limit: usize) -> String {
+    let sanitized = value.replace('\n', " ");
+    let char_count = sanitized.chars().count();
+    if char_count <= limit {
+        return sanitized;
+    }
+
+    let truncated = sanitized.chars().take(limit).collect::<String>();
+    format!("{truncated}...")
 }
 
 #[cfg(test)]

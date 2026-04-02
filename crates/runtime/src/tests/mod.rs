@@ -2013,6 +2013,186 @@ Operator note:
 }
 
 #[tokio::test]
+async fn markdown_skill_pack_trace_records_templates_references_scripts_and_event_summary() {
+    let dir = temp_dir("markdown-rich-skill");
+    fs::create_dir_all(dir.join("templates")).expect("templates dir should exist");
+    fs::create_dir_all(dir.join("references")).expect("references dir should exist");
+    fs::create_dir_all(dir.join("scripts")).expect("scripts dir should exist");
+    fs::write(
+        dir.join("SKILL.md"),
+        r#"---
+name: operator_note
+description: Render an operator note
+version: 0.2.0
+template: note.md
+references:
+  - escalation.md
+script: annotate.py
+script_runtime: python
+accepts_attachments: true
+runtime_requirements:
+  - python
+---
+Reference:
+{{references.escalation}}
+"#,
+    )
+    .expect("skill pack should be written");
+    fs::write(
+        dir.join("templates").join("note.md"),
+        "Operator note:\n{{input}}\nAttachments: {{attachments.summary}}\n",
+    )
+    .expect("template should be written");
+    fs::write(
+        dir.join("references").join("escalation.md"),
+        "Escalate to the platform team.",
+    )
+    .expect("reference should be written");
+    fs::write(
+        dir.join("scripts").join("annotate.py"),
+        r#"import json, sys
+payload = json.load(sys.stdin)
+print(json.dumps({
+  "content": payload["rendered_prompt"] + "\nscript=ok",
+  "output_mode": "json"
+}))
+"#,
+    )
+    .expect("script should be written");
+
+    let pack = MarkdownSkillPack::load_from_dir(&dir).expect("markdown skill should load");
+    let mut skills = SkillRegistry::new();
+    skills.register_markdown_pack(pack);
+    let sink = Arc::new(VecEventSink::default());
+
+    let runtime = AgentRuntime::new(RuntimeContext {
+        profiles: Arc::new(
+            ProviderProfileRegistry::from_config(&MosaicConfig::default())
+                .expect("profile registry should build"),
+        ),
+        provider_override: Some(Arc::new(MockProvider)),
+        session_store: Arc::new(MemorySessionStore::default()),
+        memory_store: Arc::new(MemoryMemoryStore::default()),
+        memory_policy: MemoryPolicy::default(),
+        runtime_policy: MosaicConfig::default().runtime,
+        attachments: MosaicConfig::default().attachments,
+        sandbox: Arc::new(test_sandbox_manager()),
+        telegram: Default::default(),
+        app_name: None,
+        tools: Arc::new(ToolRegistry::new()),
+        skills: Arc::new(skills),
+        workflows: Arc::new(WorkflowRegistry::new()),
+        node_router: None,
+        active_extensions: Vec::new(),
+        event_sink: sink.clone(),
+    });
+
+    let result = runtime
+        .run(RunRequest {
+            run_id: None,
+            system: None,
+            input: "Disk usage high on host-7".to_owned(),
+            tool: None,
+            skill: Some("operator_note".to_owned()),
+            workflow: None,
+            session_id: Some("markdown-skill-details".to_owned()),
+            profile: None,
+            ingress: Some(mosaic_inspect::IngressTrace {
+                kind: "telegram_bot".to_owned(),
+                channel: Some("telegram".to_owned()),
+                adapter: Some("telegram_webhook".to_owned()),
+                bot_name: None,
+                bot_route: None,
+                bot_profile: None,
+                bot_token_env: None,
+                bot_secret_env: None,
+                source: None,
+                remote_addr: None,
+                display_name: Some("Operator".to_owned()),
+                actor_id: Some("42".to_owned()),
+                conversation_id: Some("telegram:chat:42".to_owned()),
+                thread_id: None,
+                thread_title: None,
+                reply_target: Some("telegram:chat:42:msg:1".to_owned()),
+                message_id: Some("1".to_owned()),
+                received_at: None,
+                raw_event_id: Some("event-1".to_owned()),
+                session_hint: None,
+                profile_hint: None,
+                control_command: Some("skill".to_owned()),
+                original_text: Some(
+                    "/mosaic skill operator_note Disk usage high on host-7".to_owned(),
+                ),
+                attachments: vec![mosaic_inspect::ChannelAttachment {
+                    id: "attachment-1".to_owned(),
+                    kind: mosaic_inspect::AttachmentKind::Image,
+                    filename: Some("dashboard.png".to_owned()),
+                    mime_type: Some("image/png".to_owned()),
+                    size_bytes: Some(128),
+                    source_ref: Some("file-1".to_owned()),
+                    remote_url: None,
+                    local_cache_path: None,
+                    caption: None,
+                }],
+                attachment_failures: Vec::new(),
+                gateway_url: None,
+            }),
+        })
+        .await
+        .expect("markdown skill run should succeed");
+
+    let call = &result.trace.skill_calls[0];
+    assert!(result.output.contains("script=ok"));
+    assert!(call.accepts_attachments);
+    assert_eq!(
+        call.markdown_pack
+            .as_ref()
+            .and_then(|pack| pack.template.as_deref()),
+        Some("note.md")
+    );
+    assert_eq!(
+        call.markdown_pack
+            .as_ref()
+            .map(|pack| pack.references.clone())
+            .unwrap_or_default(),
+        vec!["escalation.md".to_owned()]
+    );
+    assert_eq!(
+        call.markdown_pack
+            .as_ref()
+            .and_then(|pack| pack.script.as_deref()),
+        Some("annotate.py")
+    );
+    assert_eq!(
+        call.markdown_pack
+            .as_ref()
+            .and_then(|pack| pack.script_runtime.as_deref()),
+        Some("python")
+    );
+    assert_eq!(
+        call.markdown_pack
+            .as_ref()
+            .map(|pack| pack.attachment_count),
+        Some(1)
+    );
+    assert!(call.sandbox.is_some());
+
+    let events = sink.snapshot();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RunEvent::SkillStarted { summary: Some(summary), .. }
+            if summary.contains("template=note.md") && summary.contains("script=annotate.py")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        RunEvent::SkillFinished { summary: Some(summary), .. }
+            if summary.contains("script=annotate.py (python)") && summary.contains("attachments=1")
+    )));
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[tokio::test]
 async fn workflow_can_call_markdown_skill_pack() {
     let dir = temp_dir("markdown-workflow");
     fs::create_dir_all(&dir).expect("temp dir should exist");

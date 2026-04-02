@@ -57,6 +57,17 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
         );
     }
 
+    validate_sandbox_install_policy(
+        &mut report,
+        "sandbox.python.install",
+        &config.sandbox.python.install,
+    );
+    validate_sandbox_install_policy(
+        &mut report,
+        "sandbox.node.install",
+        &config.sandbox.node.install,
+    );
+
     for (field, value) in [
         (
             "auth.operator_token_env",
@@ -614,6 +625,28 @@ fn validate_sandbox_binding(
             ValidationLevel::Error,
             format!("{field_prefix}.dependency_spec"),
             "sandbox dependency_spec entries must not be empty",
+        );
+    }
+}
+
+fn validate_sandbox_install_policy(
+    report: &mut ValidationReport,
+    field_prefix: &str,
+    policy: &SandboxInstallPolicy,
+) {
+    if policy.enabled && policy.timeout_ms == 0 {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.timeout_ms"),
+            "sandbox install timeout_ms must be greater than zero when installs are enabled",
+        );
+    }
+
+    if policy.enabled && policy.allowed_sources.is_empty() {
+        report.push(
+            ValidationLevel::Error,
+            format!("{field_prefix}.allowed_sources"),
+            "sandbox install allowed_sources must not be empty when installs are enabled",
         );
     }
 }

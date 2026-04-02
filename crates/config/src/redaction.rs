@@ -106,6 +106,28 @@ pub fn redact_mosaic_config(config: &MosaicConfig) -> RedactedMosaicConfig {
             base_dir: config.sandbox.base_dir.clone(),
             python_strategy: config.sandbox.python.strategy,
             node_strategy: config.sandbox.node.strategy,
+            python_install_enabled: config.sandbox.python.install.enabled,
+            python_install_timeout_ms: config.sandbox.python.install.timeout_ms,
+            python_install_retry_limit: config.sandbox.python.install.retry_limit,
+            python_allowed_sources: config
+                .sandbox
+                .python
+                .install
+                .allowed_sources
+                .iter()
+                .map(|source| source.label().to_owned())
+                .collect(),
+            node_install_enabled: config.sandbox.node.install.enabled,
+            node_install_timeout_ms: config.sandbox.node.install.timeout_ms,
+            node_install_retry_limit: config.sandbox.node.install.retry_limit,
+            node_allowed_sources: config
+                .sandbox
+                .node
+                .install
+                .allowed_sources
+                .iter()
+                .map(|source| source.label().to_owned())
+                .collect(),
             run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
             attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
         },

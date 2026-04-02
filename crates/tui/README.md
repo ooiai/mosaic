@@ -1,10 +1,10 @@
 # mosaic-tui
 
-`mosaic-tui` implements the terminal operator console for Mosaic.
+`mosaic-tui` implements the chat-first terminal operator surface for Mosaic.
 
 ## Positioning
 
-This crate owns terminal rendering, keyboard interaction, interactive session state, and event-buffer handling for the operator console.
+This crate owns terminal rendering, keyboard interaction, interactive session state, slash-command discoverability, inline capability event rendering, and event-buffer handling for the operator console.
 
 ## Architecture Layer
 
@@ -12,10 +12,11 @@ Control Plane Layer.
 
 ## Responsibilities
 
-- Render and run the terminal UI through `run`, `run_with_event_buffer`, and `run_interactive_session`.
-- Hold interactive operator state in `app` and rendering logic in `ui`.
-- Bridge runtime events into the console through `TuiEventBuffer` and `TuiEventSink`.
+- Render and run the single-column chat shell through `run`, `run_with_event_buffer`, and `run_interactive_session`.
+- Hold interactive operator state in `app` and render the transcript/composer/popup layout in `ui`.
+- Bridge runtime events into the transcript through `TuiEventBuffer` and `TuiEventSink`.
 - Support local and remote gateway-backed interactive sessions through `InteractiveGateway` and `InteractiveSessionContext`.
+- Surface tools, skills, workflows, and provider/runtime progress inline in the conversation stream.
 
 ## Out of Scope
 
@@ -59,11 +60,11 @@ cargo test -p mosaic-tui
 ## Current Limitations
 
 - The UI is terminal-only.
-- Remote operator flows are intentionally conservative and centered on the current gateway contract.
-- Visual state and operator commands are still evolving quickly.
+- Telegram remains the strongest release-grade real GUI acceptance lane while the TUI hardens.
+- Command completion currently uses a popup plus `Tab` accept model; richer inline argument completion is still evolving.
 
 ## Roadmap
 
 - Keep improving the operator console without pushing view logic back into `cli`.
-- Strengthen remote attach and session browsing flows.
-- Preserve a clear split between UI state, rendering, and bootstrap/composition.
+- Strengthen remote attach, transcript inspection, and inline operator diagnostics.
+- Preserve a clear split between UI state, rendering, gateway interaction, and bootstrap/composition.

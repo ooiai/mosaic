@@ -77,8 +77,14 @@ pub fn init_workspace_config(
         cwd,
         SandboxSettings {
             base_dir: PathBuf::from(&config.sandbox.base_dir),
-            python_strategy: config.sandbox.python.strategy,
-            node_strategy: config.sandbox.node.strategy,
+            python: mosaic_sandbox_core::PythonSandboxSettings {
+                strategy: config.sandbox.python.strategy,
+                install: config.sandbox.python.install.clone(),
+            },
+            node: mosaic_sandbox_core::NodeSandboxSettings {
+                strategy: config.sandbox.node.strategy,
+                install: config.sandbox.node.install.clone(),
+            },
             cleanup: SandboxCleanupPolicy {
                 run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
                 attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,

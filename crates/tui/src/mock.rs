@@ -17,6 +17,10 @@ pub fn sessions() -> Vec<SessionRecord> {
             state: SessionState::Active,
             unread: 2,
             draft: String::new(),
+            transcript_len: 0,
+            current_run_id: None,
+            current_gateway_run_id: None,
+            last_gateway_run_id: None,
             memory_summary: Some(
                 "Gateway routing soak and local control attachment state.".to_owned(),
             ),
@@ -25,6 +29,8 @@ pub fn sessions() -> Vec<SessionRecord> {
                     .to_owned(),
             ),
             references: vec!["sess-node-007 (node follow-up)".to_owned()],
+            streaming_preview: None,
+            streaming_run_id: None,
             timeline: vec![
                 entry(
                     "15:02",
@@ -64,11 +70,17 @@ pub fn sessions() -> Vec<SessionRecord> {
             state: SessionState::Waiting,
             unread: 1,
             draft: String::new(),
+            transcript_len: 0,
+            current_run_id: None,
+            current_gateway_run_id: None,
+            last_gateway_run_id: None,
             memory_summary: Some(
                 "Release checklist request and draft rollout checkpoints.".to_owned(),
             ),
             compressed_context: None,
             references: vec![],
+            streaming_preview: None,
+            streaming_run_id: None,
             timeline: vec![
                 entry(
                     "14:51",
@@ -108,11 +120,17 @@ pub fn sessions() -> Vec<SessionRecord> {
             state: SessionState::Degraded,
             unread: 0,
             draft: String::new(),
+            transcript_len: 0,
+            current_run_id: None,
+            current_gateway_run_id: None,
+            last_gateway_run_id: None,
             memory_summary: Some(
                 "Node reconnect flow is degraded and awaiting reattach.".to_owned(),
             ),
             compressed_context: None,
             references: vec![],
+            streaming_preview: None,
+            streaming_run_id: None,
             timeline: vec![
                 entry(
                     "14:24",
@@ -145,9 +163,15 @@ pub fn sessions() -> Vec<SessionRecord> {
             state: SessionState::Waiting,
             unread: 0,
             draft: String::new(),
+            transcript_len: 0,
+            current_run_id: None,
+            current_gateway_run_id: None,
+            last_gateway_run_id: None,
             memory_summary: Some("Webchat intake route pending operator policy update.".to_owned()),
             compressed_context: None,
             references: vec![],
+            streaming_preview: None,
+            streaming_run_id: None,
             timeline: vec![entry(
                 "13:02",
                 TimelineKind::System,
@@ -171,9 +195,15 @@ pub fn sessions() -> Vec<SessionRecord> {
             state: SessionState::Waiting,
             unread: 0,
             draft: String::new(),
+            transcript_len: 0,
+            current_run_id: None,
+            current_gateway_run_id: None,
+            last_gateway_run_id: None,
             memory_summary: Some("macOS node is waiting on device capability grant.".to_owned()),
             compressed_context: None,
             references: vec![],
+            streaming_preview: None,
+            streaming_run_id: None,
             timeline: vec![entry(
                 "11:48",
                 TimelineKind::Agent,

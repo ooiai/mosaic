@@ -59,7 +59,24 @@ These lanes are release-blocking when the feature is in scope, but they require 
 | Telegram-first release-blocking acceptance lane | [telegram-real-e2e.md](./telegram-real-e2e.md) | required when Telegram is a release target |
 | live public webhook routing | operator-managed HTTPS reverse proxy or tunnel | required for Telegram bot acceptance |
 
-### 3. Compatibility addendum lanes
+### 3. Local operator acceptance
+
+The TUI is now the primary local chat-first operator surface. It is not the external channel release lane, but it is required proof whenever local operator behavior changes.
+
+| Lane | Command / Runbook | Scope |
+| --- | --- | --- |
+| TUI local operator lane | `cargo test -p mosaic-tui` plus `mosaic tui` sanity checks from [tui.md](./tui.md) | required when TUI behavior or transcript-driven operator flows change |
+
+The TUI lane should prove:
+
+- a normal message submits a real run
+- `/` opens the command catalog
+- `Tab` completes the highlighted command
+- `/session show`, `/model list`, `/inspect last`, `/adapter status`, `/node list`, and `/sandbox status` render inline operator cards
+- inline tool, MCP, node-routed tool, skill, workflow, and provider events remain readable in the transcript
+- `/inspect last` exposes capability proof summaries for route kind, source kind, execution target, and failure origin
+
+### 4. Compatibility addendum lanes
 
 These are real lanes, but they are compatibility proof rather than the default operator story:
 
@@ -101,12 +118,12 @@ Every key crate must map to a primary real proof lane or an explicit supplementa
 | `mosaic-control-protocol` | `cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` proves the real control-plane DTO path | CLI attach flows and remote Gateway operator commands | `protocol-real` |
 | `mosaic-sdk` | `cargo test -p mosaic-sdk --test real_gateway_http -- --nocapture` | remote operator attach commands in CLI and TUI | `protocol-real` |
 | `mosaic-channel-telegram` | `cargo test -p mosaic-gateway --test real_telegram_ingress -- --nocapture` proves the real webhook contract path | Telegram-first lane proves live inbound normalize plus outbound reply, image uploads, and document uploads | `product-real` |
-| `mosaic-mcp-core` | `cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | `examples/mcp-filesystem.yaml` golden path | `protocol-real` |
+| `mosaic-mcp-core` | `cargo test -p mosaic-mcp-core --test real_stdio_mcp -- --nocapture` | `examples/mcp-filesystem.yaml` golden path plus TUI `/inspect last` capability proof for `execution_target=mcp_server` | `protocol-real` |
 | `mosaic-memory` | OpenAI + WebChat full-stack and Telegram-first lanes persist real session memory and references | file store integration tests | `product-real` |
-| `mosaic-node-protocol` | local integration file-bus tests | node operator flows in CLI | `local integration` |
+| `mosaic-node-protocol` | local integration file-bus tests | CLI node flows plus TUI `/node list` and `/node show <id>` operator proof | `local integration` |
 | `mosaic-scheduler-core` | local integration cron store tests | CLI cron flows | `local integration` |
 | `mosaic-cli` | `make test-golden`, `make test-matrix`, and the Telegram-first runbook | command regression tests in `cli/src/main.rs` | `release-blocking acceptance` |
-| `mosaic-tui` | local operator-console tests | remote attach and session refresh tests | `local integration` |
+| `mosaic-tui` | local operator-console tests | remote attach/session refresh plus inline capability proof for tool, MCP, node, and workflow execution | `local integration` |
 
 Interpretation:
 
@@ -137,7 +154,8 @@ Use [telegram-real-e2e.md](./telegram-real-e2e.md) as the operator runbook. That
 
 ## Telegram Documentation-Coupled Release Surface
 
-Until TUI is product-complete, Telegram remains the strongest real interactive GUI acceptance lane.
+Telegram remains the strongest real external interactive GUI acceptance lane.
+TUI is the primary local chat-first operator surface.
 
 That means a Telegram-affecting change is not release-ready unless the matching docs and examples move with it.
 
@@ -152,6 +170,12 @@ Minimum maintenance set:
 
 Release and test review should reject a Telegram feature if code changed but the operator runbooks did not.
 
+TUI-affecting work should also update:
+
+- [tui.md](./tui.md)
+- [getting-started.md](./getting-started.md)
+- [release.md](./release.md)
+
 ## L-Series Capability Proof Addendum
 
 The L-series work adds operator-visible concepts that must also be proven by docs, examples, and tests:
@@ -159,10 +183,17 @@ The L-series work adds operator-visible concepts that must also be proven by doc
 | Concept | Primary proof | Classification |
 | --- | --- | --- |
 | markdown skill pack loading and execution | `cargo test -p mosaic-skill-core`, `cargo test -p mosaic-runtime`, and [examples/skills/operator-note/SKILL.md](../examples/skills/operator-note/SKILL.md) | `local integration` plus product-facing docs/examples |
-| sandbox env lifecycle | `cargo test -p mosaic-sandbox-core` plus `mosaic sandbox status|list|inspect|rebuild|clean` described in [sandbox.md](./sandbox.md) | `local integration` and operator-facing |
+| sandbox env lifecycle | `cargo test -p mosaic-sandbox-core` plus `mosaic sandbox status|list|inspect|rebuild|clean` and TUI `/sandbox status|inspect|rebuild|clean` flows described in [sandbox.md](./sandbox.md) | `local integration` and operator-facing |
 | workspace isolation of capability envs | `cargo test -p mosaic-sandbox-core` | `local integration` |
 | capability taxonomy and provenance consistency | `cargo test -p mosaic-runtime`, `cargo test -p mosaic-inspect`, `cargo test -p mosaic-gateway`, and `mosaic inspect --verbose` | `local integration` plus operator-facing |
 | capability composition examples | [examples/composition/openai-capability-composition.config.yaml](../examples/composition/openai-capability-composition.config.yaml) and [examples/capabilities/README.md](../examples/capabilities/README.md) | docs/example acceptance |
+| capability execution proof across operator surfaces | CLI `mosaic inspect --verbose`, TUI `/inspect last`, and Telegram-first release lane when channel behavior is in scope | local operator + product-facing |
+
+For capability execution proof, think in terms of `CLI, TUI, Telegram`:
+
+- CLI proves scriptable/operator automation and verbose inspect output
+- TUI proves local chat-first operator visibility
+- Telegram proves the external human channel lane when channel behavior is in scope
 
 These are not replacements for Telegram or WebChat real-product lanes. They are the shared concept-proof layer that keeps skill, sandbox, and taxonomy documentation aligned with the executable system.
 

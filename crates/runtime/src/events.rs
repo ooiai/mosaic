@@ -16,28 +16,34 @@ pub enum RunEvent {
         workflow: String,
         step: String,
         kind: String,
+        summary: Option<String>,
     },
     WorkflowStepFinished {
         workflow: String,
         step: String,
+        summary: Option<String>,
     },
     WorkflowStepFailed {
         workflow: String,
         step: String,
         error: String,
+        summary: Option<String>,
     },
     WorkflowFinished {
         name: String,
     },
     SkillStarted {
         name: String,
+        summary: Option<String>,
     },
     SkillFinished {
         name: String,
+        summary: Option<String>,
     },
     SkillFailed {
         name: String,
         error: String,
+        summary: Option<String>,
     },
     ProviderRequest {
         provider_type: String,
@@ -70,15 +76,18 @@ pub enum RunEvent {
     ToolCalling {
         name: String,
         call_id: String,
+        summary: Option<String>,
     },
     ToolFinished {
         name: String,
         call_id: String,
+        summary: Option<String>,
     },
     ToolFailed {
         name: String,
         call_id: String,
         error: String,
+        summary: Option<String>,
     },
     CapabilityJobQueued {
         job_id: String,

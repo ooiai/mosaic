@@ -61,6 +61,22 @@ Node routing and sandboxing are related but separate.
 
 A node-routed tool may still surface sandbox and policy data in higher-layer traces, but this crate does not manage sandbox envs.
 
+## Operator Proof
+
+Operators should verify node-routed execution through:
+
+- CLI `mosaic node list`
+- CLI `mosaic node capabilities <id>`
+- TUI `/node list`
+- TUI `/node show <id>`
+- CLI `mosaic inspect --verbose` or TUI `/inspect last`
+
+The expected taxonomy is:
+
+- `route_kind=tool`
+- `execution_target=node`
+- `failure_origin=node` when routing or node execution fails
+
 ## Minimal Use
 
 ```rust

@@ -8,10 +8,11 @@ use std::{
 };
 
 use futures::executor::block_on;
+use mosaic_sandbox_core::{SandboxKind, SandboxScope};
 use mosaic_tool_core::{EchoTool, ToolRegistry};
 
 use crate::{
-    ManifestSkillStep, MarkdownSkillPack, SkillContext, SkillManifest, SkillRegistry,
+    ManifestSkillStep, MarkdownSkillPack, Skill, SkillContext, SkillManifest, SkillRegistry,
     SkillSourceKind, SummarizeSkill,
 };
 
@@ -152,6 +153,108 @@ Operator note:
     .expect("markdown skill should execute");
 
     assert_eq!(output.content, "Operator note:\nCheck the alerts.");
+
+    fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn markdown_skill_pack_executes_template_references_and_script_with_sandbox_context() {
+    let dir = temp_dir("markdown-script-pack");
+    fs::create_dir_all(dir.join("templates")).expect("templates dir should exist");
+    fs::create_dir_all(dir.join("references")).expect("references dir should exist");
+    fs::create_dir_all(dir.join("scripts")).expect("scripts dir should exist");
+    fs::write(
+        dir.join("SKILL.md"),
+        r#"---
+name: ops_helper
+description: Render an operator note with references and a helper script
+version: 0.2.0
+template: brief.md
+references:
+  - escalation.md
+script: annotate.py
+script_runtime: python
+runtime_requirements:
+  - python
+---
+Reference:
+{{references.escalation}}
+"#,
+    )
+    .expect("skill pack should be written");
+    fs::write(
+        dir.join("templates").join("brief.md"),
+        "Operator note:\n{{input}}\nAttachments: {{attachments.summary}}\n",
+    )
+    .expect("template should be written");
+    fs::write(
+        dir.join("references").join("escalation.md"),
+        "Escalate to the on-call platform team.",
+    )
+    .expect("reference should be written");
+    fs::write(
+        dir.join("scripts").join("annotate.py"),
+        r#"import json, sys
+payload = json.load(sys.stdin)
+print(json.dumps({
+  "content": payload["rendered_prompt"] + "\nscript=ok",
+  "output_mode": "json",
+  "structured": {"script_status": "ok"}
+}))
+"#,
+    )
+    .expect("script should be written");
+
+    let pack = MarkdownSkillPack::load_from_dir(&dir).expect("markdown skill should load");
+    let workdir = dir.join("workdir");
+    fs::create_dir_all(&workdir).expect("workdir should exist");
+    let ctx = SkillContext {
+        tools: Arc::new(ToolRegistry::new()),
+        sandbox: Some(crate::SkillSandboxContext {
+            env_id: "python-capability-ops-helper".to_owned(),
+            kind: SandboxKind::Python,
+            scope: SandboxScope::Capability,
+            env_dir: dir.join("env"),
+            workdir,
+            dependency_spec: Vec::new(),
+            prepared: false,
+            reused: true,
+            selection_reason: "unit-test".to_owned(),
+            status: "ready".to_owned(),
+        }),
+    };
+
+    let output = block_on(pack.execute(
+        serde_json::json!({
+            "text": "Disk usage high on host-7",
+            "attachments": [
+                { "kind": "image", "filename": "dashboard.png" }
+            ]
+        }),
+        &ctx,
+    ))
+    .expect("markdown skill should execute");
+
+    assert!(
+        output
+            .content
+            .contains("Escalate to the on-call platform team.")
+    );
+    assert!(output.content.contains("Attachments: image:dashboard.png"));
+    assert!(output.content.contains("script=ok"));
+    let structured = output.structured.expect("structured output");
+    assert_eq!(
+        structured["markdown_pack"]["script"]["name"].as_str(),
+        Some("annotate.py")
+    );
+    assert_eq!(
+        structured["markdown_pack"]["references"][0]["name"].as_str(),
+        Some("escalation.md")
+    );
+    assert_eq!(
+        structured["markdown_pack"]["attachment_count"].as_u64(),
+        Some(1)
+    );
 
     fs::remove_dir_all(dir).ok();
 }

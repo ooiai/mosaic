@@ -61,6 +61,21 @@ MCP is not the sandbox layer.
 
 An MCP tool may appear in a capability trace that also includes sandbox and policy context, but those concerns are not owned here.
 
+## Operator Proof
+
+Operators should verify MCP behavior through:
+
+- CLI `mosaic inspect --verbose`
+- TUI `/inspect last`
+
+The expected taxonomy is:
+
+- `route_kind=tool`
+- `capability_source_kind=mcp`
+- `execution_target=mcp_server`
+
+If a run fails, higher layers should surface `failure_origin=mcp` rather than collapsing the error into a generic tool failure.
+
 ## Minimal Use
 
 ```rust

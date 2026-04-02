@@ -4,8 +4,9 @@ This is the k5 Telegram-first release-blocking acceptance lane when Telegram is 
 
 Maintenance rule:
 
-- Telegram is the current strongest real interactive GUI acceptance lane while TUI remains incomplete
-- when Telegram command behavior, skills, attachments, sandbox prerequisites, or multi-bot behavior change, update this runbook, [telegram-step-by-step.md](./telegram-step-by-step.md), and the matching examples in the same change set
+- Telegram is the strongest real external interactive GUI acceptance lane and release-facing channel proof
+- TUI is the primary local chat-first operator surface
+- when Telegram command behavior, skills, attachments, sandbox prerequisites, multi-bot behavior, or the TUI/Telegram proof split change, update this runbook, [telegram-step-by-step.md](./telegram-step-by-step.md), [tui.md](./tui.md), and the matching examples in the same change set
 
 If you have not created a Telegram bot before, start with [telegram-step-by-step.md](./telegram-step-by-step.md) first and then come back here for the stricter acceptance checklist.
 
@@ -153,6 +154,12 @@ Expected state:
 - the loaded capabilities include `summarize_notes` and `summarize_operator_note`
 - `mosaic model list` shows the profile capability summary, including attachment mode where relevant
 - sandbox status is healthy enough for any Telegram-exposed markdown skill pack or attachment processor env
+
+For local operator verification, the chat-first TUI should expose the same checks with:
+
+- `/sandbox status`
+- `/sandbox inspect <env>`
+- `/sandbox rebuild <env>`
 
 ## Start Gateway
 

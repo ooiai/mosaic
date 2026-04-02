@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use mosaic_control_protocol::RunDetailDto;
 use mosaic_runtime::events::RunEvent;
 use mosaic_session_core::{
     SessionRecord as StoredSessionRecord, TranscriptMessage, TranscriptRole, session_route_for_id,
@@ -11,20 +12,34 @@ use crate::mock;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandCategory {
     Gateway,
+    Adapter,
+    Node,
     Session,
     Model,
+    Run,
+    Sandbox,
+    Tool,
+    Skill,
+    Workflow,
+    Inspect,
     Ui,
-    Debug,
 }
 
 impl CommandCategory {
     pub fn label(self) -> &'static str {
         match self {
             Self::Gateway => "gateway",
+            Self::Adapter => "adapter",
+            Self::Node => "node",
             Self::Session => "session",
             Self::Model => "model",
+            Self::Run => "run",
+            Self::Sandbox => "sandbox",
+            Self::Tool => "tool",
+            Self::Skill => "skill",
+            Self::Workflow => "workflow",
+            Self::Inspect => "inspect",
             Self::Ui => "ui",
-            Self::Debug => "debug",
         }
     }
 }
@@ -38,115 +53,189 @@ pub struct CommandSpec {
     pub detail: &'static str,
 }
 
-pub const LOCAL_COMMANDS: [CommandSpec; 14] = [
+pub const LOCAL_COMMANDS: [CommandSpec; 22] = [
     CommandSpec {
         command: "/help",
         category: CommandCategory::Ui,
-        summary: "Open the command reference and shortcut guide",
+        summary: "Show the command reference inside the transcript",
         usage: "/help",
-        detail: "Lists command categories, keyboard shortcuts, and the current session/runtime bindings.",
-    },
-    CommandSpec {
-        command: "/logs",
-        category: CommandCategory::Ui,
-        summary: "Show or hide the observability feed",
-        usage: "/logs",
-        detail: "Toggles the right-side activity feed so operators can focus on chat or runtime events.",
-    },
-    CommandSpec {
-        command: "/gateway connect",
-        category: CommandCategory::Gateway,
-        summary: "Resume gateway refresh and event streaming",
-        usage: "/gateway connect",
-        detail: "Re-enables session refresh and runtime event delivery for the current TUI attach target.",
-    },
-    CommandSpec {
-        command: "/gateway disconnect",
-        category: CommandCategory::Gateway,
-        summary: "Pause gateway refresh and event streaming",
-        usage: "/gateway disconnect",
-        detail: "Leaves the TUI open but stops live refresh so the operator can inspect a frozen session state.",
+        detail: "Lists session, model, run, tool, skill, workflow, gateway, and inspect commands for this TUI session.",
     },
     CommandSpec {
         command: "/gateway status",
         category: CommandCategory::Gateway,
-        summary: "Show the current gateway transport and readiness summary",
+        summary: "Show gateway transport and readiness",
         usage: "/gateway status",
-        detail: "Prints the current gateway transport, readiness, and node summary into the session timeline.",
+        detail: "Prints the current gateway transport, readiness, node summary, and adapter state into the transcript.",
+    },
+    CommandSpec {
+        command: "/adapter status",
+        category: CommandCategory::Adapter,
+        summary: "Show adapter readiness and outbound state",
+        usage: "/adapter status",
+        detail: "Prints registered adapters, bot bindings, outbound readiness, and channel-facing detail inline in the transcript.",
+    },
+    CommandSpec {
+        command: "/node list",
+        category: CommandCategory::Node,
+        summary: "List node health and affinity state",
+        usage: "/node list",
+        detail: "Shows registered nodes, health, disconnect state, and whether the current session is pinned to a specific node.",
+    },
+    CommandSpec {
+        command: "/node show <id>",
+        category: CommandCategory::Node,
+        summary: "Inspect one node and its declared capabilities",
+        usage: "/node show <id>",
+        detail: "Prints one node's transport, platform, health, disconnect reason, and declared capabilities into the transcript.",
     },
     CommandSpec {
         command: "/session list",
         category: CommandCategory::Session,
-        summary: "List sessions currently loaded into the operator console",
+        summary: "List known sessions",
         usage: "/session list",
-        detail: "Shows known local or remote sessions with the current selection marker so operators can jump quickly.",
-    },
-    CommandSpec {
-        command: "/session show",
-        category: CommandCategory::Session,
-        summary: "Explain the selected session route, memory, and references",
-        usage: "/session show",
-        detail: "Prints the active session route, runtime binding, memory summary, compressed context, and references.",
-    },
-    CommandSpec {
-        command: "/session switch <id>",
-        category: CommandCategory::Session,
-        summary: "Switch the active operator conversation",
-        usage: "/session switch <id>",
-        detail: "Moves the composer to another session and refreshes that session from the gateway.",
+        detail: "Shows the sessions currently loaded into this TUI context so the operator can switch without leaving chat.",
     },
     CommandSpec {
         command: "/session new <id>",
         category: CommandCategory::Session,
-        summary: "Create or stage a new session id for the next turn",
+        summary: "Create or stage a new session",
         usage: "/session new <id>",
-        detail: "Adds a new session placeholder immediately; the session is persisted on the next submitted turn.",
+        detail: "Creates a new active session target. The next submitted turn persists the session if it does not already exist.",
     },
     CommandSpec {
-        command: "/session state <active|waiting|degraded>",
+        command: "/session show",
         category: CommandCategory::Session,
-        summary: "Override the selected session state label",
-        usage: "/session state <active|waiting|degraded>",
-        detail: "Useful in mock mode or demos when the operator wants to pin a local state marker.",
+        summary: "Explain the current session binding",
+        usage: "/session show",
+        detail: "Prints the active session route, run ids, channel metadata, memory summary, compressed context, and references.",
     },
     CommandSpec {
-        command: "/session model <name>",
+        command: "/session switch <id>",
         category: CommandCategory::Session,
-        summary: "Override the selected session model label",
-        usage: "/session model <name>",
-        detail: "Adjusts the visible session model label without changing the next-turn runtime profile.",
+        summary: "Switch the active conversation",
+        usage: "/session switch <id>",
+        detail: "Moves the composer to another session and refreshes that session from the gateway or local runtime store.",
     },
     CommandSpec {
         command: "/model list",
         category: CommandCategory::Model,
-        summary: "List runtime profiles available to this TUI session",
+        summary: "List available runtime profiles",
         usage: "/model list",
-        detail: "Prints configured profiles with provider and model so the next turn can be scheduled intentionally.",
+        detail: "Prints configured runtime profiles with provider type and model so the next turn can be scheduled intentionally.",
     },
     CommandSpec {
         command: "/model use <profile>",
         category: CommandCategory::Model,
-        summary: "Switch the real runtime profile for future turns",
+        summary: "Switch the profile for future turns",
         usage: "/model use <profile>",
         detail: "Updates the active profile used by interactive submissions; the next message will use the new profile.",
     },
     CommandSpec {
-        command: "/runtime <status>",
-        category: CommandCategory::Debug,
-        summary: "Set the control runtime status label",
-        usage: "/runtime <status>",
-        detail: "Debug helper for setting the local runtime status badge when working in mock mode or demos.",
+        command: "/model show",
+        category: CommandCategory::Model,
+        summary: "Show the current profile and model binding",
+        usage: "/model show",
+        detail: "Explains which runtime profile is selected for the next turn and which provider/model the current session last used.",
+    },
+    CommandSpec {
+        command: "/run stop",
+        category: CommandCategory::Run,
+        summary: "Cancel the active run for this session",
+        usage: "/run stop",
+        detail: "Sends a real cancel request to the attached gateway for the current run when one is active.",
+    },
+    CommandSpec {
+        command: "/run retry",
+        category: CommandCategory::Run,
+        summary: "Retry the last completed run",
+        usage: "/run retry",
+        detail: "Requests a real retry from the attached gateway using the last known gateway run id for this session.",
+    },
+    CommandSpec {
+        command: "/sandbox status",
+        category: CommandCategory::Sandbox,
+        summary: "Show workspace sandbox lifecycle status",
+        usage: "/sandbox status",
+        detail: "Prints Python and Node sandbox strategies, install policies, runtime availability, and current env counts into the transcript.",
+    },
+    CommandSpec {
+        command: "/sandbox inspect <env>",
+        category: CommandCategory::Sandbox,
+        summary: "Inspect one sandbox env record",
+        usage: "/sandbox inspect <env>",
+        detail: "Loads one sandbox env record and renders lifecycle state, install policy, dependencies, and failure details inline.",
+    },
+    CommandSpec {
+        command: "/sandbox rebuild <env>",
+        category: CommandCategory::Sandbox,
+        summary: "Rebuild a sandbox env",
+        usage: "/sandbox rebuild <env>",
+        detail: "Deletes and recreates one sandbox env so the next capability run can reuse a fresh local execution environment.",
+    },
+    CommandSpec {
+        command: "/sandbox clean",
+        category: CommandCategory::Sandbox,
+        summary: "Clean sandbox run and attachment workdirs",
+        usage: "/sandbox clean",
+        detail: "Removes sandbox run workdirs and attachment workdirs without leaving the chat transcript.",
+    },
+    CommandSpec {
+        command: "/inspect last",
+        category: CommandCategory::Inspect,
+        summary: "Inspect the most recent run inline",
+        usage: "/inspect last",
+        detail: "Fetches the most recent run detail for the active session and renders the summary inline in the transcript.",
+    },
+    CommandSpec {
+        command: "/tool <name> <input>",
+        category: CommandCategory::Tool,
+        summary: "Invoke a tool explicitly",
+        usage: "/tool <name> <input>",
+        detail: "Submits a real run that explicitly targets one tool and shows the capability events inline in the transcript.",
+    },
+    CommandSpec {
+        command: "/skill <name> <input>",
+        category: CommandCategory::Skill,
+        summary: "Invoke a skill explicitly",
+        usage: "/skill <name> <input>",
+        detail: "Submits a real run that explicitly targets one skill and streams the result back into the active transcript.",
+    },
+    CommandSpec {
+        command: "/workflow <name> <input>",
+        category: CommandCategory::Workflow,
+        summary: "Invoke a workflow explicitly",
+        usage: "/workflow <name> <input>",
+        detail: "Submits a real run that explicitly targets one workflow and renders step activity inline in the transcript.",
     },
 ];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerRunRequest {
+    pub input: String,
+    pub tool: Option<String>,
+    pub skill: Option<String>,
+    pub workflow: Option<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppAction {
     Continue,
     Quit,
-    Submit(String),
+    SubmitRun(ComposerRunRequest),
     GatewayConnect,
     GatewayDisconnect,
+    AdapterStatus,
+    NodeList,
+    NodeShow(String),
+    SandboxStatus,
+    SandboxInspect(String),
+    SandboxRebuild(String),
+    SandboxClean,
     SwitchSession(String),
+    CancelRun(String),
+    RetryRun(String),
+    InspectRun(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +266,11 @@ pub struct ProfileOption {
     pub name: String,
     pub model: String,
     pub provider_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillOption {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -321,9 +415,15 @@ pub struct SessionRecord {
     pub state: SessionState,
     pub unread: usize,
     pub draft: String,
+    pub transcript_len: usize,
+    pub current_run_id: Option<String>,
+    pub current_gateway_run_id: Option<String>,
+    pub last_gateway_run_id: Option<String>,
     pub memory_summary: Option<String>,
     pub compressed_context: Option<String>,
     pub references: Vec<String>,
+    pub streaming_preview: Option<String>,
+    pub streaming_run_id: Option<String>,
     pub timeline: Vec<TimelineEntry>,
 }
 
@@ -358,6 +458,7 @@ pub struct App {
     pub control_model: String,
     pub selected_profile: String,
     pub available_profiles: Vec<ProfileOption>,
+    pub available_skills: Vec<SkillOption>,
     pub extension_summary: Option<String>,
     pub extension_policy_summary: Option<String>,
     pub extension_errors: Vec<String>,
@@ -381,25 +482,21 @@ impl App {
             .to_owned();
         let workspace_path = workspace_path.display().to_string();
 
-        Self {
+        let mut app = Self {
             mode: AppMode::Mock,
             workspace_name,
             workspace_path,
             sessions: mock::sessions(),
             activity: mock::activity_feed(),
-            surface: if start_in_resume {
-                Surface::Resume
-            } else {
-                Surface::Console
-            },
+            surface: Surface::Console,
             selected_session: 0,
             resume_scope: ResumeScope::Local,
             resume_query: String::new(),
             resume_search: false,
             command_menu_index: 0,
-            show_console_history: false,
+            show_console_history: true,
             focus: Focus::Composer,
-            show_observability: true,
+            show_observability: false,
             show_help_overlay: false,
             timeline_scroll: 0,
             observability_scroll: 0,
@@ -408,6 +505,7 @@ impl App {
             control_model: "gpt-5.4-control".to_owned(),
             selected_profile: "gpt-5.4-control".to_owned(),
             available_profiles: Vec::new(),
+            available_skills: Vec::new(),
             extension_summary: None,
             extension_policy_summary: None,
             extension_errors: Vec::new(),
@@ -416,7 +514,14 @@ impl App {
             node_summary: None,
             node_detail: None,
             heartbeat: 0,
+        };
+        if start_in_resume {
+            app.push_system_entry(
+                "Chat-first TUI",
+                "Resume mode now stays inside the transcript. Use /session list to browse sessions and /session switch <id> to jump.",
+            );
         }
+        app
     }
 
     pub fn new_interactive(
@@ -425,6 +530,7 @@ impl App {
         profile: String,
         model: String,
         available_profiles: Vec<ProfileOption>,
+        available_skills: Vec<SkillOption>,
         start_in_resume: bool,
     ) -> Self {
         let workspace_name = workspace_path
@@ -434,7 +540,7 @@ impl App {
             .to_owned();
         let workspace_path = workspace_path.display().to_string();
 
-        Self {
+        let mut app = Self {
             mode: AppMode::Interactive,
             workspace_name,
             workspace_path,
@@ -447,11 +553,7 @@ impl App {
                     session_id, profile, model
                 ),
             }],
-            surface: if start_in_resume {
-                Surface::Resume
-            } else {
-                Surface::Console
-            },
+            surface: Surface::Console,
             selected_session: 0,
             resume_scope: ResumeScope::Local,
             resume_query: String::new(),
@@ -459,7 +561,7 @@ impl App {
             command_menu_index: 0,
             show_console_history: true,
             focus: Focus::Composer,
-            show_observability: true,
+            show_observability: false,
             show_help_overlay: false,
             timeline_scroll: 0,
             observability_scroll: 0,
@@ -468,6 +570,7 @@ impl App {
             control_model: model,
             selected_profile: profile,
             available_profiles,
+            available_skills,
             extension_summary: None,
             extension_policy_summary: None,
             extension_errors: Vec::new(),
@@ -476,7 +579,14 @@ impl App {
             node_summary: None,
             node_detail: None,
             heartbeat: 0,
+        };
+        if start_in_resume {
+            app.push_system_entry(
+                "Chat-first TUI",
+                "Resume mode now stays inside the transcript. Use /session list or /session switch <id> to move between sessions.",
+            );
         }
+        app
     }
 
     pub fn is_interactive(&self) -> bool {
@@ -528,6 +638,19 @@ impl App {
         self.runtime_status = runtime_status_from_run_label(run_label).to_owned();
 
         if let Some(view) = self.sessions.get_mut(self.selected_session) {
+            let transcript_len = session.transcript.len();
+            if view.transcript_len == 0 || transcript_len < view.transcript_len {
+                view.timeline = session.transcript.iter().map(transcript_entry).collect();
+            } else {
+                for message in session.transcript.iter().skip(view.transcript_len) {
+                    view.timeline.push(transcript_entry(message));
+                }
+            }
+            view.transcript_len = transcript_len;
+            if !runtime_status_is_busy(run_label) {
+                view.streaming_preview = None;
+                view.streaming_run_id = None;
+            }
             view.id = session.id.clone();
             view.title = session.title.clone();
             view.origin = origin.to_owned();
@@ -554,6 +677,9 @@ impl App {
             view.state = state;
             view.unread = unread;
             view.draft = draft;
+            view.current_run_id = session.run.current_run_id.clone();
+            view.current_gateway_run_id = session.run.current_gateway_run_id.clone();
+            view.last_gateway_run_id = session.gateway.last_gateway_run_id.clone();
             view.memory_summary = session.memory.latest_summary.clone();
             view.compressed_context = session.memory.compressed_context.clone();
             view.references = session
@@ -561,7 +687,6 @@ impl App {
                 .iter()
                 .map(|reference| format!("{} ({})", reference.session_id, reference.reason))
                 .collect();
-            view.timeline = session.transcript.iter().map(transcript_entry).collect();
         }
 
         self.show_console_history = true;
@@ -579,50 +704,25 @@ impl App {
             return AppAction::Quit;
         }
 
-        if self.show_help_overlay {
-            match key.code {
-                KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('?') => {
-                    self.show_help_overlay = false;
-                }
-                _ => {}
-            }
-            return AppAction::Continue;
-        }
-
         if matches!(key.code, KeyCode::F(1))
-            || (matches!(key.code, KeyCode::Char('?')) && self.focus != Focus::Composer)
+            || (matches!(key.code, KeyCode::Char('?')) && self.active_draft().is_empty())
         {
-            self.show_help_overlay = true;
-            return AppAction::Continue;
-        }
-
-        if self.surface == Surface::Resume {
-            return self.handle_resume_key(key);
-        }
-
-        if matches!(
-            key,
-            KeyEvent {
-                code: KeyCode::Char('l'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            }
-        ) {
-            self.show_observability = !self.show_observability;
-            if !self.show_observability && self.focus == Focus::Observability {
-                self.focus = Focus::Sessions;
-            }
+            self.push_help();
             return AppAction::Continue;
         }
 
         if self.command_menu_active() {
             match key.code {
-                KeyCode::Tab => {
+                KeyCode::Down | KeyCode::Char('j') => {
                     self.select_next_command_match();
                     return AppAction::Continue;
                 }
-                KeyCode::BackTab => {
+                KeyCode::Up | KeyCode::Char('k') => {
                     self.select_previous_command_match();
+                    return AppAction::Continue;
+                }
+                KeyCode::Tab if self.command_menu_should_complete() => {
+                    self.complete_selected_command();
                     return AppAction::Continue;
                 }
                 _ => {}
@@ -630,28 +730,30 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Char('q') if self.focus != Focus::Composer => AppAction::Quit,
-            KeyCode::Char('r') if self.focus != Focus::Composer => {
-                self.open_resume();
-                AppAction::Continue
-            }
-            KeyCode::Tab => {
-                self.focus = self.advance_focus();
-                AppAction::Continue
-            }
-            KeyCode::BackTab => {
-                self.open_resume();
-                AppAction::Continue
-            }
             KeyCode::Esc => {
-                self.focus = Focus::Sessions;
+                if self.command_menu_active() || !self.active_draft().is_empty() {
+                    self.active_session_mut().draft.clear();
+                    self.command_menu_index = 0;
+                }
                 AppAction::Continue
             }
-            KeyCode::Char('i') if self.focus != Focus::Composer => {
-                self.focus = Focus::Composer;
+            KeyCode::PageDown => {
+                self.timeline_scroll = self.timeline_scroll.saturating_add(5);
                 AppAction::Continue
             }
-            _ => self.handle_focus_key(key),
+            KeyCode::PageUp => {
+                self.timeline_scroll = self.timeline_scroll.saturating_sub(5);
+                AppAction::Continue
+            }
+            KeyCode::Home => {
+                self.timeline_scroll = 0;
+                AppAction::Continue
+            }
+            KeyCode::End => {
+                self.timeline_scroll = self.timeline_scroll.saturating_add(20);
+                AppAction::Continue
+            }
+            _ => self.handle_composer_key(key),
         }
     }
 
@@ -665,9 +767,6 @@ impl App {
                 self.runtime_status = "running".to_owned();
                 self.active_session_mut().state = SessionState::Active;
                 self.push_activity("runtime", "Run started");
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "runtime",
@@ -685,9 +784,6 @@ Input: {}",
                     "workflow",
                     format!("Workflow started: {} ({} steps)", name, step_count),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "workflow",
@@ -699,60 +795,70 @@ Input: {}",
                 workflow,
                 step,
                 kind,
+                summary,
             } => {
                 self.push_activity(
                     "workflow",
                     format!("Step started: {}.{} ({})", workflow, step, kind),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "workflow",
                     &format!("Workflow step: {}", step),
-                    &format!("workflow={}\nkind={}", workflow, kind),
+                    &match summary {
+                        Some(summary) => {
+                            format!("workflow={}\nkind={}\n{}", workflow, kind, summary)
+                        }
+                        None => format!("workflow={}\nkind={}", workflow, kind),
+                    },
                 );
             }
-            RunEvent::WorkflowStepFinished { workflow, step } => {
+            RunEvent::WorkflowStepFinished {
+                workflow,
+                step,
+                summary,
+            } => {
                 self.push_activity("workflow", format!("Step finished: {}.{}", workflow, step));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "workflow",
                     &format!("Workflow step finished: {}", step),
-                    &format!("workflow={}", workflow),
+                    &match summary {
+                        Some(summary) => format!("workflow={}\n{}", workflow, summary),
+                        None => format!("workflow={}", workflow),
+                    },
                 );
             }
             RunEvent::WorkflowStepFailed {
                 workflow,
                 step,
                 error,
+                summary,
             } => {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("workflow", format!("Step failed: {}.{}", workflow, step));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "workflow",
                     &format!("Workflow step failed: {}", step),
-                    &format!(
-                        "workflow={}\nerror={}",
-                        workflow,
-                        truncate_for_timeline(&error, 180)
-                    ),
+                    &match summary {
+                        Some(summary) => format!(
+                            "workflow={}\n{}\nerror={}",
+                            workflow,
+                            summary,
+                            truncate_for_timeline(&error, 180)
+                        ),
+                        None => format!(
+                            "workflow={}\nerror={}",
+                            workflow,
+                            truncate_for_timeline(&error, 180)
+                        ),
+                    },
                 );
             }
             RunEvent::WorkflowFinished { name } => {
                 self.push_activity("workflow", format!("Workflow finished: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "workflow",
@@ -760,46 +866,55 @@ Input: {}",
                     &format!("Workflow: {}", name),
                 );
             }
-            RunEvent::SkillStarted { name } => {
+            RunEvent::SkillStarted { name, summary } => {
                 self.push_activity("skill", &format!("Executing skill: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "skill",
                     "Skill started",
-                    &format!("Skill: {}", name),
+                    &match summary {
+                        Some(summary) => format!("Skill: {}\n{}", name, summary),
+                        None => format!("Skill: {}", name),
+                    },
                 );
             }
-            RunEvent::SkillFinished { name } => {
+            RunEvent::SkillFinished { name, summary } => {
                 self.push_activity("skill", &format!("Skill finished: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Agent,
                     "skill",
                     "Skill finished",
-                    &format!("Skill: {}", name),
+                    &match summary {
+                        Some(summary) => format!("Skill: {}\n{}", name, summary),
+                        None => format!("Skill: {}", name),
+                    },
                 );
             }
-            RunEvent::SkillFailed { name, error } => {
+            RunEvent::SkillFailed {
+                name,
+                error,
+                summary,
+            } => {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("skill", &format!("Skill failed: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "skill",
                     "Skill failed",
-                    &format!(
-                        "Skill: {}\nError: {}",
-                        name,
-                        truncate_for_timeline(&error, 180)
-                    ),
+                    &match summary {
+                        Some(summary) => format!(
+                            "Skill: {}\n{}\nError: {}",
+                            name,
+                            summary,
+                            truncate_for_timeline(&error, 180)
+                        ),
+                        None => format!(
+                            "Skill: {}\nError: {}",
+                            name,
+                            truncate_for_timeline(&error, 180)
+                        ),
+                    },
                 );
             }
             RunEvent::ProviderRequest {
@@ -817,9 +932,6 @@ Input: {}",
                         provider_type, profile, model, tool_count, message_count, max_attempts
                     ),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "provider",
@@ -847,9 +959,6 @@ Input: {}",
                         provider_type, profile, model, attempt, max_attempts, kind
                     ),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "provider",
@@ -883,9 +992,6 @@ Input: {}",
                         provider_type, profile, model, kind
                     ),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "provider",
@@ -900,50 +1006,64 @@ Input: {}",
                     ),
                 );
             }
-            RunEvent::ToolCalling { name, call_id } => {
+            RunEvent::ToolCalling {
+                name,
+                call_id,
+                summary,
+            } => {
                 self.push_activity("tool", &format!("Calling tool: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Tool,
                     "tool",
                     &format!("Tool call: {}", name),
-                    &format!("call_id={}", call_id),
+                    &match summary {
+                        Some(summary) => format!("call_id={}\n{}", call_id, summary),
+                        None => format!("call_id={}", call_id),
+                    },
                 );
             }
-            RunEvent::ToolFinished { name, call_id } => {
+            RunEvent::ToolFinished {
+                name,
+                call_id,
+                summary,
+            } => {
                 self.push_activity("tool", &format!("Tool finished: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Tool,
                     "tool",
                     &format!("Tool finished: {}", name),
-                    &format!("call_id={}", call_id),
+                    &match summary {
+                        Some(summary) => format!("call_id={}\n{}", call_id, summary),
+                        None => format!("call_id={}", call_id),
+                    },
                 );
             }
             RunEvent::ToolFailed {
                 name,
                 call_id,
                 error,
+                summary,
             } => {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("tool", &format!("Tool failed: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "tool",
                     &format!("Tool failed: {}", name),
-                    &format!(
-                        "call_id={}\nerror={}",
-                        call_id,
-                        truncate_for_timeline(&error, 180)
-                    ),
+                    &match summary {
+                        Some(summary) => format!(
+                            "call_id={}\n{}\nerror={}",
+                            call_id,
+                            summary,
+                            truncate_for_timeline(&error, 180)
+                        ),
+                        None => format!(
+                            "call_id={}\nerror={}",
+                            call_id,
+                            truncate_for_timeline(&error, 180)
+                        ),
+                    },
                 );
             }
             RunEvent::CapabilityJobQueued {
@@ -957,9 +1077,6 @@ Input: {}",
                     "capability",
                     &format!("Queued capability job: {} ({}, risk={})", name, kind, risk),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Tool,
                     "capability",
@@ -978,9 +1095,6 @@ permissions={}",
             }
             RunEvent::CapabilityJobStarted { job_id, name } => {
                 self.push_activity("capability", &format!("Capability running: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Tool,
                     "capability",
@@ -998,9 +1112,6 @@ permissions={}",
                     "capability",
                     &format!("Capability retry {}: {}", attempt, name),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "capability",
@@ -1025,9 +1136,6 @@ error={}",
                     "capability",
                     &format!("Capability finished: {} ({})", name, status),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::Tool,
                     "capability",
@@ -1050,9 +1158,6 @@ summary={}",
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("capability", &format!("Capability failed: {}", name));
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "capability",
@@ -1076,9 +1181,6 @@ error={}",
                     "permission",
                     &format!("Permission denied for capability: {}", name),
                 );
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "permission",
@@ -1099,6 +1201,10 @@ reason={}",
                 self.runtime_status = "streaming".to_owned();
                 self.active_session_mut().state = SessionState::Active;
                 if self.is_interactive() {
+                    let session = self.active_session_mut();
+                    session.streaming_run_id = Some(run_id);
+                    let preview = session.streaming_preview.get_or_insert_with(String::new);
+                    preview.push_str(&chunk);
                     return;
                 }
                 self.push_timeline(
@@ -1120,6 +1226,12 @@ chunk={}",
                 self.active_session_mut().state = SessionState::Active;
                 self.push_activity("runtime", "Final answer ready");
                 if self.is_interactive() {
+                    self.push_timeline(
+                        TimelineKind::Agent,
+                        "runtime",
+                        "Final answer ready",
+                        &format!("run_id={run_id}\nWaiting for the final transcript to land."),
+                    );
                     return;
                 }
                 self.push_timeline(
@@ -1141,6 +1253,16 @@ Assistant output is ready to present.",
                 self.active_session_mut().state = SessionState::Waiting;
                 self.push_activity("runtime", "Run finished");
                 if self.is_interactive() {
+                    self.push_timeline(
+                        TimelineKind::Agent,
+                        "runtime",
+                        "Run finished",
+                        &format!(
+                            "run_id={}\nOutput preview: {}",
+                            run_id,
+                            truncate_for_timeline(&output_preview, 180)
+                        ),
+                    );
                     return;
                 }
                 self.push_timeline(
@@ -1163,10 +1285,9 @@ Output preview: {}",
             } => {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
+                self.active_session_mut().streaming_preview = None;
+                self.active_session_mut().streaming_run_id = None;
                 self.push_activity("runtime", "Run failed");
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "runtime",
@@ -1184,10 +1305,9 @@ error={}",
             RunEvent::RunCanceled { run_id, reason } => {
                 self.runtime_status = "canceled".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
+                self.active_session_mut().streaming_preview = None;
+                self.active_session_mut().streaming_run_id = None;
                 self.push_activity("runtime", "Run canceled");
-                if self.is_interactive() {
-                    return;
-                }
                 self.push_timeline(
                     TimelineKind::System,
                     "runtime",
@@ -1223,10 +1343,31 @@ reason={}",
         &self.active_session().draft
     }
 
+    pub fn active_streaming_preview(&self) -> Option<&str> {
+        self.active_session().streaming_preview.as_deref()
+    }
+
+    pub fn current_run_identifier(&self) -> Option<&str> {
+        self.active_session()
+            .current_gateway_run_id
+            .as_deref()
+            .or(self.active_session().current_run_id.as_deref())
+    }
+
+    pub fn last_run_identifier(&self) -> Option<&str> {
+        self.active_session()
+            .last_gateway_run_id
+            .as_deref()
+            .or(self.active_session().current_gateway_run_id.as_deref())
+            .or(self.active_session().current_run_id.as_deref())
+    }
+
+    pub fn visible_timeline(&self) -> &[TimelineEntry] {
+        &self.active_session().timeline
+    }
+
     pub fn input_mode(&self) -> InputMode {
-        if self.surface == Surface::Resume && self.resume_search {
-            InputMode::Search
-        } else if self.active_draft().trim_start().starts_with('/') {
+        if self.active_draft().trim_start().starts_with('/') {
             InputMode::Command
         } else {
             InputMode::Chat
@@ -1284,56 +1425,36 @@ reason={}",
 
     pub fn composer_placeholder(&self) -> &'static str {
         match self.input_mode() {
-            InputMode::Chat => {
-                "Send a message to the active session. Use / for local commands or Shift+Tab to browse sessions."
-            }
+            InputMode::Chat => "Send a message to the active session. Type / to browse commands.",
             InputMode::Command => {
-                "Run a local control command. Tab cycles suggestions and Enter executes the highlighted command."
+                "Run a control command. Tab accepts the highlighted command and Enter executes it."
             }
-            InputMode::Search => "Filter sessions by id, title, route, channel, or origin.",
+            InputMode::Search => "Type / to browse commands.",
         }
     }
 
     pub fn enter_hint(&self) -> String {
-        match self.surface {
-            Surface::Resume => {
-                if self.resume_search {
-                    "Apply the search filter and keep browsing sessions".to_owned()
+        match self.input_mode() {
+            InputMode::Chat => {
+                if self.is_interactive() {
+                    format!("Send to session {}", self.session_label())
                 } else {
-                    format!("Open session {}", self.session_label())
+                    "Queue a local mock instruction".to_owned()
                 }
             }
-            Surface::Console => match self.input_mode() {
-                InputMode::Chat => {
-                    if self.is_interactive() {
-                        format!("Send to session {}", self.session_label())
-                    } else {
-                        "Queue a local mock instruction".to_owned()
-                    }
+            InputMode::Command => {
+                if self.command_menu_should_complete() {
+                    "Complete the highlighted slash command".to_owned()
+                } else {
+                    "Run the slash command".to_owned()
                 }
-                InputMode::Command => {
-                    if self.command_menu_should_complete() {
-                        "Complete the highlighted slash command".to_owned()
-                    } else {
-                        "Run the local slash command".to_owned()
-                    }
-                }
-                InputMode::Search => "Apply the search filter".to_owned(),
-            },
+            }
+            InputMode::Search => "Apply the search filter".to_owned(),
         }
     }
 
     pub fn escape_hint(&self) -> &'static str {
-        match self.surface {
-            Surface::Resume => {
-                if self.resume_search {
-                    "leave search"
-                } else {
-                    "back to console"
-                }
-            }
-            Surface::Console => "focus sessions",
-        }
+        "clear draft or close the command popup"
     }
 
     pub fn command_query(&self) -> Option<&str> {
@@ -1353,6 +1474,23 @@ reason={}",
 
     pub fn command_suggestions(&self) -> Vec<CommandSpec> {
         suggest_commands(self.command_query().unwrap_or_default())
+    }
+
+    pub fn command_completion_suffix(&self) -> Option<String> {
+        if let Some(completion) = self.selected_skill_completion() {
+            return completion
+                .strip_prefix(self.active_draft())
+                .filter(|suffix| !suffix.is_empty())
+                .map(str::to_owned);
+        }
+
+        let command = self.selected_command_match()?;
+        let completion = command_completion(command.command);
+        let draft = self.active_draft();
+        completion
+            .strip_prefix(draft)
+            .filter(|suffix| !suffix.is_empty())
+            .map(str::to_owned)
     }
 
     pub fn sync_session_catalog(
@@ -1390,6 +1528,24 @@ reason={}",
                 }
                 if session.timeline.is_empty() {
                     session.timeline = existing.timeline.clone();
+                }
+                if session.transcript_len == 0 {
+                    session.transcript_len = existing.transcript_len;
+                }
+                if session.current_run_id.is_none() {
+                    session.current_run_id = existing.current_run_id.clone();
+                }
+                if session.current_gateway_run_id.is_none() {
+                    session.current_gateway_run_id = existing.current_gateway_run_id.clone();
+                }
+                if session.last_gateway_run_id.is_none() {
+                    session.last_gateway_run_id = existing.last_gateway_run_id.clone();
+                }
+                if session.streaming_preview.is_none() {
+                    session.streaming_preview = existing.streaming_preview.clone();
+                }
+                if session.streaming_run_id.is_none() {
+                    session.streaming_run_id = existing.streaming_run_id.clone();
                 }
                 if session.actor.is_none() {
                     session.actor = existing.actor.clone();
@@ -1430,138 +1586,6 @@ reason={}",
             .collect()
     }
 
-    fn handle_focus_key(&mut self, key: KeyEvent) -> AppAction {
-        match self.focus {
-            Focus::Sessions => {
-                self.handle_sessions_key(key.code);
-                AppAction::Continue
-            }
-            Focus::Timeline => {
-                self.handle_timeline_key(key.code);
-                AppAction::Continue
-            }
-            Focus::Composer => self.handle_composer_key(key),
-            Focus::Observability => {
-                self.handle_observability_key(key.code);
-                AppAction::Continue
-            }
-        }
-    }
-
-    fn handle_resume_key(&mut self, key: KeyEvent) -> AppAction {
-        if self.resume_search {
-            return self.handle_resume_search_key(key);
-        }
-
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => self.select_next_visible_session(),
-            KeyCode::Up | KeyCode::Char('k') => self.select_previous_visible_session(),
-            KeyCode::Tab => self.set_resume_scope(self.resume_scope.next()),
-            KeyCode::BackTab => self.set_resume_scope(self.resume_scope.previous()),
-            KeyCode::Char('/') => self.resume_search = true,
-            KeyCode::Enter => {
-                let selected_id = self.active_session().id.clone();
-                self.surface = Surface::Console;
-                self.show_console_history = true;
-                self.focus = Focus::Composer;
-                if self.is_interactive() {
-                    return AppAction::SwitchSession(selected_id);
-                }
-            }
-            KeyCode::Esc => {
-                self.surface = Surface::Console;
-                self.focus = Focus::Composer;
-            }
-            _ => {}
-        }
-
-        AppAction::Continue
-    }
-
-    fn handle_resume_search_key(&mut self, key: KeyEvent) -> AppAction {
-        match key.code {
-            KeyCode::Esc => {
-                self.resume_search = false;
-                self.resume_query.clear();
-                self.ensure_selected_session_visible();
-            }
-            KeyCode::Enter => {
-                self.resume_search = false;
-                self.ensure_selected_session_visible();
-            }
-            KeyCode::Backspace => {
-                self.resume_query.pop();
-                self.ensure_selected_session_visible();
-            }
-            KeyCode::Char(character)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.resume_query.push(character);
-                self.ensure_selected_session_visible();
-            }
-            _ => {}
-        }
-
-        AppAction::Continue
-    }
-
-    fn handle_sessions_key(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Down | KeyCode::Char('j') => self.select_next_session(),
-            KeyCode::Up | KeyCode::Char('k') => self.select_previous_session(),
-            KeyCode::Home => self.select_session(0),
-            KeyCode::End => {
-                if !self.sessions.is_empty() {
-                    self.select_session(self.sessions.len() - 1);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_timeline_key(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.timeline_scroll = self.timeline_scroll.saturating_add(1);
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.timeline_scroll = self.timeline_scroll.saturating_sub(1);
-            }
-            KeyCode::PageDown => {
-                self.timeline_scroll = self.timeline_scroll.saturating_add(5);
-            }
-            KeyCode::PageUp => {
-                self.timeline_scroll = self.timeline_scroll.saturating_sub(5);
-            }
-            KeyCode::Home => {
-                self.timeline_scroll = 0;
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_observability_key(&mut self, key: KeyCode) {
-        match key {
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.observability_scroll = self.observability_scroll.saturating_add(1);
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.observability_scroll = self.observability_scroll.saturating_sub(1);
-            }
-            KeyCode::PageDown => {
-                self.observability_scroll = self.observability_scroll.saturating_add(5);
-            }
-            KeyCode::PageUp => {
-                self.observability_scroll = self.observability_scroll.saturating_sub(5);
-            }
-            KeyCode::Home => {
-                self.observability_scroll = 0;
-            }
-            _ => {}
-        }
-    }
-
     fn handle_composer_key(&mut self, key: KeyEvent) -> AppAction {
         if self.command_menu_active() {
             match key.code {
@@ -1571,10 +1595,6 @@ reason={}",
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     self.select_previous_command_match();
-                    return AppAction::Continue;
-                }
-                KeyCode::Tab => {
-                    self.select_next_command_match();
                     return AppAction::Continue;
                 }
                 KeyCode::Enter if self.command_menu_should_complete() => {
@@ -1622,24 +1642,26 @@ reason={}",
                 let model = self.control_model.clone();
                 self.runtime_status = "running".to_owned();
                 self.active_session_mut().state = SessionState::Active;
-                self.push_timeline(
-                    TimelineKind::Operator,
-                    "operator",
-                    "Message queued",
-                    &message,
-                );
                 self.push_system_entry(
                     "Assistant pending",
                     format!(
-                        "Waiting for session {} to reply via profile {} ({}).",
-                        session_id, profile, model
+                        "Waiting for session {} to reply via profile {} ({}).\ninput: {}",
+                        session_id,
+                        profile,
+                        model,
+                        truncate_for_timeline(&message, 180)
                     ),
                 );
                 self.push_activity(
                     "composer",
                     format!("Submitted message to session {}", session_id),
                 );
-                AppAction::Submit(message.clone())
+                AppAction::SubmitRun(ComposerRunRequest {
+                    input: message.clone(),
+                    tool: None,
+                    skill: None,
+                    workflow: None,
+                })
             }
         } else {
             self.queue_operator_instruction(&message);
@@ -1669,69 +1691,10 @@ reason={}",
         );
     }
 
-    fn select_next_session(&mut self) {
-        if self.sessions.is_empty() {
-            return;
-        }
-
-        let next = (self.selected_session + 1) % self.sessions.len();
-        self.select_session(next);
-    }
-
-    fn select_previous_session(&mut self) {
-        if self.sessions.is_empty() {
-            return;
-        }
-
-        let next = if self.selected_session == 0 {
-            self.sessions.len() - 1
-        } else {
-            self.selected_session - 1
-        };
-        self.select_session(next);
-    }
-
     fn select_session(&mut self, index: usize) {
         self.selected_session = index;
         self.timeline_scroll = 0;
         self.sessions[index].unread = 0;
-    }
-
-    fn select_next_visible_session(&mut self) {
-        let visible = self.visible_session_indices();
-        if visible.is_empty() {
-            return;
-        }
-
-        let current = visible
-            .iter()
-            .position(|index| *index == self.selected_session)
-            .unwrap_or(0);
-        let next = (current + 1) % visible.len();
-        self.select_session(visible[next]);
-    }
-
-    fn select_previous_visible_session(&mut self) {
-        let visible = self.visible_session_indices();
-        if visible.is_empty() {
-            return;
-        }
-
-        let current = visible
-            .iter()
-            .position(|index| *index == self.selected_session)
-            .unwrap_or(0);
-        let next = if current == 0 {
-            visible.len() - 1
-        } else {
-            current - 1
-        };
-        self.select_session(visible[next]);
-    }
-
-    fn set_resume_scope(&mut self, scope: ResumeScope) {
-        self.resume_scope = scope;
-        self.ensure_selected_session_visible();
     }
 
     fn ensure_selected_session_visible(&mut self) {
@@ -1800,22 +1763,6 @@ reason={}",
         matches_scope && matches_query
     }
 
-    fn advance_focus(&self) -> Focus {
-        let next = self.focus.next();
-        if !self.show_observability && next == Focus::Observability {
-            next.next()
-        } else {
-            next
-        }
-    }
-
-    fn open_resume(&mut self) {
-        self.surface = Surface::Resume;
-        self.resume_search = false;
-        self.resume_query.clear();
-        self.normalize_resume_scope();
-    }
-
     fn command_menu_active(&self) -> bool {
         self.focus == Focus::Composer && self.command_query().is_some()
     }
@@ -1823,6 +1770,10 @@ reason={}",
     fn command_menu_should_complete(&self) -> bool {
         if !self.command_menu_active() {
             return false;
+        }
+
+        if let Some(completion) = self.selected_skill_completion() {
+            return self.active_draft().trim_end() != completion.trim_end();
         }
 
         let Some(command) = self.selected_command_match() else {
@@ -1857,12 +1808,40 @@ reason={}",
     }
 
     fn complete_selected_command(&mut self) {
+        if let Some(completion) = self.selected_skill_completion() {
+            self.active_session_mut().draft = completion;
+            self.command_menu_index = 0;
+            return;
+        }
+
         let Some(command) = self.selected_command_match() else {
             return;
         };
 
         self.active_session_mut().draft = command_completion(command.command);
         self.command_menu_index = 0;
+    }
+
+    fn selected_skill_completion(&self) -> Option<String> {
+        let prefix = self
+            .active_draft()
+            .trim_start()
+            .strip_prefix("/skill ")
+            .or_else(|| self.active_draft().trim_start().strip_prefix("/skill"))?;
+        let query = prefix.trim();
+        let matches = self
+            .available_skills
+            .iter()
+            .filter(|skill| {
+                query.is_empty()
+                    || skill
+                        .name
+                        .to_ascii_lowercase()
+                        .starts_with(&query.to_ascii_lowercase())
+            })
+            .collect::<Vec<_>>();
+        let selected = matches.get(self.command_menu_index.min(matches.len().saturating_sub(1)))?;
+        Some(format!("/skill {} ", selected.name))
     }
 
     fn route_command(&mut self, command: &str) -> AppAction {
@@ -1877,17 +1856,16 @@ reason={}",
                 self.push_help();
                 AppAction::Continue
             }
-            "logs" => {
-                self.toggle_logs();
-                AppAction::Continue
-            }
             "gateway" => self.route_gateway_command(parts.collect()),
+            "adapter" => self.route_adapter_command(parts.collect()),
+            "node" => self.route_node_command(parts.collect()),
+            "sandbox" => self.route_sandbox_command(parts.collect()),
             "model" => self.route_model_command(parts.collect()),
-            "runtime" => {
-                let status = parts.collect::<Vec<_>>().join(" ");
-                self.set_runtime_status(status.trim());
-                AppAction::Continue
-            }
+            "run" => self.route_run_command(parts.collect()),
+            "inspect" => self.route_inspect_command(parts.collect()),
+            "tool" => self.route_explicit_capability("tool", parts.collect()),
+            "skill" => self.route_explicit_capability("skill", parts.collect()),
+            "workflow" => self.route_explicit_capability("workflow", parts.collect()),
             "session" => self.route_session_command(parts.collect()),
             _ => {
                 self.push_command_error(unknown_command_message(command));
@@ -1930,12 +1908,16 @@ reason={}",
                 self.push_system_entry("Runtime profiles", profiles);
                 AppAction::Continue
             }
+            ["show"] => {
+                self.show_model_binding();
+                AppAction::Continue
+            }
             ["use", rest @ ..] if !rest.is_empty() => {
                 self.set_active_profile(&rest.join(" "));
                 AppAction::Continue
             }
             _ => {
-                self.push_command_error("Usage: /model list | /model use <profile>");
+                self.push_command_error("Usage: /model list | /model show | /model use <profile>");
                 AppAction::Continue
             }
         }
@@ -1943,31 +1925,105 @@ reason={}",
 
     fn route_gateway_command(&mut self, args: Vec<&str>) -> AppAction {
         match args.as_slice() {
-            ["connect"] => {
-                self.gateway_connected = true;
-                self.push_activity("gateway", "Gateway link marked connected in the TUI.");
-                self.push_system_entry(
-                    "Gateway link updated",
-                    "Gateway refresh and event streaming were resumed by operator command.",
-                );
-                AppAction::GatewayConnect
-            }
-            ["disconnect"] => {
-                self.gateway_connected = false;
-                self.push_activity("gateway", "Gateway link marked disconnected in the TUI.");
-                self.push_system_entry(
-                    "Gateway link updated",
-                    "Gateway refresh and event streaming were paused by operator command.",
-                );
-                AppAction::GatewayDisconnect
-            }
             ["status"] => {
                 self.show_gateway_status();
                 AppAction::Continue
             }
             _ => {
+                self.push_command_error("Usage: /gateway status");
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn route_adapter_command(&mut self, args: Vec<&str>) -> AppAction {
+        match args.as_slice() {
+            ["status"] => {
+                self.push_activity("adapter", "Requested adapter status.");
+                self.push_system_entry(
+                    "Adapter status requested",
+                    "Loading adapter readiness and outbound status inline.",
+                );
+                AppAction::AdapterStatus
+            }
+            _ => {
+                self.push_command_error("Usage: /adapter status");
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn route_node_command(&mut self, args: Vec<&str>) -> AppAction {
+        match args.as_slice() {
+            ["list"] => {
+                self.push_activity("node", "Requested node list.");
+                self.push_system_entry(
+                    "Node list requested",
+                    "Loading node health, affinity, and capability summaries inline.",
+                );
+                AppAction::NodeList
+            }
+            ["show", rest @ ..] if !rest.is_empty() => {
+                let node_id = rest.join(" ");
+                self.push_activity("node", format!("Requested node details for {node_id}."));
+                self.push_system_entry(
+                    "Node inspect requested",
+                    format!("Inspecting node {} inline.", node_id),
+                );
+                AppAction::NodeShow(node_id)
+            }
+            _ => {
+                self.push_command_error("Usage: /node list | /node show <id>");
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn route_sandbox_command(&mut self, args: Vec<&str>) -> AppAction {
+        match args.as_slice() {
+            ["status"] => {
+                self.push_activity("sandbox", "Requested sandbox status.");
+                self.push_system_entry(
+                    "Sandbox status requested",
+                    "Loading workspace-local sandbox env and runtime status inline.",
+                );
+                AppAction::SandboxStatus
+            }
+            ["inspect", rest @ ..] if !rest.is_empty() => {
+                let env_id = rest.join(" ");
+                self.push_activity(
+                    "sandbox",
+                    format!("Requested sandbox inspect for {env_id}."),
+                );
+                self.push_system_entry(
+                    "Sandbox inspect requested",
+                    format!("Inspecting sandbox env {} inline.", env_id),
+                );
+                AppAction::SandboxInspect(env_id)
+            }
+            ["rebuild", rest @ ..] if !rest.is_empty() => {
+                let env_id = rest.join(" ");
+                self.push_activity(
+                    "sandbox",
+                    format!("Requested sandbox rebuild for {env_id}."),
+                );
+                self.push_system_entry(
+                    "Sandbox rebuild requested",
+                    format!("Rebuilding sandbox env {} inline.", env_id),
+                );
+                AppAction::SandboxRebuild(env_id)
+            }
+            ["clean"] => {
+                self.push_activity("sandbox", "Requested sandbox clean.");
+                self.push_system_entry(
+                    "Sandbox clean requested",
+                    "Cleaning sandbox run and attachment workdirs inline.",
+                );
+                AppAction::SandboxClean
+            }
+            _ => {
                 self.push_command_error(
-                    "Usage: /gateway connect | /gateway disconnect | /gateway status",
+                    "Usage: /sandbox status | /sandbox inspect <env> | /sandbox rebuild <env> | /sandbox clean",
                 );
                 AppAction::Continue
             }
@@ -2004,21 +2060,6 @@ reason={}",
         );
     }
 
-    fn set_runtime_status(&mut self, status: &str) {
-        if status.is_empty() {
-            self.push_command_error("Usage: /runtime <status>");
-            return;
-        }
-
-        self.runtime_status = status.to_owned();
-        self.active_session_mut().state = session_state_from_run_label(status);
-        self.push_activity("runtime", format!("Runtime status set to {status}."));
-        self.push_system_entry(
-            "Runtime status updated",
-            format!("Control-plane runtime status is now {status}."),
-        );
-    }
-
     fn route_session_command(&mut self, args: Vec<&str>) -> AppAction {
         match args.as_slice() {
             ["list"] => {
@@ -2035,29 +2076,99 @@ reason={}",
             ["new", rest @ ..] if !rest.is_empty() => {
                 self.prepare_session_switch(&rest.join(" "), true)
             }
-            ["state", "active"] => {
-                self.set_session_state(SessionState::Active);
-                AppAction::Continue
-            }
-            ["state", "waiting"] => {
-                self.set_session_state(SessionState::Waiting);
-                AppAction::Continue
-            }
-            ["state", "degraded"] => {
-                self.set_session_state(SessionState::Degraded);
-                AppAction::Continue
-            }
-            ["model", rest @ ..] if !rest.is_empty() => {
-                self.set_session_model(&rest.join(" "));
-                AppAction::Continue
-            }
             _ => {
                 self.push_command_error(
-                    "Usage: /session list | /session show | /session switch <id> | /session new <id> | /session state <active|waiting|degraded> | /session model <name>",
+                    "Usage: /session list | /session show | /session switch <id> | /session new <id>",
                 );
                 AppAction::Continue
             }
         }
+    }
+
+    fn route_run_command(&mut self, args: Vec<&str>) -> AppAction {
+        match args.as_slice() {
+            ["stop"] => {
+                let Some(run_id) = self.current_run_identifier().map(str::to_owned) else {
+                    self.push_command_error("No active run is attached to the current session.");
+                    return AppAction::Continue;
+                };
+                self.push_activity("run", format!("Requested cancellation for {run_id}."));
+                self.push_system_entry(
+                    "Run cancellation requested",
+                    format!("Submitting a real cancel request for run {run_id}."),
+                );
+                AppAction::CancelRun(run_id)
+            }
+            ["retry"] => {
+                let Some(run_id) = self.last_run_identifier().map(str::to_owned) else {
+                    self.push_command_error(
+                        "No completed run is available to retry for this session.",
+                    );
+                    return AppAction::Continue;
+                };
+                self.push_activity("run", format!("Requested retry for {run_id}."));
+                self.push_system_entry(
+                    "Run retry requested",
+                    format!("Submitting a real retry request for run {run_id}."),
+                );
+                AppAction::RetryRun(run_id)
+            }
+            _ => {
+                self.push_command_error("Usage: /run stop | /run retry");
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn route_inspect_command(&mut self, args: Vec<&str>) -> AppAction {
+        match args.as_slice() {
+            ["last"] => {
+                let Some(run_id) = self.last_run_identifier().map(str::to_owned) else {
+                    self.push_command_error("No run is available to inspect for this session.");
+                    return AppAction::Continue;
+                };
+                self.push_activity("inspect", format!("Requested inline inspect for {run_id}."));
+                AppAction::InspectRun(run_id)
+            }
+            _ => {
+                self.push_command_error("Usage: /inspect last");
+                AppAction::Continue
+            }
+        }
+    }
+
+    fn route_explicit_capability(&mut self, kind: &str, args: Vec<&str>) -> AppAction {
+        let Some((name, input)) = split_capability_args(args) else {
+            self.push_command_error(match kind {
+                "tool" => "Usage: /tool <name> <input>",
+                "skill" => "Usage: /skill <name> <input>",
+                _ => "Usage: /workflow <name> <input>",
+            });
+            return AppAction::Continue;
+        };
+
+        let request = ComposerRunRequest {
+            input: input.to_owned(),
+            tool: (kind == "tool").then_some(name.to_owned()),
+            skill: (kind == "skill").then_some(name.to_owned()),
+            workflow: (kind == "workflow").then_some(name.to_owned()),
+        };
+        let label = match kind {
+            "tool" => "Tool invocation queued",
+            "skill" => "Skill invocation queued",
+            _ => "Workflow invocation queued",
+        };
+        self.push_activity(kind, format!("Queued explicit {kind}: {name}"));
+        self.push_system_entry(
+            label,
+            format!(
+                "{} {}\ninput: {}",
+                capitalize(kind),
+                name,
+                truncate_for_timeline(&request.input, 180)
+            ),
+        );
+        AppAction::SubmitRun(request)
     }
 
     fn show_session_list(&mut self) {
@@ -2112,6 +2223,17 @@ reason={}",
             .compressed_context
             .clone()
             .unwrap_or_else(|| "none".to_owned());
+        let current_run = self
+            .active_session()
+            .current_gateway_run_id
+            .clone()
+            .or_else(|| self.active_session().current_run_id.clone())
+            .unwrap_or_else(|| "none".to_owned());
+        let last_run = self
+            .active_session()
+            .last_gateway_run_id
+            .clone()
+            .unwrap_or_else(|| "none".to_owned());
         let next_profile = self.active_profile().to_owned();
         let next_model = self.control_model.clone();
         self.push_activity(
@@ -2127,6 +2249,8 @@ origin={}
 channel={}
 current runtime={}
 current model={}
+current run={}
+last run={}
 next-turn profile={}
 next-turn model={}
 memory={}
@@ -2138,6 +2262,8 @@ references={}",
                 channel,
                 runtime,
                 model,
+                current_run,
+                last_run,
                 next_profile,
                 next_model,
                 memory,
@@ -2162,7 +2288,7 @@ references={}",
             self.sessions.len() - 1
         } else {
             self.push_command_error(format!(
-                "Unknown session: {}. Use /session list or Shift+Tab to browse.",
+                "Unknown session: {}. Use /session list to browse known sessions.",
                 session_id
             ));
             return AppAction::Continue;
@@ -2191,30 +2317,6 @@ references={}",
         } else {
             AppAction::Continue
         }
-    }
-
-    fn set_session_state(&mut self, state: SessionState) {
-        self.active_session_mut().state = state;
-        self.push_activity(
-            "session",
-            format!("{} state set to {}.", self.session_label(), state.label()),
-        );
-        self.push_system_entry(
-            "Session state updated",
-            format!("Selected session is now {}.", state.label()),
-        );
-    }
-
-    fn set_session_model(&mut self, model: &str) {
-        self.active_session_mut().model = model.to_owned();
-        self.push_activity(
-            "session",
-            format!("{} model set to {model}.", self.session_label()),
-        );
-        self.push_system_entry(
-            "Session model updated",
-            format!("Selected session now shows {model}. Future turns still use the active profile unless it is changed with /model use."),
-        );
     }
 
     fn set_active_profile(&mut self, profile: &str) {
@@ -2247,33 +2349,109 @@ references={}",
         );
     }
 
-    fn toggle_logs(&mut self) {
-        self.show_observability = !self.show_observability;
-        if !self.show_observability && self.focus == Focus::Observability {
-            self.focus = Focus::Sessions;
-        }
-
-        let visibility = if self.show_observability {
-            "visible"
-        } else {
-            "hidden"
-        };
-        self.push_activity("ui", format!("Observability panel is now {visibility}."));
+    fn show_model_binding(&mut self) {
+        self.push_activity("model", "Displayed active profile and model binding.");
         self.push_system_entry(
-            "Observability visibility updated",
-            format!("Right-side observability panel is now {visibility}."),
+            "Model binding",
+            format!(
+                "next-turn profile={}\nnext-turn model={}\ncurrent runtime={}\ncurrent model={}",
+                self.active_profile(),
+                self.control_model,
+                self.active_session().runtime,
+                self.active_session().model
+            ),
+        );
+    }
+
+    pub(crate) fn show_run_detail(&mut self, detail: &RunDetailDto) {
+        let summary = &detail.summary;
+        let capability_details = if detail.capability_explanations.is_empty() {
+            "<none>".to_owned()
+        } else {
+            detail
+                .capability_explanations
+                .iter()
+                .map(|explanation| {
+                    let mut line = format!(
+                        "{}:{} | route_kind={} | source={} | exec_target={} | orchestration_owner={} | status={}",
+                        explanation.scope,
+                        explanation.name,
+                        explanation.route_kind.as_deref().unwrap_or("<none>"),
+                        explanation
+                            .capability_source_kind
+                            .as_deref()
+                            .unwrap_or("<none>"),
+                        explanation.execution_target.as_deref().unwrap_or("<none>"),
+                        explanation
+                            .orchestration_owner
+                            .as_deref()
+                            .unwrap_or("<none>"),
+                        explanation.status,
+                    );
+                    if !explanation.summary.is_empty() {
+                        line.push_str(&format!(
+                            " | summary={}",
+                            truncate_for_timeline(&explanation.summary, 120)
+                        ));
+                    }
+                    if let Some(decision_basis) = explanation.decision_basis.as_deref() {
+                        line.push_str(&format!(
+                            " | decision={}",
+                            truncate_for_timeline(decision_basis, 140)
+                        ));
+                    }
+                    if let Some(origin) = explanation.failure_origin.as_deref() {
+                        line.push_str(&format!(" | failure_origin={origin}"));
+                    }
+                    line
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        self.push_activity(
+            "inspect",
+            format!(
+                "Displayed run {} ({:?})",
+                summary.gateway_run_id, summary.status
+            ),
+        );
+        self.push_system_entry(
+            "Run inspect",
+            format!(
+                "run={}\nsession={}\nstatus={:?}\nrequested_profile={}\neffective_profile={}\neffective_provider={}\neffective_model={}\ntool={}\nskill={}\nworkflow={}\ntrace={}\nerror={}\noutput={}\ncapability_proof=\n{}",
+                summary.gateway_run_id,
+                summary.session_id.as_deref().unwrap_or("<none>"),
+                summary.status,
+                summary.requested_profile.as_deref().unwrap_or("<none>"),
+                summary.effective_profile.as_deref().unwrap_or("<none>"),
+                summary.effective_provider_type.as_deref().unwrap_or("<none>"),
+                summary.effective_model.as_deref().unwrap_or("<none>"),
+                summary.tool.as_deref().unwrap_or("<none>"),
+                summary.skill.as_deref().unwrap_or("<none>"),
+                summary.workflow.as_deref().unwrap_or("<none>"),
+                summary.trace_path.as_deref().unwrap_or("<none>"),
+                summary.error.as_deref().unwrap_or("<none>"),
+                summary.output_preview.as_deref().unwrap_or("<none>"),
+                capability_details,
+            ),
         );
     }
 
     fn push_help(&mut self) {
-        self.show_help_overlay = true;
         let mut grouped = BTreeMap::new();
         for category in [
-            CommandCategory::Ui,
             CommandCategory::Gateway,
+            CommandCategory::Adapter,
+            CommandCategory::Node,
             CommandCategory::Session,
             CommandCategory::Model,
-            CommandCategory::Debug,
+            CommandCategory::Run,
+            CommandCategory::Sandbox,
+            CommandCategory::Tool,
+            CommandCategory::Skill,
+            CommandCategory::Workflow,
+            CommandCategory::Inspect,
+            CommandCategory::Ui,
         ] {
             let entries = LOCAL_COMMANDS
                 .iter()
@@ -2284,9 +2462,17 @@ references={}",
         }
 
         let mut body = vec![
-            format!("input.chat    Enter => {}", if self.is_interactive() { "send to the active session" } else { "queue a mock instruction" }),
-            "input.command Enter => run local slash command, Tab => complete, Esc => leave command mode".to_owned(),
-            "input.search  / in resume view starts search over session id, title, route, and channel".to_owned(),
+            format!(
+                "input.chat    Enter => {}",
+                if self.is_interactive() {
+                    "send to the active session"
+                } else {
+                    "queue a mock instruction"
+                }
+            ),
+            "input.command / opens the popup, typing filters, Tab completes, Enter executes"
+                .to_owned(),
+            "navigation     PageUp/PageDown scroll the transcript, Ctrl+C quits".to_owned(),
             String::new(),
         ];
         for (category, entries) in grouped {
@@ -2295,15 +2481,16 @@ references={}",
             body.push(String::new());
         }
         body.push(format!(
-            "current session={} next-profile={} next-model={}",
+            "current session={} next-profile={} next-model={} current-run={}",
             self.session_label(),
             self.active_profile(),
-            self.control_model
+            self.control_model,
+            self.current_run_identifier().unwrap_or("<none>")
         ));
 
-        self.push_activity("command", "Displayed local control command reference.");
+        self.push_activity("command", "Displayed TUI command reference.");
         self.push_system_entry(
-            "Local command reference",
+            "TUI command reference",
             body.join(
                 "
 ",
@@ -2317,7 +2504,7 @@ references={}",
         self.push_system_entry("Command rejected", message);
     }
 
-    fn push_system_entry(&mut self, title: impl Into<String>, body: impl Into<String>) {
+    pub(crate) fn push_system_entry(&mut self, title: impl Into<String>, body: impl Into<String>) {
         self.push_timeline(
             TimelineKind::System,
             "control-plane",
@@ -2375,9 +2562,15 @@ fn interactive_session_record(session_id: &str, model: &str) -> SessionRecord {
         state: SessionState::Waiting,
         unread: 0,
         draft: String::new(),
+        transcript_len: 0,
+        current_run_id: None,
+        current_gateway_run_id: None,
+        last_gateway_run_id: None,
         memory_summary: None,
         compressed_context: None,
         references: Vec::new(),
+        streaming_preview: None,
+        streaming_run_id: None,
         timeline: Vec::new(),
     }
 }
@@ -2412,6 +2605,24 @@ fn truncate_for_timeline(value: &str, limit: usize) -> String {
 
     let truncated: String = value.chars().take(limit).collect();
     format!("{truncated}...")
+}
+
+fn split_capability_args(args: Vec<&str>) -> Option<(&str, String)> {
+    let mut iter = args.into_iter();
+    let name = iter.next()?;
+    let input = iter.collect::<Vec<_>>().join(" ");
+    if input.trim().is_empty() {
+        return None;
+    }
+    Some((name, input))
+}
+
+fn capitalize(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+        None => String::new(),
+    }
 }
 
 fn command_completion(command: &str) -> String {
@@ -2553,22 +2764,11 @@ fn edit_distance(left: &str, right: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use mosaic_control_protocol::{RunDetailDto, RunSubmission, RunSummaryDto};
+    use mosaic_inspect::{CapabilityExplanationTrace, RunLifecycleStatus};
     use mosaic_runtime::events::RunEvent;
 
-    use super::{
-        App, AppAction, Focus, InputMode, ResumeScope, SessionState, Surface, TimelineKind,
-    };
-
-    #[test]
-    fn tab_skips_hidden_observability_panel() {
-        let mut app = App::new("/tmp/mosaic".into());
-        app.show_observability = false;
-        app.focus = Focus::Composer;
-
-        app.focus = app.advance_focus();
-
-        assert_eq!(app.focus, Focus::Sessions);
-    }
+    use super::{App, AppAction, ComposerRunRequest, InputMode, SkillOption, TimelineKind};
 
     #[test]
     fn switching_sessions_resets_unread_and_scroll() {
@@ -2580,22 +2780,6 @@ mod tests {
 
         assert_eq!(app.timeline_scroll, 0);
         assert_eq!(app.sessions[1].unread, 0);
-    }
-
-    #[test]
-    fn submitting_composer_appends_operator_entry() {
-        let mut app = App::new("/tmp/mosaic".into());
-        let initial_len = app.active_session().timeline.len();
-        app.active_session_mut().draft = "Trace gateway route".to_owned();
-
-        app.submit_composer();
-
-        assert_eq!(app.active_draft(), "");
-        assert_eq!(app.active_session().timeline.len(), initial_len + 1);
-        assert_eq!(
-            app.active_session().timeline.last().map(|entry| entry.kind),
-            Some(TimelineKind::Operator)
-        );
     }
 
     #[test]
@@ -2614,27 +2798,57 @@ mod tests {
     }
 
     #[test]
-    fn gateway_command_updates_connection_state() {
-        let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/gateway disconnect".to_owned();
-
-        app.submit_composer();
-
-        assert!(!app.gateway_connected);
-        assert_eq!(
-            app.active_session().timeline.last().map(|entry| entry.kind),
-            Some(TimelineKind::System)
+    fn interactive_submit_returns_real_run_request() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
         );
+        app.active_session_mut().draft = "hello runtime".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(
+            action,
+            AppAction::SubmitRun(ComposerRunRequest {
+                input: "hello runtime".to_owned(),
+                tool: None,
+                skill: None,
+                workflow: None,
+            })
+        );
+        assert_eq!(app.runtime_status, "running");
+        assert_eq!(app.active_draft(), "");
     }
 
     #[test]
-    fn session_state_command_updates_selected_session() {
-        let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/session state degraded".to_owned();
+    fn explicit_tool_command_returns_targeted_run_request() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+        app.active_session_mut().draft = "/tool read_file README.md".to_owned();
 
-        app.submit_composer();
+        let action = app.submit_composer();
 
-        assert_eq!(app.active_session().state, SessionState::Degraded);
+        assert_eq!(
+            action,
+            AppAction::SubmitRun(ComposerRunRequest {
+                input: "README.md".to_owned(),
+                tool: Some("read_file".to_owned()),
+                skill: None,
+                workflow: None,
+            })
+        );
     }
 
     #[test]
@@ -2642,8 +2856,9 @@ mod tests {
         let mut app = App::new_interactive(
             "/tmp/mosaic".into(),
             "demo".to_owned(),
-            "mock".to_owned(),
-            "mock".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
             Vec::new(),
             false,
         );
@@ -2662,100 +2877,169 @@ mod tests {
 
         assert_eq!(app.input_mode(), InputMode::Command);
         assert!(app.enter_hint().contains("Complete"));
-        assert_eq!(app.escape_hint(), "focus sessions");
+        assert_eq!(app.escape_hint(), "clear draft or close the command popup");
     }
 
     #[test]
-    fn help_overlay_opens_and_blocks_navigation_until_closed() {
+    fn question_mark_opens_help_when_composer_is_empty() {
         let mut app = App::new("/tmp/mosaic".into());
-        let initial_focus = app.focus;
-
-        assert_eq!(
-            app.handle_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)),
-            AppAction::Continue
-        );
-        assert!(app.show_help_overlay);
-
-        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        assert!(app.show_help_overlay);
-        assert_eq!(app.focus, initial_focus);
-
-        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert!(!app.show_help_overlay);
-    }
-
-    #[test]
-    fn question_mark_remains_typable_inside_composer() {
-        let mut app = App::new("/tmp/mosaic".into());
-        app.focus = Focus::Composer;
 
         app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "?");
-        assert!(!app.show_help_overlay);
-    }
-
-    #[test]
-    fn command_menu_selection_completes_draft_without_submitting() {
-        let mut app = App::new("/tmp/mosaic".into());
-        app.focus = Focus::Composer;
-        app.active_session_mut().draft = "/g".to_owned();
-
-        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-        assert_eq!(app.active_draft(), "/gateway disconnect ");
+        assert_eq!(app.active_draft(), "");
         assert_eq!(
             app.active_session()
                 .timeline
                 .last()
                 .map(|entry| entry.title.as_str()),
-            Some("Working")
+            Some("TUI command reference")
         );
     }
 
     #[test]
-    fn tab_cycles_command_menu_selection() {
+    fn command_menu_selection_completes_draft_without_submitting() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.focus = Focus::Composer;
         app.active_session_mut().draft = "/g".to_owned();
 
-        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "/gateway disconnect ");
+        assert_eq!(app.active_draft(), "/gateway status ");
     }
 
     #[test]
-    fn app_can_start_in_resume_surface() {
+    fn tab_accepts_current_command_completion() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/m".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "/model list ");
+    }
+
+    #[test]
+    fn gateway_status_command_renders_inline_card() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.gateway_summary = Some("Gateway ready".to_owned());
+        app.gateway_detail = Some("transport=http+sse".to_owned());
+        app.node_summary = Some("nodes=1".to_owned());
+        app.node_detail = Some("healthy".to_owned());
+        app.active_session_mut().draft = "/gateway status".to_owned();
+
+        app.submit_composer();
+
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Gateway status")
+        );
+    }
+
+    #[test]
+    fn sandbox_status_command_returns_inline_action() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/sandbox status".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(action, AppAction::SandboxStatus);
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Sandbox status requested")
+        );
+    }
+
+    #[test]
+    fn sandbox_rebuild_command_returns_targeted_action() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/sandbox rebuild python-capability-demo".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(
+            action,
+            AppAction::SandboxRebuild("python-capability-demo".to_owned())
+        );
+    }
+
+    #[test]
+    fn slash_tab_can_complete_sandbox_command() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/sand".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "/sandbox status ");
+    }
+
+    #[test]
+    fn slash_tab_can_complete_registered_skill_name() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            vec![SkillOption {
+                name: "operator_note".to_owned(),
+            }],
+            false,
+        );
+        app.active_session_mut().draft = "/skill op".to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+
+        assert_eq!(app.active_draft(), "/skill operator_note ");
+    }
+
+    #[test]
+    fn adapter_status_command_returns_inline_action() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/adapter status".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(action, AppAction::AdapterStatus);
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Adapter status requested")
+        );
+    }
+
+    #[test]
+    fn node_commands_return_expected_actions() {
+        let mut list_app = App::new("/tmp/mosaic".into());
+        list_app.active_session_mut().draft = "/node list".to_owned();
+        assert_eq!(list_app.submit_composer(), AppAction::NodeList);
+
+        let mut show_app = App::new("/tmp/mosaic".into());
+        show_app.active_session_mut().draft = "/node show headless-1".to_owned();
+        assert_eq!(
+            show_app.submit_composer(),
+            AppAction::NodeShow("headless-1".to_owned())
+        );
+    }
+
+    #[test]
+    fn app_starts_in_chat_surface_even_when_resume_flag_is_set() {
         let app = App::new_with_resume("/tmp/mosaic".into(), true);
 
-        assert_eq!(app.surface, Surface::Resume);
-        assert_eq!(app.focus, Focus::Composer);
-    }
-
-    #[test]
-    fn resume_surface_filters_sessions_and_selects_visible_match() {
-        let mut app = App::new_with_resume("/tmp/mosaic".into(), true);
-        app.resume_scope = ResumeScope::Remote;
-        app.resume_query = "ios".to_owned();
-        app.ensure_selected_session_visible();
-
-        let visible = app.visible_session_indices();
-
-        assert_eq!(visible.len(), 1);
-        assert_eq!(app.sessions[visible[0]].id, "sess-node-007");
-        assert_eq!(app.selected_session, visible[0]);
-    }
-
-    #[test]
-    fn enter_from_resume_returns_to_console() {
-        let mut app = App::new_with_resume("/tmp/mosaic".into(), true);
-
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-        assert_eq!(app.surface, Surface::Console);
-        assert_eq!(app.focus, Focus::Composer);
+        assert_eq!(app.surface, super::Surface::Console);
+        assert_eq!(app.focus, super::Focus::Composer);
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Chat-first TUI")
+        );
     }
 
     #[test]
@@ -2777,16 +3061,56 @@ mod tests {
             initial_timeline_len + 1
         );
         assert_eq!(
-            app.activity.last().map(|entry| entry.scope.as_str()),
-            Some("runtime")
-        );
-        assert_eq!(
             app.active_session()
                 .timeline
                 .last()
                 .map(|entry| entry.title.as_str()),
             Some("Run started")
         );
+    }
+
+    #[test]
+    fn skill_events_render_markdown_pack_summary_into_timeline() {
+        let mut app = App::new("/tmp/mosaic".into());
+
+        app.apply_run_event(RunEvent::SkillStarted {
+            name: "operator_note".to_owned(),
+            summary: Some(
+                "source=markdown_pack | template=note.md | references=escalation.md | script=annotate.py"
+                    .to_owned(),
+            ),
+        });
+
+        let body = app
+            .active_session()
+            .timeline
+            .last()
+            .map(|entry| entry.body.clone())
+            .unwrap_or_default();
+        assert!(body.contains("template=note.md"));
+        assert!(body.contains("script=annotate.py"));
+    }
+
+    #[test]
+    fn interactive_output_delta_updates_streaming_preview() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+
+        app.apply_run_event(RunEvent::OutputDelta {
+            run_id: "run-1".to_owned(),
+            chunk: "partial".to_owned(),
+            accumulated_chars: 7,
+        });
+
+        assert_eq!(app.runtime_status, "streaming");
+        assert_eq!(app.active_streaming_preview(), Some("partial"));
     }
 
     #[test]
@@ -2797,13 +3121,10 @@ mod tests {
             name: "read_file".to_owned(),
             call_id: "call-123".to_owned(),
             error: "permission denied".to_owned(),
+            summary: Some("source=builtin | exec_target=local".to_owned()),
         });
 
         assert_eq!(app.runtime_status, "error");
-        assert_eq!(
-            app.activity.last().map(|entry| entry.message.as_str()),
-            Some("Tool failed: read_file")
-        );
         let last = app
             .active_session()
             .timeline
@@ -2811,31 +3132,106 @@ mod tests {
             .expect("timeline entry should exist");
         assert_eq!(last.kind, TimelineKind::System);
         assert_eq!(last.title, "Tool failed: read_file");
-        assert!(last.body.contains("call_id=call-123"));
         assert!(last.body.contains("permission denied"));
     }
 
     #[test]
-    fn apply_tool_calling_appends_tool_activity_and_timeline() {
+    fn apply_run_event_renders_tool_and_workflow_summaries() {
         let mut app = App::new("/tmp/mosaic".into());
 
         app.apply_run_event(RunEvent::ToolCalling {
             name: "read_file".to_owned(),
-            call_id: "call_123".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("source=builtin | exec_target=local".to_owned()),
+        });
+        app.apply_run_event(RunEvent::WorkflowStepStarted {
+            workflow: "ops_review".to_owned(),
+            step: "fanout".to_owned(),
+            kind: "tool".to_owned(),
+            summary: Some("target=read_file | orchestration_owner=workflow_engine".to_owned()),
         });
 
-        let last_activity = app.activity.last().expect("activity entry should exist");
-        assert_eq!(last_activity.scope, "tool");
-        assert_eq!(last_activity.message, "Calling tool: read_file");
+        let timeline = &app.active_session().timeline;
+        let tool_body = timeline
+            .iter()
+            .find(|entry| entry.title == "Tool call: read_file")
+            .map(|entry| entry.body.clone())
+            .unwrap_or_default();
+        let workflow_body = timeline
+            .iter()
+            .find(|entry| entry.title == "Workflow step: fanout")
+            .map(|entry| entry.body.clone())
+            .unwrap_or_default();
+        assert!(tool_body.contains("exec_target=local"));
+        assert!(workflow_body.contains("orchestration_owner=workflow_engine"));
+    }
 
-        let last_timeline = app
+    #[test]
+    fn show_run_detail_renders_capability_explanations() {
+        let mut app = App::new("/tmp/mosaic".into());
+        let detail = RunDetailDto {
+            summary: RunSummaryDto {
+                gateway_run_id: "gw-1".to_owned(),
+                correlation_id: "corr-1".to_owned(),
+                run_id: "run-1".to_owned(),
+                session_id: Some("sess-1".to_owned()),
+                session_route: "local/sess-1".to_owned(),
+                status: RunLifecycleStatus::Success,
+                requested_profile: Some("openai".to_owned()),
+                effective_profile: Some("openai".to_owned()),
+                effective_provider_type: Some("openai".to_owned()),
+                effective_model: Some("gpt-5.4-mini".to_owned()),
+                tool: Some("read_file".to_owned()),
+                skill: None,
+                workflow: None,
+                retry_of: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+                finished_at: Some(chrono::Utc::now()),
+                input_preview: "read README".to_owned(),
+                output_preview: Some("done".to_owned()),
+                error: None,
+                failure_kind: None,
+                failure_origin: None,
+                trace_path: Some("/tmp/trace.json".to_owned()),
+            },
+            ingress: None,
+            outbound_deliveries: Vec::new(),
+            capability_explanations: vec![CapabilityExplanationTrace {
+                scope: "tool".to_owned(),
+                name: "read_file".to_owned(),
+                route_kind: Some("tool".to_owned()),
+                capability_source_kind: Some("builtin_tool".to_owned()),
+                execution_target: Some("local".to_owned()),
+                orchestration_owner: Some("tool_loop".to_owned()),
+                status: "success".to_owned(),
+                summary: "read README.md".to_owned(),
+                decision_basis: Some("policy=workspace".to_owned()),
+                failure_origin: None,
+            }],
+            submission: RunSubmission {
+                system: None,
+                input: "read README".to_owned(),
+                tool: Some("read_file".to_owned()),
+                skill: None,
+                workflow: None,
+                session_id: Some("sess-1".to_owned()),
+                profile: Some("openai".to_owned()),
+                ingress: None,
+            },
+        };
+
+        app.show_run_detail(&detail);
+
+        let body = app
             .active_session()
             .timeline
             .last()
-            .expect("timeline entry should exist");
-        assert!(last_timeline.title.contains("Tool call"));
-        assert!(last_timeline.title.contains("read_file"));
-        assert!(last_timeline.body.contains("call_123"));
+            .map(|entry| entry.body.clone())
+            .unwrap_or_default();
+        assert!(body.contains("capability_proof="));
+        assert!(body.contains("tool:read_file"));
+        assert!(body.contains("decision=policy=workspace"));
     }
 
     #[test]
@@ -2849,11 +3245,6 @@ mod tests {
         });
 
         assert_eq!(app.runtime_status, "idle");
-
-        let last_activity = app.activity.last().expect("activity entry should exist");
-        assert_eq!(last_activity.scope, "runtime");
-        assert_eq!(last_activity.message, "Run finished");
-
         let last_timeline = app
             .active_session()
             .timeline
@@ -2875,10 +3266,6 @@ mod tests {
         });
 
         assert_eq!(app.runtime_status, "error");
-
-        let last_activity = app.activity.last().expect("activity entry should exist");
-        assert_eq!(last_activity.message, "Run failed");
-
         let last_timeline = app
             .active_session()
             .timeline
@@ -2886,5 +3273,17 @@ mod tests {
             .expect("timeline entry should exist");
         assert_eq!(last_timeline.title, "Run failed");
         assert!(last_timeline.body.contains("boom"));
+    }
+
+    #[test]
+    fn resume_scope_filtering_still_works_for_session_list_logic() {
+        let mut app = App::new_with_resume("/tmp/mosaic".into(), true);
+        app.resume_scope = super::ResumeScope::Remote;
+        app.resume_query = "ios".to_owned();
+        app.ensure_selected_session_visible();
+
+        let visible = app.visible_session_indices();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(app.sessions[visible[0]].id, "sess-node-007");
     }
 }

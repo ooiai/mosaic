@@ -62,6 +62,7 @@ Properties:
 - best for reusable prompt- and template-oriented skill packs
 - easier to author outside Rust code
 - intended to feel closer to external skill ecosystems
+- pack-relative and sandbox-aware by design
 
 ## Skill vs Workflow
 
@@ -148,7 +149,19 @@ Related examples:
 - [examples/skills/native-skill.yaml](../examples/skills/native-skill.yaml)
 - [examples/skills/manifest-skill.yaml](../examples/skills/manifest-skill.yaml)
 - [examples/skills/operator-note/SKILL.md](../examples/skills/operator-note/SKILL.md)
+- [examples/skills/operator-note/templates/note.md](../examples/skills/operator-note/templates/note.md)
+- [examples/skills/operator-note/references/escalation.md](../examples/skills/operator-note/references/escalation.md)
+- [examples/skills/operator-note/scripts/annotate.py](../examples/skills/operator-note/scripts/annotate.py)
 - [examples/extensions/markdown-skill-pack.yaml](../examples/extensions/markdown-skill-pack.yaml)
+
+The `operator_note` pack now demonstrates the full markdown-pack execution path:
+
+- `SKILL.md` frontmatter
+- `templates/`
+- `references/`
+- `scripts/`
+- attachment-aware rendering
+- sandbox-backed helper script execution
 
 ## Skill and Sandbox
 
@@ -159,6 +172,7 @@ The relevant rules are:
 - a skill may declare a sandbox binding
 - runtime resolves that binding into a workspace-local sandbox env
 - dependency and env state should live under `.mosaic/sandbox/`
+- helper scripts execute inside that selected sandbox env, not in the global Python or Node environment
 
 This matters most for:
 
@@ -168,14 +182,22 @@ This matters most for:
 
 The sandbox details live in [sandbox.md](./sandbox.md).
 
+Local operators should now be able to verify skill env readiness from both CLI and TUI:
+
+- `mosaic sandbox status`
+- `/sandbox status`
+- `/sandbox inspect <env>`
+
 ## Skills in Telegram Lanes
 
-Telegram currently carries the strongest real interactive acceptance lane while TUI remains incomplete.
+Telegram currently carries the strongest real external interactive acceptance lane.
+TUI is the primary local chat-first operator surface for skill discovery and local execution proof.
 
 If a Telegram bot exposes explicit skill execution such as `/mosaic skill ...`, the following must stay aligned in the same change set:
 
 - [telegram-step-by-step.md](./telegram-step-by-step.md)
 - [telegram-real-e2e.md](./telegram-real-e2e.md)
+- [tui.md](./tui.md) when local skill discovery or inline execution visibility changes
 - Telegram examples and extension manifests
 
 This applies to:
@@ -193,7 +215,7 @@ Operators should be able to answer:
 - which skill ran
 - where it came from
 - whether it was native, manifest, or markdown
-- whether it used a sandbox env
+- whether it used templates, references, scripts, and a sandbox env
 
 Use:
 
@@ -207,18 +229,19 @@ Expected trace fields include:
 - `source_name`
 - `source_path`
 - `source_version`
+- markdown-pack usage such as `template`, `references`, `script`, `script_runtime`, and attachment summary
 
 ## Limitations Today
 
-- markdown skill packs are template-style in v1
+- markdown skill packs now support templates, references, and helper scripts, but remain intentionally pack-relative and sandbox-scoped
 - manifest skill execution is intentionally sequential
 - native skill inventory is still small
-- richer dependency-aware execution belongs to the sandbox environment model, not to the skill registry itself
+- package dependency resolution still belongs to the sandbox environment model, not to the skill registry itself
 
 ## Quick Start
 
 1. Start with [examples/skills/README.md](../examples/skills/README.md).
 2. Register a manifest or markdown skill through config or an extension manifest.
 3. Run `mosaic setup validate`.
-4. Trigger the skill through CLI, channel command, or workflow.
+4. In the TUI, type `/skill op<Tab>` to complete the markdown pack name, or invoke it through CLI, channel command, or workflow.
 5. Confirm provenance with `mosaic inspect --verbose`.

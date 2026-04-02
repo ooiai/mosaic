@@ -86,8 +86,14 @@ pub(crate) fn build_sandbox_manager(
         workspace_root,
         SandboxSettings {
             base_dir: PathBuf::from(&config.sandbox.base_dir),
-            python_strategy: config.sandbox.python.strategy,
-            node_strategy: config.sandbox.node.strategy,
+            python: mosaic_sandbox_core::PythonSandboxSettings {
+                strategy: config.sandbox.python.strategy,
+                install: config.sandbox.python.install.clone(),
+            },
+            node: mosaic_sandbox_core::NodeSandboxSettings {
+                strategy: config.sandbox.node.strategy,
+                install: config.sandbox.node.install.clone(),
+            },
             cleanup: SandboxCleanupPolicy {
                 run_workdirs_after_hours: config.sandbox.cleanup.run_workdirs_after_hours,
                 attachments_after_hours: config.sandbox.cleanup.attachments_after_hours,
@@ -490,11 +496,14 @@ impl StoredRunRecord {
         }
     }
 
-    fn detail_dto(&self) -> RunDetailDto {
+    fn detail_dto(&self, trace: Option<&RunTrace>) -> RunDetailDto {
         RunDetailDto {
             summary: self.summary_dto(),
             ingress: self.ingress.clone(),
             outbound_deliveries: self.outbound_deliveries.clone(),
+            capability_explanations: trace
+                .map(RunTrace::capability_explanations)
+                .unwrap_or_default(),
             submission: self.submission.clone(),
         }
     }
@@ -1957,6 +1966,7 @@ mod dto;
 mod http;
 mod ingress;
 mod runs;
+mod sandbox;
 #[cfg(test)]
 mod tests;
 

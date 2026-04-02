@@ -20,7 +20,8 @@ Examples used by this guide:
 
 ## Telegram Documentation Maintenance Rule
 
-Telegram is the current strongest real GUI acceptance lane while TUI remains incomplete.
+Telegram is the strongest real external GUI acceptance lane.
+TUI is the primary local chat-first operator surface.
 
 Because of that, a Telegram-affecting change is not complete unless the matching docs and examples change with it.
 
@@ -52,6 +53,12 @@ Minimum update matrix:
   - CLI examples
 
 Release work is not complete until those files move together.
+
+When a change alters how proof is divided between local operator work and external channel work, also update:
+
+- `docs/tui.md`
+- `docs/testing.md`
+- `docs/release.md`
 
 ## Unified Channel Story
 

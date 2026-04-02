@@ -54,6 +54,19 @@ When Telegram is in release scope, this is also required:
 - record which bot or bots were used for sign-off
 - record whether the image upload, document upload, and `/mosaic help` catalog discovery lanes were part of the scoped release
 
+### Local operator sign-off
+
+When TUI behavior is in release scope, also verify the local operator lane:
+
+- `cargo test -p mosaic-tui`
+- `mosaic tui`
+- submit one normal message and confirm a real run starts
+- confirm `/` opens the command popup and `Tab` completes the highlighted command
+- confirm `/session show`, `/model list`, `/adapter status`, `/node list`, `/node show <id>`, and `/inspect last` render inline operator cards
+- confirm inline tool, MCP, node-routed tool, skill, or workflow blocks remain visible when the scoped release affects those surfaces
+- confirm `/inspect last` explains route kind, source kind, execution target, and failure origin for the affected capability paths
+- confirm [tui.md](./tui.md), [getting-started.md](./getting-started.md), [testing.md](./testing.md), and [release.md](./release.md) were updated when the local operator contract changed
+
 ### Compatibility addendum lanes
 
 These are real lanes, but they are compatibility evidence rather than the main product story:
@@ -155,12 +168,16 @@ At minimum, re-check:
 
 Telegram-affecting work is not release-ready unless the matching Telegram docs and examples changed in the same change set.
 
+TUI-affecting work is not release-ready unless the matching TUI docs and operator guidance changed in the same change set.
+
 Also confirm the operator can answer:
 
 - whether a failed run came from provider, tool, MCP, node, or sandbox
 - where a skill came from
 - why a capability was visible
 - which sandbox env was selected
+- which execution target handled the capability
+- whether the proof came from CLI, TUI, or Telegram sign-off
 
 ### 5. Packaging
 

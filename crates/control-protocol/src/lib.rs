@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
+use mosaic_inspect::CapabilityExplanationTrace;
 use mosaic_inspect::{RunLifecycleStatus, RunTrace};
 use mosaic_runtime::events::RunEvent;
 use serde::{Deserialize, Serialize};
@@ -244,6 +245,8 @@ pub struct RunDetailDto {
     pub ingress: Option<IngressTrace>,
     #[serde(default)]
     pub outbound_deliveries: Vec<ChannelDeliveryTrace>,
+    #[serde(default)]
+    pub capability_explanations: Vec<CapabilityExplanationTrace>,
     pub submission: RunSubmission,
 }
 

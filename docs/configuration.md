@@ -137,8 +137,18 @@ sandbox:
   base_dir: .mosaic/sandbox
   python:
     strategy: venv
+    install:
+      enabled: true
+      timeout_ms: 120000
+      retry_limit: 0
+      allowed_sources: [registry, file]
   node:
     strategy: npm
+    install:
+      enabled: true
+      timeout_ms: 120000
+      retry_limit: 0
+      allowed_sources: [registry, file]
   cleanup:
     run_workdirs_after_hours: 24
     attachments_after_hours: 24
@@ -148,7 +158,9 @@ Fields:
 
 - `base_dir`: workspace-local sandbox root
 - `python.strategy`: `venv`, `uv`, or `disabled`
+- `python.install.*`: dependency-install policy for Python env preparation
 - `node.strategy`: `npm`, `pnpm`, `layout_only`, or `disabled`
+- `node.install.*`: dependency-install policy for Node env preparation
 - `cleanup.run_workdirs_after_hours`: how long run workdirs under `.mosaic/sandbox/work/runs` are retained
 - `cleanup.attachments_after_hours`: how long sandbox-managed attachment workdirs are retained
 

@@ -1,11 +1,14 @@
 use std::{
     collections::BTreeMap,
     fs,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     process::Command,
+    thread,
+    time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -106,11 +109,98 @@ impl Default for SandboxCleanupPolicy {
     }
 }
 
+fn default_install_enabled() -> bool {
+    true
+}
+
+fn default_install_timeout_ms() -> u64 {
+    120_000
+}
+
+fn default_install_sources() -> Vec<SandboxInstallSource> {
+    vec![SandboxInstallSource::Registry, SandboxInstallSource::File]
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxInstallSource {
+    Registry,
+    File,
+}
+
+impl SandboxInstallSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Registry => "registry",
+            Self::File => "file",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxInstallPolicy {
+    #[serde(default = "default_install_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_install_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default)]
+    pub retry_limit: u8,
+    #[serde(default = "default_install_sources")]
+    pub allowed_sources: Vec<SandboxInstallSource>,
+}
+
+impl Default for SandboxInstallPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: default_install_enabled(),
+            timeout_ms: default_install_timeout_ms(),
+            retry_limit: 0,
+            allowed_sources: default_install_sources(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PythonSandboxSettings {
+    #[serde(default)]
+    pub strategy: PythonEnvStrategy,
+    #[serde(default)]
+    pub install: SandboxInstallPolicy,
+}
+
+impl Default for PythonSandboxSettings {
+    fn default() -> Self {
+        Self {
+            strategy: PythonEnvStrategy::Venv,
+            install: SandboxInstallPolicy::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NodeSandboxSettings {
+    #[serde(default)]
+    pub strategy: NodeEnvStrategy,
+    #[serde(default)]
+    pub install: SandboxInstallPolicy,
+}
+
+impl Default for NodeSandboxSettings {
+    fn default() -> Self {
+        Self {
+            strategy: NodeEnvStrategy::Npm,
+            install: SandboxInstallPolicy::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SandboxSettings {
     pub base_dir: PathBuf,
-    pub python_strategy: PythonEnvStrategy,
-    pub node_strategy: NodeEnvStrategy,
+    #[serde(default)]
+    pub python: PythonSandboxSettings,
+    #[serde(default)]
+    pub node: NodeSandboxSettings,
     pub cleanup: SandboxCleanupPolicy,
 }
 
@@ -118,8 +208,8 @@ impl Default for SandboxSettings {
     fn default() -> Self {
         Self {
             base_dir: PathBuf::from(".mosaic/sandbox"),
-            python_strategy: PythonEnvStrategy::Venv,
-            node_strategy: NodeEnvStrategy::Npm,
+            python: PythonSandboxSettings::default(),
+            node: NodeSandboxSettings::default(),
             cleanup: SandboxCleanupPolicy::default(),
         }
     }
@@ -177,19 +267,51 @@ pub struct SandboxPaths {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SandboxEnvStatus {
+    Absent,
+    Preparing,
+    #[serde(alias = "layout_only")]
     Ready,
-    LayoutOnly,
-    MissingRuntime,
-    Broken,
+    Drifted,
+    #[serde(alias = "missing_runtime", alias = "broken")]
+    Failed,
+    RebuildRequired,
 }
 
 impl SandboxEnvStatus {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Absent => "absent",
+            Self::Preparing => "preparing",
             Self::Ready => "ready",
-            Self::LayoutOnly => "layout_only",
-            Self::MissingRuntime => "missing_runtime",
-            Self::Broken => "broken",
+            Self::Drifted => "drifted",
+            Self::Failed => "failed",
+            Self::RebuildRequired => "rebuild_required",
+        }
+    }
+
+    pub fn is_ready(self) -> bool {
+        matches!(self, Self::Ready)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxFailureStage {
+    Runtime,
+    Create,
+    Install,
+    HealthCheck,
+    Policy,
+}
+
+impl SandboxFailureStage {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::Create => "create",
+            Self::Install => "install",
+            Self::HealthCheck => "health_check",
+            Self::Policy => "policy",
         }
     }
 }
@@ -202,6 +324,8 @@ pub struct SandboxEnvRecord {
     pub env_name: String,
     #[serde(default)]
     pub dependency_spec: Vec<String>,
+    #[serde(default)]
+    pub dependency_fingerprint: String,
     pub strategy: String,
     pub env_dir: PathBuf,
     pub cache_dir: PathBuf,
@@ -210,8 +334,28 @@ pub struct SandboxEnvRecord {
     pub status: SandboxEnvStatus,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub failure_stage: Option<String>,
+    #[serde(default = "default_install_enabled")]
+    pub install_enabled: bool,
+    #[serde(default = "default_install_timeout_ms")]
+    pub install_timeout_ms: u64,
+    #[serde(default)]
+    pub install_retry_limit: u8,
+    #[serde(default)]
+    pub allowed_sources: Vec<SandboxInstallSource>,
+    #[serde(default)]
+    pub last_transition: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SandboxEnvResolution {
+    pub record: SandboxEnvRecord,
+    pub prepared: bool,
+    pub reused: bool,
+    pub selection_reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -317,7 +461,7 @@ impl SandboxManager {
         })
     }
 
-    pub fn ensure_env(&self, binding: &SandboxBinding) -> Result<SandboxEnvRecord> {
+    pub fn ensure_env(&self, binding: &SandboxBinding) -> Result<SandboxEnvResolution> {
         self.ensure_layout()?;
         let env_dir = self.env_dir(binding);
         let cache_dir = self.cache_dir(binding.kind);
@@ -333,10 +477,135 @@ impl SandboxManager {
             .as_ref()
             .map(|record| record.created_at)
             .unwrap_or(now);
+        let dependency_fingerprint = dependency_fingerprint(&binding.dependency_spec);
+        let strategy = self.strategy_label(binding.kind).to_owned();
+        let install_policy = self.install_policy(binding.kind).clone();
 
-        let (status, runtime_dir, error, strategy) = match binding.kind {
-            SandboxKind::Python => self.prepare_python_env(&env_dir, binding)?,
-            SandboxKind::Node => self.prepare_node_env(&env_dir, binding)?,
+        if let Some(existing) = existing {
+            if existing.dependency_fingerprint != dependency_fingerprint {
+                let record = SandboxEnvRecord {
+                    env_id: binding.env_id(),
+                    kind: binding.kind,
+                    scope: binding.scope,
+                    env_name: binding.env_name.clone(),
+                    dependency_spec: binding.dependency_spec.clone(),
+                    dependency_fingerprint,
+                    strategy,
+                    env_dir,
+                    cache_dir,
+                    runtime_dir: existing.runtime_dir,
+                    status: SandboxEnvStatus::RebuildRequired,
+                    error: Some("dependency spec changed; rebuild required".to_owned()),
+                    failure_stage: Some(SandboxFailureStage::Policy.label().to_owned()),
+                    install_enabled: install_policy.enabled,
+                    install_timeout_ms: install_policy.timeout_ms,
+                    install_retry_limit: install_policy.retry_limit,
+                    allowed_sources: install_policy.allowed_sources.clone(),
+                    last_transition: "rebuild_required".to_owned(),
+                    created_at,
+                    updated_at: now,
+                };
+                self.write_env_record(&record)?;
+                return Ok(SandboxEnvResolution {
+                    record,
+                    prepared: false,
+                    reused: false,
+                    selection_reason: "dependency fingerprint changed".to_owned(),
+                });
+            }
+
+            if let Some(drift_reason) = self.detect_env_drift(binding.kind, &existing) {
+                let record = SandboxEnvRecord {
+                    env_id: binding.env_id(),
+                    kind: binding.kind,
+                    scope: binding.scope,
+                    env_name: binding.env_name.clone(),
+                    dependency_spec: binding.dependency_spec.clone(),
+                    dependency_fingerprint,
+                    strategy,
+                    env_dir,
+                    cache_dir,
+                    runtime_dir: existing.runtime_dir,
+                    status: SandboxEnvStatus::Drifted,
+                    error: Some(drift_reason.clone()),
+                    failure_stage: Some(SandboxFailureStage::HealthCheck.label().to_owned()),
+                    install_enabled: install_policy.enabled,
+                    install_timeout_ms: install_policy.timeout_ms,
+                    install_retry_limit: install_policy.retry_limit,
+                    allowed_sources: install_policy.allowed_sources.clone(),
+                    last_transition: "drifted".to_owned(),
+                    created_at,
+                    updated_at: now,
+                };
+                self.write_env_record(&record)?;
+                return Ok(SandboxEnvResolution {
+                    record,
+                    prepared: false,
+                    reused: false,
+                    selection_reason: "existing env drifted".to_owned(),
+                });
+            }
+
+            if existing.status == SandboxEnvStatus::Ready {
+                let record = SandboxEnvRecord {
+                    env_id: binding.env_id(),
+                    kind: binding.kind,
+                    scope: binding.scope,
+                    env_name: binding.env_name.clone(),
+                    dependency_spec: binding.dependency_spec.clone(),
+                    dependency_fingerprint,
+                    strategy,
+                    env_dir,
+                    cache_dir,
+                    runtime_dir: existing.runtime_dir,
+                    status: SandboxEnvStatus::Ready,
+                    error: None,
+                    failure_stage: None,
+                    install_enabled: install_policy.enabled,
+                    install_timeout_ms: install_policy.timeout_ms,
+                    install_retry_limit: install_policy.retry_limit,
+                    allowed_sources: install_policy.allowed_sources.clone(),
+                    last_transition: "reused".to_owned(),
+                    created_at,
+                    updated_at: now,
+                };
+                self.write_env_record(&record)?;
+                return Ok(SandboxEnvResolution {
+                    record,
+                    prepared: false,
+                    reused: true,
+                    selection_reason: "reused existing ready env".to_owned(),
+                });
+            }
+        }
+
+        let preparing = SandboxEnvRecord {
+            env_id: binding.env_id(),
+            kind: binding.kind,
+            scope: binding.scope,
+            env_name: binding.env_name.clone(),
+            dependency_spec: binding.dependency_spec.clone(),
+            dependency_fingerprint: dependency_fingerprint.clone(),
+            strategy: strategy.clone(),
+            env_dir: env_dir.clone(),
+            cache_dir: cache_dir.clone(),
+            runtime_dir: None,
+            status: SandboxEnvStatus::Preparing,
+            error: None,
+            failure_stage: None,
+            install_enabled: install_policy.enabled,
+            install_timeout_ms: install_policy.timeout_ms,
+            install_retry_limit: install_policy.retry_limit,
+            allowed_sources: install_policy.allowed_sources.clone(),
+            last_transition: "preparing".to_owned(),
+            created_at,
+            updated_at: now,
+        };
+        self.write_env_record(&preparing)?;
+
+        let prepared = match binding.kind {
+            SandboxKind::Python => self.prepare_python_env(&env_dir, &cache_dir, binding)?,
+            SandboxKind::Node => self.prepare_node_env(&env_dir, &cache_dir, binding)?,
             SandboxKind::Shell => self.prepare_shell_env(&env_dir, binding),
             SandboxKind::Processor => self.prepare_processor_env(&env_dir, binding),
         };
@@ -347,17 +616,33 @@ impl SandboxManager {
             scope: binding.scope,
             env_name: binding.env_name.clone(),
             dependency_spec: binding.dependency_spec.clone(),
-            strategy,
+            dependency_fingerprint,
+            strategy: prepared.strategy,
             env_dir,
             cache_dir,
-            runtime_dir,
-            status,
-            error,
+            runtime_dir: prepared.runtime_dir,
+            status: prepared.status,
+            error: prepared.error,
+            failure_stage: prepared.failure_stage.map(|stage| stage.label().to_owned()),
+            install_enabled: install_policy.enabled,
+            install_timeout_ms: install_policy.timeout_ms,
+            install_retry_limit: install_policy.retry_limit,
+            allowed_sources: install_policy.allowed_sources.clone(),
+            last_transition: if prepared.status.is_ready() {
+                "prepared".to_owned()
+            } else {
+                "failed".to_owned()
+            },
             created_at,
-            updated_at: now,
+            updated_at: Utc::now(),
         };
         self.write_env_record(&record)?;
-        Ok(record)
+        Ok(SandboxEnvResolution {
+            record,
+            prepared: true,
+            reused: false,
+            selection_reason: "prepared sandbox env for capability execution".to_owned(),
+        })
     }
 
     pub fn list_envs(&self) -> Result<Vec<SandboxEnvRecord>> {
@@ -412,6 +697,7 @@ impl SandboxManager {
             dependency_spec: record.dependency_spec,
             scope: record.scope,
         })
+        .map(|resolution| resolution.record)
     }
 
     pub fn clean(&self) -> Result<SandboxCleanReport> {
@@ -466,7 +752,7 @@ impl SandboxManager {
     }
 
     fn python_runtime_status(&self) -> SandboxRuntimeStatus {
-        match self.settings.python_strategy {
+        match self.settings.python.strategy {
             PythonEnvStrategy::Disabled => SandboxRuntimeStatus {
                 kind: SandboxKind::Python,
                 strategy: PythonEnvStrategy::Disabled.label().to_owned(),
@@ -479,7 +765,7 @@ impl SandboxManager {
     }
 
     fn node_runtime_status(&self) -> SandboxRuntimeStatus {
-        match self.settings.node_strategy {
+        match self.settings.node.strategy {
             NodeEnvStrategy::Disabled => SandboxRuntimeStatus {
                 kind: SandboxKind::Node,
                 strategy: NodeEnvStrategy::Disabled.label().to_owned(),
@@ -504,62 +790,154 @@ impl SandboxManager {
     fn prepare_python_env(
         &self,
         env_dir: &Path,
+        cache_dir: &Path,
         binding: &SandboxBinding,
-    ) -> Result<(SandboxEnvStatus, Option<PathBuf>, Option<String>, String)> {
+    ) -> Result<PreparedEnv> {
         let requirements = env_dir.join("requirements.txt");
         if !binding.dependency_spec.is_empty() {
             fs::write(&requirements, binding.dependency_spec.join("\n") + "\n")
                 .with_context(|| format!("failed to write {}", requirements.display()))?;
         }
-        match self.settings.python_strategy {
-            PythonEnvStrategy::Disabled => Ok((
-                SandboxEnvStatus::MissingRuntime,
+        match self.settings.python.strategy {
+            PythonEnvStrategy::Disabled => Ok(PreparedEnv::failed(
+                PythonEnvStrategy::Disabled.label(),
                 None,
-                Some("python sandbox strategy is disabled".to_owned()),
-                PythonEnvStrategy::Disabled.label().to_owned(),
+                SandboxFailureStage::Runtime,
+                "python sandbox strategy is disabled",
             )),
-            PythonEnvStrategy::Uv => Ok((
-                if command_exists("uv") {
-                    SandboxEnvStatus::LayoutOnly
-                } else {
-                    SandboxEnvStatus::MissingRuntime
-                },
-                Some(env_dir.join("uv")),
-                (!command_exists("uv")).then_some("uv is not available on PATH".to_owned()),
-                PythonEnvStrategy::Uv.label().to_owned(),
-            )),
+            PythonEnvStrategy::Uv => {
+                let runtime_dir = env_dir.join("uv");
+                if !command_exists("uv") {
+                    return Ok(PreparedEnv::failed(
+                        PythonEnvStrategy::Uv.label(),
+                        Some(runtime_dir),
+                        SandboxFailureStage::Runtime,
+                        "uv is not available on PATH",
+                    ));
+                }
+                if let Err(error) = run_command_with_timeout(
+                    &CommandSpecBuilder::new("uv")
+                        .args(["venv"])
+                        .arg(&runtime_dir),
+                    self.settings.python.install.timeout_ms,
+                ) {
+                    return Ok(PreparedEnv::failed(
+                        PythonEnvStrategy::Uv.label(),
+                        Some(runtime_dir),
+                        SandboxFailureStage::Create,
+                        error.to_string(),
+                    ));
+                }
+                if !binding.dependency_spec.is_empty() {
+                    if let Err(error) = self.validate_install_sources(
+                        binding.kind,
+                        &binding.dependency_spec,
+                        &self.settings.python.install,
+                    ) {
+                        return Ok(PreparedEnv::failed(
+                            PythonEnvStrategy::Uv.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Policy,
+                            error.to_string(),
+                        ));
+                    }
+                    if !self.settings.python.install.enabled {
+                        return Ok(PreparedEnv::failed(
+                            PythonEnvStrategy::Uv.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Policy,
+                            "python dependency installs are disabled by sandbox policy",
+                        ));
+                    }
+                    let python = python_binary(&runtime_dir);
+                    if let Err(error) = run_command_with_retries(
+                        CommandSpecBuilder::new("uv")
+                            .args(["pip", "install", "--python"])
+                            .arg(&python)
+                            .args(["-r"])
+                            .arg(&requirements)
+                            .env("UV_CACHE_DIR", cache_dir),
+                        &self.settings.python.install,
+                    ) {
+                        return Ok(PreparedEnv::failed(
+                            PythonEnvStrategy::Uv.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Install,
+                            error.to_string(),
+                        ));
+                    }
+                }
+                Ok(PreparedEnv::ready(
+                    PythonEnvStrategy::Uv.label(),
+                    Some(runtime_dir),
+                ))
+            }
             PythonEnvStrategy::Venv => {
                 let runtime_dir = env_dir.join("venv");
-                if command_exists("python3") {
-                    if !runtime_dir.exists() {
-                        let status = Command::new("python3")
-                            .args(["-m", "venv"])
-                            .arg(&runtime_dir)
-                            .status()
-                            .with_context(|| "failed to invoke python3 -m venv")?;
-                        if !status.success() {
-                            return Ok((
-                                SandboxEnvStatus::Broken,
-                                Some(runtime_dir),
-                                Some("python3 -m venv returned a non-zero exit code".to_owned()),
-                                PythonEnvStrategy::Venv.label().to_owned(),
-                            ));
-                        }
-                    }
-                    Ok((
-                        SandboxEnvStatus::Ready,
+                if !command_exists("python3") {
+                    return Ok(PreparedEnv::failed(
+                        PythonEnvStrategy::Venv.label(),
                         Some(runtime_dir),
-                        None,
-                        PythonEnvStrategy::Venv.label().to_owned(),
-                    ))
-                } else {
-                    Ok((
-                        SandboxEnvStatus::MissingRuntime,
-                        Some(runtime_dir),
-                        Some("python3 is not available on PATH".to_owned()),
-                        PythonEnvStrategy::Venv.label().to_owned(),
-                    ))
+                        SandboxFailureStage::Runtime,
+                        "python3 is not available on PATH",
+                    ));
                 }
+                if !runtime_dir.exists() {
+                    if let Err(error) = run_command_with_timeout(
+                        &CommandSpecBuilder::new("python3")
+                            .args(["-m", "venv"])
+                            .arg(&runtime_dir),
+                        self.settings.python.install.timeout_ms,
+                    ) {
+                        return Ok(PreparedEnv::failed(
+                            PythonEnvStrategy::Venv.label(),
+                            Some(runtime_dir),
+                            SandboxFailureStage::Create,
+                            error.to_string(),
+                        ));
+                    }
+                }
+                if !binding.dependency_spec.is_empty() {
+                    if let Err(error) = self.validate_install_sources(
+                        binding.kind,
+                        &binding.dependency_spec,
+                        &self.settings.python.install,
+                    ) {
+                        return Ok(PreparedEnv::failed(
+                            PythonEnvStrategy::Venv.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Policy,
+                            error.to_string(),
+                        ));
+                    }
+                    if !self.settings.python.install.enabled {
+                        return Ok(PreparedEnv::failed(
+                            PythonEnvStrategy::Venv.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Policy,
+                            "python dependency installs are disabled by sandbox policy",
+                        ));
+                    }
+                    let pip = pip_binary(&runtime_dir);
+                    if let Err(error) = run_command_with_retries(
+                        CommandSpecBuilder::new(pip.display().to_string())
+                            .args(["install", "-r"])
+                            .arg(&requirements)
+                            .env("PIP_CACHE_DIR", cache_dir),
+                        &self.settings.python.install,
+                    ) {
+                        return Ok(PreparedEnv::failed(
+                            PythonEnvStrategy::Venv.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Install,
+                            error.to_string(),
+                        ));
+                    }
+                }
+                Ok(PreparedEnv::ready(
+                    PythonEnvStrategy::Venv.label(),
+                    Some(runtime_dir),
+                ))
             }
         }
     }
@@ -567,8 +945,9 @@ impl SandboxManager {
     fn prepare_node_env(
         &self,
         env_dir: &Path,
+        cache_dir: &Path,
         binding: &SandboxBinding,
-    ) -> Result<(SandboxEnvStatus, Option<PathBuf>, Option<String>, String)> {
+    ) -> Result<PreparedEnv> {
         let package_json = env_dir.join("package.json");
         let mut dependencies = BTreeMap::new();
         for dependency in &binding.dependency_spec {
@@ -576,11 +955,7 @@ impl SandboxManager {
             if trimmed.is_empty() {
                 continue;
             }
-            let (name, version) = trimmed
-                .split_once('@')
-                .filter(|(name, _)| !name.is_empty())
-                .map(|(name, version)| (name.to_owned(), version.to_owned()))
-                .unwrap_or_else(|| (trimmed.to_owned(), "latest".to_owned()));
+            let (name, version) = parse_node_dependency(trimmed);
             dependencies.insert(name, version);
         }
         let package_body = serde_json::json!({
@@ -592,49 +967,96 @@ impl SandboxManager {
         fs::write(&package_json, serde_json::to_vec_pretty(&package_body)?)
             .with_context(|| format!("failed to write {}", package_json.display()))?;
 
-        let strategy = self.settings.node_strategy;
+        let strategy = self.settings.node.strategy;
         let runtime_dir = env_dir.join("node_modules");
-        let runtime_available = match strategy {
-            NodeEnvStrategy::Disabled => false,
-            NodeEnvStrategy::LayoutOnly => true,
-            NodeEnvStrategy::Npm => command_exists("npm"),
-            NodeEnvStrategy::Pnpm => command_exists("pnpm"),
-        };
-
-        let status = match strategy {
-            NodeEnvStrategy::Disabled => SandboxEnvStatus::MissingRuntime,
-            NodeEnvStrategy::LayoutOnly => SandboxEnvStatus::LayoutOnly,
-            NodeEnvStrategy::Npm | NodeEnvStrategy::Pnpm if runtime_available => {
-                SandboxEnvStatus::LayoutOnly
-            }
-            NodeEnvStrategy::Npm | NodeEnvStrategy::Pnpm => SandboxEnvStatus::MissingRuntime,
-        };
-        let error = if runtime_available {
-            None
-        } else {
-            Some(format!(
-                "{} is not available on PATH",
-                match strategy {
-                    NodeEnvStrategy::Npm => "npm",
-                    NodeEnvStrategy::Pnpm => "pnpm",
-                    NodeEnvStrategy::Disabled => "node sandbox strategy",
-                    NodeEnvStrategy::LayoutOnly => "node runtime",
+        match strategy {
+            NodeEnvStrategy::Disabled => Ok(PreparedEnv::failed(
+                strategy.label(),
+                Some(runtime_dir),
+                SandboxFailureStage::Runtime,
+                "node sandbox strategy is disabled",
+            )),
+            NodeEnvStrategy::LayoutOnly => {
+                if binding.dependency_spec.is_empty() {
+                    Ok(PreparedEnv::ready(strategy.label(), Some(runtime_dir)))
+                } else {
+                    Ok(PreparedEnv {
+                        status: SandboxEnvStatus::RebuildRequired,
+                        runtime_dir: Some(runtime_dir),
+                        error: Some(
+                            "node layout_only strategy does not install dependencies; switch to npm/pnpm or rebuild with a richer strategy"
+                                .to_owned(),
+                        ),
+                        failure_stage: Some(SandboxFailureStage::Policy),
+                        strategy: strategy.label().to_owned(),
+                    })
                 }
-            ))
-        };
-        Ok((
-            status,
-            Some(runtime_dir),
-            error,
-            strategy.label().to_owned(),
-        ))
+            }
+            NodeEnvStrategy::Npm | NodeEnvStrategy::Pnpm => {
+                let command = if strategy == NodeEnvStrategy::Npm {
+                    "npm"
+                } else {
+                    "pnpm"
+                };
+                if !command_exists(command) {
+                    return Ok(PreparedEnv::failed(
+                        strategy.label(),
+                        Some(runtime_dir),
+                        SandboxFailureStage::Runtime,
+                        format!("{command} is not available on PATH"),
+                    ));
+                }
+                if !binding.dependency_spec.is_empty() {
+                    if let Err(error) = self.validate_install_sources(
+                        binding.kind,
+                        &binding.dependency_spec,
+                        &self.settings.node.install,
+                    ) {
+                        return Ok(PreparedEnv::failed(
+                            strategy.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Policy,
+                            error.to_string(),
+                        ));
+                    }
+                    if !self.settings.node.install.enabled {
+                        return Ok(PreparedEnv::failed(
+                            strategy.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Policy,
+                            "node dependency installs are disabled by sandbox policy",
+                        ));
+                    }
+                    let builder = if strategy == NodeEnvStrategy::Npm {
+                        CommandSpecBuilder::new("npm")
+                            .arg("install")
+                            .arg("--no-package-lock")
+                            .cwd(env_dir)
+                            .env("npm_config_cache", cache_dir)
+                    } else {
+                        CommandSpecBuilder::new("pnpm")
+                            .arg("install")
+                            .cwd(env_dir)
+                            .env("npm_config_cache", cache_dir)
+                    };
+                    if let Err(error) =
+                        run_command_with_retries(builder, &self.settings.node.install)
+                    {
+                        return Ok(PreparedEnv::failed(
+                            strategy.label(),
+                            Some(runtime_dir.clone()),
+                            SandboxFailureStage::Install,
+                            error.to_string(),
+                        ));
+                    }
+                }
+
+                Ok(PreparedEnv::ready(strategy.label(), Some(runtime_dir)))
+            }
+        }
     }
 
-    fn prepare_shell_env(
-        &self,
-        env_dir: &Path,
-        binding: &SandboxBinding,
-    ) -> (SandboxEnvStatus, Option<PathBuf>, Option<String>, String) {
+    fn prepare_shell_env(&self, env_dir: &Path, binding: &SandboxBinding) -> PreparedEnv {
         let script = env_dir.join("ENVIRONMENT.txt");
         let _ = fs::write(
             &script,
@@ -645,23 +1067,19 @@ impl SandboxManager {
             ),
         );
         let available = command_exists("sh");
-        (
-            if available {
-                SandboxEnvStatus::LayoutOnly
-            } else {
-                SandboxEnvStatus::MissingRuntime
-            },
-            Some(env_dir.to_path_buf()),
-            (!available).then_some("sh is not available on PATH".to_owned()),
-            "sh".to_owned(),
-        )
+        if available {
+            PreparedEnv::ready("sh", Some(env_dir.to_path_buf()))
+        } else {
+            PreparedEnv::failed(
+                "sh",
+                Some(env_dir.to_path_buf()),
+                SandboxFailureStage::Runtime,
+                "sh is not available on PATH",
+            )
+        }
     }
 
-    fn prepare_processor_env(
-        &self,
-        env_dir: &Path,
-        binding: &SandboxBinding,
-    ) -> (SandboxEnvStatus, Option<PathBuf>, Option<String>, String) {
+    fn prepare_processor_env(&self, env_dir: &Path, binding: &SandboxBinding) -> PreparedEnv {
         let manifest = env_dir.join("processor.json");
         let _ = fs::write(
             &manifest,
@@ -671,13 +1089,274 @@ impl SandboxManager {
             }))
             .unwrap_or_default(),
         );
-        (
-            SandboxEnvStatus::LayoutOnly,
-            Some(env_dir.to_path_buf()),
-            None,
-            "processor".to_owned(),
-        )
+        PreparedEnv::ready("processor", Some(env_dir.to_path_buf()))
     }
+
+    fn strategy_label(&self, kind: SandboxKind) -> &'static str {
+        match kind {
+            SandboxKind::Python => self.settings.python.strategy.label(),
+            SandboxKind::Node => self.settings.node.strategy.label(),
+            SandboxKind::Shell => "sh",
+            SandboxKind::Processor => "processor",
+        }
+    }
+
+    fn install_policy(&self, kind: SandboxKind) -> &SandboxInstallPolicy {
+        match kind {
+            SandboxKind::Python => &self.settings.python.install,
+            SandboxKind::Node => &self.settings.node.install,
+            SandboxKind::Shell | SandboxKind::Processor => {
+                static DEFAULT: std::sync::OnceLock<SandboxInstallPolicy> =
+                    std::sync::OnceLock::new();
+                DEFAULT.get_or_init(SandboxInstallPolicy::default)
+            }
+        }
+    }
+
+    fn detect_env_drift(&self, kind: SandboxKind, existing: &SandboxEnvRecord) -> Option<String> {
+        let runtime_dir = existing.runtime_dir.as_ref()?;
+        let healthy = match kind {
+            SandboxKind::Python => python_healthcheck(runtime_dir),
+            SandboxKind::Node => runtime_dir.is_dir(),
+            SandboxKind::Shell | SandboxKind::Processor => existing.env_dir.is_dir(),
+        };
+        if healthy {
+            None
+        } else {
+            Some(format!(
+                "sandbox runtime directory is missing or unhealthy: {}",
+                runtime_dir.display()
+            ))
+        }
+    }
+
+    fn validate_install_sources(
+        &self,
+        kind: SandboxKind,
+        dependency_spec: &[String],
+        policy: &SandboxInstallPolicy,
+    ) -> Result<()> {
+        for dependency in dependency_spec {
+            let source = classify_install_source(kind, dependency);
+            if !policy.allowed_sources.contains(&source) {
+                bail!(
+                    "sandbox policy rejected dependency '{}' because source '{}' is not allowed",
+                    dependency,
+                    source.label()
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreparedEnv {
+    status: SandboxEnvStatus,
+    runtime_dir: Option<PathBuf>,
+    error: Option<String>,
+    failure_stage: Option<SandboxFailureStage>,
+    strategy: String,
+}
+
+impl PreparedEnv {
+    fn ready(strategy: impl Into<String>, runtime_dir: Option<PathBuf>) -> Self {
+        Self {
+            status: SandboxEnvStatus::Ready,
+            runtime_dir,
+            error: None,
+            failure_stage: None,
+            strategy: strategy.into(),
+        }
+    }
+
+    fn failed(
+        strategy: impl Into<String>,
+        runtime_dir: Option<PathBuf>,
+        failure_stage: SandboxFailureStage,
+        error: impl Into<String>,
+    ) -> Self {
+        Self {
+            status: SandboxEnvStatus::Failed,
+            runtime_dir,
+            error: Some(error.into()),
+            failure_stage: Some(failure_stage),
+            strategy: strategy.into(),
+        }
+    }
+}
+
+struct CommandSpecBuilder {
+    program: String,
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+    env: BTreeMap<String, PathBuf>,
+}
+
+impl CommandSpecBuilder {
+    fn new(program: impl Into<String>) -> Self {
+        Self {
+            program: program.into(),
+            args: Vec::new(),
+            cwd: None,
+            env: BTreeMap::new(),
+        }
+    }
+
+    fn arg(mut self, arg: impl AsRef<std::ffi::OsStr>) -> Self {
+        self.args.push(arg.as_ref().to_string_lossy().into_owned());
+        self
+    }
+
+    fn args<I, S>(mut self, args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<std::ffi::OsStr>,
+    {
+        for arg in args {
+            self.args.push(arg.as_ref().to_string_lossy().into_owned());
+        }
+        self
+    }
+
+    fn cwd(mut self, cwd: impl AsRef<Path>) -> Self {
+        self.cwd = Some(cwd.as_ref().to_path_buf());
+        self
+    }
+
+    fn env(mut self, key: impl Into<String>, value: impl AsRef<Path>) -> Self {
+        self.env.insert(key.into(), value.as_ref().to_path_buf());
+        self
+    }
+}
+
+fn run_command_with_retries(
+    builder: CommandSpecBuilder,
+    policy: &SandboxInstallPolicy,
+) -> Result<()> {
+    let mut last_error = None;
+    for _ in 0..=policy.retry_limit {
+        match run_command_with_timeout(&builder, policy.timeout_ms) {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow!("sandbox command failed without an error")))
+}
+
+fn run_command_with_timeout(builder: &CommandSpecBuilder, timeout_ms: u64) -> Result<()> {
+    let mut command = Command::new(&builder.program);
+    command.args(&builder.args);
+    if let Some(cwd) = &builder.cwd {
+        command.current_dir(cwd);
+    }
+    for (key, value) in &builder.env {
+        command.env(key, value);
+    }
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to spawn sandbox command '{} {}'",
+            builder.program,
+            builder.args.join(" ")
+        )
+    })?;
+    let timeout = Duration::from_millis(timeout_ms.max(1));
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            if status.success() {
+                return Ok(());
+            }
+            return Err(anyhow!(
+                "sandbox command '{} {}' exited with status {}",
+                builder.program,
+                builder.args.join(" "),
+                status
+            ));
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(anyhow!(
+                "sandbox command '{} {}' timed out after {}ms",
+                builder.program,
+                builder.args.join(" "),
+                timeout_ms
+            ));
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn dependency_fingerprint(spec: &[String]) -> String {
+    let mut normalized = spec
+        .iter()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    normalized.sort();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    normalized.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+fn parse_node_dependency(raw: &str) -> (String, String) {
+    if let Some((name, source)) = raw.split_once('=') {
+        if !name.trim().is_empty() && !source.trim().is_empty() {
+            return (name.trim().to_owned(), source.trim().to_owned());
+        }
+    }
+    raw.rsplit_once('@')
+        .filter(|(name, version)| !name.is_empty() && !version.is_empty())
+        .map(|(name, version)| (name.to_owned(), version.to_owned()))
+        .unwrap_or_else(|| (raw.to_owned(), "latest".to_owned()))
+}
+
+fn classify_install_source(kind: SandboxKind, dependency: &str) -> SandboxInstallSource {
+    let trimmed = dependency.trim();
+    match kind {
+        SandboxKind::Python => {
+            if trimmed.starts_with("file:")
+                || trimmed.starts_with('.')
+                || trimmed.starts_with('/')
+                || trimmed.contains(std::path::MAIN_SEPARATOR)
+            {
+                SandboxInstallSource::File
+            } else {
+                SandboxInstallSource::Registry
+            }
+        }
+        SandboxKind::Node => {
+            if trimmed.contains("file:") || trimmed.contains(std::path::MAIN_SEPARATOR) {
+                SandboxInstallSource::File
+            } else {
+                SandboxInstallSource::Registry
+            }
+        }
+        SandboxKind::Shell | SandboxKind::Processor => SandboxInstallSource::File,
+    }
+}
+
+fn python_binary(runtime_dir: &Path) -> PathBuf {
+    let unix = runtime_dir.join("bin/python");
+    if unix.exists() {
+        unix
+    } else {
+        runtime_dir.join("Scripts/python.exe")
+    }
+}
+
+fn pip_binary(runtime_dir: &Path) -> PathBuf {
+    let unix = runtime_dir.join("bin/pip");
+    if unix.exists() {
+        unix
+    } else {
+        runtime_dir.join("Scripts/pip.exe")
+    }
+}
+
+fn python_healthcheck(runtime_dir: &Path) -> bool {
+    python_binary(runtime_dir).exists()
 }
 
 fn remove_children(dir: &Path) -> Result<usize> {
@@ -786,15 +1465,25 @@ mod tests {
     #[test]
     fn python_envs_live_under_workspace_sandbox_and_write_requirements() {
         let root = temp_dir("python-env");
+        let package_dir = root.join("note_dep");
+        fs::create_dir_all(package_dir.join("note_dep")).expect("python package dir");
+        fs::write(
+            package_dir.join("pyproject.toml"),
+            "[build-system]\nrequires = [\"setuptools>=61\"]\nbuild-backend = \"setuptools.build_meta\"\n\n[project]\nname = \"note-dep\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("pyproject");
+        fs::write(package_dir.join("note_dep/__init__.py"), "VALUE = 'note'\n")
+            .expect("python module");
         let manager = SandboxManager::new(&root, SandboxSettings::default());
-        let record = manager
+        let resolution = manager
             .ensure_env(&SandboxBinding::new(
                 SandboxKind::Python,
                 "operator-notes",
                 SandboxScope::Capability,
-                vec!["requests==2.32.0".to_owned()],
+                vec![package_dir.display().to_string()],
             ))
             .expect("python env should be prepared");
+        let record = resolution.record;
         assert!(record.env_dir.starts_with(root.join(".mosaic/sandbox")));
         assert!(record.env_dir.join("requirements.txt").is_file());
         assert_eq!(record.kind, SandboxKind::Python);
@@ -804,16 +1493,33 @@ mod tests {
     #[test]
     fn node_envs_are_workspace_local_and_listable() {
         let root = temp_dir("node-env");
+        let package_dir = root.join("image-processor-package");
+        fs::create_dir_all(&package_dir).expect("node package dir");
+        fs::write(
+            package_dir.join("package.json"),
+            "{\n  \"name\": \"image-processor-package\",\n  \"version\": \"0.1.0\",\n  \"main\": \"index.js\"\n}\n",
+        )
+        .expect("package json");
+        fs::write(
+            package_dir.join("index.js"),
+            "module.exports = { value: 'ok' };\n",
+        )
+        .expect("node index");
         let manager = SandboxManager::new(&root, SandboxSettings::default());
-        let record = manager
+        let resolution = manager
             .ensure_env(&SandboxBinding::new(
                 SandboxKind::Node,
                 "image-processor",
                 SandboxScope::Capability,
-                vec!["sharp@1.0.0".to_owned()],
+                vec![format!(
+                    "image-processor-package=file:{}",
+                    package_dir.display()
+                )],
             ))
             .expect("node env should be prepared");
+        let record = resolution.record;
         assert!(record.env_dir.join("package.json").is_file());
+        assert_eq!(record.status, SandboxEnvStatus::Ready);
         let listed = manager.list_envs().expect("envs should list");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].env_id, record.env_id);
@@ -832,17 +1538,19 @@ mod tests {
                 SandboxKind::Python,
                 "shared-name",
                 SandboxScope::Capability,
-                vec!["python".to_owned()],
+                Vec::new(),
             ))
-            .expect("workspace a env should prepare");
+            .expect("workspace a env should prepare")
+            .record;
         let env_b = manager_b
             .ensure_env(&SandboxBinding::new(
                 SandboxKind::Python,
                 "shared-name",
                 SandboxScope::Capability,
-                vec!["python".to_owned()],
+                Vec::new(),
             ))
-            .expect("workspace b env should prepare");
+            .expect("workspace b env should prepare")
+            .record;
 
         assert_ne!(env_a.env_dir, env_b.env_dir);
         assert!(env_a.env_dir.starts_with(&root_a));
@@ -863,12 +1571,120 @@ mod tests {
                 SandboxScope::Capability,
                 vec!["paddle-vl".to_owned()],
             ))
-            .expect("processor env should prepare");
+            .expect("processor env should prepare")
+            .record;
         let rebuilt = manager
             .rebuild_env(&record.env_id)
             .expect("processor env should rebuild");
         assert_eq!(rebuilt.env_id, record.env_id);
         assert!(rebuilt.env_dir.is_dir());
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn python_env_install_uses_workspace_local_venv_and_local_dependency() {
+        if !command_exists("python3") {
+            return;
+        }
+
+        let root = temp_dir("python-install");
+        let package_dir = root.join("local_python_dep");
+        fs::create_dir_all(package_dir.join("local_python_dep")).expect("python package dir");
+        fs::write(
+            package_dir.join("pyproject.toml"),
+            "[build-system]\nrequires = [\"setuptools>=61\"]\nbuild-backend = \"setuptools.build_meta\"\n\n[project]\nname = \"local-python-dep\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("pyproject");
+        fs::write(
+            package_dir.join("local_python_dep/__init__.py"),
+            "__all__ = ['VALUE']\nVALUE = 'ok'\n",
+        )
+        .expect("python module");
+
+        let manager = SandboxManager::new(&root, SandboxSettings::default());
+        let resolution = manager
+            .ensure_env(&SandboxBinding::new(
+                SandboxKind::Python,
+                "local-python-dep",
+                SandboxScope::Capability,
+                vec![package_dir.display().to_string()],
+            ))
+            .expect("python env should prepare");
+
+        assert!(resolution.prepared);
+        assert_eq!(resolution.record.status, SandboxEnvStatus::Ready);
+        let site_packages = resolution.record.env_dir.join("venv/lib");
+        assert!(site_packages.exists(), "venv lib dir should exist");
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn node_env_install_uses_workspace_local_modules_and_local_dependency() {
+        if !command_exists("npm") {
+            return;
+        }
+
+        let root = temp_dir("node-install");
+        let package_dir = root.join("local-node-dep");
+        fs::create_dir_all(&package_dir).expect("node package dir");
+        fs::write(
+            package_dir.join("package.json"),
+            "{\n  \"name\": \"local-node-dep\",\n  \"version\": \"0.1.0\",\n  \"main\": \"index.js\"\n}\n",
+        )
+        .expect("package json");
+        fs::write(
+            package_dir.join("index.js"),
+            "module.exports = { value: 'ok' };\n",
+        )
+        .expect("node index");
+
+        let manager = SandboxManager::new(&root, SandboxSettings::default());
+        let resolution = manager
+            .ensure_env(&SandboxBinding::new(
+                SandboxKind::Node,
+                "local-node-dep",
+                SandboxScope::Capability,
+                vec![format!("local-node-dep=file:{}", package_dir.display())],
+            ))
+            .expect("node env should prepare");
+
+        assert!(resolution.prepared);
+        assert_eq!(resolution.record.status, SandboxEnvStatus::Ready);
+        assert!(
+            resolution
+                .record
+                .env_dir
+                .join("node_modules/local-node-dep")
+                .exists(),
+            "local node dependency should be installed in sandbox node_modules"
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn dependency_fingerprint_drift_requires_rebuild() {
+        let root = temp_dir("rebuild-required");
+        let manager = SandboxManager::new(&root, SandboxSettings::default());
+        let first = manager
+            .ensure_env(&SandboxBinding::new(
+                SandboxKind::Processor,
+                "doc-parser",
+                SandboxScope::Capability,
+                vec!["paddle-vl".to_owned()],
+            ))
+            .expect("processor env should prepare");
+        assert_eq!(first.record.status, SandboxEnvStatus::Ready);
+
+        let second = manager
+            .ensure_env(&SandboxBinding::new(
+                SandboxKind::Processor,
+                "doc-parser",
+                SandboxScope::Capability,
+                vec!["paddle-vl==2".to_owned()],
+            ))
+            .expect("processor env should resolve");
+        assert_eq!(second.record.status, SandboxEnvStatus::RebuildRequired);
+        assert!(!second.prepared);
         fs::remove_dir_all(root).ok();
     }
 }
