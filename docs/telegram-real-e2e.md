@@ -2,6 +2,11 @@
 
 This is the k5 Telegram-first release-blocking acceptance lane when Telegram is in release scope.
 
+Maintenance rule:
+
+- Telegram is the current strongest real interactive GUI acceptance lane while TUI remains incomplete
+- when Telegram command behavior, skills, attachments, sandbox prerequisites, or multi-bot behavior change, update this runbook, [telegram-step-by-step.md](./telegram-step-by-step.md), and the matching examples in the same change set
+
 If you have not created a Telegram bot before, start with [telegram-step-by-step.md](./telegram-step-by-step.md) first and then come back here for the stricter acceptance checklist.
 
 Use it when Telegram is a real release target and you need one repeatable path that proves:
@@ -134,6 +139,8 @@ mosaic config show
 mosaic model list
 mosaic extension validate
 mosaic extension list
+mosaic sandbox status
+mosaic sandbox list
 mosaic adapter status
 mosaic adapter doctor
 ```
@@ -145,6 +152,7 @@ Expected state:
 - the extension list includes `telegram-e2e`
 - the loaded capabilities include `summarize_notes` and `summarize_operator_note`
 - `mosaic model list` shows the profile capability summary, including attachment mode where relevant
+- sandbox status is healthy enough for any Telegram-exposed markdown skill pack or attachment processor env
 
 ## Start Gateway
 
@@ -320,6 +328,8 @@ TRACE_PATH=$(ls -t .mosaic/runs/*.json | head -n 1)
 mosaic inspect "$TRACE_PATH" --verbose
 ```
 
+If the bot policy exposes a markdown skill pack rather than the manifest example, repeat the same Telegram proof and confirm the skill source and sandbox binding through `mosaic inspect --verbose` plus `mosaic sandbox status`.
+
 ## Workflow Proof
 
 Send this explicit Telegram command:
@@ -418,6 +428,13 @@ The same run should agree across all surfaces:
 - audit trail
 - replay window
 - `.mosaic/audit/incidents/${RUN_ID}.json`
+
+When the Telegram lane depends on markdown skills or attachment processors, also verify:
+
+```bash
+mosaic sandbox status
+mosaic sandbox list
+```
 
 ## Expected Artifacts
 

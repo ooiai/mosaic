@@ -2,6 +2,11 @@
 
 This guide is the beginner path for connecting Mosaic to a real Telegram bot.
 
+Maintenance rule:
+
+- Telegram is the current strongest real interactive GUI lane while TUI remains incomplete
+- if a change affects the real Telegram operator path, update this guide, [telegram-real-e2e.md](./telegram-real-e2e.md), and the matching Telegram examples in the same change set
+
 Important baseline:
 
 - this Telegram guide does not require `mosaic node serve`
@@ -134,6 +139,8 @@ mosaic config show
 mosaic model list
 mosaic extension validate
 mosaic extension list
+mosaic sandbox status
+mosaic sandbox list
 mosaic adapter status
 mosaic adapter doctor
 ```
@@ -145,6 +152,12 @@ What success should look like:
 - outbound readiness is true
 - `telegram-e2e` appears in extension output
 - `summarize_notes` and `summarize_operator_note` are visible
+- sandbox status is healthy enough for the capabilities you plan to expose in Telegram
+
+If your Telegram lane uses markdown skill packs, helper scripts, or specialized attachment processors, review:
+
+- [skills.md](./skills.md)
+- [sandbox.md](./sandbox.md)
 
 If this step is red, do not continue to webhook registration yet.
 
@@ -404,6 +417,8 @@ Send this in Telegram:
 /mosaic skill summarize_notes 这里是一些运营笔记：今天修复了 webhook，模型切换正常，session 和 trace 都能看到。
 ```
 
+If your bot exposes a markdown skill pack instead of the manifest example, validate the pack through [skills.md](./skills.md) and confirm any required env with `mosaic sandbox status` before repeating the Telegram proof.
+
 ### Workflow
 
 Send this in Telegram:
@@ -441,6 +456,13 @@ Relevant example configs:
 
 - [examples/full-stack/openai-telegram-multimodal.config.yaml](../examples/full-stack/openai-telegram-multimodal.config.yaml)
 - [examples/full-stack/openai-telegram-bot-split.config.yaml](../examples/full-stack/openai-telegram-bot-split.config.yaml)
+
+If the selected image or document route depends on a sandboxed helper or processor, confirm the env with:
+
+```bash
+mosaic sandbox status
+mosaic sandbox list
+```
 
 These map to the repo payload shapes:
 

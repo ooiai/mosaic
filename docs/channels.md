@@ -18,6 +18,41 @@ Examples used by this guide:
 - [examples/full-stack/openai-telegram-single-bot.config.yaml](../examples/full-stack/openai-telegram-single-bot.config.yaml)
 - [examples/full-stack/openai-telegram-multi-bot.config.yaml](../examples/full-stack/openai-telegram-multi-bot.config.yaml)
 
+## Telegram Documentation Maintenance Rule
+
+Telegram is the current strongest real GUI acceptance lane while TUI remains incomplete.
+
+Because of that, a Telegram-affecting change is not complete unless the matching docs and examples change with it.
+
+Minimum update matrix:
+
+- command or help behavior changes:
+  - `docs/telegram-step-by-step.md`
+  - `docs/telegram-real-e2e.md`
+  - `docs/channels.md`
+- skill or markdown-skill behavior changes:
+  - `docs/telegram-step-by-step.md`
+  - `docs/telegram-real-e2e.md`
+  - `docs/skills.md`
+  - Telegram examples
+- attachment or multimodal behavior changes:
+  - `docs/telegram-step-by-step.md`
+  - `docs/telegram-real-e2e.md`
+  - `docs/channels.md`
+  - `docs/capabilities.md`
+  - Telegram examples and fixtures
+- sandbox prerequisites change:
+  - `docs/telegram-step-by-step.md`
+  - `docs/telegram-real-e2e.md`
+  - `docs/sandbox.md`
+- multi-bot or webhook operations change:
+  - `docs/telegram-step-by-step.md`
+  - `docs/telegram-real-e2e.md`
+  - `docs/channels.md`
+  - CLI examples
+
+Release work is not complete until those files move together.
+
 ## Unified Channel Story
 
 Regardless of the source channel, Mosaic tries to preserve the same five facts:

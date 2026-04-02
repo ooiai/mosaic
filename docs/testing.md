@@ -135,6 +135,23 @@ The Telegram-first release-blocking acceptance lane proves:
 
 Use [telegram-real-e2e.md](./telegram-real-e2e.md) as the operator runbook. That runbook is the product-level proof for Telegram. Do not replace it with mock payloads when Telegram is in scope.
 
+## Telegram Documentation-Coupled Release Surface
+
+Until TUI is product-complete, Telegram remains the strongest real interactive GUI acceptance lane.
+
+That means a Telegram-affecting change is not release-ready unless the matching docs and examples move with it.
+
+Minimum maintenance set:
+
+- [telegram-step-by-step.md](./telegram-step-by-step.md)
+- [telegram-real-e2e.md](./telegram-real-e2e.md)
+- [channels.md](./channels.md)
+- [skills.md](./skills.md) when Telegram-visible skills change
+- [sandbox.md](./sandbox.md) when Telegram lanes depend on sandbox readiness
+- Telegram full-stack examples and channel fixtures
+
+Release and test review should reject a Telegram feature if code changed but the operator runbooks did not.
+
 ## L-Series Capability Proof Addendum
 
 The L-series work adds operator-visible concepts that must also be proven by docs, examples, and tests:

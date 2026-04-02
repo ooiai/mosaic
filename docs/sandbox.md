@@ -160,6 +160,22 @@ In taxonomy terms:
 - MCP tool -> `route_kind=tool`, `capability_source_kind=mcp`, `execution_target=mcp_server`
 - sandbox failures -> `failure_origin=sandbox`
 
+## Sandbox in Telegram Lanes
+
+Telegram is currently the strongest real interactive GUI acceptance lane while TUI remains incomplete.
+
+When a Telegram-exposed skill, tool, or attachment processor depends on sandbox readiness:
+
+- update [telegram-step-by-step.md](./telegram-step-by-step.md)
+- update [telegram-real-e2e.md](./telegram-real-e2e.md)
+- update the matching Telegram examples
+
+The Telegram operator path should explicitly call out:
+
+- `mosaic sandbox status`
+- `mosaic sandbox list`
+- any required env identity or rebuild step
+
 ## Diagnosing Failures
 
 When a capability run fails, the operator should be able to answer:

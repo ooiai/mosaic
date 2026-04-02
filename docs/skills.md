@@ -168,6 +168,24 @@ This matters most for:
 
 The sandbox details live in [sandbox.md](./sandbox.md).
 
+## Skills in Telegram Lanes
+
+Telegram currently carries the strongest real interactive acceptance lane while TUI remains incomplete.
+
+If a Telegram bot exposes explicit skill execution such as `/mosaic skill ...`, the following must stay aligned in the same change set:
+
+- [telegram-step-by-step.md](./telegram-step-by-step.md)
+- [telegram-real-e2e.md](./telegram-real-e2e.md)
+- Telegram examples and extension manifests
+
+This applies to:
+
+- manifest skills
+- markdown skill packs
+- attachment-aware skills
+
+If a Telegram-visible skill depends on helper scripts or a dedicated env, the Telegram docs should also mention the sandbox checks from [sandbox.md](./sandbox.md).
+
 ## How Operators See Skill Provenance
 
 Operators should be able to answer:

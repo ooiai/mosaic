@@ -224,6 +224,12 @@ For the Telegram-first real acceptance lane, start with:
 - [`docs/telegram-real-e2e.md`](./docs/telegram-real-e2e.md)
 - [`docs/full-stack.md`](./docs/full-stack.md)
 
+Current operator reality:
+
+- Telegram is the strongest real interactive GUI acceptance surface today
+- TUI is still improving and does not yet replace the Telegram release lane
+- if a change affects Telegram commands, capability discovery, skills, attachments, sandbox readiness, or multi-bot behavior, update the Telegram guides and matching examples in the same change set
+
 For release evidence, use:
 
 - `make release-check`
@@ -296,6 +302,8 @@ The shared operator vocabulary lives in:
 ## Current Operator Surface
 
 The repository currently includes the first terminal control-plane slice.
+
+Until TUI reaches the same product completeness as the Telegram lane, Telegram remains the primary real interactive acceptance surface for GUI-style operator validation.
 
 <details open>
 <summary><strong>TUI capabilities</strong></summary>

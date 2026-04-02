@@ -47,6 +47,8 @@ When Telegram is in release scope, this is also required:
 
 - Telegram-first release-blocking acceptance lane
 - execute [telegram-real-e2e.md](./telegram-real-e2e.md)
+- confirm [telegram-step-by-step.md](./telegram-step-by-step.md), [telegram-real-e2e.md](./telegram-real-e2e.md), and [channels.md](./channels.md) were updated if the release changed Telegram behavior
+- confirm [skills.md](./skills.md) and [sandbox.md](./sandbox.md) changed too when Telegram-visible skill or sandbox prerequisites changed
 - record the session id, trace path, and incident bundle path
 - record the `mosaic adapter telegram webhook info` output used for sign-off
 - record which bot or bots were used for sign-off
@@ -76,6 +78,8 @@ Confirm these are present and up to date:
 - `docs/testing.md`
 - `docs/real-vs-mock-acceptance.md`
 - `docs/telegram-real-e2e.md`
+- `docs/telegram-step-by-step.md`
+- `docs/channels.md`
 - `docs/providers.md`
 - `docs/release.md`
 - `examples/full-stack/openai-webchat.config.yaml`
@@ -148,6 +152,8 @@ At minimum, re-check:
 - `mosaic session show <session-id>`
 - `mosaic inspect .mosaic/runs/<run-id>.json --verbose`
 - `mosaic gateway incident <run-id>`
+
+Telegram-affecting work is not release-ready unless the matching Telegram docs and examples changed in the same change set.
 
 Also confirm the operator can answer:
 

@@ -3313,6 +3313,10 @@ mod tests {
             "examples/channels/telegram-document-update.json",
             "POST /ingress/webchat",
             "POST /ingress/telegram",
+            "Telegram Documentation Maintenance Rule",
+            "Telegram is the current strongest real GUI acceptance lane while TUI remains incomplete.",
+            "docs/skills.md",
+            "docs/sandbox.md",
             "/mosaic help",
             "telegram-step-by-step.md",
             "telegram-real-e2e.md",
@@ -3364,6 +3368,9 @@ mod tests {
             "Markdown Skill Pack",
             "Skill vs Workflow",
             "Skill and Sandbox",
+            "Skills in Telegram Lanes",
+            "telegram-step-by-step.md",
+            "telegram-real-e2e.md",
             "capability_source_kind=native_skill|manifest_skill|markdown_skill_pack",
             "examples/skills/native-skill.yaml",
             "examples/extensions/markdown-skill-pack.yaml",
@@ -3382,6 +3389,9 @@ mod tests {
             "mosaic sandbox inspect <env-id>",
             "Sandbox vs Node",
             "Sandbox vs MCP",
+            "Sandbox in Telegram Lanes",
+            "telegram-step-by-step.md",
+            "telegram-real-e2e.md",
             "failure_origin=sandbox",
             "examples/sandbox/README.md",
         ] {
@@ -3399,6 +3409,7 @@ mod tests {
             "capabilities/README.md",
             "sandbox/README.md",
             "composition/README.md",
+            "Telegram is the current real interactive acceptance path while TUI remains incomplete",
         ] {
             assert!(
                 examples.contains(required),
@@ -3433,6 +3444,9 @@ mod tests {
             "sandbox env lifecycle",
             "capability taxonomy and provenance consistency",
             "examples/composition/openai-capability-composition.config.yaml",
+            "Telegram Documentation-Coupled Release Surface",
+            "telegram-step-by-step.md",
+            "telegram-real-e2e.md",
         ] {
             assert!(
                 testing.contains(required),
@@ -3448,6 +3462,7 @@ mod tests {
             "examples/skills/README.md",
             "examples/sandbox/README.md",
             "whether a failed run came from provider, tool, MCP, node, or sandbox",
+            "Telegram-affecting work is not release-ready unless the matching Telegram docs and examples changed in the same change set.",
         ] {
             assert!(
                 release.contains(required),
@@ -3496,6 +3511,8 @@ mod tests {
             "mosaic config show",
             "mosaic model list",
             "mosaic extension validate",
+            "mosaic sandbox status",
+            "mosaic sandbox list",
             "mosaic gateway serve --http 127.0.0.1:18080",
             "mosaic adapter telegram webhook set",
             "mosaic adapter telegram webhook info",
@@ -3513,6 +3530,7 @@ mod tests {
             "mosaic gateway incident \"$RUN_ID\"",
             "mosaic adapter telegram webhook delete --drop-pending-updates",
             "reverse proxy or tunnel",
+            "this runbook, [telegram-step-by-step.md](./telegram-step-by-step.md), and the matching examples",
         ] {
             assert!(
                 guide.contains(required),
@@ -3541,6 +3559,8 @@ mod tests {
             "openai-telegram-e2e.config.yaml",
             "mosaic setup validate",
             "mosaic setup doctor",
+            "mosaic sandbox status",
+            "mosaic sandbox list",
             "mosaic adapter status",
             "mosaic gateway serve --http 127.0.0.1:18080",
             "cloudflared tunnel --url http://localhost:18080",
@@ -3557,12 +3577,83 @@ mod tests {
             "/mosaic workflow summarize_operator_note",
             "openai-telegram-multi-bot.config.yaml",
             "mosaic gateway incident \"$RUN_ID\"",
+            "skills.md",
+            "sandbox.md",
         ] {
             assert!(
                 guide.contains(required),
                 "telegram step-by-step guide missing {required}"
             );
         }
+    }
+
+    #[test]
+    fn telegram_docs_and_examples_define_l10_maintenance_contract() {
+        let root = repo_root();
+
+        let readme = fs::read_to_string(root.join("README.md")).expect("README should load");
+        for required in [
+            "Telegram is the strongest real interactive GUI acceptance surface today",
+            "if a change affects Telegram commands, capability discovery, skills, attachments, sandbox readiness, or multi-bot behavior",
+            "docs/telegram-step-by-step.md",
+            "docs/telegram-real-e2e.md",
+        ] {
+            assert!(readme.contains(required), "README missing {required}");
+        }
+
+        let step = fs::read_to_string(root.join("docs/telegram-step-by-step.md"))
+            .expect("telegram step-by-step guide should load");
+        for required in [
+            "Maintenance rule:",
+            "Telegram is the current strongest real interactive GUI lane while TUI remains incomplete",
+            "mosaic sandbox status",
+            "mosaic sandbox list",
+            "[skills.md](./skills.md)",
+            "[sandbox.md](./sandbox.md)",
+        ] {
+            assert!(
+                step.contains(required),
+                "telegram step guide missing {required}"
+            );
+        }
+
+        let e2e = fs::read_to_string(root.join("docs/telegram-real-e2e.md"))
+            .expect("telegram real e2e guide should load");
+        for required in [
+            "Maintenance rule:",
+            "mosaic sandbox status",
+            "mosaic sandbox list",
+            "Telegram is the current strongest real interactive GUI acceptance lane while TUI remains incomplete",
+        ] {
+            assert!(
+                e2e.contains(required),
+                "telegram e2e guide missing {required}"
+            );
+        }
+
+        let channels =
+            fs::read_to_string(root.join("docs/channels.md")).expect("channels guide should load");
+        for required in [
+            "Telegram Documentation Maintenance Rule",
+            "command or help behavior changes",
+            "skill or markdown-skill behavior changes",
+            "sandbox prerequisites change",
+            "Release work is not complete until those files move together.",
+        ] {
+            assert!(
+                channels.contains(required),
+                "channels guide missing {required}"
+            );
+        }
+
+        let examples = fs::read_to_string(root.join("examples/README.md"))
+            .expect("examples README should load");
+        assert!(
+            examples.contains(
+                "Telegram is the current real interactive acceptance path while TUI remains incomplete"
+            ),
+            "examples README missing Telegram acceptance note"
+        );
     }
 
     #[test]
@@ -3658,11 +3749,13 @@ mod tests {
             "specs/completed/plan_l7.md",
             "specs/completed/plan_l8.md",
             "specs/completed/plan_l9.md",
+            "specs/completed/plan_l10.md",
             "specs/completed/plan_k1.md",
             "specs/completed/plan_i1.md",
             "completed (working tree)",
             "uncommitted workspace",
             "`97a0291`",
+            "specs/completed/plan_l10.md",
             "No pending `plan_**.md` files are currently left under `specs/`.",
         ] {
             assert!(planlog.contains(required), "PLANLOG missing {required}");
@@ -3673,6 +3766,7 @@ mod tests {
             "specs/completed/plan_j1.md",
             "specs/completed/plan_l1.md",
             "specs/completed/plan_l9.md",
+            "specs/completed/plan_l10.md",
             "specs/completed/plan_k1.md",
             "specs/completed/plan_i1.md",
             "specs/completed/plan_d2.md",
