@@ -344,15 +344,18 @@ fn channel_policy_prefers_matching_channel_profile() {
 
 #[test]
 fn registry_profiles_expose_usage_classification() {
-    let registry = ProviderProfileRegistry::from_config(&MosaicConfig::default())
-        .expect("registry should build");
+    let mut config = MosaicConfig::default();
+    config
+        .profiles
+        .insert("fixture-mock".to_owned(), mock_profile_config("mock"));
+    let registry = ProviderProfileRegistry::from_config(&config).expect("registry should build");
 
     assert_eq!(
         registry.get("gpt-5.4-mini").map(|profile| profile.usage),
         Some(ProviderUsage::FirstClassReal)
     );
     assert_eq!(
-        registry.get("mock").map(|profile| profile.usage),
+        registry.get("fixture-mock").map(|profile| profile.usage),
         Some(ProviderUsage::DevOnlyMock)
     );
 }

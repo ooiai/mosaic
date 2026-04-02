@@ -5,7 +5,6 @@ These examples bind one provider profile, one Gateway, one ingress path, one per
 Primary files:
 
 - `openai-webchat.config.yaml`: no-mock OpenAI + WebChat acceptance config
-- `mock-telegram.config.yaml`: local dev-only mock provider plus Telegram ingress secret
 - `openai-telegram.config.yaml`: legacy single-bot Telegram sign-off config
 - `openai-telegram-single-bot.config.yaml`: beginner-friendly single-bot Telegram baseline with `/mosaic` catalog and attachment routing
 - `openai-telegram-e2e.config.yaml`: Telegram-first real acceptance config with extension wiring
@@ -50,26 +49,6 @@ mosaic inspect .mosaic/runs/<run-id>.json --verbose
 mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>
 ```
 
-## Fast Local Dev Lane
-
-```bash
-mosaic setup init --dev-mock
-cp examples/full-stack/mock-telegram.config.yaml .mosaic/config.yaml
-export MOSAIC_TELEGRAM_SECRET_TOKEN=full-stack-secret
-mosaic setup validate
-mosaic setup doctor
-mosaic gateway serve --http 127.0.0.1:18080
-```
-
-In another shell:
-
-```bash
-curl -X POST http://127.0.0.1:18080/ingress/telegram \
-  -H 'content-type: application/json' \
-  -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_SECRET_TOKEN" \
-  --data @examples/channels/telegram-update.json
-```
-
 ## Telegram Bot Sign-Off Config
 
 ```bash
@@ -89,6 +68,7 @@ Use this config when you are validating a real Telegram bot webhook outside the 
 This baseline is the easiest way to prove:
 
 - `/mosaic help` and category discovery
+- Telegram command keyboard discovery through `/start` and `/help`
 - plain text Telegram conversation
 - explicit tool / skill / workflow routes
 - image and document attachment routing
@@ -128,6 +108,7 @@ mosaic gateway serve --http 127.0.0.1:18080
 
 Then follow [../../docs/telegram-real-e2e.md](../../docs/telegram-real-e2e.md) for:
 
+- `/start` / `/help` and Telegram command keyboard discovery
 - `/mosaic help` and category discovery
 - webhook registration
 - plain conversation proof
@@ -141,12 +122,6 @@ Then follow [../../docs/telegram-real-e2e.md](../../docs/telegram-real-e2e.md) f
 - session, inspect, audit, replay, and incident verification
 
 ## Automated verification
-
-Dev-only mock lane:
-
-```bash
-./scripts/test-full-stack-example.sh mock
-```
 
 Release-blocking OpenAI + WebChat lane:
 

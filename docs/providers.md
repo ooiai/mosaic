@@ -17,7 +17,6 @@ Mosaic validates and runs these provider types:
 - `anthropic`
 - `ollama`
 - `openai-compatible`
-- `mock` for explicit dev-only lanes
 
 `openai-compatible` is supported, but it is not a substitute for real acceptance of the first-class vendors above.
 
@@ -131,22 +130,6 @@ profiles:
     base_url: https://your-gateway.example/v1
     api_key_env: COMPAT_API_KEY
 ```
-
-## Built-in mock provider
-
-`mock` remains available for local smoke tests, but it is no longer the default onboarding path.
-
-```yaml
-active_profile: mock
-```
-
-Enable it explicitly with:
-
-```bash
-mosaic setup init --dev-mock
-```
-
-Use `mock` for control-plane regression and local docs smoke tests. Do not use it as onboarding default or release acceptance evidence.
 
 ## Transport and Vendor Policy
 

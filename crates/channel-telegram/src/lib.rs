@@ -354,6 +354,7 @@ impl TelegramOutboundClient {
             correlation_id: "telegram-cli-test".to_owned(),
             gateway_run_id: "telegram-cli-test".to_owned(),
             session_id: session_hint_for_chat(chat_id, thread_id, bot, true),
+            reply_markup: None,
         })
         .await
     }
@@ -374,6 +375,7 @@ impl TelegramOutboundClient {
                 text: message.text.clone(),
                 message_thread_id: reply_target.thread_id,
                 reply_to_message_id: reply_target.reply_to_message_id,
+                reply_markup: message.reply_markup.as_ref().map(telegram_reply_markup),
             })
             .send()
             .await
@@ -773,6 +775,23 @@ struct TelegramSendMessageRequest {
     message_thread_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reply_to_message_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reply_markup: Option<TelegramReplyMarkup>,
+}
+
+#[derive(Debug, Serialize)]
+struct TelegramReplyMarkup {
+    keyboard: Vec<Vec<TelegramKeyboardButton>>,
+    resize_keyboard: bool,
+    one_time_keyboard: bool,
+    is_persistent: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_field_placeholder: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct TelegramKeyboardButton {
+    text: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -802,6 +821,26 @@ struct TelegramApiResponse<T> {
 #[derive(Debug, Deserialize)]
 struct TelegramApiMessage {
     message_id: Option<i64>,
+}
+
+fn telegram_reply_markup(markup: &mosaic_inspect::ChannelReplyMarkup) -> TelegramReplyMarkup {
+    TelegramReplyMarkup {
+        keyboard: markup
+            .rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|button| TelegramKeyboardButton {
+                        text: button.text.clone(),
+                    })
+                    .collect()
+            })
+            .collect(),
+        resize_keyboard: true,
+        one_time_keyboard: false,
+        is_persistent: markup.persistent,
+        input_field_placeholder: markup.input_placeholder.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -1075,6 +1114,7 @@ mod tests {
                 correlation_id: "corr-1".to_owned(),
                 gateway_run_id: "gateway-run-1".to_owned(),
                 session_id: "telegram--10042-7".to_owned(),
+                reply_markup: None,
             })
             .await;
 
@@ -1149,12 +1189,97 @@ mod tests {
                 correlation_id: "corr-2".to_owned(),
                 gateway_run_id: "gateway-run-2".to_owned(),
                 session_id: "telegram-42".to_owned(),
+                reply_markup: None,
             })
             .await;
 
         assert_eq!(delivery.result.status, ChannelDeliveryStatus::Delivered);
         assert_eq!(delivery.result.retry_count, 1);
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn sends_reply_keyboard_markup_with_outbound_message() {
+        let captured = Arc::new(tokio::sync::Mutex::new(Vec::<serde_json::Value>::new()));
+        let app = Router::new().route(
+            "/bottest-token/sendMessage",
+            post({
+                let captured = captured.clone();
+                move |Json(payload): Json<serde_json::Value>| {
+                    let captured = captured.clone();
+                    async move {
+                        captured.lock().await.push(payload);
+                        Json(serde_json::json!({
+                            "ok": true,
+                            "result": { "message_id": 118 }
+                        }))
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener should bind");
+        let addr = listener.local_addr().expect("addr should exist");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let client = TelegramOutboundClient::new("test-token", format!("http://{addr}")).unwrap();
+        let delivery = client
+            .send_message(ChannelOutboundMessage {
+                channel: "telegram".to_owned(),
+                adapter: "telegram_webhook".to_owned(),
+                bot_name: None,
+                bot_route: None,
+                bot_profile: None,
+                bot_token_env: None,
+                conversation_id: "telegram:chat:42".to_owned(),
+                reply_target: "telegram:chat:42:message:10".to_owned(),
+                text: "catalog".to_owned(),
+                idempotency_key: "idem-3".to_owned(),
+                correlation_id: "corr-3".to_owned(),
+                gateway_run_id: "gateway-run-3".to_owned(),
+                session_id: "telegram-42".to_owned(),
+                reply_markup: Some(mosaic_inspect::ChannelReplyMarkup {
+                    rows: vec![
+                        vec![
+                            mosaic_inspect::ChannelQuickReplyButton {
+                                text: "/mosaic".to_owned(),
+                            },
+                            mosaic_inspect::ChannelQuickReplyButton {
+                                text: "/mosaic help".to_owned(),
+                            },
+                        ],
+                        vec![mosaic_inspect::ChannelQuickReplyButton {
+                            text: "/mosaic help tools".to_owned(),
+                        }],
+                    ],
+                    input_placeholder: Some("Try /mosaic help tools".to_owned()),
+                    persistent: true,
+                }),
+            })
+            .await;
+
+        assert_eq!(delivery.result.status, ChannelDeliveryStatus::Delivered);
+        let captured = captured.lock().await;
+        assert_eq!(
+            captured[0]["reply_markup"]["keyboard"][0][0]["text"],
+            "/mosaic"
+        );
+        assert_eq!(
+            captured[0]["reply_markup"]["keyboard"][0][1]["text"],
+            "/mosaic help"
+        );
+        assert_eq!(
+            captured[0]["reply_markup"]["keyboard"][1][0]["text"],
+            "/mosaic help tools"
+        );
+        assert_eq!(
+            captured[0]["reply_markup"]["input_field_placeholder"],
+            "Try /mosaic help tools"
+        );
+        assert_eq!(captured[0]["reply_markup"]["is_persistent"], true);
     }
 
     #[tokio::test]

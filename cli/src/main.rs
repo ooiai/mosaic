@@ -7,10 +7,10 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand, ValueEnum};
 use mosaic_config::{
-    ACTIVE_PROFILE_ENV, DEFAULT_PRODUCT_ACTIVE_PROFILE, DEV_MOCK_PROFILE,
-    InitWorkspaceConfigOptions, LoadConfigOptions, LoadedMosaicConfig, PolicyConfig, ProviderUsage,
-    ValidationLevel, doctor_mosaic_config, init_workspace_config, load_mosaic_config,
-    redact_mosaic_config, save_mosaic_config, validate_mosaic_config,
+    ACTIVE_PROFILE_ENV, DEFAULT_PRODUCT_ACTIVE_PROFILE, InitWorkspaceConfigOptions,
+    LoadConfigOptions, LoadedMosaicConfig, PolicyConfig, ValidationLevel, doctor_mosaic_config,
+    init_workspace_config, load_mosaic_config, redact_mosaic_config, save_mosaic_config,
+    validate_mosaic_config,
 };
 use mosaic_control_protocol::{
     CapabilityJobDto, CronRegistrationDto, GatewayAuditEventDto, GatewayEvent, HealthResponse,
@@ -90,7 +90,6 @@ const SETUP_AFTER_HELP: &str = "When to use it:
 Examples:
   mosaic setup init
   mosaic setup init --profile anthropic-sonnet
-  mosaic setup init --dev-mock
   mosaic setup validate
   mosaic setup doctor";
 const CONFIG_AFTER_HELP: &str = "When to use it:
@@ -303,12 +302,6 @@ enum SetupCommand {
             help = "Use this built-in provider profile as the initial active profile"
         )]
         profile: Option<String>,
-        #[arg(
-            long,
-            conflicts_with = "profile",
-            help = "Generate a dev-only mock template instead of the real-provider-first default"
-        )]
-        dev_mock: bool,
     },
     Validate,
     Doctor,
@@ -924,54 +917,28 @@ where
 
 fn setup_cmd(command: SetupCommand) -> Result<()> {
     match command {
-        SetupCommand::Init {
-            force,
-            profile,
-            dev_mock,
-        } => {
+        SetupCommand::Init { force, profile } => {
             let cwd = env::current_dir()?;
-            let selected_profile = if dev_mock {
-                DEV_MOCK_PROFILE.to_owned()
-            } else {
-                profile
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_PRODUCT_ACTIVE_PROFILE.to_owned())
-            };
-            let dev_mock_mode = selected_profile == DEV_MOCK_PROFILE;
+            let selected_profile = profile
+                .clone()
+                .unwrap_or_else(|| DEFAULT_PRODUCT_ACTIVE_PROFILE.to_owned());
             let path = init_workspace_config(
                 &cwd,
                 &InitWorkspaceConfigOptions {
                     force,
                     active_profile: profile,
-                    dev_mock,
                 },
             )?;
             println!("workspace initialized");
             println!("config_path: {}", path.display());
             println!("active_profile: {}", selected_profile);
-            println!(
-                "setup_mode: {}",
-                if dev_mock_mode {
-                    "dev-only-mock"
-                } else {
-                    "real-provider-first"
-                }
-            );
-            if dev_mock_mode {
-                print_next_steps([
-                    "mosaic setup validate",
-                    "mosaic setup doctor",
-                    "mosaic model list",
-                    "mosaic tui",
-                ]);
-            } else {
-                print_next_steps([
-                    "mosaic setup validate",
-                    "mosaic setup doctor",
-                    "mosaic model list",
-                    "mosaic tui",
-                ]);
-            }
+            println!("setup_mode: real-provider-first");
+            print_next_steps([
+                "mosaic setup validate",
+                "mosaic setup doctor",
+                "mosaic model list",
+                "mosaic tui",
+            ]);
             Ok(())
         }
         SetupCommand::Validate => {
@@ -1388,9 +1355,7 @@ fn model_cmd(command: ModelCommand) -> Result<()> {
             let profiles = registry.list();
             let validation = validate_mosaic_config(&loaded.config);
             let active = registry.active_profile();
-            let active_state = if active.usage == ProviderUsage::DevOnlyMock {
-                "dev-mock"
-            } else if validation.issues.iter().any(|issue| {
+            let active_state = if validation.issues.iter().any(|issue| {
                 issue.field == "active_profile"
                     || issue
                         .field
@@ -2656,19 +2621,6 @@ mod tests {
                 command: SetupCommand::Init {
                     force: true,
                     profile: Some("anthropic-sonnet".to_owned()),
-                    dev_mock: false,
-                },
-            }
-        );
-
-        let cli = Cli::parse_from(["mosaic", "setup", "init", "--dev-mock"]);
-        assert_eq!(
-            cli.dispatch(),
-            DispatchCommand::Setup {
-                command: SetupCommand::Init {
-                    force: false,
-                    profile: None,
-                    dev_mock: true,
                 },
             }
         );
@@ -2928,7 +2880,6 @@ mod tests {
         assert!(help.contains("When to use it"));
         assert!(help.contains("diagnose why Mosaic will not start cleanly"));
         assert!(help.contains("mosaic setup init --profile anthropic-sonnet"));
-        assert!(help.contains("mosaic setup init --dev-mock"));
     }
 
     #[test]
@@ -2964,6 +2915,8 @@ mod tests {
             "mosaic setup validate",
             "mosaic setup doctor",
             "mosaic tui",
+            "/start",
+            "/help",
             "/mosaic help",
             "mosaic session list",
             "mosaic inspect .mosaic/runs/<run-id>.json",
@@ -2974,7 +2927,6 @@ mod tests {
             "docs/full-stack.md",
             "docs/telegram-real-e2e.md",
             "docs/real-vs-mock-acceptance.md",
-            "docs/residual-mock-first-audit.md",
             "docs/provider-runtime-policy-matrix.md",
             "docs/writer-ownership.md",
             "docs/deployment.md",
@@ -3052,7 +3004,6 @@ mod tests {
             "make test-matrix",
             "make test-golden",
             "MOSAIC_REAL_TESTS=1 make test-real",
-            "./scripts/test-full-stack-example.sh mock",
             "OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat",
             "Crate-by-Crate Product Proof Matrix",
             "Release Roles",
@@ -3103,7 +3054,6 @@ mod tests {
             "examples/channels/telegram-photo-update.json",
             "examples/channels/telegram-document-update.json",
             "examples/full-stack/README.md",
-            "examples/full-stack/mock-telegram.config.yaml",
             "examples/full-stack/openai-webchat.config.yaml",
             "examples/full-stack/openai-telegram.config.yaml",
             "examples/full-stack/openai-telegram-single-bot.config.yaml",
@@ -3258,8 +3208,8 @@ mod tests {
             "crates/gateway/src/lib.rs:523-538",
             "crates/runtime/src/lib.rs:240-313",
             "crates/extension-core/src/lib.rs:257-365",
-            "specs/plan_i1.md",
-            "specs/plan_h5.md",
+            "specs/completed/plan_i1.md",
+            "specs/completed/plan_h5.md",
         ] {
             assert!(
                 audit.contains(required),
@@ -3267,7 +3217,8 @@ mod tests {
             );
         }
 
-        let plan = fs::read_to_string(root.join("specs/plan_i1.md")).expect("plan_i1 should load");
+        let plan = fs::read_to_string(root.join("specs/completed/plan_i1.md"))
+            .expect("plan_i1 should load");
         for required in [
             "# Plan i1",
             "cli",
@@ -3332,7 +3283,6 @@ mod tests {
             .expect("full-stack guide should load");
         for required in [
             "examples/full-stack/openai-webchat.config.yaml",
-            "examples/full-stack/mock-telegram.config.yaml",
             "examples/full-stack/openai-telegram.config.yaml",
             "examples/full-stack/openai-telegram-single-bot.config.yaml",
             "examples/full-stack/openai-telegram-e2e.config.yaml",
@@ -3345,7 +3295,6 @@ mod tests {
             "examples/channels/telegram-photo-update.json",
             "examples/channels/telegram-document-update.json",
             "telegram-real-e2e.md",
-            "./scripts/test-full-stack-example.sh mock",
             "MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat",
             "mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>",
         ] {
@@ -3538,7 +3487,10 @@ mod tests {
             "examples/full-stack/openai-telegram-multimodal.config.yaml",
             "examples/full-stack/openai-telegram-bot-split.config.yaml",
             "examples/extensions/telegram-e2e.yaml",
+            "/start",
+            "/help",
             "/mosaic help",
+            "command keyboard",
             "mosaic setup validate",
             "mosaic setup doctor",
             "mosaic config show",
@@ -3577,6 +3529,8 @@ mod tests {
 
         for required in [
             "# Telegram Step-by-Step Setup",
+            "/start",
+            "/help",
             "https://t.me/BotFather",
             "https://core.telegram.org/bots/tutorial#obtain-your-bot-token",
             "MOSAIC_TELEGRAM_BOT_TOKEN",
@@ -3595,6 +3549,8 @@ mod tests {
             "mosaic adapter telegram webhook info --bot primary",
             "mosaic adapter telegram test-send --bot primary --chat-id 123456789 \"hello from mosaic\"",
             "/mosaic help",
+            "command keyboard",
+            "/mosaic@your_bot_name",
             "conversation_id: telegram:chat:123456789",
             "/mosaic tool read_file .mosaic/config.yaml",
             "/mosaic skill summarize_notes",
@@ -3687,6 +3643,46 @@ mod tests {
         assert_eq!(source.label(), "builtin");
         assert_eq!(source.server_name(), None);
         assert_eq!(source.remote_tool_name(), None);
+    }
+
+    #[test]
+    fn specs_planlog_tracks_completed_and_pending_plan_locations() {
+        let root = repo_root();
+        let planlog =
+            fs::read_to_string(root.join("specs/PLANLOG.md")).expect("PLANLOG should load");
+
+        for required in [
+            "# PLANLOG",
+            "executed_at",
+            "commit_ref",
+            "specs/completed/plan_l7.md",
+            "specs/completed/plan_l8.md",
+            "specs/completed/plan_l9.md",
+            "specs/completed/plan_k1.md",
+            "specs/completed/plan_i1.md",
+            "completed (working tree)",
+            "uncommitted workspace",
+            "`97a0291`",
+            "No pending `plan_**.md` files are currently left under `specs/`.",
+        ] {
+            assert!(planlog.contains(required), "PLANLOG missing {required}");
+        }
+
+        for relative in [
+            "specs/completed/plan_a.md",
+            "specs/completed/plan_j1.md",
+            "specs/completed/plan_l1.md",
+            "specs/completed/plan_l9.md",
+            "specs/completed/plan_k1.md",
+            "specs/completed/plan_i1.md",
+            "specs/completed/plan_d2.md",
+            "specs/completed/plan_k6.md",
+        ] {
+            assert!(
+                root.join(relative).is_file(),
+                "missing archived spec {relative}"
+            );
+        }
     }
 
     #[test]

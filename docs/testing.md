@@ -163,7 +163,6 @@ Docs, examples, and matrix consistency:
 ```bash
 make test-matrix
 make test-golden
-./scripts/test-full-stack-example.sh mock
 ```
 
 Automated real lanes:

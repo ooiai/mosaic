@@ -61,6 +61,15 @@ fn mock_profile_config() -> ProviderProfileConfig {
     }
 }
 
+fn config_with_mock_active_profile() -> MosaicConfig {
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    config
+        .profiles
+        .insert("mock".to_owned(), mock_profile_config());
+    config
+}
+
 #[derive(Default)]
 struct VecEventSink {
     events: Mutex<Vec<RunEvent>>,
@@ -460,11 +469,7 @@ fn runtime_with_provider_and_workflows(
     event_sink: Arc<dyn RunEventSink>,
     workflows: WorkflowRegistry,
 ) -> AgentRuntime {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
-    config
-        .profiles
-        .insert("mock".to_owned(), mock_profile_config());
+    let config = config_with_mock_active_profile();
 
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
@@ -684,11 +689,7 @@ async fn run_records_ingress_metadata_in_trace() {
 
 #[tokio::test]
 async fn conversational_skill_auto_route_records_route_decision() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
-    config
-        .profiles
-        .insert("mock".to_owned(), mock_profile_config());
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let mut skills = SkillRegistry::new();
@@ -930,11 +931,7 @@ async fn assistant_runs_with_attachments_use_provider_native_multimodal_route() 
 
 #[tokio::test]
 async fn attachments_can_route_to_specialized_processor_skills() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
-    config
-        .profiles
-        .insert("mock".to_owned(), mock_profile_config());
+    let mut config = config_with_mock_active_profile();
     config.attachments.routing.default.mode = AttachmentRouteModeConfig::SpecializedProcessor;
     config.attachments.routing.default.processor = Some("attachment_echo".to_owned());
 
@@ -1049,11 +1046,7 @@ async fn attachments_can_route_to_specialized_processor_skills() {
 #[tokio::test]
 async fn bot_attachment_policy_overrides_workspace_defaults_and_records_scope() {
     let provider = Arc::new(RecordingProvider::default());
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
-    config
-        .profiles
-        .insert("mock".to_owned(), mock_profile_config());
+    let mut config = config_with_mock_active_profile();
     config.profiles.insert(
         "gpt-5.4".to_owned(),
         ProviderProfileConfig {
@@ -1414,8 +1407,7 @@ async fn tool_loop_executes_time_now_and_records_tool_trace() {
 
 #[tokio::test]
 async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let mut tools = ToolRegistry::new();
@@ -1482,8 +1474,7 @@ async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
 
 #[tokio::test]
 async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let workspace_root = std::env::temp_dir().join(format!(
@@ -1606,8 +1597,7 @@ async fn tool_loop_routes_read_file_via_node_when_affinity_is_present() {
 
 #[tokio::test]
 async fn node_preferred_read_file_falls_back_to_local_when_matching_node_is_offline() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let workspace_root = std::env::temp_dir().join(format!(
@@ -1702,8 +1692,7 @@ async fn node_preferred_read_file_falls_back_to_local_when_matching_node_is_offl
 
 #[tokio::test]
 async fn require_node_tool_does_not_fall_back_when_no_node_is_available() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let workspace_root = std::env::temp_dir().join(format!(
@@ -1766,8 +1755,7 @@ async fn require_node_tool_does_not_fall_back_when_no_node_is_available() {
 
 #[tokio::test]
 async fn permission_denied_affinity_does_not_fall_back_to_local_execution() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let workspace_root = std::env::temp_dir().join(format!(
@@ -1857,8 +1845,7 @@ async fn workflow_runs_record_step_trace_and_skill_invocation() {
     let store = Arc::new(MemorySessionStore::default());
     let mut workflows = WorkflowRegistry::new();
     workflows.register(research_workflow());
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let mut skills = SkillRegistry::new();
@@ -2230,8 +2217,7 @@ async fn empty_provider_response_returns_an_error() {
 #[tokio::test]
 async fn skill_failures_emit_skill_failed_then_run_failed() {
     let sink = Arc::new(VecEventSink::default());
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
 
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
@@ -2281,8 +2267,7 @@ async fn skill_failures_emit_skill_failed_then_run_failed() {
 
 #[tokio::test]
 async fn session_skill_runs_persist_assistant_output() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let store = Arc::new(MemorySessionStore::default());
@@ -2335,8 +2320,7 @@ async fn session_skill_runs_persist_assistant_output() {
 
 #[tokio::test]
 async fn session_runs_persist_memory_and_record_compression_trace() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let store = Arc::new(MemorySessionStore::default());
@@ -2409,8 +2393,7 @@ async fn session_runs_persist_memory_and_record_compression_trace() {
 
 #[tokio::test]
 async fn cross_session_reference_records_memory_reads_and_session_links() {
-    let mut config = MosaicConfig::default();
-    config.active_profile = "mock".to_owned();
+    let config = config_with_mock_active_profile();
     let profiles =
         ProviderProfileRegistry::from_config(&config).expect("profile registry should build");
     let store = Arc::new(MemorySessionStore::default());

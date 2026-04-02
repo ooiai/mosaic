@@ -5,7 +5,6 @@ use mosaic_sandbox_core::{SandboxCleanupPolicy, SandboxManager, SandboxSettings}
 pub struct InitWorkspaceConfigOptions {
     pub force: bool,
     pub active_profile: Option<String>,
-    pub dev_mock: bool,
 }
 
 pub fn load_from_file(path: impl AsRef<Path>) -> Result<AppConfig> {
@@ -93,14 +92,10 @@ pub fn init_workspace_config(
 
 fn init_config_template(options: &InitWorkspaceConfigOptions) -> Result<MosaicConfig> {
     let mut config = MosaicConfig::default();
-    let active_profile = if options.dev_mock {
-        DEV_MOCK_PROFILE.to_owned()
-    } else {
-        options
-            .active_profile
-            .clone()
-            .unwrap_or_else(|| DEFAULT_PRODUCT_ACTIVE_PROFILE.to_owned())
-    };
+    let active_profile = options
+        .active_profile
+        .clone()
+        .unwrap_or_else(|| DEFAULT_PRODUCT_ACTIVE_PROFILE.to_owned());
 
     if !config.profiles.contains_key(&active_profile) {
         let available = config

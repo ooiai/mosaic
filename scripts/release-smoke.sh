@@ -13,31 +13,17 @@ run_cli() {
 }
 
 cd "$WORKDIR"
-run_cli setup init --dev-mock
+run_cli setup init --profile ollama-qwen3
 run_cli setup validate >/dev/null
 run_cli setup doctor >/dev/null
 run_cli config show >/dev/null
 run_cli config sources >/dev/null
 run_cli model list >/dev/null
 run_cli gateway status >/dev/null
-run_cli run "$ROOT/examples/time-now-agent.yaml" --session release-smoke >/dev/null
-TRACE_PATH=$(find "$WORKDIR/.mosaic/runs" -maxdepth 1 -name '*.json' | head -n 1)
-if [ -z "$TRACE_PATH" ]; then
-    echo "release smoke did not produce a trace" >&2
-    exit 1
+if [ "${MOSAIC_REAL_TESTS:-0}" != "1" ] || [ -z "${OPENAI_API_KEY:-}" ]; then
+    printf 'release smoke ok\nworkspace=%s\nmode=config-only\n' "$WORKDIR"
+    exit 0
 fi
-RUN_ID=$(basename "$TRACE_PATH" .json)
-run_cli session list >/dev/null
-run_cli session show release-smoke >/dev/null
-run_cli inspect "$TRACE_PATH" >/dev/null
-run_cli gateway audit --limit 5 >/dev/null
-run_cli gateway replay --limit 5 >/dev/null
-run_cli gateway incident "$RUN_ID" >/dev/null
-cp -R "$WORKDIR/.mosaic" "$WORKDIR/.mosaic.backup"
-rm -rf "$WORKDIR/.mosaic"
-cp -R "$WORKDIR/.mosaic.backup" "$WORKDIR/.mosaic"
-run_cli session show release-smoke >/dev/null
-run_cli gateway status >/dev/null
-run_cli gateway audit --limit 5 >/dev/null
-run_cli inspect "$TRACE_PATH" >/dev/null
-printf 'release smoke ok\nworkspace=%s\ntrace=%s\nrun_id=%s\n' "$WORKDIR" "$TRACE_PATH" "$RUN_ID"
+
+sh "$ROOT/scripts/test-full-stack-example.sh" openai-webchat >/dev/null
+printf 'release smoke ok\nworkspace=%s\nmode=openai-webchat\n' "$WORKDIR"

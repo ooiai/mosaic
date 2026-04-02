@@ -10,7 +10,6 @@ Examples used by this guide:
 
 - [examples/full-stack/README.md](../examples/full-stack/README.md)
 - [examples/full-stack/openai-webchat.config.yaml](../examples/full-stack/openai-webchat.config.yaml)
-- [examples/full-stack/mock-telegram.config.yaml](../examples/full-stack/mock-telegram.config.yaml) for the explicit dev-only mock lane
 - [examples/full-stack/openai-telegram.config.yaml](../examples/full-stack/openai-telegram.config.yaml)
 - [examples/full-stack/openai-telegram-single-bot.config.yaml](../examples/full-stack/openai-telegram-single-bot.config.yaml)
 - [examples/full-stack/openai-telegram-e2e.config.yaml](../examples/full-stack/openai-telegram-e2e.config.yaml)
@@ -96,53 +95,6 @@ In the verbose inspect output you should see:
 - `retry_backoff_ms`
 - `max_provider_round_trips`
 
-## Fast Local Dev Path
-
-This lane uses the mock provider but the real Gateway HTTP and Telegram ingress path.
-
-It is useful for docs smoke tests and local iteration, but it is not final acceptance.
-
-1. Initialize the workspace.
-
-```bash
-mosaic setup init --dev-mock
-cp examples/full-stack/mock-telegram.config.yaml .mosaic/config.yaml
-export MOSAIC_TELEGRAM_SECRET_TOKEN=full-stack-secret
-```
-
-2. Validate the config.
-
-```bash
-mosaic setup validate
-mosaic setup doctor
-```
-
-3. Start the HTTP Gateway.
-
-```bash
-mosaic gateway serve --http 127.0.0.1:18080
-```
-
-4. In another shell, send a Telegram webhook payload.
-
-```bash
-curl -X POST http://127.0.0.1:18080/ingress/telegram \
-  -H 'content-type: application/json' \
-  -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_SECRET_TOKEN" \
-  --data @examples/channels/telegram-update.json
-```
-
-5. Inspect the resulting control-plane state.
-
-```bash
-mosaic gateway --attach http://127.0.0.1:18080 status
-mosaic gateway --attach http://127.0.0.1:18080 audit --limit 10
-mosaic gateway --attach http://127.0.0.1:18080 replay --limit 10
-mosaic session show telegram--100123-99
-mosaic inspect .mosaic/runs/<run-id>.json
-mosaic gateway --attach http://127.0.0.1:18080 incident <run-id>
-```
-
 ## Telegram Bot Acceptance Path
 
 Use this path when Telegram is a real release target and you have:
@@ -171,12 +123,6 @@ That dedicated runbook adds:
 - `session`, `inspect`, `audit`, `replay`, and `incident` verification
 
 ## Automated Verification
-
-Dev-only mock lane:
-
-```bash
-./scripts/test-full-stack-example.sh mock
-```
 
 Release-blocking OpenAI + WebChat lane:
 

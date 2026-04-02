@@ -547,6 +547,21 @@ pub struct AttachmentRouteTrace {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelQuickReplyButton {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChannelReplyMarkup {
+    #[serde(default)]
+    pub rows: Vec<Vec<ChannelQuickReplyButton>>,
+    #[serde(default)]
+    pub input_placeholder: Option<String>,
+    #[serde(default)]
+    pub persistent: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ChannelOutboundMessage {
     pub channel: String,
     pub adapter: String,
@@ -565,6 +580,8 @@ pub struct ChannelOutboundMessage {
     pub correlation_id: String,
     pub gateway_run_id: String,
     pub session_id: String,
+    #[serde(default)]
+    pub reply_markup: Option<ChannelReplyMarkup>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

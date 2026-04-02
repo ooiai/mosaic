@@ -75,6 +75,7 @@ fn persists_and_recovers_trace_with_ingress_metadata() {
             correlation_id: "corr-1".to_owned(),
             gateway_run_id: "gw-1".to_owned(),
             session_id: "demo".to_owned(),
+            reply_markup: None,
         },
         result: ChannelDeliveryResult {
             delivery_id: "delivery-1".to_owned(),

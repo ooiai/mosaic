@@ -1,6 +1,6 @@
 # mosaic-channel-telegram
 
-`mosaic-channel-telegram` normalizes Telegram webhook payloads into Mosaic-ready ingress context.
+`mosaic-channel-telegram` normalizes Telegram webhook payloads into Mosaic-ready ingress context and sends Telegram-native outbound replies, including command keyboards.
 
 ## Positioning
 
@@ -14,19 +14,19 @@ Interaction Entry Layer.
 
 - Define Telegram webhook payload structs.
 - Normalize message, thread, actor, and reply-target data through `normalize_update`.
-- Produce `IngressTrace`-compatible context through `NormalizedTelegramMessage::ingress`.
+- Send Telegram outbound replies through `TelegramOutboundClient`.
+- Map channel quick-reply markup into Telegram reply keyboards.
 
 ## Out of Scope
 
 - Gateway HTTP routing or shared-secret auth.
 - Runtime orchestration.
-- Outbound Telegram sending.
 - TUI or CLI rendering.
 
 ## Public Boundary
 
-- Types: `TelegramUpdate`, `TelegramMessage`, `TelegramChat`, `TelegramUser`, `NormalizedTelegramMessage`.
-- Entry function: `normalize_update`.
+- Types: `TelegramUpdate`, `TelegramMessage`, `TelegramChat`, `TelegramUser`, `TelegramOutboundClient`.
+- Entry functions: `normalize_update`, `normalize_update_with_context`.
 
 ## Why This Is In `crates/`
 
@@ -35,7 +35,7 @@ Telegram normalization is reusable by gateway ingress handlers, SDK tests, and f
 ## Relationships
 
 - Upstream crates: `mosaic-inspect` provides the ingress trace type used by normalized output.
-- Downstream crates: `mosaic-gateway` calls `normalize_update`, while CLI and SDK tests can reuse the same normalization behavior.
+- Downstream crates: `mosaic-gateway` calls `normalize_update` and uses `TelegramOutboundClient` for outbound replies, while CLI and SDK tests can reuse the same adapter behavior.
 - Runtime/control-plane coupling: `gateway` uses this crate before submitting a run to `mosaic-runtime`; the runtime should never parse raw Telegram payloads itself.
 
 ## Minimal Use
@@ -56,11 +56,12 @@ cargo test -p mosaic-channel-telegram
 ## Current Limitations
 
 - It only handles the currently supported inbound Telegram payload shapes.
-- There is no outbound Telegram abstraction yet.
-- Rich media handling is intentionally out of scope today.
+- Rich media handling is intentionally narrow and focused on the current image/document lanes.
+- Callback-query and inline-keyboard flows are not implemented yet; Telegram command discovery currently uses reply-keyboard shortcuts plus text commands.
 
 ## Roadmap
 
 - Expand supported inbound Telegram payload patterns carefully.
+- Keep outbound reply semantics and keyboard rendering compatible.
 - Keep the adapter thin and normalization-focused.
 - Preserve a stable bridge from channel payloads into control-plane ingress traces.

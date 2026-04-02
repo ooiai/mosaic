@@ -167,7 +167,6 @@ The installed binary name is `mosaic`.
 - [`docs/full-stack.md`](./docs/full-stack.md)
 - [`docs/telegram-real-e2e.md`](./docs/telegram-real-e2e.md)
 - [`docs/real-vs-mock-acceptance.md`](./docs/real-vs-mock-acceptance.md)
-- [`docs/residual-mock-first-audit.md`](./docs/residual-mock-first-audit.md)
 - [`docs/provider-runtime-policy-matrix.md`](./docs/provider-runtime-policy-matrix.md)
 - [`docs/writer-ownership.md`](./docs/writer-ownership.md)
 - [`docs/deployment.md`](./docs/deployment.md)
@@ -216,7 +215,7 @@ The operator-first path is:
 4. `mosaic config show`
 5. `mosaic model list`
 6. `mosaic tui`
-7. Use `/mosaic help` inside a real channel or the interactive console.
+7. Use `/start`, `/help`, or `/mosaic help` inside a real channel or the interactive console.
 8. Inspect the resulting run with `mosaic inspect .mosaic/runs/<run-id>.json`
 
 For the Telegram-first real acceptance lane, start with:

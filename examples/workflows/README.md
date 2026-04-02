@@ -7,5 +7,3 @@ Run it:
 ```bash
 mosaic run examples/workflows/research-brief.yaml --workflow research_brief --session workflow-demo
 ```
-
-If you want to exercise the same workflow with the dev-only mock lane, initialize the workspace with `mosaic setup init --dev-mock` first.

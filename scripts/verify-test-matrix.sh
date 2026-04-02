@@ -176,8 +176,7 @@ do
 done
 
 for pattern in \
-    'openai-webchat' \
-    'mock-telegram'
+    'openai-webchat'
 do
     require_contains "scripts/test-full-stack-example.sh" "$pattern"
 done

@@ -99,7 +99,6 @@ pub fn parse_provider_type(value: &str) -> Option<ProviderType> {
 
 pub fn supported_provider_types() -> &'static [&'static str] {
     &[
-        "mock",
         "openai",
         "azure",
         "anthropic",
@@ -1269,18 +1268,6 @@ fn default_profiles() -> BTreeMap<String, ProviderProfileConfig> {
                 model: "gpt-5.4-mini".to_owned(),
                 base_url: Some("https://api.openai.com/v1".to_owned()),
                 api_key_env: Some("OPENAI_API_KEY".to_owned()),
-                transport: ProviderTransportPolicyConfig::default(),
-                vendor: ProviderVendorPolicyConfig::default(),
-                attachments: ProviderAttachmentRoutingConfig::default(),
-            },
-        ),
-        (
-            "mock".to_owned(),
-            ProviderProfileConfig {
-                provider_type: "mock".to_owned(),
-                model: "mock".to_owned(),
-                base_url: None,
-                api_key_env: None,
                 transport: ProviderTransportPolicyConfig::default(),
                 vendor: ProviderVendorPolicyConfig::default(),
                 attachments: ProviderAttachmentRoutingConfig::default(),

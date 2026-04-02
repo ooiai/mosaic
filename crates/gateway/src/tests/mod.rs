@@ -1348,6 +1348,161 @@ async fn telegram_inbound_run_records_outbound_delivery_audit_and_incident_trace
 }
 
 #[tokio::test]
+async fn telegram_help_aliases_emit_command_keyboard() {
+    let _env_guard = telegram_env_lock()
+        .lock()
+        .expect("telegram env lock should not be poisoned");
+    let delivery_requests = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+    let api = axum::Router::new().route(
+        "/bottest-token/sendMessage",
+        axum::routing::post({
+            let delivery_requests = delivery_requests.clone();
+            move |axum::Json(payload): axum::Json<serde_json::Value>| {
+                let delivery_requests = delivery_requests.clone();
+                async move {
+                    delivery_requests
+                        .lock()
+                        .expect("delivery requests lock should not be poisoned")
+                        .push(payload);
+                    axum::Json(serde_json::json!({
+                        "ok": true,
+                        "result": { "message_id": 144 }
+                    }))
+                }
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("telegram api listener should bind");
+    let addr = listener.local_addr().expect("listener addr should resolve");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, api).await;
+    });
+
+    unsafe {
+        std::env::set_var("MOSAIC_TELEGRAM_BOT_TOKEN", "test-token");
+        std::env::set_var("MOSAIC_TELEGRAM_API_BASE_URL", format!("http://{addr}"));
+    }
+
+    let gateway = gateway();
+    let bot = crate::auth::resolved_telegram_bot_by_name(&gateway.snapshot_components(), None)
+        .expect("default telegram bot should resolve");
+
+    let start = gateway
+        .submit_telegram_update(
+            &bot,
+            TelegramUpdate {
+                update_id: 9101,
+                message: Some(mosaic_channel_telegram::TelegramMessage {
+                    message_id: 21,
+                    text: Some("/start".to_owned()),
+                    caption: None,
+                    photo: vec![],
+                    document: None,
+                    message_thread_id: None,
+                    chat: mosaic_channel_telegram::TelegramChat {
+                        id: 42,
+                        chat_type: "private".to_owned(),
+                        title: None,
+                        username: Some("tester".to_owned()),
+                        first_name: Some("Test".to_owned()),
+                        last_name: None,
+                    },
+                    from: Some(mosaic_channel_telegram::TelegramUser {
+                        id: 42,
+                        username: Some("tester".to_owned()),
+                        first_name: "Test".to_owned(),
+                        last_name: None,
+                    }),
+                }),
+                edited_message: None,
+                channel_post: None,
+            },
+        )
+        .expect("telegram submit should succeed")
+        .wait()
+        .await
+        .expect("telegram start should succeed");
+    assert!(
+        start
+            .output
+            .contains("Mosaic commands available in this conversation.")
+    );
+
+    let tools = gateway
+        .submit_telegram_update(
+            &bot,
+            TelegramUpdate {
+                update_id: 9102,
+                message: Some(mosaic_channel_telegram::TelegramMessage {
+                    message_id: 22,
+                    text: Some("/help@testbot tools".to_owned()),
+                    caption: None,
+                    photo: vec![],
+                    document: None,
+                    message_thread_id: None,
+                    chat: mosaic_channel_telegram::TelegramChat {
+                        id: 42,
+                        chat_type: "private".to_owned(),
+                        title: None,
+                        username: Some("tester".to_owned()),
+                        first_name: Some("Test".to_owned()),
+                        last_name: None,
+                    },
+                    from: Some(mosaic_channel_telegram::TelegramUser {
+                        id: 42,
+                        username: Some("tester".to_owned()),
+                        first_name: "Test".to_owned(),
+                        last_name: None,
+                    }),
+                }),
+                edited_message: None,
+                channel_post: None,
+            },
+        )
+        .expect("telegram help should submit")
+        .wait()
+        .await
+        .expect("telegram help should succeed");
+    assert!(
+        tools
+            .output
+            .contains("Tools commands available in this conversation.")
+    );
+
+    let requests = delivery_requests
+        .lock()
+        .expect("delivery requests lock should not be poisoned");
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0]["reply_markup"]["keyboard"][0][0]["text"],
+        "/mosaic"
+    );
+    assert_eq!(
+        requests[0]["reply_markup"]["keyboard"][0][1]["text"],
+        "/mosaic help"
+    );
+    assert_eq!(
+        requests[0]["reply_markup"]["keyboard"][1][0]["text"],
+        "/mosaic help session"
+    );
+    assert_eq!(
+        requests[1]["reply_markup"]["keyboard"][2][0]["text"],
+        "/mosaic help tools"
+    );
+    assert_eq!(
+        requests[1]["reply_markup"]["keyboard"][4][0]["text"],
+        "/mosaic session status"
+    );
+
+    unsafe {
+        std::env::remove_var("MOSAIC_TELEGRAM_BOT_TOKEN");
+        std::env::remove_var("MOSAIC_TELEGRAM_API_BASE_URL");
+    }
+}
+
+#[tokio::test]
 async fn reload_extensions_swaps_workflow_registry_and_broadcasts_event() {
     let root = extension_workspace_dir("reload-ok");
     write_extension_workspace_config(&root, "0.1.0");

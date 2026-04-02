@@ -246,6 +246,8 @@ This lane must prove that chat-native capability discovery is live.
 Send:
 
 ```text
+/start
+/help
 /mosaic help
 /mosaic help tools
 /mosaic help workflows
@@ -254,9 +256,11 @@ Send:
 Expected result:
 
 - Telegram receives grouped catalog help
+- Telegram shows a command keyboard with `/mosaic`, `/mosaic help`, category shortcuts, and status actions
 - the groups include `Session`, `Runtime`, `Tools`, `Skills`, `Workflows`, and `Gateway`
 - the visible items match the currently allowed channel and bot policy
 - the trace exposes the channel command catalog scope in inspect output
+- `/help@bot_name` and `/mosaic@bot_name ...` work in group contexts
 
 ## Tool Proof
 

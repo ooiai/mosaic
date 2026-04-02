@@ -29,8 +29,6 @@ Run it:
 mosaic run examples/workflows/research-brief.yaml --workflow research_brief --session workflow-demo
 ```
 
-For a local dev-only smoke lane without provider credentials, initialize the workspace with `mosaic setup init --dev-mock` before running the example.
-
 ## Extensions
 
 - [extensions/time-and-summary.yaml](./extensions/time-and-summary.yaml): extension manifest with one manifest skill and one workflow
@@ -103,7 +101,6 @@ curl -X POST http://127.0.0.1:8080/ingress/webchat \
 ## Full Stack
 
 - [full-stack/README.md](./full-stack/README.md): the complete provider + Gateway + channel + session + inspect path
-- [full-stack/mock-telegram.config.yaml](./full-stack/mock-telegram.config.yaml): fast local Gateway + Telegram dev-only mock config
 - [full-stack/openai-webchat.config.yaml](./full-stack/openai-webchat.config.yaml): release-blocking OpenAI + WebChat config
 - [full-stack/openai-telegram.config.yaml](./full-stack/openai-telegram.config.yaml): manual Telegram bot sign-off config
 - [full-stack/openai-telegram-single-bot.config.yaml](./full-stack/openai-telegram-single-bot.config.yaml): single-bot Telegram baseline with `/mosaic` catalog and attachment routing
@@ -115,7 +112,6 @@ curl -X POST http://127.0.0.1:8080/ingress/webchat \
 Automated verification:
 
 ```bash
-./scripts/test-full-stack-example.sh mock
 MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat
 ```
 

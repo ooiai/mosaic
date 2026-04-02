@@ -198,6 +198,18 @@ pub fn validate_mosaic_config(config: &MosaicConfig) -> ValidationReport {
             }
         };
 
+        if provider_type == ProviderType::Mock {
+            report.push(
+                ValidationLevel::Error,
+                format!("{field_prefix}.type"),
+                format!(
+                    "provider type 'mock' is reserved for tests and is not supported in workspace config; expected one of {}",
+                    supported_provider_types().join(", ")
+                ),
+            );
+            continue;
+        }
+
         if profile.model.trim().is_empty() {
             report.push(
                 ValidationLevel::Error,

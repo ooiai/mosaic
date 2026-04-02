@@ -56,9 +56,17 @@ mosaic gateway serve --http 127.0.0.1:8080
 
 The channel-native operator story is built around `/mosaic`.
 
+Telegram currently exposes that story in a hybrid form:
+
+- text commands such as `/mosaic help`, `/mosaic tool ...`, and `/mosaic workflow ...`
+- Telegram command keyboard shortcuts for `/mosaic`, `/mosaic help`, category help, and status actions
+- Telegram-friendly aliases such as `/start`, `/help`, and group-addressed forms like `/mosaic@your_bot`
+
 Typical Telegram examples:
 
 ```text
+/start
+/help
 /mosaic help
 /mosaic help tools
 /mosaic session status

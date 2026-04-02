@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 pub use mosaic_inspect::{
     AttachmentFailureTrace, AttachmentKind, AttachmentRouteMode, AttachmentRouteTrace,
     CapabilitySourceKind, ChannelAttachment, ChannelDeliveryResult, ChannelDeliveryStatus,
-    ChannelDeliveryTrace, ChannelOutboundMessage, ExecutionTarget, FailureOrigin, IngressTrace,
-    OrchestrationOwner, RouteDecisionTrace, RouteKind, RouteMode,
+    ChannelDeliveryTrace, ChannelOutboundMessage, ChannelQuickReplyButton, ChannelReplyMarkup,
+    ExecutionTarget, FailureOrigin, IngressTrace, OrchestrationOwner, RouteDecisionTrace,
+    RouteKind, RouteMode,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

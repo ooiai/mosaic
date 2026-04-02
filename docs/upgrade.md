@@ -29,6 +29,18 @@ mosaic setup validate
 mosaic setup doctor
 ```
 
+If the old workspace still contains a test-only mock profile, replace it before continuing. These older patterns are no longer accepted in product config:
+
+- `active_profile: mock`
+- `profiles.mock`
+- `profiles.<name>.type: mock`
+
+Replace them with a real provider profile such as `openai`, `azure`, `anthropic`, `ollama`, or `openai-compatible`, then rerun:
+
+```bash
+mosaic setup validate
+```
+
 5. Start the service.
 6. Run:
 

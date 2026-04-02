@@ -28,13 +28,13 @@ use mosaic_config::{
 use mosaic_control_protocol::{
     AdapterStatusDto, CapabilityInventorySummaryDto, CapabilityJobDto,
     CapabilitySourceBreakdownDto, CapabilityVisibilitySummaryDto, ChannelDeliveryTrace,
-    ChannelInboundMessage, ChannelOutboundMessage, CronRegistrationDto, CronRegistrationRequest,
-    ErrorResponse, EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
-    GatewayAuditEventDto, GatewayEvent, HealthResponse, InboundMessage, IncidentBundleDto,
-    MetricsResponse, NodeBindingDto, ReadinessResponse, ReloadBoundaryDto, ReplayWindowResponse,
-    RunDetailDto, RunResponse, RunSubmission, RunSummaryDto, SessionChannelDto, SessionDetailDto,
-    SessionGatewayDto, SessionRunDto, SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto,
-    WebhookJobRequest,
+    ChannelInboundMessage, ChannelOutboundMessage, ChannelReplyMarkup, CronRegistrationDto,
+    CronRegistrationRequest, ErrorResponse, EventStreamEnvelope, ExecJobRequest,
+    ExtensionPolicyDto, ExtensionStatusDto, GatewayAuditEventDto, GatewayEvent, HealthResponse,
+    InboundMessage, IncidentBundleDto, MetricsResponse, NodeBindingDto, ReadinessResponse,
+    ReloadBoundaryDto, ReplayWindowResponse, RunDetailDto, RunResponse, RunSubmission,
+    RunSummaryDto, SessionChannelDto, SessionDetailDto, SessionGatewayDto, SessionRunDto,
+    SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto, WebhookJobRequest,
 };
 use mosaic_extension_core::{
     CapabilityInventorySummary, ExtensionStatus, ExtensionValidationReport, load_extension_set,
@@ -1436,7 +1436,8 @@ async fn finalize_success(
         event_replay_window: components.audit.event_replay_window,
         redact_inputs: components.audit.redact_inputs,
     });
-    let delivery_traces = dispatch_outbound_replies(state.as_ref(), &meta, &result.output).await;
+    let delivery_traces =
+        dispatch_outbound_replies(state.as_ref(), &meta, &result.output, None).await;
     for delivery in delivery_traces.iter().cloned() {
         trace.add_outbound_delivery(delivery);
     }
@@ -1722,7 +1723,11 @@ async fn finalize_canceled(
     })
 }
 
-fn build_outbound_message(meta: &GatewayRunMeta, output: &str) -> Option<ChannelOutboundMessage> {
+fn build_outbound_message(
+    meta: &GatewayRunMeta,
+    output: &str,
+    reply_markup: Option<&ChannelReplyMarkup>,
+) -> Option<ChannelOutboundMessage> {
     let ingress = meta.ingress.as_ref()?;
     let channel = ingress.channel.clone()?;
     let adapter = ingress
@@ -1747,6 +1752,7 @@ fn build_outbound_message(meta: &GatewayRunMeta, output: &str) -> Option<Channel
         correlation_id: meta.correlation_id.clone(),
         gateway_run_id: meta.gateway_run_id.clone(),
         session_id,
+        reply_markup: reply_markup.cloned(),
     })
 }
 
@@ -1754,8 +1760,9 @@ async fn dispatch_outbound_replies(
     state: &GatewayState,
     meta: &GatewayRunMeta,
     output: &str,
+    reply_markup: Option<&ChannelReplyMarkup>,
 ) -> Vec<ChannelDeliveryTrace> {
-    let Some(message) = build_outbound_message(meta, output) else {
+    let Some(message) = build_outbound_message(meta, output, reply_markup) else {
         return Vec::new();
     };
 

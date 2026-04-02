@@ -210,11 +210,11 @@ pub fn doctor_mosaic_config(config: &MosaicConfig, cwd: impl AsRef<Path>) -> Doc
 
         match provider_type {
             ProviderType::Mock => checks.push(DoctorCheck {
-                status: DoctorStatus::Ok,
+                status: DoctorStatus::Error,
                 category: DoctorCategory::Providers,
                 message: format!(
-                    "profile '{}' uses the dev-only mock provider and does not require API credentials",
-                    name
+                    "profile '{}' uses test-only provider type 'mock'; replace it with openai, azure, anthropic, ollama, or openai-compatible",
+                    name,
                 ),
             }),
             _ => {

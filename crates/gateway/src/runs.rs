@@ -246,6 +246,7 @@ impl GatewayHandle {
         response_text: String,
         route_decision: RouteDecisionTrace,
         profile_override: Option<String>,
+        reply_markup: Option<ChannelReplyMarkup>,
     ) -> Result<GatewaySubmittedRun> {
         let gateway_run_id = Uuid::new_v4().to_string();
         let correlation_id = Uuid::new_v4().to_string();
@@ -330,6 +331,7 @@ impl GatewayHandle {
                 response_text,
                 route_decision,
                 profile_override,
+                reply_markup,
             )
             .await
         });
@@ -376,6 +378,7 @@ async fn finalize_control_response(
     response_text: String,
     mut route_decision: RouteDecisionTrace,
     profile_override: Option<String>,
+    reply_markup: Option<ChannelReplyMarkup>,
 ) -> Result<GatewayRunResult, GatewayRunError> {
     let components = state.snapshot_components();
     let resolved_profile_name = profile_override
@@ -466,7 +469,8 @@ async fn finalize_control_response(
     trace.record_output_chunk();
     trace.finish_ok(response_text.clone());
     let outbound_deliveries =
-        dispatch_outbound_replies(state.as_ref(), &meta, &response_text).await;
+        dispatch_outbound_replies(state.as_ref(), &meta, &response_text, reply_markup.as_ref())
+            .await;
     let last_delivery = outbound_deliveries.last().cloned();
     for delivery in outbound_deliveries {
         trace.add_outbound_delivery(delivery.clone());

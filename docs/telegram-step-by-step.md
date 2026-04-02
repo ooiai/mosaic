@@ -266,7 +266,7 @@ In the Telegram app:
 
 1. search for your bot username
 2. open the chat
-3. press `Start`
+3. press `Start` or send `/start`
 4. send a simple message such as:
 
 ```text
@@ -279,12 +279,14 @@ Expected result:
 - Mosaic creates a session
 - Mosaic runs the provider
 - the reply returns to the same Telegram chat
+- Telegram also shows a command keyboard with `/mosaic`, `/mosaic help`, and category shortcuts
 
 ## Step 8: Discover the Channel Command Catalog
 
-After plain chat works, ask the bot what it can do:
+After plain chat works, ask the bot what it can do. You can either tap the Telegram command keyboard or type the commands directly:
 
 ```text
+/help
 /mosaic help
 /mosaic help tools
 /mosaic help skills
@@ -292,6 +294,8 @@ After plain chat works, ask the bot what it can do:
 ```
 
 This proves the dynamic channel command catalog is live for the current bot and channel.
+
+In group chats, Telegram may send commands as `/mosaic@your_bot_name` or `/help@your_bot_name`. Mosaic accepts those forms too.
 
 ## Step 9: Verify That Mosaic Saved the Run
 

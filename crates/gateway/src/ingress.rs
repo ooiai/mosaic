@@ -3,6 +3,7 @@ use mosaic_control_protocol::OrchestrationOwner;
 
 use super::command_catalog::{
     ChannelCommandCatalog, ChannelCommandCategory, ChannelCommandContext, build_command_catalog,
+    build_command_reply_markup,
 };
 use super::*;
 
@@ -14,6 +15,7 @@ enum ParsedChannelCommand {
         route_decision: RouteDecisionTrace,
         profile_override: Option<String>,
         binding_update: Option<ChannelConversationBinding>,
+        reply_markup: Option<ChannelReplyMarkup>,
     },
 }
 
@@ -67,11 +69,11 @@ fn parse_channel_command(
     message: ChannelInboundMessage,
 ) -> ParsedChannelCommand {
     let trimmed = message.text.trim().to_owned();
-    if !trimmed.starts_with("/mosaic") {
+    let Some(canonical) = canonical_channel_command(&message, &trimmed) else {
         return ParsedChannelCommand::Run(channel_message_to_submission(message));
-    }
+    };
 
-    let tail = trimmed.trim_start_matches("/mosaic").trim();
+    let tail = canonical.trim_start_matches("/mosaic").trim();
     if tail.is_empty() {
         return control_catalog_response(
             gateway,
@@ -183,6 +185,17 @@ fn parse_channel_command(
                 None,
             )
         }
+        "runtime" | "tools" | "skills" | "workflows" => {
+            let category = ChannelCommandCategory::parse(command.as_str());
+            control_catalog_response(
+                gateway,
+                message,
+                "help",
+                category,
+                format!("explicit /mosaic {} command", command),
+                None,
+            )
+        }
         other => control_catalog_response(
             gateway,
             message,
@@ -217,6 +230,11 @@ fn control_catalog_response(
     let catalog = build_command_catalog(&components, &context, selected_category);
     let response_text = render_catalog_response(prefix, &catalog);
     let scope = catalog.scope.clone();
+    let reply_markup = if context.channel.eq_ignore_ascii_case("telegram") {
+        build_command_reply_markup(&components, &context, selected_category)
+    } else {
+        None
+    };
     control_response(
         message,
         Some(control_command),
@@ -245,6 +263,7 @@ fn control_catalog_response(
         },
         None,
         None,
+        reply_markup,
     )
 }
 
@@ -324,6 +343,7 @@ fn handle_profile_command(
             session_id: None,
             profile: Some(profile.name),
         }),
+        None,
     )
 }
 
@@ -384,6 +404,7 @@ fn handle_session_command<'a>(
                     session_id: Some(target_session),
                     profile: Some(context.profile),
                 }),
+                None,
             )
         }
         Some(command) if command == "switch" => {
@@ -443,6 +464,7 @@ fn handle_session_command<'a>(
                             session_id: Some(session.id),
                             profile: Some(session.provider_profile),
                         }),
+                        None,
                     )
                 }
                 Ok(None) => control_catalog_response(
@@ -550,6 +572,7 @@ fn session_status_response(
         },
         None,
         None,
+        None,
     )
 }
 
@@ -605,6 +628,7 @@ fn handle_gateway_command<'a>(
                 },
                 None,
                 None,
+                None,
             )
         }
         Some(command) if command == "help" => control_catalog_response(
@@ -641,6 +665,7 @@ fn control_response(
     route_decision: RouteDecisionTrace,
     profile_override: Option<String>,
     binding_update: Option<ChannelConversationBinding>,
+    reply_markup: Option<ChannelReplyMarkup>,
 ) -> ParsedChannelCommand {
     ParsedChannelCommand::Control {
         submission: RunSubmission {
@@ -657,6 +682,38 @@ fn control_response(
         route_decision,
         profile_override,
         binding_update,
+        reply_markup,
+    }
+}
+
+fn canonical_channel_command(message: &ChannelInboundMessage, trimmed: &str) -> Option<String> {
+    let mut parts = trimmed.split_whitespace();
+    let first = parts.next()?;
+    let rest = parts.collect::<Vec<_>>().join(" ");
+
+    let command = strip_telegram_bot_suffix(first);
+    let canonical = match command {
+        "/mosaic" => Some(rebuild_command("/mosaic", &rest)),
+        "/start" if message.channel.eq_ignore_ascii_case("telegram") => Some("/mosaic".to_owned()),
+        "/help" if message.channel.eq_ignore_ascii_case("telegram") => {
+            Some(rebuild_command("/mosaic help", &rest))
+        }
+        _ => None,
+    }?;
+
+    Some(canonical)
+}
+
+fn strip_telegram_bot_suffix(command: &str) -> &str {
+    let (head, _) = command.split_once('@').unwrap_or((command, ""));
+    head
+}
+
+fn rebuild_command(prefix: &str, rest: &str) -> String {
+    if rest.trim().is_empty() {
+        prefix.to_owned()
+    } else {
+        format!("{prefix} {}", rest.trim())
     }
 }
 
@@ -875,12 +932,65 @@ impl GatewayHandle {
                 route_decision,
                 profile_override,
                 binding_update,
+                mut reply_markup,
             } => {
+                if reply_markup.is_none()
+                    && submission
+                        .ingress
+                        .as_ref()
+                        .and_then(|ingress| ingress.channel.as_deref())
+                        .is_some_and(|channel| channel.eq_ignore_ascii_case("telegram"))
+                {
+                    if let Some(ingress) = submission.ingress.as_ref() {
+                        let context = self.command_context_for(&ChannelInboundMessage {
+                            channel: ingress
+                                .channel
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_owned()),
+                            adapter: ingress
+                                .adapter
+                                .clone()
+                                .unwrap_or_else(|| ingress.kind.clone()),
+                            bot_name: ingress.bot_name.clone(),
+                            bot_route: ingress.bot_route.clone(),
+                            bot_profile: ingress.bot_profile.clone(),
+                            bot_token_env: ingress.bot_token_env.clone(),
+                            actor_id: ingress.actor_id.clone(),
+                            display_name: ingress.display_name.clone(),
+                            conversation_id: ingress
+                                .conversation_id
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_owned()),
+                            thread_id: ingress.thread_id.clone(),
+                            thread_title: ingress.thread_title.clone(),
+                            reply_target: ingress
+                                .reply_target
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_owned()),
+                            message_id: ingress
+                                .message_id
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_owned()),
+                            text: submission.input.clone(),
+                            attachments: ingress.attachments.clone(),
+                            profile_hint: submission.profile.clone(),
+                            session_hint: submission.session_id.clone(),
+                            received_at: ingress.received_at.unwrap_or_else(Utc::now),
+                            raw_event_id: ingress
+                                .raw_event_id
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_owned()),
+                        });
+                        let components = self.snapshot_components();
+                        reply_markup = build_command_reply_markup(&components, &context, None);
+                    }
+                }
                 let submitted = self.submit_control_response(
                     submission.clone(),
                     response_text,
                     route_decision,
                     profile_override,
+                    reply_markup,
                 )?;
                 if let (Some(update), Some(ingress)) = (binding_update, submission.ingress.as_ref())
                 {

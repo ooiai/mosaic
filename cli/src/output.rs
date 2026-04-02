@@ -1124,7 +1124,7 @@ pub fn render_inspect_report(
                 .iter()
                 .map(|delivery| {
                     format!(
-                        "channel={} | adapter={} | bot_name={} | bot_route={} | bot_profile={} | token_env={} | target={} | status={} | retries={} | provider_message_id={} | error_kind={} | error={} | delivered_at={}",
+                        "channel={} | adapter={} | bot_name={} | bot_route={} | bot_profile={} | token_env={} | target={} | buttons={} | status={} | retries={} | provider_message_id={} | error_kind={} | error={} | delivered_at={}",
                         delivery.message.channel,
                         delivery.message.adapter,
                         option_string(delivery.message.bot_name.clone()),
@@ -1132,6 +1132,21 @@ pub fn render_inspect_report(
                         option_string(delivery.message.bot_profile.clone()),
                         option_string(delivery.message.bot_token_env.clone()),
                         delivery.message.reply_target,
+                        delivery
+                            .message
+                            .reply_markup
+                            .as_ref()
+                            .map(|markup| {
+                                markup
+                                    .rows
+                                    .iter()
+                                    .flatten()
+                                    .map(|button| button.text.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                            .filter(|value| !value.is_empty())
+                            .unwrap_or_else(|| "<none>".to_owned()),
                         delivery.result.status.label(),
                         delivery.result.retry_count,
                         option_string(delivery.result.provider_message_id.clone()),
@@ -1941,11 +1956,11 @@ fn derive_onboarding(
 
     if active_profile.usage == ProviderUsage::DevOnlyMock {
         return OnboardingView {
-            state: "dev-mock",
+            state: "invalid",
             active_profile_usage: active_profile.usage.label(),
             message: format!(
-                "active profile '{}' is dev-only mock; use it for local smoke tests, not onboarding or release evidence",
-                active_profile.name
+                "active profile '{}' uses test-only provider type 'mock'; replace it with openai, azure, anthropic, ollama, or openai-compatible",
+                active_profile.name,
             ),
         };
     }

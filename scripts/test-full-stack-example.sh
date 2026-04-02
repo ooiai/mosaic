@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-MODE=${1:-mock}
+MODE=${1:-openai-webchat}
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/mosaic-full-stack.XXXXXX")
 PORT=${MOSAIC_FULL_STACK_PORT:-}
 BASE_URL=""
@@ -44,8 +44,6 @@ require_cmd curl
 require_cmd python3
 
 case "$MODE" in
-    mock|mock-telegram)
-        ;;
     openai|openai-webchat)
         if [ "${MOSAIC_REAL_TESTS:-0}" != "1" ]; then
             echo "full-stack openai-webchat skipped: set MOSAIC_REAL_TESTS=1 to enable" >&2
@@ -57,7 +55,7 @@ case "$MODE" in
         fi
         ;;
     *)
-        echo "usage: $0 [mock|mock-telegram|openai|openai-webchat]" >&2
+        echo "usage: $0 [openai|openai-webchat]" >&2
         exit 1
         ;;
 esac
@@ -69,36 +67,24 @@ BASE_URL="http://127.0.0.1:${PORT}"
 
 cd "$WORKDIR"
 
-case "$MODE" in
-    mock|mock-telegram)
-        run_cli setup init --dev-mock >/dev/null
-        cp "$ROOT/examples/full-stack/mock-telegram.config.yaml" ".mosaic/config.yaml"
-        export MOSAIC_TELEGRAM_SECRET_TOKEN="${MOSAIC_TELEGRAM_SECRET_TOKEN:-full-stack-secret}"
-        PAYLOAD_FILE="$ROOT/examples/channels/telegram-update.json"
-        RESPONSE_FILE="$WORKDIR/telegram-response.json"
-        SESSION_ID="telegram--100123-99"
-        ;;
-    openai|openai-webchat)
-        run_cli setup init >/dev/null
-        cp "$ROOT/examples/full-stack/openai-webchat.config.yaml" ".mosaic/config.yaml"
-        if [ -n "${MOSAIC_TEST_OPENAI_BASE_URL:-}" ]; then
-            tmp=".mosaic/config.yaml.tmp"
-            sed "s|https://api.openai.com/v1|$MOSAIC_TEST_OPENAI_BASE_URL|" \
-                ".mosaic/config.yaml" >"$tmp"
-            mv "$tmp" ".mosaic/config.yaml"
-        fi
-        if [ -n "${MOSAIC_TEST_OPENAI_MODEL:-}" ]; then
-            tmp=".mosaic/config.yaml.tmp"
-            sed "s|gpt-5.4-mini|$MOSAIC_TEST_OPENAI_MODEL|" \
-                ".mosaic/config.yaml" >"$tmp"
-            mv "$tmp" ".mosaic/config.yaml"
-        fi
-        export MOSAIC_WEBCHAT_SHARED_SECRET="${MOSAIC_TEST_WEBCHAT_SECRET:-${MOSAIC_WEBCHAT_SHARED_SECRET:-full-stack-secret}}"
-        PAYLOAD_FILE="$ROOT/examples/channels/webchat-openai-message.json"
-        RESPONSE_FILE="$WORKDIR/webchat-response.json"
-        SESSION_ID="full-stack-openai-webchat"
-        ;;
-esac
+run_cli setup init >/dev/null
+cp "$ROOT/examples/full-stack/openai-webchat.config.yaml" ".mosaic/config.yaml"
+if [ -n "${MOSAIC_TEST_OPENAI_BASE_URL:-}" ]; then
+    tmp=".mosaic/config.yaml.tmp"
+    sed "s|https://api.openai.com/v1|$MOSAIC_TEST_OPENAI_BASE_URL|" \
+        ".mosaic/config.yaml" >"$tmp"
+    mv "$tmp" ".mosaic/config.yaml"
+fi
+if [ -n "${MOSAIC_TEST_OPENAI_MODEL:-}" ]; then
+    tmp=".mosaic/config.yaml.tmp"
+    sed "s|gpt-5.4-mini|$MOSAIC_TEST_OPENAI_MODEL|" \
+        ".mosaic/config.yaml" >"$tmp"
+    mv "$tmp" ".mosaic/config.yaml"
+fi
+export MOSAIC_WEBCHAT_SHARED_SECRET="${MOSAIC_TEST_WEBCHAT_SECRET:-${MOSAIC_WEBCHAT_SHARED_SECRET:-full-stack-secret}}"
+PAYLOAD_FILE="$ROOT/examples/channels/webchat-openai-message.json"
+RESPONSE_FILE="$WORKDIR/webchat-response.json"
+SESSION_ID="full-stack-openai-webchat"
 
 run_cli setup validate >/dev/null
 run_cli setup doctor >/dev/null
@@ -115,42 +101,22 @@ if ! wait_for_gateway; then
     exit 1
 fi
 
-case "$MODE" in
-    mock|mock-telegram)
-        curl -sf -X POST "$BASE_URL/ingress/telegram" \
-            -H 'content-type: application/json' \
-            -H "x-telegram-bot-api-secret-token: $MOSAIC_TELEGRAM_SECRET_TOKEN" \
-            --data @"$PAYLOAD_FILE" \
-            >"$RESPONSE_FILE"
-        ;;
-    openai|openai-webchat)
-        curl -sf -X POST "$BASE_URL/ingress/webchat" \
-            -H 'content-type: application/json' \
-            -H "x-mosaic-shared-secret: $MOSAIC_WEBCHAT_SHARED_SECRET" \
-            --data @"$PAYLOAD_FILE" \
-            >"$RESPONSE_FILE"
-        ;;
-esac
+curl -sf -X POST "$BASE_URL/ingress/webchat" \
+    -H 'content-type: application/json' \
+    -H "x-mosaic-shared-secret: $MOSAIC_WEBCHAT_SHARED_SECRET" \
+    --data @"$PAYLOAD_FILE" \
+    >"$RESPONSE_FILE"
 
 run_cli gateway --attach "$BASE_URL" status >"$WORKDIR/gateway-status.txt"
 run_cli gateway --attach "$BASE_URL" audit --limit 10 >"$WORKDIR/gateway-audit.txt"
 run_cli gateway --attach "$BASE_URL" replay --limit 10 >"$WORKDIR/gateway-replay.txt"
 run_cli session show "$SESSION_ID" >"$WORKDIR/session.txt"
 
-case "$MODE" in
-    mock|mock-telegram)
-        grep -q 'channel: Some("telegram")' "$WORKDIR/session.txt"
-        grep -q 'thread_id: Some("99")' "$WORKDIR/session.txt"
-        grep -q 'session_route: gateway.channel/telegram/' "$WORKDIR/session.txt"
-        ;;
-    openai|openai-webchat)
-        grep -q 'channel: Some("webchat")' "$WORKDIR/session.txt"
-        grep -q 'thread_id: Some("pricing-page")' "$WORKDIR/session.txt"
-        grep -q 'session_route: gateway.channel/webchat/' "$WORKDIR/session.txt"
-        grep -q 'provider defaults:' "$WORKDIR/config-show.txt"
-        grep -q 'runtime policy:' "$WORKDIR/config-show.txt"
-        ;;
-esac
+grep -q 'channel: Some("webchat")' "$WORKDIR/session.txt"
+grep -q 'thread_id: Some("pricing-page")' "$WORKDIR/session.txt"
+grep -q 'session_route: gateway.channel/webchat/' "$WORKDIR/session.txt"
+grep -q 'provider defaults:' "$WORKDIR/config-show.txt"
+grep -q 'runtime policy:' "$WORKDIR/config-show.txt"
 
 TRACE_PATH=$(find "$WORKDIR/.mosaic/runs" -maxdepth 1 -name '*.json' | sort | tail -n 1)
 if [ -z "$TRACE_PATH" ]; then
@@ -167,14 +133,10 @@ if [ ! -f "$WORKDIR/.mosaic/audit/incidents/${RUN_ID}.json" ]; then
     exit 1
 fi
 
-case "$MODE" in
-    openai|openai-webchat)
-        grep -q 'provider_type: openai' "$WORKDIR/inspect.txt"
-        grep -q 'runtime policy:' "$WORKDIR/inspect.txt"
-        grep -q 'retry_backoff_ms:' "$WORKDIR/inspect.txt"
-        python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); assert data["effective_profile"]["provider_type"] == "openai"; assert data["runtime_policy"]["max_provider_round_trips"] >= 1; assert data["runtime_policy"]["max_workflow_provider_round_trips"] >= 1' "$TRACE_PATH"
-        ;;
-esac
+grep -q 'provider_type: openai' "$WORKDIR/inspect.txt"
+grep -q 'runtime policy:' "$WORKDIR/inspect.txt"
+grep -q 'retry_backoff_ms:' "$WORKDIR/inspect.txt"
+python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); assert data["effective_profile"]["provider_type"] == "openai"; assert data["runtime_policy"]["max_provider_round_trips"] >= 1; assert data["runtime_policy"]["max_workflow_provider_round_trips"] >= 1' "$TRACE_PATH"
 
 printf 'full-stack example ok\nmode=%s\nworkspace=%s\nsession=%s\ntrace=%s\nrun_id=%s\n' \
     "$MODE" "$WORKDIR" "$SESSION_ID" "$TRACE_PATH" "$RUN_ID"

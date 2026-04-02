@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use mosaic_config::MosaicConfig;
+use mosaic_config::{MosaicConfig, ProviderProfileConfig};
 use mosaic_memory::{FileMemoryStore, MemoryPolicy};
 use mosaic_node_protocol::FileNodeStore;
 use mosaic_provider::ProviderProfileRegistry;
@@ -38,6 +38,20 @@ fn temp_dir(label: &str) -> PathBuf {
 async fn runtime_executes_mock_provider_tool_loop_against_real_session_and_memory_stores() {
     let root = temp_dir("runtime");
     fs::create_dir_all(&root).expect("temp root should exist");
+    let mut config = MosaicConfig::default();
+    config.active_profile = "mock".to_owned();
+    config.profiles.insert(
+        "mock".to_owned(),
+        ProviderProfileConfig {
+            provider_type: "mock".to_owned(),
+            model: "mock".to_owned(),
+            base_url: None,
+            api_key_env: None,
+            transport: Default::default(),
+            vendor: Default::default(),
+            attachments: Default::default(),
+        },
+    );
 
     let mut tools = ToolRegistry::new();
     tools.register(Arc::new(TimeNowTool::new()));
@@ -47,14 +61,13 @@ async fn runtime_executes_mock_provider_tool_loop_against_real_session_and_memor
 
     let ctx = RuntimeContext {
         profiles: Arc::new(
-            ProviderProfileRegistry::from_config(&MosaicConfig::default())
-                .expect("provider registry should build"),
+            ProviderProfileRegistry::from_config(&config).expect("provider registry should build"),
         ),
         provider_override: None,
         session_store: Arc::new(FileSessionStore::new(root.join("sessions"))),
         memory_store: Arc::new(FileMemoryStore::new(root.join("memory"))),
         memory_policy: MemoryPolicy::default(),
-        runtime_policy: MosaicConfig::default().runtime,
+        runtime_policy: config.runtime.clone(),
         sandbox: Arc::new({
             let manager = SandboxManager::new(&root, SandboxSettings::default());
             manager
@@ -67,7 +80,7 @@ async fn runtime_executes_mock_provider_tool_loop_against_real_session_and_memor
         workflows: Arc::new(WorkflowRegistry::new()),
         node_router: Some(Arc::new(FileNodeStore::new(root.join("nodes")))),
         active_extensions: vec![],
-        attachments: MosaicConfig::default().attachments,
+        attachments: config.attachments.clone(),
         telegram: Default::default(),
         app_name: None,
         event_sink: shared_noop_event_sink(),

@@ -1,4 +1,5 @@
 use mosaic_config::PolicyConfig;
+use mosaic_inspect::{ChannelQuickReplyButton, ChannelReplyMarkup};
 use mosaic_provider::ProviderProfile;
 use mosaic_tool_core::{CapabilityExposure, CapabilityVisibility, ToolMetadata, ToolSource};
 
@@ -180,6 +181,66 @@ impl ChannelCommandCatalog {
         }
         lines.join("\n")
     }
+}
+
+pub(crate) fn build_command_reply_markup(
+    components: &GatewayRuntimeComponents,
+    context: &ChannelCommandContext,
+    selected_category: Option<ChannelCommandCategory>,
+) -> Option<ChannelReplyMarkup> {
+    let catalog = build_command_catalog(components, context, None);
+    let mut rows = vec![vec![quick_reply("/mosaic"), quick_reply("/mosaic help")]];
+
+    let visible_categories = ChannelCommandCategory::ALL
+        .into_iter()
+        .filter(|category| {
+            catalog
+                .entries
+                .iter()
+                .any(|entry| entry.category == *category)
+        })
+        .map(|category| quick_reply(format!("/mosaic help {}", category.slug())))
+        .collect::<Vec<_>>();
+
+    for chunk in visible_categories.chunks(2) {
+        rows.push(chunk.to_vec());
+    }
+
+    let mut status_row = Vec::new();
+    if catalog
+        .entries
+        .iter()
+        .any(|entry| entry.usage == "/mosaic session status")
+    {
+        status_row.push(quick_reply("/mosaic session status"));
+    }
+    if catalog
+        .entries
+        .iter()
+        .any(|entry| entry.usage == "/mosaic gateway status")
+    {
+        status_row.push(quick_reply("/mosaic gateway status"));
+    }
+    if !status_row.is_empty() {
+        rows.push(status_row);
+    }
+
+    if rows.is_empty() {
+        return None;
+    }
+
+    Some(ChannelReplyMarkup {
+        rows,
+        input_placeholder: Some(match selected_category {
+            Some(category) => format!("Try /mosaic help {}", category.slug()),
+            None => "Try /mosaic help tools".to_owned(),
+        }),
+        persistent: true,
+    })
+}
+
+fn quick_reply(text: impl Into<String>) -> ChannelQuickReplyButton {
+    ChannelQuickReplyButton { text: text.into() }
 }
 
 pub(crate) fn build_command_catalog(

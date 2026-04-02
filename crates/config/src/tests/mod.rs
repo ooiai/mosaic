@@ -65,7 +65,7 @@ fn default_config_is_real_provider_first_not_mock_first() {
 
     assert_eq!(config.active_profile, DEFAULT_PRODUCT_ACTIVE_PROFILE);
     assert_ne!(config.active_profile, DEV_MOCK_PROFILE);
-    assert!(config.profiles.contains_key(DEV_MOCK_PROFILE));
+    assert!(!config.profiles.contains_key(DEV_MOCK_PROFILE));
 }
 
 #[test]
@@ -244,8 +244,10 @@ fn layered_mosaic_config_prefers_workspace_over_user_and_cli_over_env() {
 active_profile: gpt-5.4-mini
 profiles:
   custom-user:
-    type: mock
-    model: mock-user
+    type: openai-compatible
+    model: custom-user
+    base_url: https://gateway.example.test/v1
+    api_key_env: USER_COMPAT_API_KEY
 "#,
     )
     .expect("user config should be written");
@@ -256,8 +258,10 @@ profiles:
 active_profile: gpt-5.4
 profiles:
   custom-workspace:
-    type: mock
-    model: mock-workspace
+    type: openai-compatible
+    model: custom-workspace
+    base_url: https://gateway.example.test/v1
+    api_key_env: WORKSPACE_COMPAT_API_KEY
 "#,
     )
     .expect("workspace config should be written");
@@ -322,6 +326,33 @@ fn validate_reports_invalid_active_profile_and_missing_api_key_env() {
             .iter()
             .any(|issue| issue.field == "profiles.broken.api_key_env")
     );
+}
+
+#[test]
+fn validate_rejects_test_only_mock_provider_profiles() {
+    let mut config = MosaicConfig::default();
+    config.profiles.insert(
+        "fixture-mock".to_owned(),
+        ProviderProfileConfig {
+            provider_type: "mock".to_owned(),
+            model: "mock".to_owned(),
+            base_url: None,
+            api_key_env: None,
+            transport: Default::default(),
+            vendor: Default::default(),
+            attachments: Default::default(),
+        },
+    );
+
+    let report = validate_mosaic_config(&config);
+
+    assert!(report.has_errors());
+    assert!(report.issues.iter().any(|issue| {
+        issue.field == "profiles.fixture-mock.type"
+            && issue
+                .message
+                .contains("reserved for tests and is not supported in workspace config")
+    }));
 }
 
 #[test]
@@ -448,20 +479,19 @@ fn init_workspace_config_writes_template_and_directories() {
 }
 
 #[test]
-fn init_workspace_config_supports_explicit_dev_mock_template() {
-    let dir = temp_dir("init-dev-mock");
+fn init_workspace_config_supports_explicit_real_profile_selection() {
+    let dir = temp_dir("init-profile");
     let path = init_workspace_config(
         &dir,
         &InitWorkspaceConfigOptions {
             force: false,
-            active_profile: None,
-            dev_mock: true,
+            active_profile: Some("anthropic-sonnet".to_owned()),
         },
     )
     .expect("workspace init should succeed");
     let content = fs::read_to_string(&path).expect("config should be readable");
 
-    assert!(content.contains("active_profile: mock"));
+    assert!(content.contains("active_profile: anthropic-sonnet"));
 
     fs::remove_dir_all(dir).ok();
 }

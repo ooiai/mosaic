@@ -23,8 +23,6 @@ Mosaic keeps mock paths for speed, but mock paths are never product evidence by 
 | webchat full stack | OpenAI + WebChat ingress + saved artifacts | product-real and automated release-blocking acceptance | `MOSAIC_REAL_TESTS=1 OPENAI_API_KEY=... ./scripts/test-full-stack-example.sh openai-webchat` | primary automated no-mock lane |
 | telegram webhook contract | local real Telegram HTTP handler | protocol-real | `MOSAIC_REAL_TESTS=1 cargo test -p mosaic-gateway --test real_telegram_ingress -- --nocapture` | real handler, not a live bot |
 | Telegram-first acceptance | live bot token + public HTTPS webhook + OpenAI + CLI operator flow | product-real and operator-manual release-blocking acceptance | [telegram-real-e2e.md](./telegram-real-e2e.md) | required when Telegram is in release scope |
-| mock full stack | mock provider + Telegram sample payload | dev-only | `./scripts/test-full-stack-example.sh mock` | docs and example smoke only |
-
 ## Release Roles
 
 ### Automated release-blocking lanes
@@ -62,8 +60,7 @@ These remain real tests, but they are compatibility proof rather than the main o
 Mock is intentionally retained for:
 
 - fast unit and local integration safety nets
-- docs smoke paths that must run without secrets
-- the explicit dev-only mock full-stack example
+- explicit crate-level test fixtures and helpers
 
 Mock is intentionally not used for:
 
