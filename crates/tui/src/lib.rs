@@ -966,6 +966,8 @@ mod tests {
             deployment_profile: "local".to_owned(),
             auth_mode: "disabled".to_owned(),
             event_replay_window: 256,
+            capability_inventory: mosaic_control_protocol::CapabilityInventorySummaryDto::default(),
+            reload_boundaries: mosaic_control_protocol::ReloadBoundaryDto::default(),
         };
         let readiness = ReadinessResponse {
             status: "ready".to_owned(),

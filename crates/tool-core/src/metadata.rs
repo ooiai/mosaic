@@ -436,6 +436,8 @@ pub struct ToolMetadata {
     pub extension: Option<String>,
     pub version: Option<String>,
     #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
     pub compatibility: ToolCompatibility,
 }
 
@@ -454,6 +456,7 @@ impl ToolMetadata {
             exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
+            source_path: None,
             compatibility: ToolCompatibility::default(),
         }
     }
@@ -479,6 +482,7 @@ impl ToolMetadata {
             exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
+            source_path: None,
             compatibility: ToolCompatibility::default(),
         }
     }
@@ -500,6 +504,11 @@ impl ToolMetadata {
     ) -> Self {
         self.extension = Some(extension.into());
         self.version = Some(version.into());
+        self
+    }
+
+    pub fn with_source_path(mut self, source_path: Option<String>) -> Self {
+        self.source_path = source_path;
         self
     }
 

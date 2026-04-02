@@ -72,6 +72,7 @@ pub(crate) fn load_extension_set(
                         extension.status.name.clone(),
                         extension.status.version.clone(),
                     )
+                    .with_source_path(Some(extension.status.source.clone()))
                     .with_compatibility(WorkflowCompatibility {
                         schema_version: extension.schema_version,
                     }),
@@ -90,6 +91,7 @@ pub(crate) fn load_extension_set(
                     (
                         extension.status.name.clone(),
                         extension.status.version.clone(),
+                        extension.status.source.clone(),
                         extension.schema_version,
                     ),
                 );

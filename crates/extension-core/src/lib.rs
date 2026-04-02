@@ -23,6 +23,7 @@ use mosaic_workflow::{Workflow, WorkflowCompatibility, WorkflowMetadata, Workflo
 use serde::{Deserialize, Serialize};
 
 mod builtin;
+mod inventory;
 mod loading;
 mod planning;
 mod validation;
@@ -76,6 +77,11 @@ pub struct LoadedExtensionSet {
     pub policies: PolicyConfig,
 }
 
+pub use inventory::{
+    CapabilityInventorySummary, CapabilitySourceBreakdown, CapabilityVisibilitySummary,
+    summarize_loaded_capabilities, summarize_planned_capabilities,
+};
+
 struct PlannedExtension {
     status: ExtensionStatus,
     schema_version: u32,
@@ -126,12 +132,14 @@ fn wrap_tool(
     inner: Arc<dyn Tool>,
     extension_name: &str,
     extension_version: &str,
+    extension_source: Option<&str>,
     schema_version: u32,
 ) -> Arc<dyn Tool> {
     let metadata = inner
         .metadata()
         .clone()
         .with_extension(extension_name.to_owned(), extension_version.to_owned())
+        .with_source_path(extension_source.map(ToOwned::to_owned))
         .with_compatibility(ToolCompatibility { schema_version });
     Arc::new(ExtensionWrappedTool { inner, metadata })
 }

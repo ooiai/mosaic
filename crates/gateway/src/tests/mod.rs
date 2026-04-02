@@ -111,6 +111,7 @@ fn gateway() -> GatewayHandle {
     GatewayHandle::new_local(
         Handle::current(),
         GatewayRuntimeComponents {
+            config_snapshot: config.clone(),
             profiles: Arc::new(profiles),
             provider_override: Some(Arc::new(MockProvider)),
             session_store: Arc::new(MemorySessionStore::default()),
@@ -193,6 +194,7 @@ fn gateway_with_filtered_workflow() -> GatewayHandle {
     GatewayHandle::new_local(
         Handle::current(),
         GatewayRuntimeComponents {
+            config_snapshot: config.clone(),
             profiles: Arc::new(profiles),
             provider_override: Some(Arc::new(MockProvider)),
             session_store: Arc::new(MemorySessionStore::default()),
@@ -313,6 +315,7 @@ fn extension_gateway(root: &std::path::Path) -> GatewayHandle {
     GatewayHandle::new_local_with_reload_source(
         Handle::current(),
         GatewayRuntimeComponents {
+            config_snapshot: loaded.config.clone(),
             profiles: Arc::new(profiles),
             provider_override: Some(Arc::new(MockProvider)),
             session_store: Arc::new(MemorySessionStore::default()),
@@ -602,6 +605,7 @@ async fn gateway_handle_keeps_mcp_manager_owned_by_components() {
     let gateway = GatewayHandle::new_local(
         Handle::current(),
         GatewayRuntimeComponents {
+            config_snapshot: config.clone(),
             profiles: Arc::new(profiles),
             provider_override: Some(Arc::new(MockProvider)),
             session_store: Arc::new(MemorySessionStore::default()),

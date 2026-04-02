@@ -373,6 +373,7 @@ mod tests {
             crate::build_sandbox_manager(&root, &config).expect("sandbox manager should build");
 
         GatewayRuntimeComponents {
+            config_snapshot: config.clone(),
             profiles: Arc::new(
                 ProviderProfileRegistry::from_config(&config)
                     .expect("profile registry should build"),

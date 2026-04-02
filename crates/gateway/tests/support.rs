@@ -88,6 +88,7 @@ pub fn build_components(root: &Path) -> GatewayRuntimeComponents {
     });
 
     GatewayRuntimeComponents {
+        config_snapshot: config.clone(),
         profiles: Arc::new(
             ProviderProfileRegistry::from_config(&config).expect("provider registry should build"),
         ),

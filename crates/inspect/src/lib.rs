@@ -173,6 +173,12 @@ pub struct RouteDecisionTrace {
     #[serde(default)]
     pub capability_source_kind: Option<CapabilitySourceKind>,
     #[serde(default)]
+    pub source_name: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub source_version: Option<String>,
+    #[serde(default)]
     pub execution_target: Option<ExecutionTarget>,
     #[serde(default)]
     pub orchestration_owner: Option<OrchestrationOwner>,
@@ -196,6 +202,12 @@ pub struct ToolTrace {
     pub source: ToolSource,
     #[serde(default)]
     pub capability_source_kind: Option<CapabilitySourceKind>,
+    #[serde(default)]
+    pub source_name: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub source_version: Option<String>,
     pub input: serde_json::Value,
     pub output: Option<String>,
     #[serde(default)]
@@ -245,6 +257,12 @@ pub struct CapabilityInvocationTrace {
     pub route_kind: Option<RouteKind>,
     #[serde(default)]
     pub capability_source_kind: Option<CapabilitySourceKind>,
+    #[serde(default)]
+    pub source_name: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub source_version: Option<String>,
     pub kind: CapabilityKind,
     #[serde(default)]
     pub permission_scopes: Vec<PermissionScope>,
@@ -330,9 +348,13 @@ pub struct SkillTrace {
     #[serde(default)]
     pub capability_source_kind: Option<CapabilitySourceKind>,
     #[serde(default)]
+    pub source_name: Option<String>,
+    #[serde(default)]
     pub source_path: Option<String>,
     #[serde(default)]
     pub skill_version: Option<String>,
+    #[serde(default)]
+    pub source_version: Option<String>,
     #[serde(default)]
     pub runtime_requirements: Vec<String>,
     #[serde(default)]
@@ -1289,6 +1311,9 @@ mod tests {
             name: "echo".to_owned(),
             source: ToolSource::Builtin,
             capability_source_kind: Some(CapabilitySourceKind::Builtin),
+            source_name: Some("builtin.core".to_owned()),
+            source_path: None,
+            source_version: None,
             input: serde_json::json!({ "text": "hello" }),
             output: Some("hello".to_owned()),
             node_attempted: false,
@@ -1407,6 +1432,9 @@ mod tests {
                 name: "echo".to_owned(),
                 source: ToolSource::Builtin,
                 capability_source_kind: Some(CapabilitySourceKind::Builtin),
+                source_name: Some("builtin.core".to_owned()),
+                source_path: None,
+                source_version: None,
                 input: serde_json::json!({ "text": "hello" }),
                 output: Some("hello".to_owned()),
                 node_attempted: false,

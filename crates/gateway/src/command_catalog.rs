@@ -683,6 +683,7 @@ mod tests {
                     .with_allowed_channels(vec!["telegram".to_owned()]),
                 extension: None,
                 version: None,
+                source_path: None,
                 compatibility: Default::default(),
             },
         }));
@@ -698,6 +699,7 @@ mod tests {
                     .with_required_policy(Some("allow_exec".to_owned())),
                 extension: None,
                 version: None,
+                source_path: None,
                 compatibility: Default::default(),
             },
         }));
@@ -709,6 +711,7 @@ mod tests {
             .expect("sandbox manager should build");
 
         GatewayRuntimeComponents {
+            config_snapshot: config.clone(),
             profiles: Arc::new(profiles),
             provider_override: Some(Arc::new(MockProvider)),
             session_store: Arc::new(crate::tests::MemorySessionStore::default()),

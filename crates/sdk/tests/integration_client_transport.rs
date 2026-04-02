@@ -8,7 +8,8 @@ use axum::{
 use chrono::Utc;
 use futures::stream;
 use mosaic_control_protocol::{
-    EventStreamEnvelope, GatewayEvent, HealthResponse, RunResponse, RunSubmission,
+    CapabilityInventorySummaryDto, EventStreamEnvelope, GatewayEvent, HealthResponse,
+    ReloadBoundaryDto, RunResponse, RunSubmission,
 };
 use mosaic_inspect::RunTrace;
 use mosaic_sdk::GatewayClient;
@@ -28,6 +29,8 @@ async fn gateway_client_consumes_health_and_event_stream_from_real_http_transpor
                     deployment_profile: "test".to_owned(),
                     auth_mode: "disabled".to_owned(),
                     event_replay_window: 32,
+                    capability_inventory: CapabilityInventorySummaryDto::default(),
+                    reload_boundaries: ReloadBoundaryDto::default(),
                 })
             }),
         )

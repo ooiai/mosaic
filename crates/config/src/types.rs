@@ -1081,6 +1081,17 @@ pub struct RedactedMosaicConfig {
     pub telegram_bots: Vec<RedactedTelegramBotView>,
     pub extension_manifest_count: usize,
     pub policies: RedactedPolicyView,
+    pub reload_boundaries: ReloadBoundaryView,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ReloadBoundaryView {
+    #[serde(default)]
+    pub hot_reloadable: Vec<String>,
+    #[serde(default)]
+    pub restart_required: Vec<String>,
+    #[serde(default)]
+    pub pending_restart: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

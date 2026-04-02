@@ -2,6 +2,7 @@ use anyhow::Result;
 use mosaic_config::{
     DoctorReport, LoadedMosaicConfig, ProviderUsage, RedactedMosaicConfig, ValidationReport,
 };
+use mosaic_extension_core::CapabilityInventorySummary;
 use mosaic_inspect::RunTrace;
 use mosaic_runtime::events::{RunEvent, RunEventSink};
 use mosaic_sandbox_core::{SandboxCleanReport, SandboxEnvRecord, SandboxRuntimeStatus};
@@ -267,9 +268,18 @@ pub fn render_config_sources(loaded: &LoadedMosaicConfig, validation: &Validatio
     ])
 }
 
-pub fn render_config_show(loaded: &LoadedMosaicConfig, validation: &ValidationReport) -> String {
+pub fn render_config_show(
+    loaded: &LoadedMosaicConfig,
+    validation: &ValidationReport,
+    capability_inventory: Option<&CapabilityInventorySummary>,
+) -> String {
     let redacted = mosaic_config::redact_mosaic_config(&loaded.config);
-    render_redacted_config(&redacted, validation, Some(&loaded.workspace_config_path))
+    render_redacted_config(
+        &redacted,
+        validation,
+        Some(&loaded.workspace_config_path),
+        capability_inventory,
+    )
 }
 
 pub fn render_onboarding_json(
@@ -285,7 +295,11 @@ pub fn render_onboarding_json(
     })
 }
 
-pub fn render_doctor_report(doctor: &DoctorReport, workspace: &RedactedMosaicConfig) -> String {
+pub fn render_doctor_report(
+    doctor: &DoctorReport,
+    workspace: &RedactedMosaicConfig,
+    capability_inventory: Option<&CapabilityInventorySummary>,
+) -> String {
     let summary = doctor.summary();
     let onboarding = derive_onboarding(workspace, &doctor.validation);
     let status = if doctor.has_errors() {
@@ -378,6 +392,11 @@ pub fn render_doctor_report(doctor: &DoctorReport, workspace: &RedactedMosaicCon
         blocks.push(render_list_block("doctor checks", check_lines));
     }
 
+    if let Some(summary) = capability_inventory {
+        blocks.push(render_capability_inventory_summary(summary));
+    }
+    blocks.push(render_reload_boundary_block(&workspace.reload_boundaries));
+
     join_blocks(blocks)
 }
 
@@ -438,6 +457,86 @@ pub fn render_gateway_status(
                     metrics.broadcast_lag_events_total.to_string(),
                 ),
                 ("open_jobs", metrics.capability_job_count.to_string()),
+            ],
+        ),
+        render_key_value_block(
+            "capability inventory",
+            vec![
+                (
+                    "total_capabilities",
+                    health.capability_inventory.total_capabilities.to_string(),
+                ),
+                ("tools", health.capability_inventory.total_tools.to_string()),
+                (
+                    "skills",
+                    health.capability_inventory.total_skills.to_string(),
+                ),
+                (
+                    "workflows",
+                    health.capability_inventory.total_workflows.to_string(),
+                ),
+                (
+                    "mcp_servers",
+                    health.capability_inventory.total_mcp_servers.to_string(),
+                ),
+                (
+                    "profiles",
+                    health
+                        .capability_inventory
+                        .visibility
+                        .profile_count
+                        .to_string(),
+                ),
+                (
+                    "telegram_bots",
+                    health
+                        .capability_inventory
+                        .visibility
+                        .telegram_bot_count
+                        .to_string(),
+                ),
+                (
+                    "channel_scoped",
+                    health
+                        .capability_inventory
+                        .visibility
+                        .channel_scoped
+                        .to_string(),
+                ),
+                (
+                    "attachment_capable",
+                    health
+                        .capability_inventory
+                        .visibility
+                        .attachment_capable
+                        .to_string(),
+                ),
+            ],
+        ),
+        render_list_block(
+            "capability sources",
+            health
+                .capability_inventory
+                .source_breakdown
+                .iter()
+                .map(|entry| format!("{}={}", entry.source_kind, entry.count))
+                .collect(),
+        ),
+        render_key_value_block(
+            "reload boundaries",
+            vec![
+                (
+                    "hot_reloadable",
+                    list_or_none(&health.reload_boundaries.hot_reloadable),
+                ),
+                (
+                    "restart_required",
+                    list_or_none(&health.reload_boundaries.restart_required),
+                ),
+                (
+                    "pending_restart",
+                    list_or_none(&health.reload_boundaries.pending_restart),
+                ),
             ],
         ),
     ])
@@ -722,6 +821,12 @@ pub fn render_inspect_report(
                         .capability_source_kind
                         .map(|kind| kind.label().to_owned())
                         .unwrap_or_else(|| "<none>".to_owned()),
+                ),
+                ("source_name", option_string(route.source_name.clone())),
+                ("source_path", option_string(route.source_path.clone())),
+                (
+                    "source_version",
+                    option_string(route.source_version.clone()),
                 ),
                 (
                     "execution_target",
@@ -1147,7 +1252,7 @@ pub fn render_inspect_report(
                 .capability_invocations
                 .iter()
                 .map(|invocation| format!(
-                    "job_id={} | tool={} | route_kind={} | capability_source_kind={} | kind={} | risk={} | status={} | scopes={} | target={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | failure_origin={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | duration_ms={} | error={} | summary={}",
+                    "job_id={} | tool={} | route_kind={} | capability_source_kind={} | source_name={} | source_path={} | source_version={} | kind={} | risk={} | status={} | scopes={} | target={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | failure_origin={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | duration_ms={} | error={} | summary={}",
                     invocation.job_id,
                     invocation.tool_name,
                     invocation
@@ -1158,6 +1263,9 @@ pub fn render_inspect_report(
                         .capability_source_kind
                         .map(|kind| kind.label().to_owned())
                         .unwrap_or_else(|| "<none>".to_owned()),
+                    option_string(invocation.source_name.clone()),
+                    option_string(invocation.source_path.clone()),
+                    option_string(invocation.source_version.clone()),
                     invocation.kind.label(),
                     invocation.risk.label(),
                     invocation.status,
@@ -1217,6 +1325,7 @@ pub fn render_inspect_report(
             workspace,
             &ValidationReport::default(),
             None,
+            None,
         ));
     }
 
@@ -1225,7 +1334,7 @@ pub fn render_inspect_report(
         for call in &trace.tool_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "call_id={} | name={} | source={} | capability_source_kind={} | server={} | remote_tool={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
+                "call_id={} | name={} | source={} | capability_source_kind={} | source_name={} | source_path={} | source_version={} | server={} | remote_tool={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
                 option_string(call.call_id.clone()),
                 call.name,
                 call.source.label(),
@@ -1233,6 +1342,9 @@ pub fn render_inspect_report(
                     .capability_source_kind
                     .map(|kind| kind.label().to_owned())
                     .unwrap_or_else(|| "<none>".to_owned()),
+                option_string(call.source_name.clone()),
+                option_string(call.source_path.clone()),
+                option_string(call.source_version.clone()),
                 option_str(call.source.server_name()),
                 option_str(call.source.remote_tool_name()),
                 call.execution_target.label(),
@@ -1266,18 +1378,20 @@ pub fn render_inspect_report(
         for call in &trace.skill_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "name={} | source_kind={} | capability_source_kind={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | source_path={} | skill_version={} | runtime_requirements={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
+                "name={} | source_kind={} | capability_source_kind={} | source_name={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | source_path={} | source_version={} | skill_version={} | runtime_requirements={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
                 call.name,
                 option_string(call.source_kind.clone()),
                 call
                     .capability_source_kind
                     .map(|kind| kind.label().to_owned())
                     .unwrap_or_else(|| "<none>".to_owned()),
+                option_string(call.source_name.clone()),
                 call.execution_target.label(),
                 call.orchestration_owner.label(),
                 option_string(call.policy_source.clone()),
                 option_string(call.sandbox_scope.clone()),
                 option_string(call.source_path.clone()),
+                option_string(call.source_version.clone()),
                 option_string(call.skill_version.clone()),
                     if call.runtime_requirements.is_empty() {
                         "<none>".to_owned()
@@ -1334,6 +1448,7 @@ fn render_redacted_config(
     redacted: &RedactedMosaicConfig,
     validation: &ValidationReport,
     workspace_path: Option<&std::path::Path>,
+    capability_inventory: Option<&CapabilityInventorySummary>,
 ) -> String {
     let onboarding = derive_onboarding(redacted, validation);
     let mut blocks = vec![render_key_value_block(
@@ -1466,6 +1581,10 @@ fn render_redacted_config(
             ),
         ],
     ));
+    if let Some(summary) = capability_inventory {
+        blocks.push(render_capability_inventory_summary(summary));
+    }
+    blocks.push(render_reload_boundary_block(&redacted.reload_boundaries));
     blocks.push(render_key_value_block(
         "provider defaults",
         vec![
@@ -1690,6 +1809,60 @@ fn render_redacted_config(
     join_blocks(blocks)
 }
 
+fn render_capability_inventory_summary(summary: &CapabilityInventorySummary) -> String {
+    join_blocks([
+        render_key_value_block(
+            "capability inventory",
+            vec![
+                ("total_capabilities", summary.total_capabilities.to_string()),
+                ("tools", summary.total_tools.to_string()),
+                ("skills", summary.total_skills.to_string()),
+                ("workflows", summary.total_workflows.to_string()),
+                ("mcp_servers", summary.total_mcp_servers.to_string()),
+                ("profiles", summary.visibility.profile_count.to_string()),
+                (
+                    "telegram_bots",
+                    summary.visibility.telegram_bot_count.to_string(),
+                ),
+                (
+                    "channel_scoped",
+                    summary.visibility.channel_scoped.to_string(),
+                ),
+                (
+                    "attachment_capable",
+                    summary.visibility.attachment_capable.to_string(),
+                ),
+                (
+                    "bot_scoped_bindings",
+                    summary.visibility.bot_scoped_bindings.to_string(),
+                ),
+            ],
+        ),
+        render_list_block(
+            "capability sources",
+            summary
+                .source_breakdown
+                .iter()
+                .map(|entry| format!("{}={}", entry.source_kind, entry.count))
+                .collect(),
+        ),
+    ])
+}
+
+fn render_reload_boundary_block(boundaries: &mosaic_config::ReloadBoundaryView) -> String {
+    render_key_value_block(
+        "reload boundaries",
+        vec![
+            ("hot_reloadable", list_or_none(&boundaries.hot_reloadable)),
+            (
+                "restart_required",
+                list_or_none(&boundaries.restart_required),
+            ),
+            ("pending_restart", list_or_none(&boundaries.pending_restart)),
+        ],
+    )
+}
+
 fn render_attachment_route_override(route: &mosaic_config::RedactedAttachmentRouteView) -> String {
     format!(
         "{} | mode={} | processor={} | multimodal_profile={} | specialized_processor_profile={} | kinds={} | max_attachment_size_mb={}",
@@ -1874,6 +2047,14 @@ fn tags_or_none(tags: &[String]) -> String {
     }
 }
 
+fn list_or_none(values: &[String]) -> String {
+    if values.is_empty() {
+        "<none>".to_owned()
+    } else {
+        values.join(", ")
+    }
+}
+
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
 }
@@ -2009,7 +2190,7 @@ mod tests {
     #[test]
     fn renders_config_show_with_summary_first() {
         let loaded = load_mosaic_config(&LoadConfigOptions::default()).expect("config should load");
-        let rendered = render_config_show(&loaded, &ValidationReport::default());
+        let rendered = render_config_show(&loaded, &ValidationReport::default(), None);
 
         assert!(rendered.starts_with("config summary:"));
         assert!(rendered.contains("onboarding:"));
@@ -2163,7 +2344,9 @@ mod tests {
                     allow_mcp: true,
                     hot_reload_enabled: false,
                 },
+                reload_boundaries: mosaic_config::reload_boundary_view(),
             },
+            None,
         );
         assert!(rendered.starts_with("doctor summary:"));
         assert!(rendered.contains("onboarding:"));
@@ -2215,6 +2398,9 @@ mod tests {
                 name: "echo".to_owned(),
                 source: ToolSource::Builtin,
                 capability_source_kind: Some(mosaic_inspect::CapabilitySourceKind::Builtin),
+                source_name: Some("builtin".to_owned()),
+                source_path: None,
+                source_version: None,
                 input: serde_json::json!({"text": "hello"}),
                 output: Some("hello".to_owned()),
                 node_attempted: false,

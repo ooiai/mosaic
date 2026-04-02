@@ -97,6 +97,8 @@ pub struct WorkflowMetadata {
     pub extension: Option<String>,
     pub version: Option<String>,
     #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
     pub compatibility: WorkflowCompatibility,
 }
 
@@ -107,6 +109,7 @@ impl WorkflowMetadata {
             exposure: CapabilityExposure::default(),
             extension: None,
             version: None,
+            source_path: None,
             compatibility: WorkflowCompatibility::default(),
         }
     }
@@ -118,6 +121,11 @@ impl WorkflowMetadata {
     ) -> Self {
         self.extension = Some(extension.into());
         self.version = Some(version.into());
+        self
+    }
+
+    pub fn with_source_path(mut self, source_path: Option<String>) -> Self {
+        self.source_path = source_path;
         self
     }
 
@@ -186,6 +194,10 @@ impl WorkflowRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.workflows.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &RegisteredWorkflow> {
+        self.workflows.values()
     }
 }
 

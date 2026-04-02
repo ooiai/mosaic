@@ -344,6 +344,7 @@ mod tests {
         let gateway = GatewayHandle::new_local(
             tokio::runtime::Handle::current(),
             GatewayRuntimeComponents {
+                config_snapshot: config.clone(),
                 profiles: Arc::new(profiles),
                 provider_override: Some(Arc::new(MockProvider)),
                 session_store: Arc::new(FileSessionStore::new(&session_root)),

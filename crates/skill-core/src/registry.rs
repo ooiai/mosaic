@@ -114,4 +114,8 @@ impl SkillRegistry {
     pub fn list(&self) -> Vec<String> {
         self.skills.keys().cloned().collect()
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &RegisteredSkill> {
+        self.skills.values()
+    }
 }

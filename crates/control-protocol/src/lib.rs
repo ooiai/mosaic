@@ -21,6 +21,8 @@ pub struct HealthResponse {
     pub deployment_profile: String,
     pub auth_mode: String,
     pub event_replay_window: usize,
+    pub capability_inventory: CapabilityInventorySummaryDto,
+    pub reload_boundaries: ReloadBoundaryDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -56,6 +58,50 @@ pub struct MetricsResponse {
     pub broadcast_lag_events_total: u64,
     pub replay_events_buffered: usize,
     pub event_replay_window: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct CapabilitySourceBreakdownDto {
+    pub source_kind: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct CapabilityVisibilitySummaryDto {
+    pub visible: usize,
+    pub restricted: usize,
+    pub hidden: usize,
+    pub conversational: usize,
+    pub explicit_only: usize,
+    pub hidden_invocation: usize,
+    pub attachment_capable: usize,
+    pub channel_scoped: usize,
+    pub profile_count: usize,
+    pub telegram_bot_count: usize,
+    pub bot_scoped_bindings: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct CapabilityInventorySummaryDto {
+    pub total_capabilities: usize,
+    pub total_tools: usize,
+    pub total_skills: usize,
+    pub total_workflows: usize,
+    pub total_mcp_servers: usize,
+    #[serde(default)]
+    pub source_breakdown: Vec<CapabilitySourceBreakdownDto>,
+    #[serde(default)]
+    pub visibility: CapabilityVisibilitySummaryDto,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ReloadBoundaryDto {
+    #[serde(default)]
+    pub hot_reloadable: Vec<String>,
+    #[serde(default)]
+    pub restart_required: Vec<String>,
+    #[serde(default)]
+    pub pending_restart: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -17,7 +17,10 @@ use mosaic_control_protocol::{
     IncidentBundleDto, IngressTrace, MetricsResponse, ReadinessResponse, ReplayWindowResponse,
     RunDetailDto, RunResponse, RunSummaryDto, SessionSummaryDto,
 };
-use mosaic_extension_core::{ExtensionStatus, ExtensionValidationReport, validate_extension_set};
+use mosaic_extension_core::{
+    CapabilityInventorySummary, ExtensionStatus, ExtensionValidationReport,
+    summarize_planned_capabilities, validate_extension_set,
+};
 use mosaic_gateway::{GatewayHandle, GatewayRunError, GatewayRunResult};
 use mosaic_inspect::RunTrace;
 use mosaic_memory::{FileMemoryStore, MemoryStore};
@@ -37,6 +40,14 @@ mod node_cmd;
 mod output;
 mod run_cmd;
 mod session_cmd;
+
+fn planned_capability_inventory(loaded: &LoadedMosaicConfig) -> Result<CapabilityInventorySummary> {
+    Ok(summarize_planned_capabilities(
+        &loaded.config,
+        None,
+        &env::current_dir()?,
+    ))
+}
 
 const CLI_ABOUT: &str = "Self-hosted AI assistant control plane for sessions, the TUI, Gateway routing, and trace inspection.";
 const CLI_AFTER_HELP: &str = "Quick start:
@@ -966,7 +977,11 @@ fn setup_cmd(command: SetupCommand) -> Result<()> {
         SetupCommand::Validate => {
             let loaded = load_config()?;
             let report = validate_mosaic_config(&loaded.config);
-            println!("{}", output::render_config_show(&loaded, &report));
+            let capability_inventory = planned_capability_inventory(&loaded)?;
+            println!(
+                "{}",
+                output::render_config_show(&loaded, &report, Some(&capability_inventory))
+            );
 
             if report.has_errors() {
                 bail!(
@@ -987,14 +1002,23 @@ next: run `mosaic setup doctor` and compare `.mosaic/config.yaml` with `docs/con
         SetupCommand::Doctor => {
             let loaded = load_config()?;
             let doctor = doctor_mosaic_config(&loaded.config, &current_dir()?);
+            let capability_inventory = planned_capability_inventory(&loaded)?;
             println!(
                 "{}",
-                output::render_config_show(&loaded, &doctor.validation)
+                output::render_config_show(
+                    &loaded,
+                    &doctor.validation,
+                    Some(&capability_inventory)
+                )
             );
             println!();
             println!(
                 "{}",
-                output::render_doctor_report(&doctor, &redact_mosaic_config(&loaded.config))
+                output::render_doctor_report(
+                    &doctor,
+                    &redact_mosaic_config(&loaded.config),
+                    Some(&capability_inventory),
+                )
             );
             if let Ok(gateway) = build_gateway_handle(&loaded, None) {
                 print_node_diagnostics(&gateway)?;
@@ -1025,6 +1049,7 @@ fn config_cmd(command: ConfigCommand) -> Result<()> {
 
     match command {
         ConfigCommand::Show { json } => {
+            let capability_inventory = planned_capability_inventory(&loaded)?;
             if json {
                 println!(
                     "{}",
@@ -1033,12 +1058,17 @@ fn config_cmd(command: ConfigCommand) -> Result<()> {
                         "user_config_path": loaded.user_config_path,
                         "sources": loaded.sources,
                         "config": redact_mosaic_config(&loaded.config),
+                        "capability_inventory": capability_inventory,
+                        "reload_boundaries": mosaic_config::reload_boundary_view(),
                         "onboarding": output::render_onboarding_json(&loaded, &validation),
                         "validation": validation,
                     }))?
                 );
             } else {
-                println!("{}", output::render_config_show(&loaded, &validation));
+                println!(
+                    "{}",
+                    output::render_config_show(&loaded, &validation, Some(&capability_inventory))
+                );
                 print_next_steps(["mosaic config sources", "mosaic setup doctor"]);
             }
             Ok(())
@@ -1273,6 +1303,24 @@ fn extension_cmd(command: ExtensionCommand) -> Result<()> {
             let result = gateway.reload_extensions()?;
             println!("extension reload succeeded");
             print_extension_snapshot(&result.extensions, &result.policies);
+            println!(
+                "reload boundaries: hot_reloadable={} restart_required={} pending_restart={}",
+                if result.reload_boundaries.hot_reloadable.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    result.reload_boundaries.hot_reloadable.join(",")
+                },
+                if result.reload_boundaries.restart_required.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    result.reload_boundaries.restart_required.join(",")
+                },
+                if result.reload_boundaries.pending_restart.is_empty() {
+                    "<none>".to_owned()
+                } else {
+                    result.reload_boundaries.pending_restart.join(",")
+                },
+            );
             Ok(())
         }
     }

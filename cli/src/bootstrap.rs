@@ -147,6 +147,7 @@ fn build_gateway_components_for_workspace(
     let audit_root = resolve_workspace_path(&config.audit.root_dir)?;
 
     Ok(GatewayRuntimeComponents {
+        config_snapshot: config.clone(),
         profiles,
         provider_override: None,
         session_store: Arc::new(FileSessionStore::new(session_store_root)),

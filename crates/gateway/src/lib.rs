@@ -26,17 +26,19 @@ use mosaic_config::{
     PolicyConfig, load_mosaic_config,
 };
 use mosaic_control_protocol::{
-    AdapterStatusDto, CapabilityJobDto, ChannelDeliveryTrace, ChannelInboundMessage,
-    ChannelOutboundMessage, CronRegistrationDto, CronRegistrationRequest, ErrorResponse,
-    EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
+    AdapterStatusDto, CapabilityInventorySummaryDto, CapabilityJobDto,
+    CapabilitySourceBreakdownDto, CapabilityVisibilitySummaryDto, ChannelDeliveryTrace,
+    ChannelInboundMessage, ChannelOutboundMessage, CronRegistrationDto, CronRegistrationRequest,
+    ErrorResponse, EventStreamEnvelope, ExecJobRequest, ExtensionPolicyDto, ExtensionStatusDto,
     GatewayAuditEventDto, GatewayEvent, HealthResponse, InboundMessage, IncidentBundleDto,
-    MetricsResponse, NodeBindingDto, ReadinessResponse, ReplayWindowResponse, RunDetailDto,
-    RunResponse, RunSubmission, RunSummaryDto, SessionChannelDto, SessionDetailDto,
+    MetricsResponse, NodeBindingDto, ReadinessResponse, ReloadBoundaryDto, ReplayWindowResponse,
+    RunDetailDto, RunResponse, RunSubmission, RunSummaryDto, SessionChannelDto, SessionDetailDto,
     SessionGatewayDto, SessionRunDto, SessionSummaryDto, TranscriptMessageDto, TranscriptRoleDto,
     WebhookJobRequest,
 };
 use mosaic_extension_core::{
-    ExtensionStatus, ExtensionValidationReport, load_extension_set, validate_extension_set,
+    CapabilityInventorySummary, ExtensionStatus, ExtensionValidationReport, load_extension_set,
+    summarize_loaded_capabilities, validate_extension_set,
 };
 use mosaic_inspect::{
     ExtensionTrace, GovernanceTrace, IngressTrace, RouteDecisionTrace, RouteMode,
@@ -51,7 +53,9 @@ use mosaic_node_protocol::{
 use mosaic_provider::{LlmProvider, ProviderProfileRegistry, public_error_message};
 use mosaic_runtime::events::{RunEvent, RunEventSink, SharedRunEventSink};
 use mosaic_runtime::{RunError, RunResult, RuntimeContext};
-use mosaic_sandbox_core::{SandboxCleanupPolicy, SandboxManager, SandboxSettings};
+use mosaic_sandbox_core::SandboxManager;
+#[cfg(test)]
+use mosaic_sandbox_core::{SandboxCleanupPolicy, SandboxSettings};
 use mosaic_scheduler_core::{CronRegistration, CronStore};
 use mosaic_session_core::{
     SessionChannelMetadata, SessionRecord, SessionStore, SessionSummary, TranscriptRole,
@@ -73,7 +77,8 @@ pub use mosaic_control_protocol::{
 const DEFAULT_AUDIT_QUERY_LIMIT: usize = 50;
 const DEFAULT_REPLAY_QUERY_LIMIT: usize = 50;
 
-fn build_sandbox_manager(
+#[cfg(test)]
+pub(crate) fn build_sandbox_manager(
     workspace_root: &FsPath,
     config: &mosaic_config::MosaicConfig,
 ) -> Result<Arc<SandboxManager>> {
@@ -95,6 +100,7 @@ fn build_sandbox_manager(
 
 #[derive(Clone)]
 pub struct GatewayRuntimeComponents {
+    pub config_snapshot: mosaic_config::MosaicConfig,
     pub profiles: Arc<ProviderProfileRegistry>,
     pub provider_override: Option<Arc<dyn LlmProvider>>,
     pub session_store: Arc<dyn SessionStore>,
@@ -143,6 +149,20 @@ impl GatewayRuntimeComponents {
             event_sink,
         }
     }
+
+    pub fn capability_inventory(&self) -> CapabilityInventorySummaryDto {
+        capability_inventory_dto(&summarize_loaded_capabilities(
+            &self.tools,
+            &self.skills,
+            &self.workflows,
+            &self.extensions,
+            &self.config_snapshot,
+        ))
+    }
+
+    pub fn reload_boundaries(&self) -> ReloadBoundaryDto {
+        reload_boundary_dto(&mosaic_config::reload_boundary_view())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +177,7 @@ pub struct GatewayReloadSource {
 pub struct GatewayExtensionReloadResult {
     pub extensions: Vec<ExtensionStatus>,
     pub policies: PolicyConfig,
+    pub reload_boundaries: mosaic_config::ReloadBoundaryView,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -166,6 +187,45 @@ pub enum GatewayCommand {
 
 pub type GatewayRunRequest = RunSubmission;
 pub type GatewayEventEnvelope = EventStreamEnvelope;
+
+fn capability_inventory_dto(summary: &CapabilityInventorySummary) -> CapabilityInventorySummaryDto {
+    CapabilityInventorySummaryDto {
+        total_capabilities: summary.total_capabilities,
+        total_tools: summary.total_tools,
+        total_skills: summary.total_skills,
+        total_workflows: summary.total_workflows,
+        total_mcp_servers: summary.total_mcp_servers,
+        source_breakdown: summary
+            .source_breakdown
+            .iter()
+            .map(|entry| CapabilitySourceBreakdownDto {
+                source_kind: entry.source_kind.clone(),
+                count: entry.count,
+            })
+            .collect(),
+        visibility: CapabilityVisibilitySummaryDto {
+            visible: summary.visibility.visible,
+            restricted: summary.visibility.restricted,
+            hidden: summary.visibility.hidden,
+            conversational: summary.visibility.conversational,
+            explicit_only: summary.visibility.explicit_only,
+            hidden_invocation: summary.visibility.hidden_invocation,
+            attachment_capable: summary.visibility.attachment_capable,
+            channel_scoped: summary.visibility.channel_scoped,
+            profile_count: summary.visibility.profile_count,
+            telegram_bot_count: summary.visibility.telegram_bot_count,
+            bot_scoped_bindings: summary.visibility.bot_scoped_bindings,
+        },
+    }
+}
+
+fn reload_boundary_dto(boundaries: &mosaic_config::ReloadBoundaryView) -> ReloadBoundaryDto {
+    ReloadBoundaryDto {
+        hot_reloadable: boundaries.hot_reloadable.clone(),
+        restart_required: boundaries.restart_required.clone(),
+        pending_restart: boundaries.pending_restart.clone(),
+    }
+}
 
 #[derive(Debug)]
 pub struct GatewayRunResult {
@@ -672,6 +732,8 @@ impl GatewayHandle {
             deployment_profile: components.deployment.profile.clone(),
             auth_mode: operator_auth_mode(&components.auth),
             event_replay_window: components.audit.event_replay_window,
+            capability_inventory: components.capability_inventory(),
+            reload_boundaries: components.reload_boundaries(),
         }
     }
 
@@ -814,6 +876,8 @@ impl GatewayHandle {
         }
 
         let current = self.snapshot_components();
+        let reload_boundaries =
+            mosaic_config::reload_boundary_delta(&current.config_snapshot, &loaded.config);
         let extension_set = match load_extension_set(
             &loaded.config,
             source.app_config.as_ref(),
@@ -836,18 +900,19 @@ impl GatewayHandle {
             }
         };
 
-        let profiles = Arc::new(ProviderProfileRegistry::from_config(&loaded.config)?);
-        let sandbox = build_sandbox_manager(&source.workspace_root, &loaded.config)?;
+        let applied_config =
+            mosaic_config::apply_hot_reloadable_config(&current.config_snapshot, &loaded.config);
         let updated = GatewayRuntimeComponents {
-            profiles,
+            config_snapshot: applied_config,
+            profiles: current.profiles.clone(),
             provider_override: current.provider_override.clone(),
             session_store: current.session_store.clone(),
             memory_store: current.memory_store.clone(),
             memory_policy: current.memory_policy.clone(),
             runtime_policy: current.runtime_policy.clone(),
-            attachments: loaded.config.attachments.clone(),
-            sandbox,
-            telegram: loaded.config.telegram.clone(),
+            attachments: current.attachments.clone(),
+            sandbox: current.sandbox.clone(),
+            telegram: current.telegram.clone(),
             app_name: source
                 .app_config
                 .as_ref()
@@ -895,6 +960,7 @@ impl GatewayHandle {
         Ok(GatewayExtensionReloadResult {
             extensions: extension_set.extensions,
             policies: extension_set.policies,
+            reload_boundaries,
         })
     }
 

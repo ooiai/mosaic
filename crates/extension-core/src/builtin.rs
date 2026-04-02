@@ -82,6 +82,7 @@ pub(crate) fn build_builtin_tool(
         inner,
         extension_name,
         extension_version,
+        Some(extension_source),
         schema_version,
     ))
 }
@@ -209,10 +210,10 @@ fn markdown_pack_exposure(
 pub(crate) fn apply_mcp_extension_metadata(
     tools: &mut ToolRegistry,
     registered: &[McpRegisteredTool],
-    origins: &BTreeMap<String, (String, String, u32)>,
+    origins: &BTreeMap<String, (String, String, String, u32)>,
 ) {
     for registration in registered {
-        let Some((extension_name, extension_version, schema_version)) =
+        let Some((extension_name, extension_version, extension_source, schema_version)) =
             origins.get(&registration.server_name)
         else {
             continue;
@@ -224,6 +225,7 @@ pub(crate) fn apply_mcp_extension_metadata(
             existing,
             extension_name,
             extension_version,
+            Some(extension_source),
             *schema_version,
         ));
     }

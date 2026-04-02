@@ -169,7 +169,77 @@ pub fn redact_mosaic_config(config: &MosaicConfig) -> RedactedMosaicConfig {
             allow_mcp: config.policies.allow_mcp,
             hot_reload_enabled: config.policies.hot_reload_enabled,
         },
+        reload_boundaries: reload_boundary_view(),
     }
+}
+
+pub fn reload_boundary_view() -> ReloadBoundaryView {
+    ReloadBoundaryView {
+        hot_reloadable: vec![
+            "workspace_inline_capabilities".to_owned(),
+            "extension_manifests".to_owned(),
+            "markdown_skill_packs".to_owned(),
+            "capability_visibility".to_owned(),
+            "capability_policy".to_owned(),
+            "mcp_registrations".to_owned(),
+        ],
+        restart_required: vec![
+            "provider_registry".to_owned(),
+            "runtime_policy".to_owned(),
+            "sandbox_runtime".to_owned(),
+            "attachment_routing".to_owned(),
+            "telegram_adapter_wiring".to_owned(),
+            "gateway_service".to_owned(),
+        ],
+        pending_restart: Vec::new(),
+    }
+}
+
+pub fn reload_boundary_delta(current: &MosaicConfig, next: &MosaicConfig) -> ReloadBoundaryView {
+    let mut view = reload_boundary_view();
+    let mut pending = Vec::new();
+
+    if current.active_profile != next.active_profile
+        || current.provider_defaults != next.provider_defaults
+        || current.profiles != next.profiles
+    {
+        pending.push("provider_registry".to_owned());
+    }
+    if current.runtime != next.runtime {
+        pending.push("runtime_policy".to_owned());
+    }
+    if current.sandbox != next.sandbox {
+        pending.push("sandbox_runtime".to_owned());
+    }
+    if current.attachments != next.attachments {
+        pending.push("attachment_routing".to_owned());
+    }
+    if current.telegram != next.telegram {
+        pending.push("telegram_adapter_wiring".to_owned());
+    }
+    if current.deployment != next.deployment
+        || current.auth != next.auth
+        || current.audit != next.audit
+        || current.observability != next.observability
+        || current.session_store != next.session_store
+        || current.inspect != next.inspect
+    {
+        pending.push("gateway_service".to_owned());
+    }
+
+    view.pending_restart = pending;
+    view
+}
+
+pub fn apply_hot_reloadable_config(current: &MosaicConfig, next: &MosaicConfig) -> MosaicConfig {
+    let mut merged = current.clone();
+    merged.tools = next.tools.clone();
+    merged.skills = next.skills.clone();
+    merged.workflows = next.workflows.clone();
+    merged.mcp = next.mcp.clone();
+    merged.extensions = next.extensions.clone();
+    merged.policies = next.policies.clone();
+    merged
 }
 
 fn infer_profile_capabilities(profile: &ProviderProfileConfig) -> InferredAttachmentCapabilities {

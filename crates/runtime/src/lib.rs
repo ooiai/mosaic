@@ -145,6 +145,27 @@ impl AgentRuntime {
         }
     }
 
+    fn tool_source_name(metadata: &ToolMetadata) -> Option<String> {
+        match &metadata.source {
+            mosaic_tool_core::ToolSource::Mcp { server, .. } => Some(server.clone()),
+            mosaic_tool_core::ToolSource::Builtin => metadata.extension.clone().or_else(|| {
+                Some(match metadata.exposure.source.as_str() {
+                    "workspace_config" => "workspace.inline".to_owned(),
+                    "app_config" => "app.inline".to_owned(),
+                    _ => "builtin.core".to_owned(),
+                })
+            }),
+        }
+    }
+
+    fn tool_source_path(metadata: &ToolMetadata) -> Option<String> {
+        metadata.source_path.clone()
+    }
+
+    fn tool_source_version(metadata: &ToolMetadata) -> Option<String> {
+        metadata.version.clone()
+    }
+
     fn skill_capability_source_kind(
         metadata: &mosaic_skill_core::SkillMetadata,
     ) -> CapabilitySourceKind {
@@ -155,6 +176,25 @@ impl AgentRuntime {
                 CapabilitySourceKind::MarkdownSkillPack
             }
         }
+    }
+
+    fn skill_source_name(metadata: &mosaic_skill_core::SkillMetadata) -> Option<String> {
+        metadata
+            .extension
+            .clone()
+            .or_else(|| Some(metadata.name.clone()))
+    }
+
+    fn skill_source_path(metadata: &mosaic_skill_core::SkillMetadata) -> Option<String> {
+        metadata.source_path.clone()
+    }
+
+    fn skill_source_version(metadata: &mosaic_skill_core::SkillMetadata) -> Option<String> {
+        metadata
+            .skill_version
+            .clone()
+            .or_else(|| metadata.extension_version.clone())
+            .or_else(|| metadata.version.clone())
     }
 
     fn workflow_capability_source_kind(
@@ -169,6 +209,21 @@ impl AgentRuntime {
                 _ => CapabilitySourceKind::Builtin,
             }
         }
+    }
+
+    fn workflow_source_name(metadata: &mosaic_workflow::WorkflowMetadata) -> Option<String> {
+        metadata
+            .extension
+            .clone()
+            .or_else(|| Some(metadata.name.clone()))
+    }
+
+    fn workflow_source_path(metadata: &mosaic_workflow::WorkflowMetadata) -> Option<String> {
+        metadata.source_path.clone()
+    }
+
+    fn workflow_source_version(metadata: &mosaic_workflow::WorkflowMetadata) -> Option<String> {
+        metadata.version.clone()
     }
 
     fn tool_execution_target(metadata: &ToolMetadata) -> ExecutionTarget {
@@ -337,21 +392,40 @@ impl AgentRuntime {
         if let Some(route) = attachment_route.as_ref() {
             if route.trace.mode == AttachmentRouteMode::SpecializedProcessor {
                 if let Some(skill_name) = route.specialized_skill.clone() {
-                    let (source_kind, policy_source, sandbox_scope) =
-                        if let Some(skill) = self.ctx.skills.get(&skill_name) {
-                            (
-                                Self::skill_capability_source_kind(skill.metadata()),
-                                Self::skill_policy_source(skill.metadata()),
-                                Self::skill_sandbox_scope(skill.metadata()),
-                            )
-                        } else {
-                            (CapabilitySourceKind::ManifestSkill, None, None)
-                        };
+                    let (
+                        source_kind,
+                        source_name,
+                        source_path,
+                        source_version,
+                        policy_source,
+                        sandbox_scope,
+                    ) = if let Some(skill) = self.ctx.skills.get(&skill_name) {
+                        (
+                            Self::skill_capability_source_kind(skill.metadata()),
+                            Self::skill_source_name(skill.metadata()),
+                            Self::skill_source_path(skill.metadata()),
+                            Self::skill_source_version(skill.metadata()),
+                            Self::skill_policy_source(skill.metadata()),
+                            Self::skill_sandbox_scope(skill.metadata()),
+                        )
+                    } else {
+                        (
+                            CapabilitySourceKind::ManifestSkill,
+                            Some(skill_name.clone()),
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                    };
                     planned_route = crate::routing::PlannedRoute::Skill {
                         name: skill_name,
                         reason: "attachment specialized processor".to_owned(),
                         source: "attachment.routing".to_owned(),
                         source_kind,
+                        source_name,
+                        source_path,
+                        source_version,
                         execution_target: ExecutionTarget::Local,
                         policy_source,
                         sandbox_scope,
@@ -837,8 +911,10 @@ impl AgentRuntime {
             name: skill_name.clone(),
             source_kind: Some(skill.metadata().source_kind.label().to_owned()),
             capability_source_kind: Some(Self::skill_capability_source_kind(skill.metadata())),
+            source_name: Self::skill_source_name(skill.metadata()),
             source_path: skill.metadata().source_path.clone(),
             skill_version: skill.metadata().skill_version.clone(),
+            source_version: Self::skill_source_version(skill.metadata()),
             runtime_requirements: skill.metadata().runtime_requirements.clone(),
             execution_target: Self::skill_execution_target(skill.metadata()),
             orchestration_owner: OrchestrationOwner::Runtime,
@@ -939,8 +1015,10 @@ impl AgentRuntime {
                 name: skill_name.clone(),
                 source_kind: Some(skill.metadata().source_kind.label().to_owned()),
                 capability_source_kind: Some(Self::skill_capability_source_kind(skill.metadata())),
+                source_name: Self::skill_source_name(skill.metadata()),
                 source_path: skill.metadata().source_path.clone(),
                 skill_version: skill.metadata().skill_version.clone(),
+                source_version: Self::skill_source_version(skill.metadata()),
                 runtime_requirements: skill.metadata().runtime_requirements.clone(),
                 execution_target: Self::skill_execution_target(skill.metadata()),
                 orchestration_owner: OrchestrationOwner::WorkflowEngine,
