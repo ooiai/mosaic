@@ -1,0 +1,23 @@
+name: workflow-example
+version: 0.1.0
+description: Example workflow that composes a manifest skill as one orchestration step.
+schema_version: 1
+skills:
+  - type: manifest
+    name: summarize_notes
+    description: Summarize input before the workflow returns.
+    steps:
+      - kind: echo
+        name: draft
+        input: "{{input}}"
+      - kind: summarize
+        name: summary
+        input: "{{current}}"
+workflows:
+  - name: summarize_operator_note
+    description: Example workflow that calls the summarize_notes skill.
+    steps:
+      - name: summarize
+        kind: skill
+        skill: summarize_notes
+        input: "{{input}}"

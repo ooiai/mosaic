@@ -3389,6 +3389,143 @@ mod tests {
     }
 
     #[test]
+    fn l_series_docs_examples_and_crate_guides_cover_skill_sandbox_and_taxonomy() {
+        let root = repo_root();
+
+        let readme = fs::read_to_string(root.join("README.md")).expect("README should load");
+        for required in [
+            "docs/skills.md",
+            "docs/sandbox.md",
+            "docs/capabilities.md",
+            "examples/skills/README.md",
+            "examples/capabilities/README.md",
+            "examples/sandbox/README.md",
+            "examples/composition/README.md",
+            "examples/composition/openai-capability-composition.config.yaml",
+        ] {
+            assert!(readme.contains(required), "README missing {required}");
+        }
+
+        let skills =
+            fs::read_to_string(root.join("docs/skills.md")).expect("skills guide should load");
+        for required in [
+            "# Skills",
+            "Native Skill",
+            "Manifest Skill",
+            "Markdown Skill Pack",
+            "Skill vs Workflow",
+            "Skill and Sandbox",
+            "capability_source_kind=native_skill|manifest_skill|markdown_skill_pack",
+            "examples/skills/native-skill.yaml",
+            "examples/extensions/markdown-skill-pack.yaml",
+        ] {
+            assert!(skills.contains(required), "skills guide missing {required}");
+        }
+
+        let sandbox =
+            fs::read_to_string(root.join("docs/sandbox.md")).expect("sandbox guide should load");
+        for required in [
+            "# Sandbox",
+            "Execution Policy Sandbox",
+            "Execution Environment Sandbox",
+            ".mosaic/sandbox/",
+            "mosaic sandbox status",
+            "mosaic sandbox inspect <env-id>",
+            "Sandbox vs Node",
+            "Sandbox vs MCP",
+            "failure_origin=sandbox",
+            "examples/sandbox/README.md",
+        ] {
+            assert!(
+                sandbox.contains(required),
+                "sandbox guide missing {required}"
+            );
+        }
+
+        let examples = fs::read_to_string(root.join("examples/README.md"))
+            .expect("examples README should load");
+        for required in [
+            "skills/README.md",
+            "skills/native-skill.yaml",
+            "capabilities/README.md",
+            "sandbox/README.md",
+            "composition/README.md",
+        ] {
+            assert!(
+                examples.contains(required),
+                "examples README missing {required}"
+            );
+        }
+
+        for relative in [
+            "docs/skills.md",
+            "docs/sandbox.md",
+            "examples/skills/README.md",
+            "examples/skills/native-skill.yaml",
+            "examples/skills/manifest-skill.yaml",
+            "examples/capabilities/README.md",
+            "examples/capabilities/builtin-tool.yaml",
+            "examples/capabilities/node-routed-tool.yaml",
+            "examples/capabilities/workflow.yaml",
+            "examples/sandbox/README.md",
+            "examples/sandbox/python-markdown-skill-pack.yaml",
+            "examples/sandbox/node-manifest-skill.yaml",
+            "examples/composition/README.md",
+            "examples/composition/openai-capability-composition.config.yaml",
+        ] {
+            assert!(root.join(relative).is_file(), "missing {relative}");
+        }
+
+        let testing =
+            fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
+        for required in [
+            "L-Series Capability Proof Addendum",
+            "markdown skill pack loading and execution",
+            "sandbox env lifecycle",
+            "capability taxonomy and provenance consistency",
+            "examples/composition/openai-capability-composition.config.yaml",
+        ] {
+            assert!(
+                testing.contains(required),
+                "testing guide missing {required}"
+            );
+        }
+
+        let release =
+            fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
+        for required in [
+            "docs/skills.md",
+            "docs/sandbox.md",
+            "examples/skills/README.md",
+            "examples/sandbox/README.md",
+            "whether a failed run came from provider, tool, MCP, node, or sandbox",
+        ] {
+            assert!(
+                release.contains(required),
+                "release guide missing {required}"
+            );
+        }
+
+        for relative in [
+            "crates/skill-core/README.md",
+            "crates/tool-core/README.md",
+            "crates/mcp-core/README.md",
+            "crates/runtime/README.md",
+            "crates/extension-core/README.md",
+            "crates/workflow/README.md",
+            "crates/node-protocol/README.md",
+            "crates/memory/README.md",
+        ] {
+            let guide = fs::read_to_string(root.join(relative))
+                .unwrap_or_else(|_| panic!("load {relative}"));
+            assert!(
+                guide.contains("## Sandbox Relationship"),
+                "{relative} missing sandbox relationship section"
+            );
+        }
+    }
+
+    #[test]
     fn telegram_real_e2e_runbook_covers_acceptance_workspace_and_cli_proofs() {
         let root = repo_root();
         let guide = fs::read_to_string(root.join("docs/telegram-real-e2e.md"))

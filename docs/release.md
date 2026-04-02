@@ -70,12 +70,28 @@ Confirm these are present and up to date:
 
 - `README.md`
 - `.env.example`
+- `docs/skills.md`
+- `docs/sandbox.md`
+- `docs/capabilities.md`
 - `docs/testing.md`
 - `docs/real-vs-mock-acceptance.md`
 - `docs/telegram-real-e2e.md`
 - `docs/providers.md`
 - `docs/release.md`
 - `examples/full-stack/openai-webchat.config.yaml`
+- `examples/skills/README.md`
+- `examples/capabilities/README.md`
+- `examples/sandbox/README.md`
+- `examples/composition/README.md`
+- `examples/skills/native-skill.yaml`
+- `examples/skills/manifest-skill.yaml`
+- `examples/skills/operator-note/SKILL.md`
+- `examples/capabilities/builtin-tool.yaml`
+- `examples/capabilities/node-routed-tool.yaml`
+- `examples/capabilities/workflow.yaml`
+- `examples/sandbox/python-markdown-skill-pack.yaml`
+- `examples/sandbox/node-manifest-skill.yaml`
+- `examples/composition/openai-capability-composition.config.yaml`
 - `examples/full-stack/openai-telegram-single-bot.config.yaml`
 - `examples/full-stack/openai-telegram-e2e.config.yaml`
 - `examples/full-stack/openai-telegram-multi-bot.config.yaml`
@@ -132,6 +148,13 @@ At minimum, re-check:
 - `mosaic session show <session-id>`
 - `mosaic inspect .mosaic/runs/<run-id>.json --verbose`
 - `mosaic gateway incident <run-id>`
+
+Also confirm the operator can answer:
+
+- whether a failed run came from provider, tool, MCP, node, or sandbox
+- where a skill came from
+- why a capability was visible
+- which sandbox env was selected
 
 ### 5. Packaging
 

@@ -39,6 +39,9 @@ For a local dev-only smoke lane without provider credentials, initialize the wor
 
 ## Skills
 
+- [skills/README.md](./skills/README.md): native, manifest, and markdown skill examples
+- [skills/native-skill.yaml](./skills/native-skill.yaml): builtin native skill example
+- [skills/manifest-skill.yaml](./skills/manifest-skill.yaml): declarative manifest skill example
 - [skills/operator-note/SKILL.md](./skills/operator-note/SKILL.md): minimal markdown skill pack example
 
 Validate it by referencing it from `.mosaic/config.yaml`:
@@ -78,6 +81,24 @@ curl -X POST http://127.0.0.1:8080/ingress/webchat \
 ## Channels
 
 - [channels/README.md](./channels/README.md): channel payloads and local ingress commands
+
+## Capabilities
+
+- [capabilities/README.md](./capabilities/README.md): builtin tool, MCP tool, node-routed capability, and workflow taxonomy examples
+- [capabilities/builtin-tool.yaml](./capabilities/builtin-tool.yaml): builtin tool exposure example
+- [capabilities/node-routed-tool.yaml](./capabilities/node-routed-tool.yaml): node-preferred tool metadata example
+- [capabilities/workflow.yaml](./capabilities/workflow.yaml): workflow example that composes a manifest skill
+
+## Sandbox
+
+- [sandbox/README.md](./sandbox/README.md): workspace-local sandbox env examples
+- [sandbox/python-markdown-skill-pack.yaml](./sandbox/python-markdown-skill-pack.yaml): Python sandbox binding for a markdown skill pack
+- [sandbox/node-manifest-skill.yaml](./sandbox/node-manifest-skill.yaml): Node sandbox binding for a manifest skill
+
+## Composition
+
+- [composition/README.md](./composition/README.md): capability composition walkthrough
+- [composition/openai-capability-composition.config.yaml](./composition/openai-capability-composition.config.yaml): config + extension + MCP + markdown skill pack composition example
 
 ## Full Stack
 

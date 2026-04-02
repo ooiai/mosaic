@@ -1,0 +1,10 @@
+name: native-skill-example
+version: 0.1.0
+description: Minimal extension manifest that exposes the builtin native summarize skill.
+schema_version: 1
+skills:
+  - type: builtin
+    name: summarize
+    visibility: visible
+    invocation_mode: explicit_only
+    accepts_attachments: false

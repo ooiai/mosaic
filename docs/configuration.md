@@ -2,7 +2,7 @@
 
 Mosaic reads configuration from YAML and merges multiple sources into one runtime view.
 
-This guide focuses on the operator-visible config knobs, especially the Telegram bot registry and attachment routing added in k1-k4.
+This guide focuses on the operator-visible config knobs, especially the Telegram bot registry, attachment routing, skill packs, and sandbox configuration added through k- and l-series work.
 
 For the capability taxonomy that config ultimately feeds into, see [capabilities.md](./capabilities.md). In particular:
 
@@ -10,6 +10,11 @@ For the capability taxonomy that config ultimately feeds into, see [capabilities
 - config and policy can affect `route_kind`
 - config can change `execution_target` indirectly through MCP registration, node routing, and workflow composition
 - config failures should surface as `failure_origin=config` instead of being confused with runtime/provider failures
+
+For deeper skill and sandbox guidance, also see:
+
+- [skills.md](./skills.md)
+- [sandbox.md](./sandbox.md)
 
 ## File Locations
 
@@ -162,6 +167,8 @@ tools:
 ```
 
 The runtime uses these bindings to resolve per-capability env identity while still allocating a per-run workdir for each run.
+
+For a fuller operator explanation of policy sandbox versus execution environment sandbox, see [sandbox.md](./sandbox.md).
 
 ### `deployment`
 

@@ -101,6 +101,41 @@ fn workflow_and_gateway_examples_parse_from_disk() {
 }
 
 #[test]
+fn l5_skill_sandbox_and_composition_examples_parse_from_disk() {
+    let root = repo_root();
+
+    for rel in [
+        "examples/skills/native-skill.yaml",
+        "examples/skills/manifest-skill.yaml",
+        "examples/capabilities/builtin-tool.yaml",
+        "examples/capabilities/node-routed-tool.yaml",
+        "examples/capabilities/workflow.yaml",
+        "examples/sandbox/python-markdown-skill-pack.yaml",
+        "examples/sandbox/node-manifest-skill.yaml",
+    ] {
+        let manifest = load_extension_manifest_from_file(root.join(rel))
+            .unwrap_or_else(|_| panic!("example manifest should parse: {rel}"));
+        assert!(
+            !manifest.name.trim().is_empty(),
+            "{rel} should have a non-empty name"
+        );
+    }
+
+    let patch = load_config_patch(
+        &root.join("examples/composition/openai-capability-composition.config.yaml"),
+    )
+    .expect("composition config should parse");
+    let mut config = MosaicConfig::default();
+    merge_patch(&mut config, patch);
+    let report = validate_mosaic_config(&config);
+    assert!(
+        !report.has_errors(),
+        "composition config should validate without errors: {:?}",
+        report.issues
+    );
+}
+
+#[test]
 fn loads_yaml_app_config_from_disk() {
     let dir = temp_dir("app-load");
     let path = dir.join("app.yaml");

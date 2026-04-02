@@ -1,0 +1,18 @@
+name: sandbox-python-markdown-skill-pack
+version: 0.1.0
+description: Example markdown skill pack bound to a Python sandbox environment.
+schema_version: 1
+skills:
+  - type: markdown_pack
+    name: operator_note
+    path: ../skills/operator-note
+    visibility: visible
+    invocation_mode: explicit_only
+    accepts_attachments: true
+    sandbox:
+      kind: python
+      env_name: operator-note-pack
+      scope: capability
+      dependency_spec:
+        - jinja2
+        - rich

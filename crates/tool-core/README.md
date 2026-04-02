@@ -48,6 +48,16 @@ What changes is the source and target:
 
 This crate should define tool metadata cleanly, but it must not redefine skill/workflow/node semantics.
 
+## Sandbox Relationship
+
+Tools may declare sandbox metadata, but this crate does not own sandbox env creation or lifecycle.
+
+- `mosaic-tool-core` defines what a tool requests
+- `mosaic-runtime` decides when the tool runs
+- `mosaic-sandbox-core` resolves the workspace-local environment
+
+That separation keeps the tool contract stable while sandbox policy and env management evolve independently.
+
 ## Why This Is In `crates/`
 
 Tools are used by multiple paths: runtime execution, provider tool exposure policy, inspect traces, gateway capability jobs, node routing, and bootstrap. That makes `tool-core` a stable shared module instead of a CLI-only implementation detail.

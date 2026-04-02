@@ -50,6 +50,12 @@ Inside Mosaic taxonomy, workflows are:
 
 Workflows are orchestration units. They may call prompt steps, tools, and skills, but they are not themselves tools or MCP adapters.
 
+## Sandbox Relationship
+
+Workflows are not sandbox environments.
+
+They may invoke steps whose concrete execution touches tools, skills, MCP servers, or sandboxed envs, but the workflow crate only models orchestration structure.
+
 ## Minimal Use
 
 ```rust

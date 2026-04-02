@@ -52,6 +52,15 @@ In Mosaic taxonomy, node participation is expressed as:
 
 This crate should stay focused on node registration, selection, and dispatch protocol, not on redefining tool or workflow semantics.
 
+## Sandbox Relationship
+
+Node routing and sandboxing are related but separate.
+
+- this crate owns node registration, affinity, and dispatch protocol
+- sandbox owns local execution policy and workspace-local env identity
+
+A node-routed tool may still surface sandbox and policy data in higher-layer traces, but this crate does not manage sandbox envs.
+
 ## Minimal Use
 
 ```rust

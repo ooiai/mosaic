@@ -2,7 +2,7 @@
 
 Mosaic testing is not one bucket of `cargo test`. It is a product-proof system with fixed layers, fixed release roles, and an explicit mapping from each key crate to at least one real or quasi-real acceptance lane.
 
-This document is the source of truth for the k5 channel product baseline.
+This document is the source of truth for the current channel and capability product baseline.
 
 Capability taxonomy for test interpretation is defined in [capabilities.md](./capabilities.md). When a test or runbook claims that a lane proves "tool", "MCP", "node", "skill", or "workflow", it should use the same `route_kind`, `capability_source_kind`, `execution_target`, and `failure_origin` vocabulary described there.
 
@@ -12,6 +12,8 @@ See also:
 - [telegram-real-e2e.md](./telegram-real-e2e.md)
 - [providers.md](./providers.md)
 - [release.md](./release.md)
+- [skills.md](./skills.md)
+- [sandbox.md](./sandbox.md)
 
 ## Fixed Layers
 
@@ -132,6 +134,20 @@ The Telegram-first release-blocking acceptance lane proves:
 - real dual-bot routing when the multi-bot config is in scope
 
 Use [telegram-real-e2e.md](./telegram-real-e2e.md) as the operator runbook. That runbook is the product-level proof for Telegram. Do not replace it with mock payloads when Telegram is in scope.
+
+## L-Series Capability Proof Addendum
+
+The L-series work adds operator-visible concepts that must also be proven by docs, examples, and tests:
+
+| Concept | Primary proof | Classification |
+| --- | --- | --- |
+| markdown skill pack loading and execution | `cargo test -p mosaic-skill-core`, `cargo test -p mosaic-runtime`, and [examples/skills/operator-note/SKILL.md](../examples/skills/operator-note/SKILL.md) | `local integration` plus product-facing docs/examples |
+| sandbox env lifecycle | `cargo test -p mosaic-sandbox-core` plus `mosaic sandbox status|list|inspect|rebuild|clean` described in [sandbox.md](./sandbox.md) | `local integration` and operator-facing |
+| workspace isolation of capability envs | `cargo test -p mosaic-sandbox-core` | `local integration` |
+| capability taxonomy and provenance consistency | `cargo test -p mosaic-runtime`, `cargo test -p mosaic-inspect`, `cargo test -p mosaic-gateway`, and `mosaic inspect --verbose` | `local integration` plus operator-facing |
+| capability composition examples | [examples/composition/openai-capability-composition.config.yaml](../examples/composition/openai-capability-composition.config.yaml) and [examples/capabilities/README.md](../examples/capabilities/README.md) | docs/example acceptance |
+
+These are not replacements for Telegram or WebChat real-product lanes. They are the shared concept-proof layer that keeps skill, sandbox, and taxonomy documentation aligned with the executable system.
 
 ## Commands
 

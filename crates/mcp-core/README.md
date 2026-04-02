@@ -52,6 +52,15 @@ Instead, MCP capabilities are represented as:
 
 That distinction matters because operators should not confuse MCP tools with skills, workflows, or node routes.
 
+## Sandbox Relationship
+
+MCP is not the sandbox layer.
+
+- this crate owns MCP transport and remote tool registration
+- higher layers still decide policy, audit, and sandbox interpretation around that execution
+
+An MCP tool may appear in a capability trace that also includes sandbox and policy context, but those concerns are not owned here.
+
 ## Minimal Use
 
 ```rust

@@ -60,6 +60,16 @@ The source is one of:
 
 Skills are reusable capability units. They are not MCP adapters, not node routes, and not workflow graphs.
 
+## Sandbox Relationship
+
+Skills may carry sandbox bindings, but this crate does not create or manage sandbox environments itself.
+
+- `mosaic-skill-core` describes skill metadata and execution contracts
+- `mosaic-runtime` decides when a skill runs
+- `mosaic-sandbox-core` resolves the workspace-local execution environment
+
+This keeps skill semantics separate from env lifecycle and policy enforcement.
+
 ## Minimal Use
 
 ```rust

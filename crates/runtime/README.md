@@ -41,6 +41,16 @@ Runtime orchestration is the core reusable behavior of Mosaic. Both `cli` and `m
 - Downstream crates: `mosaic-gateway` owns long-lived control-plane coordination around this runtime; `cli` creates local runtime contexts; `mosaic-tui` consumes runtime events through buffers and gateway sessions.
 - Runtime/control-plane coupling: `cli` and `gateway` should submit requests and observe results, but the actual run loop belongs here.
 
+## Sandbox Relationship
+
+Runtime is where sandbox selection becomes run behavior.
+
+- it binds tool and skill metadata to sandbox env identity
+- it records sandbox decisions in traces
+- it should not own sandbox filesystem layout or CLI lifecycle commands
+
+That boundary belongs to `mosaic-sandbox-core` and operator surfaces.
+
 ## Minimal Use
 
 ```rust

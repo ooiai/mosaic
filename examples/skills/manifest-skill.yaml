@@ -1,0 +1,16 @@
+name: manifest-skill-example
+version: 0.1.0
+description: Example manifest skill with sequential echo and summarize steps.
+schema_version: 1
+skills:
+  - type: manifest
+    name: summarize_notes
+    description: Summarize an operator note with a manifest-backed skill.
+    tools: []
+    steps:
+      - kind: echo
+        name: draft
+        input: "{{input}}"
+      - kind: summarize
+        name: summary
+        input: "{{current}}"

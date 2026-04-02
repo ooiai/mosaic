@@ -40,6 +40,12 @@ Memory is shared by runtime execution, gateway summaries, CLI memory commands, a
 - Downstream crates: `mosaic-runtime` reads and writes memory, `mosaic-gateway` exposes memory-backed session views, and `cli` surfaces memory inspection commands.
 - Runtime/control-plane coupling: `runtime` decides when memory changes, while `gateway` and `cli` inspect the result. This crate should not choose memory policy timing on its own.
 
+## Sandbox Relationship
+
+Memory is not a sandbox subsystem.
+
+However, memory traces may be inspected alongside capability, sandbox, and provenance traces during run diagnosis. This crate should keep memory records clean and independent of execution-env details.
+
 ## Minimal Use
 
 ```rust

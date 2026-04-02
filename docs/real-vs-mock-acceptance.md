@@ -71,6 +71,29 @@ Mock is intentionally not used for:
 - the OpenAI + WebChat full-stack release lane
 - the Telegram-first acceptance lane
 
+## Capability and Sandbox Concept Proof
+
+Some L-series concepts are primarily proven through local integration plus operator-visible artifacts rather than through a public channel runbook alone.
+
+These include:
+
+- markdown skill pack loading and execution
+- sandbox env lifecycle and workspace-local isolation
+- capability taxonomy and provenance consistency across runtime, inspect, gateway, and CLI
+
+Current proof sources:
+
+- `cargo test -p mosaic-skill-core`
+- `cargo test -p mosaic-runtime`
+- `cargo test -p mosaic-sandbox-core`
+- `cargo test -p mosaic-inspect`
+- `cargo test -p mosaic-gateway`
+- [docs/skills.md](./skills.md)
+- [docs/sandbox.md](./sandbox.md)
+- [docs/capabilities.md](./capabilities.md)
+
+These are operator-facing concepts, so they are not considered complete if they exist only in code or only in mock fixtures.
+
 ## Telegram Release Scope
 
 When Telegram is in release scope, release sign-off is not complete until the Telegram-first runbook is executed and the operator records the saved artifact paths.

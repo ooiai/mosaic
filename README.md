@@ -160,6 +160,8 @@ The installed binary name is `mosaic`.
 - [`docs/getting-started.md`](./docs/getting-started.md)
 - [`docs/cli.md`](./docs/cli.md)
 - [`docs/channels.md`](./docs/channels.md)
+- [`docs/skills.md`](./docs/skills.md)
+- [`docs/sandbox.md`](./docs/sandbox.md)
 - [`docs/capabilities.md`](./docs/capabilities.md)
 - [`docs/telegram-step-by-step.md`](./docs/telegram-step-by-step.md)
 - [`docs/full-stack.md`](./docs/full-stack.md)
@@ -179,9 +181,22 @@ The installed binary name is `mosaic`.
 
 - [`examples/README.md`](./examples/README.md)
 - [`examples/TESTING.md`](./examples/TESTING.md)
+- [`examples/skills/README.md`](./examples/skills/README.md)
+- [`examples/capabilities/README.md`](./examples/capabilities/README.md)
+- [`examples/sandbox/README.md`](./examples/sandbox/README.md)
+- [`examples/composition/README.md`](./examples/composition/README.md)
 - [`examples/channels/README.md`](./examples/channels/README.md)
 - [`examples/channels/telegram-photo-update.json`](./examples/channels/telegram-photo-update.json)
 - [`examples/channels/telegram-document-update.json`](./examples/channels/telegram-document-update.json)
+- [`examples/skills/native-skill.yaml`](./examples/skills/native-skill.yaml)
+- [`examples/skills/manifest-skill.yaml`](./examples/skills/manifest-skill.yaml)
+- [`examples/skills/operator-note/SKILL.md`](./examples/skills/operator-note/SKILL.md)
+- [`examples/capabilities/builtin-tool.yaml`](./examples/capabilities/builtin-tool.yaml)
+- [`examples/capabilities/node-routed-tool.yaml`](./examples/capabilities/node-routed-tool.yaml)
+- [`examples/capabilities/workflow.yaml`](./examples/capabilities/workflow.yaml)
+- [`examples/sandbox/python-markdown-skill-pack.yaml`](./examples/sandbox/python-markdown-skill-pack.yaml)
+- [`examples/sandbox/node-manifest-skill.yaml`](./examples/sandbox/node-manifest-skill.yaml)
+- [`examples/composition/openai-capability-composition.config.yaml`](./examples/composition/openai-capability-composition.config.yaml)
 - [`examples/full-stack/README.md`](./examples/full-stack/README.md)
 - [`examples/full-stack/openai-telegram-single-bot.config.yaml`](./examples/full-stack/openai-telegram-single-bot.config.yaml)
 - [`examples/full-stack/openai-telegram-e2e.config.yaml`](./examples/full-stack/openai-telegram-e2e.config.yaml)
@@ -215,6 +230,46 @@ For release evidence, use:
 - `make release-check`
 - `make test-matrix`
 - `make test-golden`
+
+## Skill System
+
+Mosaic now has three skill sources:
+
+- native Rust skills
+- manifest-backed skills
+- markdown skill packs centered on `SKILL.md`
+
+Start here:
+
+- [`docs/skills.md`](./docs/skills.md)
+- [`examples/skills/README.md`](./examples/skills/README.md)
+
+## Sandbox Model
+
+Mosaic sandboxing is both:
+
+- policy and execution guardrails
+- workspace-local execution environments under `.mosaic/sandbox/`
+
+Start here:
+
+- [`docs/sandbox.md`](./docs/sandbox.md)
+- [`examples/sandbox/README.md`](./examples/sandbox/README.md)
+
+## Capability Taxonomy
+
+Mosaic distinguishes:
+
+- builtin tool
+- MCP tool
+- node-routed capability
+- skill
+- workflow
+
+The shared operator vocabulary lives in:
+
+- [`docs/capabilities.md`](./docs/capabilities.md)
+- [`examples/capabilities/README.md`](./examples/capabilities/README.md)
 
 ## Crate Guide
 

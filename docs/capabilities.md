@@ -11,6 +11,12 @@ The goal is simple:
 
 That vocabulary is used by runtime traces, `mosaic inspect --verbose`, gateway run detail DTOs, incident bundles, and operator docs.
 
+See also:
+
+- [skills.md](./skills.md)
+- [sandbox.md](./sandbox.md)
+- [configuration.md](./configuration.md)
+
 ## Route Kind
 
 `route_kind` describes the top-level route selected by runtime.
@@ -164,6 +170,14 @@ When debugging a run, the minimum interpretation path is:
 3. `execution_target`
 4. `orchestration_owner`
 5. `failure_origin` if the run failed
+
+## Related Examples
+
+- [examples/capabilities/README.md](../examples/capabilities/README.md)
+- [examples/capabilities/builtin-tool.yaml](../examples/capabilities/builtin-tool.yaml)
+- [examples/capabilities/node-routed-tool.yaml](../examples/capabilities/node-routed-tool.yaml)
+- [examples/capabilities/workflow.yaml](../examples/capabilities/workflow.yaml)
+- [examples/mcp-filesystem.yaml](../examples/mcp-filesystem.yaml)
 
 ## What This Does Not Mean
 

@@ -40,6 +40,15 @@ Extension policy is shared by bootstrap, gateway reload, CLI validation, and tes
 - Downstream crates: `mosaic-gateway` owns live reload and active extension state; `cli` exposes validate/reload commands; `mosaic-runtime` receives the resulting registries indirectly through bootstrap.
 - Runtime/control-plane coupling: `gateway` supervises reload, `runtime` consumes the loaded registries, and `cli` explains validation state. This crate should not own HTTP or run execution.
 
+## Sandbox Relationship
+
+Extensions may describe sandbox bindings on tools and skills, but this crate does not create environments or enforce runtime policy.
+
+- it preserves sandbox metadata through loading and validation
+- runtime and sandbox-core turn that metadata into real execution state
+
+This keeps extension manifests declarative instead of turning them into execution engines.
+
 ## Minimal Use
 
 ```rust
