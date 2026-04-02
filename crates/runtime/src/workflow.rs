@@ -138,9 +138,15 @@ impl WorkflowObserver for RuntimeWorkflowObserver<'_> {
             step: step.name.clone(),
             kind: step.kind.label().to_owned(),
         });
+        let execution_target = match step.kind {
+            WorkflowStepKind::Prompt { .. } => Some(ExecutionTarget::Provider),
+            WorkflowStepKind::Skill { .. } => Some(ExecutionTarget::Local),
+        };
         self.trace.step_traces.push(WorkflowStepTrace {
             name: step.name.clone(),
             kind: step.kind.label().to_owned(),
+            execution_target,
+            orchestration_owner: Some(OrchestrationOwner::WorkflowEngine),
             input: input.to_owned(),
             output: None,
             started_at: Utc::now(),

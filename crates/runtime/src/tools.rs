@@ -41,7 +41,7 @@ impl AgentRuntime {
             node_attempted: true,
             node_fallback_to_local: false,
             node_failure_class: None,
-            effective_execution_target: "node".to_owned(),
+            effective_execution_target: ExecutionTarget::Node,
         }
     }
 
@@ -60,9 +60,9 @@ impl AgentRuntime {
             node_fallback_to_local: fallback_to_local,
             node_failure_class: Some(failure_class.label().to_owned()),
             effective_execution_target: if fallback_to_local {
-                "local".to_owned()
+                ExecutionTarget::Local
             } else {
-                "node".to_owned()
+                ExecutionTarget::Node
             },
         }
     }
@@ -74,6 +74,33 @@ impl AgentRuntime {
         !metadata.capability.node.require_node && failure_class.allows_local_fallback()
     }
 
+    fn tool_failure_origin(
+        metadata: &ToolMetadata,
+        node_trace: Option<&NodeTraceContext>,
+        status: &str,
+    ) -> FailureOrigin {
+        match status {
+            "sandbox" => FailureOrigin::Sandbox,
+            "rejected" => FailureOrigin::Config,
+            _ => match &metadata.source {
+                mosaic_tool_core::ToolSource::Mcp { .. } => FailureOrigin::Mcp,
+                mosaic_tool_core::ToolSource::Builtin => {
+                    if matches!(
+                        node_trace.map(|trace| trace.effective_execution_target),
+                        Some(ExecutionTarget::Node)
+                    ) && !node_trace
+                        .map(|trace| trace.node_fallback_to_local)
+                        .unwrap_or(false)
+                    {
+                        FailureOrigin::Node
+                    } else {
+                        FailureOrigin::Tool
+                    }
+                }
+            },
+        }
+    }
+
     pub(crate) async fn invoke_tool_with_guardrails(
         &self,
         session_id: Option<&str>,
@@ -81,6 +108,7 @@ impl AgentRuntime {
         call_id: String,
         tool_input: serde_json::Value,
         run_workdir: Option<&std::path::Path>,
+        orchestration_owner: OrchestrationOwner,
     ) -> std::result::Result<ToolExecutionOutcome, ToolExecutionFailure> {
         self.emit(RunEvent::ToolCalling {
             name: tool_name.clone(),
@@ -121,8 +149,18 @@ impl AgentRuntime {
                     error: error.to_string(),
                 });
                 return Err(self.build_tool_failure(
-                    error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None,
-                    None, None, "sandbox",
+                    error,
+                    job_id,
+                    call_id,
+                    tool_name,
+                    &metadata,
+                    tool_input,
+                    started_at,
+                    None,
+                    None,
+                    None,
+                    "sandbox",
+                    orchestration_owner,
                 ));
             }
         };
@@ -152,8 +190,18 @@ impl AgentRuntime {
                 error: error.to_string(),
             });
             return Err(self.build_tool_failure(
-                error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None, None,
-                None, "rejected",
+                error,
+                job_id,
+                call_id,
+                tool_name,
+                &metadata,
+                tool_input,
+                started_at,
+                None,
+                None,
+                None,
+                "rejected",
+                orchestration_owner,
             ));
         }
 
@@ -175,8 +223,18 @@ impl AgentRuntime {
                 error: error.to_string(),
             });
             return Err(self.build_tool_failure(
-                error, job_id, call_id, tool_name, &metadata, tool_input, started_at, None, None,
-                None, "rejected",
+                error,
+                job_id,
+                call_id,
+                tool_name,
+                &metadata,
+                tool_input,
+                started_at,
+                None,
+                None,
+                None,
+                "rejected",
+                orchestration_owner,
             ));
         }
 
@@ -189,6 +247,7 @@ impl AgentRuntime {
         let timeout = Duration::from_millis(metadata.capability.execution.timeout_ms.max(1));
         let node_router_available = self.ctx.node_router.is_some();
         let mut local_node_trace: Option<NodeTraceContext> = None;
+        let default_execution_target = Self::tool_execution_target(&metadata);
 
         if metadata.capability.routes_via_node() {
             match self
@@ -210,6 +269,7 @@ impl AgentRuntime {
                         call_id: Some(call_id.clone()),
                         name: tool_name.clone(),
                         source: metadata.source.clone(),
+                        capability_source_kind: Some(Self::tool_capability_source_kind(&metadata)),
                         input: tool_input,
                         output: Some(output.clone()),
                         node_attempted: node_trace.node_attempted,
@@ -218,7 +278,14 @@ impl AgentRuntime {
                         node_id: node_trace.node_id.clone(),
                         capability_route: node_trace.capability_route.clone(),
                         disconnect_context: node_trace.disconnect_context.clone(),
-                        effective_execution_target: node_trace.effective_execution_target.clone(),
+                        effective_execution_target: node_trace
+                            .effective_execution_target
+                            .label()
+                            .to_owned(),
+                        execution_target: node_trace.effective_execution_target,
+                        orchestration_owner,
+                        policy_source: Self::tool_policy_source(&metadata),
+                        sandbox_scope: Self::tool_sandbox_scope(&metadata),
                         sandbox: None,
                         started_at,
                         finished_at: Some(finished_at),
@@ -235,6 +302,7 @@ impl AgentRuntime {
                         None,
                         Some(output.as_str()),
                         Some(&node_trace),
+                        orchestration_owner,
                     );
                     self.emit(RunEvent::CapabilityJobFinished {
                         job_id: job_id.clone(),
@@ -289,6 +357,7 @@ impl AgentRuntime {
                             None,
                             Some(node_trace),
                             status,
+                            orchestration_owner,
                         ));
                     }
                 }
@@ -332,6 +401,7 @@ impl AgentRuntime {
                                 false,
                             )),
                             Self::node_failure_status(NodeDispatchFailureClass::NoEligibleNode),
+                            orchestration_owner,
                         ));
                     }
                     if node_router_available && metadata.capability.node.prefer_node {
@@ -380,6 +450,7 @@ impl AgentRuntime {
                             None,
                             None,
                             Self::node_failure_status(NodeDispatchFailureClass::Transport),
+                            orchestration_owner,
                         ));
                     }
                 }
@@ -427,6 +498,7 @@ impl AgentRuntime {
                         call_id: Some(call_id.clone()),
                         name: tool_name.clone(),
                         source: metadata.source.clone(),
+                        capability_source_kind: Some(Self::tool_capability_source_kind(&metadata)),
                         input: tool_input,
                         output: Some(output.clone()),
                         node_attempted: local_node_trace
@@ -451,8 +523,15 @@ impl AgentRuntime {
                             .and_then(|trace| trace.disconnect_context.clone()),
                         effective_execution_target: local_node_trace
                             .as_ref()
-                            .map(|trace| trace.effective_execution_target.clone())
-                            .unwrap_or_else(|| "local".to_owned()),
+                            .map(|trace| trace.effective_execution_target.label().to_owned())
+                            .unwrap_or_else(|| default_execution_target.label().to_owned()),
+                        execution_target: local_node_trace
+                            .as_ref()
+                            .map(|trace| trace.effective_execution_target)
+                            .unwrap_or(default_execution_target),
+                        orchestration_owner,
+                        policy_source: Self::tool_policy_source(&metadata),
+                        sandbox_scope: Self::tool_sandbox_scope(&metadata),
                         sandbox: sandbox_trace,
                         started_at,
                         finished_at: Some(finished_at),
@@ -469,6 +548,7 @@ impl AgentRuntime {
                         None,
                         Some(output.as_str()),
                         local_node_trace.as_ref(),
+                        orchestration_owner,
                     );
                     self.emit(RunEvent::CapabilityJobFinished {
                         job_id: job_id.clone(),
@@ -519,6 +599,7 @@ impl AgentRuntime {
                         result.audit.as_ref(),
                         local_node_trace.clone(),
                         "failed",
+                        orchestration_owner,
                     ));
                 }
                 Ok(Err(err)) => {
@@ -553,6 +634,7 @@ impl AgentRuntime {
                         None,
                         local_node_trace.clone(),
                         "failed",
+                        orchestration_owner,
                     ));
                 }
                 Err(_) => {
@@ -592,6 +674,7 @@ impl AgentRuntime {
                         None,
                         local_node_trace.clone(),
                         "timed_out",
+                        orchestration_owner,
                     ));
                 }
             }
@@ -613,12 +696,14 @@ impl AgentRuntime {
         audit: Option<&CapabilityAudit>,
         node_trace: Option<NodeTraceContext>,
         status: &str,
+        orchestration_owner: OrchestrationOwner,
     ) -> ToolExecutionFailure {
         let finished_at = Utc::now();
         let tool_trace = ToolTrace {
             call_id: Some(call_id.clone()),
             name: tool_name.clone(),
             source: metadata.source.clone(),
+            capability_source_kind: Some(Self::tool_capability_source_kind(metadata)),
             input: tool_input,
             output: output
                 .clone()
@@ -643,8 +728,15 @@ impl AgentRuntime {
                 .and_then(|trace| trace.disconnect_context.clone()),
             effective_execution_target: node_trace
                 .as_ref()
-                .map(|trace| trace.effective_execution_target.clone())
-                .unwrap_or_else(|| "local".to_owned()),
+                .map(|trace| trace.effective_execution_target.label().to_owned())
+                .unwrap_or_else(|| Self::tool_execution_target(metadata).label().to_owned()),
+            execution_target: node_trace
+                .as_ref()
+                .map(|trace| trace.effective_execution_target)
+                .unwrap_or(Self::tool_execution_target(metadata)),
+            orchestration_owner,
+            policy_source: Self::tool_policy_source(metadata),
+            sandbox_scope: Self::tool_sandbox_scope(metadata),
             sandbox: None,
             started_at,
             finished_at: Some(finished_at),
@@ -661,6 +753,7 @@ impl AgentRuntime {
             Some(error.to_string()),
             output.as_deref(),
             node_trace.as_ref(),
+            orchestration_owner,
         );
 
         ToolExecutionFailure {
@@ -682,6 +775,7 @@ impl AgentRuntime {
         error: Option<String>,
         fallback_summary: Option<&str>,
         node_trace: Option<&NodeTraceContext>,
+        orchestration_owner: OrchestrationOwner,
     ) -> CapabilityInvocationTrace {
         let base_summary = audit
             .map(|audit| audit.side_effect_summary.clone())
@@ -700,6 +794,8 @@ impl AgentRuntime {
             job_id: job_id.to_owned(),
             call_id: Some(call_id.to_owned()),
             tool_name: tool_name.to_owned(),
+            route_kind: Some(RouteKind::Tool),
+            capability_source_kind: Some(Self::tool_capability_source_kind(metadata)),
             kind: metadata.capability.kind.clone(),
             permission_scopes: metadata.capability.permission_scopes.clone(),
             risk: metadata.capability.risk.clone(),
@@ -717,8 +813,19 @@ impl AgentRuntime {
             capability_route: node_trace.and_then(|trace| trace.capability_route.clone()),
             disconnect_context: node_trace.and_then(|trace| trace.disconnect_context.clone()),
             effective_execution_target: node_trace
-                .map(|trace| trace.effective_execution_target.clone())
-                .unwrap_or_else(|| "local".to_owned()),
+                .map(|trace| trace.effective_execution_target.label().to_owned())
+                .unwrap_or_else(|| Self::tool_execution_target(metadata).label().to_owned()),
+            execution_target: node_trace
+                .map(|trace| trace.effective_execution_target)
+                .unwrap_or(Self::tool_execution_target(metadata)),
+            orchestration_owner,
+            policy_source: Self::tool_policy_source(metadata),
+            sandbox_scope: Self::tool_sandbox_scope(metadata),
+            failure_origin: if status == "success" {
+                None
+            } else {
+                Some(Self::tool_failure_origin(metadata, node_trace, status))
+            },
             started_at,
             finished_at: Some(finished_at),
             error,

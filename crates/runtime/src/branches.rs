@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
+use mosaic_inspect::OrchestrationOwner;
 use mosaic_provider::ProviderProfile;
 use mosaic_session_core::{SessionRecord, TranscriptRole};
 use mosaic_workflow::WorkflowRunner;
@@ -54,6 +55,7 @@ impl AgentRuntime {
                     .sandbox_run
                     .as_ref()
                     .map(|sandbox| std::path::Path::new(&sandbox.workdir)),
+                OrchestrationOwner::Runtime,
             )
             .await
         {

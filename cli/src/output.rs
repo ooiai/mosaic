@@ -155,12 +155,22 @@ fn format_run_event(event: &RunEvent) -> String {
             run_id,
             error,
             failure_kind,
-        } => match failure_kind {
-            Some(kind) => format!(
+            failure_origin,
+            ..
+        } => match (failure_kind, failure_origin) {
+            (Some(kind), Some(origin)) => format!(
+                "[run] failed run_id={} kind={} origin={} error={}",
+                run_id, kind, origin, error
+            ),
+            (Some(kind), None) => format!(
                 "[run] failed run_id={} kind={} error={}",
                 run_id, kind, error
             ),
-            None => format!("[run] failed run_id={} error={}", run_id, error),
+            (None, Some(origin)) => format!(
+                "[run] failed run_id={} origin={} error={}",
+                run_id, origin, error
+            ),
+            (None, None) => format!("[run] failed run_id={} error={}", run_id, error),
         },
         RunEvent::RunCanceled { run_id, reason } => {
             format!("[run] canceled run_id={} reason={}", run_id, reason)
@@ -597,6 +607,10 @@ pub fn render_inspect_report(
             ("error", option_preview(trace.error.as_deref(), 120)),
             ("failure_kind", option_string(summary.failure_kind.clone())),
             (
+                "failure_origin",
+                option_string(summary.failure_origin.clone()),
+            ),
+            (
                 "lifecycle_status",
                 trace.lifecycle_status.label().to_owned(),
             ),
@@ -674,6 +688,13 @@ pub fn render_inspect_report(
             vec![
                 ("route_mode", route.route_mode.label().to_owned()),
                 (
+                    "route_kind",
+                    route
+                        .route_kind
+                        .map(|kind| kind.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                ),
+                (
                     "selected_capability_type",
                     option_string(route.selected_capability_type.clone()),
                 ),
@@ -695,6 +716,29 @@ pub fn render_inspect_report(
                     "capability_source",
                     option_string(route.capability_source.clone()),
                 ),
+                (
+                    "capability_source_kind",
+                    route
+                        .capability_source_kind
+                        .map(|kind| kind.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                ),
+                (
+                    "execution_target",
+                    route
+                        .execution_target
+                        .map(|target| target.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                ),
+                (
+                    "orchestration_owner",
+                    route
+                        .orchestration_owner
+                        .map(|owner| owner.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                ),
+                ("policy_source", option_string(route.policy_source.clone())),
+                ("sandbox_scope", option_string(route.sandbox_scope.clone())),
                 ("profile_used", option_string(route.profile_used.clone())),
                 (
                     "selected_category",
@@ -841,6 +885,7 @@ pub fn render_inspect_report(
             vec![
                 ("kind", failure.kind.clone()),
                 ("stage", failure.stage.clone()),
+                ("origin", failure.origin.label().to_owned()),
                 ("retryable", failure.retryable.to_string()),
                 ("message", truncate(&failure.message, 160)),
             ],
@@ -1102,9 +1147,17 @@ pub fn render_inspect_report(
                 .capability_invocations
                 .iter()
                 .map(|invocation| format!(
-                    "job_id={} | tool={} | kind={} | risk={} | status={} | scopes={} | target={} | exec_target={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | duration_ms={} | error={} | summary={}",
+                    "job_id={} | tool={} | route_kind={} | capability_source_kind={} | kind={} | risk={} | status={} | scopes={} | target={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | failure_origin={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | duration_ms={} | error={} | summary={}",
                     invocation.job_id,
                     invocation.tool_name,
+                    invocation
+                        .route_kind
+                        .map(|kind| kind.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                    invocation
+                        .capability_source_kind
+                        .map(|kind| kind.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
                     invocation.kind.label(),
                     invocation.risk.label(),
                     invocation.status,
@@ -1119,7 +1172,14 @@ pub fn render_inspect_report(
                             .join(", ")
                     },
                     option_string(invocation.target.clone()),
-                    invocation.effective_execution_target,
+                    invocation.execution_target.label(),
+                    invocation.orchestration_owner.label(),
+                    option_string(invocation.policy_source.clone()),
+                    option_string(invocation.sandbox_scope.clone()),
+                    invocation
+                        .failure_origin
+                        .map(|origin| origin.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
                     invocation.node_attempted,
                     invocation.node_fallback_to_local,
                     option_string(invocation.node_failure_class.clone()),
@@ -1165,13 +1225,20 @@ pub fn render_inspect_report(
         for call in &trace.tool_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "call_id={} | name={} | source={} | server={} | remote_tool={} | exec_target={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
+                "call_id={} | name={} | source={} | capability_source_kind={} | server={} | remote_tool={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | node_attempted={} | fallback={} | node_failure_class={} | node_id={} | route={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
                 option_string(call.call_id.clone()),
                 call.name,
                 call.source.label(),
+                call
+                    .capability_source_kind
+                    .map(|kind| kind.label().to_owned())
+                    .unwrap_or_else(|| "<none>".to_owned()),
                 option_str(call.source.server_name()),
                 option_str(call.source.remote_tool_name()),
-                call.effective_execution_target,
+                call.execution_target.label(),
+                call.orchestration_owner.label(),
+                option_string(call.policy_source.clone()),
+                option_string(call.sandbox_scope.clone()),
                 call.node_attempted,
                 call.node_fallback_to_local,
                 option_string(call.node_failure_class.clone()),
@@ -1199,9 +1266,17 @@ pub fn render_inspect_report(
         for call in &trace.skill_calls {
             let input = serde_json::to_string_pretty(&call.input)?;
             lines.push(format!(
-                "name={} | source_kind={} | source_path={} | skill_version={} | runtime_requirements={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
+                "name={} | source_kind={} | capability_source_kind={} | exec_target={} | orchestration_owner={} | policy_source={} | sandbox_scope={} | source_path={} | skill_version={} | runtime_requirements={} | sandbox={} | duration_ms={} | input={} | output_preview={}",
                 call.name,
                 option_string(call.source_kind.clone()),
+                call
+                    .capability_source_kind
+                    .map(|kind| kind.label().to_owned())
+                    .unwrap_or_else(|| "<none>".to_owned()),
+                call.execution_target.label(),
+                call.orchestration_owner.label(),
+                option_string(call.policy_source.clone()),
+                option_string(call.sandbox_scope.clone()),
                 option_string(call.source_path.clone()),
                 option_string(call.skill_version.clone()),
                     if call.runtime_requirements.is_empty() {
@@ -1233,9 +1308,15 @@ pub fn render_inspect_report(
                 .step_traces
                 .iter()
                 .map(|step| format!(
-                    "name={} | kind={} | status={} | duration_ms={} | input_preview={} | output_preview={} | error={}",
+                    "name={} | kind={} | exec_target={} | orchestration_owner={} | status={} | duration_ms={} | input_preview={} | output_preview={} | error={}",
                     step.name,
                     step.kind,
+                    step.execution_target
+                        .map(|target| target.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
+                    step.orchestration_owner
+                        .map(|owner| owner.label().to_owned())
+                        .unwrap_or_else(|| "<none>".to_owned()),
                     step.status(),
                     option_i64(step.duration_ms()),
                     truncate(&step.input, 120),
@@ -1916,11 +1997,12 @@ mod tests {
             run_id: "run-1".to_owned(),
             error: "provider failure".to_owned(),
             failure_kind: Some("provider".to_owned()),
+            failure_origin: Some("provider".to_owned()),
         });
 
         assert_eq!(
             line,
-            "[run] failed run_id=run-1 kind=provider error=provider failure"
+            "[run] failed run_id=run-1 kind=provider origin=provider error=provider failure"
         );
     }
 
@@ -2132,6 +2214,7 @@ mod tests {
                 call_id: Some("call-1".to_owned()),
                 name: "echo".to_owned(),
                 source: ToolSource::Builtin,
+                capability_source_kind: Some(mosaic_inspect::CapabilitySourceKind::Builtin),
                 input: serde_json::json!({"text": "hello"}),
                 output: Some("hello".to_owned()),
                 node_attempted: false,
@@ -2141,6 +2224,10 @@ mod tests {
                 capability_route: None,
                 disconnect_context: None,
                 effective_execution_target: "local".to_owned(),
+                execution_target: mosaic_inspect::ExecutionTarget::Local,
+                orchestration_owner: mosaic_inspect::OrchestrationOwner::Runtime,
+                policy_source: None,
+                sandbox_scope: None,
                 sandbox: None,
                 started_at,
                 finished_at: Some(finished_at),

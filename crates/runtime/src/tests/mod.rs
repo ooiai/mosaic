@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use chrono::Utc;
 use mosaic_config::{AttachmentRouteModeConfig, MosaicConfig, ProviderProfileConfig};
-use mosaic_inspect::{AttachmentKind, IngressTrace};
+use mosaic_inspect::{AttachmentKind, IngressTrace, OrchestrationOwner};
 use mosaic_memory::{MemoryPolicy, MemorySearchHit, MemoryStore, SessionMemoryRecord};
 use mosaic_node_protocol::{
     FileNodeStore, NodeCapabilityDeclaration, NodeCommandResultEnvelope, NodeRegistration,
@@ -744,6 +744,33 @@ async fn conversational_skill_auto_route_records_route_decision() {
             .map(|route| route.route_mode.label()),
         Some("skill")
     );
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.route_kind)
+            .map(|kind| kind.label()),
+        Some("skill")
+    );
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.capability_source_kind)
+            .map(|kind| kind.label()),
+        Some("native_skill")
+    );
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.execution_target)
+            .map(|target| target.label()),
+        Some("local")
+    );
     assert!(result.output.starts_with("summary:"));
 }
 
@@ -777,6 +804,24 @@ async fn default_messages_remain_on_assistant_route() {
             .as_ref()
             .map(|route| route.route_mode.label()),
         Some("assistant")
+    );
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.route_kind)
+            .map(|kind| kind.label()),
+        Some("assistant")
+    );
+    assert_eq!(
+        result
+            .trace
+            .route_decision
+            .as_ref()
+            .and_then(|route| route.execution_target)
+            .map(|target| target.label()),
+        Some("provider")
     );
     assert_eq!(
         result
@@ -1418,6 +1463,16 @@ async fn tool_loop_records_mcp_tool_source_for_remote_tools() {
             remote_tool: "read_file".to_owned(),
         }
     );
+    assert_eq!(
+        result.trace.tool_calls[0]
+            .capability_source_kind
+            .map(|kind| kind.label()),
+        Some("mcp")
+    );
+    assert_eq!(
+        result.trace.tool_calls[0].execution_target.label(),
+        "mcp_server"
+    );
     assert!(
         result
             .output
@@ -1613,6 +1668,7 @@ async fn node_preferred_read_file_falls_back_to_local_when_matching_node_is_offl
                 "path": path.display().to_string(),
             }),
             None,
+            OrchestrationOwner::Runtime,
         )
         .await
         .expect("read_file should fall back locally");
@@ -1686,6 +1742,7 @@ async fn require_node_tool_does_not_fall_back_when_no_node_is_available() {
             "call-required".to_owned(),
             serde_json::json!({ "text": "hello" }),
             None,
+            OrchestrationOwner::Runtime,
         )
         .await
         .expect_err("require_node tool should fail without a node");
@@ -1697,6 +1754,13 @@ async fn require_node_tool_does_not_fall_back_when_no_node_is_available() {
     assert_eq!(
         tool_trace.node_failure_class.as_deref(),
         Some("no_eligible_node")
+    );
+    let capability_trace = failure
+        .capability_trace
+        .expect("capability trace should exist");
+    assert_eq!(
+        capability_trace.failure_origin.map(|origin| origin.label()),
+        Some("node")
     );
 }
 
@@ -1765,6 +1829,7 @@ async fn permission_denied_affinity_does_not_fall_back_to_local_execution() {
                 "path": path.display().to_string(),
             }),
             None,
+            OrchestrationOwner::Runtime,
         )
         .await
         .expect_err("permission denied should not fall back to local execution");
@@ -1776,6 +1841,13 @@ async fn permission_denied_affinity_does_not_fall_back_to_local_execution() {
     assert_eq!(
         tool_trace.node_failure_class.as_deref(),
         Some("node_permission_denied")
+    );
+    let capability_trace = failure
+        .capability_trace
+        .expect("capability trace should exist");
+    assert_eq!(
+        capability_trace.failure_origin.map(|origin| origin.label()),
+        Some("node")
     );
 }
 
@@ -2102,6 +2174,13 @@ async fn workflow_step_tool_capability_failures_surface_as_run_failures() {
         .expect_err("tool-capability mismatch should fail");
 
     assert!(!err.to_string().is_empty());
+    assert_eq!(
+        err.trace()
+            .failure
+            .as_ref()
+            .map(|failure| failure.origin.label()),
+        Some("workflow")
+    );
     assert_eq!(
         event_names(&sink.snapshot()),
         vec![

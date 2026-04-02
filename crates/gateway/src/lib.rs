@@ -311,6 +311,7 @@ struct StoredRunRecord {
     output_preview: Option<String>,
     error: Option<String>,
     failure_kind: Option<String>,
+    failure_origin: Option<String>,
     trace_path: Option<String>,
     ingress: Option<IngressTrace>,
     #[serde(default)]
@@ -348,6 +349,7 @@ impl StoredRunRecord {
             output_preview: None,
             error: None,
             failure_kind: None,
+            failure_origin: None,
             trace_path: None,
             ingress: request.ingress.clone(),
             outbound_deliveries: Vec::new(),
@@ -363,9 +365,15 @@ impl StoredRunRecord {
         }
     }
 
-    fn set_error(&mut self, error: Option<String>, failure_kind: Option<String>) {
+    fn set_error(
+        &mut self,
+        error: Option<String>,
+        failure_kind: Option<String>,
+        failure_origin: Option<String>,
+    ) {
         self.error = error;
         self.failure_kind = failure_kind;
+        self.failure_origin = failure_origin;
         self.updated_at = Utc::now();
     }
 
@@ -381,6 +389,10 @@ impl StoredRunRecord {
             .map(|output| truncate_preview(output, 160));
         self.error = trace.error.clone();
         self.failure_kind = trace.failure.as_ref().map(|failure| failure.kind.clone());
+        self.failure_origin = trace
+            .failure
+            .as_ref()
+            .map(|failure| failure.origin.label().to_owned());
         self.trace_path = trace_path.map(|path| path.display().to_string());
         self.outbound_deliveries = trace.outbound_deliveries.clone();
         if let Some(profile) = trace.effective_profile.as_ref() {
@@ -413,6 +425,7 @@ impl StoredRunRecord {
             output_preview: self.output_preview.clone(),
             error: self.error.clone(),
             failure_kind: self.failure_kind.clone(),
+            failure_origin: self.failure_origin.clone(),
             trace_path: self.trace_path.clone(),
         }
     }
@@ -1262,7 +1275,7 @@ impl RunEventSink for GatewayRunEventSink {
                 update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
                     record.run_id = run_id.clone();
                     record.set_status(RunLifecycleStatus::Running);
-                    record.set_error(None, None);
+                    record.set_error(None, None, None);
                 })
             }
             RunEvent::OutputDelta { .. } | RunEvent::FinalAnswerReady { .. } => {
@@ -1277,22 +1290,31 @@ impl RunEventSink for GatewayRunEventSink {
                 record.run_id = run_id.clone();
                 record.set_status(RunLifecycleStatus::Success);
                 record.output_preview = Some(output_preview.clone());
-                record.set_error(None, None);
+                record.set_error(None, None, None);
             }),
             RunEvent::RunFailed {
                 run_id,
                 error,
                 failure_kind,
+                failure_origin,
             } => update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
                 record.run_id = run_id.clone();
                 record.set_status(RunLifecycleStatus::Failed);
-                record.set_error(Some(error.clone()), failure_kind.clone());
+                record.set_error(
+                    Some(error.clone()),
+                    failure_kind.clone(),
+                    failure_origin.clone(),
+                );
             }),
             RunEvent::RunCanceled { run_id, reason } => {
                 update_run_record(self.state.as_ref(), &self.meta.gateway_run_id, |record| {
                     record.run_id = run_id.clone();
                     record.set_status(RunLifecycleStatus::Canceled);
-                    record.set_error(Some(reason.clone()), Some("canceled".to_owned()));
+                    record.set_error(
+                        Some(reason.clone()),
+                        Some("canceled".to_owned()),
+                        Some("gateway".to_owned()),
+                    );
                 })
             }
             _ => None,

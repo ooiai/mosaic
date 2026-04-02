@@ -20,6 +20,7 @@ impl AgentRuntime {
                     "provider"
                 }
                 .to_owned(),
+                origin: FailureOrigin::Provider,
                 retryable: provider_error.retryable,
                 message: provider_error.public_message().to_owned(),
             };
@@ -34,25 +35,55 @@ impl AgentRuntime {
                     "provider"
                 }
                 .to_owned(),
+                origin: FailureOrigin::Provider,
                 retryable: provider_failure.retryable,
                 message: provider_failure.message.clone(),
             };
         }
 
-        if trace
+        if let Some(invocation) = trace
             .capability_invocations
             .iter()
-            .any(|invocation| invocation.status != "success")
-            || trace.tool_calls.iter().any(|call| call.output.is_some())
+            .rev()
+            .find(|invocation| invocation.status != "success")
         {
+            let origin = invocation.failure_origin.unwrap_or(FailureOrigin::Tool);
+            let kind = match origin {
+                FailureOrigin::Mcp => "mcp",
+                FailureOrigin::Node => "node",
+                FailureOrigin::Sandbox => "sandbox",
+                FailureOrigin::Config => "config",
+                FailureOrigin::Tool => "tool",
+                _ => "tool",
+            };
             return RunFailureTrace {
-                kind: "tool".to_owned(),
+                kind: kind.to_owned(),
                 stage: if trace.workflow_name.is_some() {
                     "workflow_tool"
                 } else {
                     "tool"
                 }
                 .to_owned(),
+                origin,
+                retryable: true,
+                message: error.to_string(),
+            };
+        }
+
+        if trace
+            .skill_calls
+            .iter()
+            .any(|call| call.finished_at.is_some() && call.output.is_none())
+        {
+            return RunFailureTrace {
+                kind: "skill".to_owned(),
+                stage: if trace.workflow_name.is_some() {
+                    "workflow_skill"
+                } else {
+                    "skill"
+                }
+                .to_owned(),
+                origin: FailureOrigin::Skill,
                 retryable: true,
                 message: error.to_string(),
             };
@@ -62,6 +93,7 @@ impl AgentRuntime {
             return RunFailureTrace {
                 kind: "workflow".to_owned(),
                 stage: "workflow".to_owned(),
+                origin: FailureOrigin::Workflow,
                 retryable: true,
                 message: error.to_string(),
             };
@@ -69,24 +101,27 @@ impl AgentRuntime {
 
         let message = error.to_string();
         let lower = message.to_ascii_lowercase();
-        let (kind, stage, retryable) =
+        let (kind, stage, retryable, origin) =
             if lower.contains("memory") || lower.contains("compressed context") {
-                ("memory", "memory", true)
+                ("memory", "memory", true, FailureOrigin::Runtime)
             } else if lower.contains("session") || lower.contains("transcript") {
-                ("session", "session", true)
+                ("session", "session", true, FailureOrigin::Runtime)
+            } else if lower.contains("sandbox") {
+                ("sandbox", "sandbox", false, FailureOrigin::Sandbox)
             } else if lower.contains("cannot select both skill and workflow")
                 || lower.contains("workflow not found")
                 || lower.contains("skill not found")
                 || lower.contains("unknown provider profile")
             {
-                ("validation", "validation", false)
+                ("config", "validation", false, FailureOrigin::Config)
             } else {
-                ("runtime", "runtime", false)
+                ("runtime", "runtime", false, FailureOrigin::Runtime)
             };
 
         RunFailureTrace {
             kind: kind.to_owned(),
             stage: stage.to_owned(),
+            origin,
             retryable,
             message,
         }
@@ -132,6 +167,7 @@ impl AgentRuntime {
             run_id: trace.run_id.clone(),
             error: message,
             failure_kind: Some(failure.kind),
+            failure_origin: Some(failure.origin.label().to_owned()),
         });
 
         Err(RunError::new(error, trace))

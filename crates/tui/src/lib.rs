@@ -365,6 +365,7 @@ fn spawn_interactive_run(
                                 run_id: session_id.clone(),
                                 error: err.to_string(),
                                 failure_kind: Some("gateway".to_owned()),
+                                failure_origin: Some("gateway".to_owned()),
                             });
                         }
                     }
@@ -373,6 +374,7 @@ fn spawn_interactive_run(
                             run_id: session_id.clone(),
                             error: err.to_string(),
                             failure_kind: Some("gateway".to_owned()),
+                            failure_origin: Some("gateway".to_owned()),
                         });
                     }
                 }
@@ -424,6 +426,7 @@ fn spawn_interactive_run(
                         run_id: session_id.clone(),
                         error: err.to_string(),
                         failure_kind: Some("gateway".to_owned()),
+                        failure_origin: Some("gateway".to_owned()),
                     });
                 }
             });
@@ -627,6 +630,7 @@ async fn forward_remote_runtime_events(
                 run_id: "gateway-stream".to_owned(),
                 error: err.to_string(),
                 failure_kind: Some("gateway".to_owned()),
+                failure_origin: Some("gateway".to_owned()),
             });
             return;
         }
@@ -641,6 +645,7 @@ async fn forward_remote_runtime_events(
                     run_id: "gateway-stream".to_owned(),
                     error: err.to_string(),
                     failure_kind: Some("gateway".to_owned()),
+                    failure_origin: Some("gateway".to_owned()),
                 });
                 break;
             }

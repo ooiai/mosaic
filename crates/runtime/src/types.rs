@@ -29,7 +29,7 @@ pub(crate) struct NodeTraceContext {
     pub(crate) node_attempted: bool,
     pub(crate) node_fallback_to_local: bool,
     pub(crate) node_failure_class: Option<String>,
-    pub(crate) effective_execution_target: String,
+    pub(crate) effective_execution_target: ExecutionTarget,
 }
 
 impl Default for NodeTraceContext {
@@ -41,7 +41,7 @@ impl Default for NodeTraceContext {
             node_attempted: false,
             node_fallback_to_local: false,
             node_failure_class: None,
-            effective_execution_target: "local".to_owned(),
+            effective_execution_target: ExecutionTarget::Local,
         }
     }
 }

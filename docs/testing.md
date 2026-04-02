@@ -4,6 +4,8 @@ Mosaic testing is not one bucket of `cargo test`. It is a product-proof system w
 
 This document is the source of truth for the k5 channel product baseline.
 
+Capability taxonomy for test interpretation is defined in [capabilities.md](./capabilities.md). When a test or runbook claims that a lane proves "tool", "MCP", "node", "skill", or "workflow", it should use the same `route_kind`, `capability_source_kind`, `execution_target`, and `failure_origin` vocabulary described there.
+
 See also:
 
 - [real-vs-mock-acceptance.md](./real-vs-mock-acceptance.md)

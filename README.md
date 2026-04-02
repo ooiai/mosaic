@@ -160,6 +160,7 @@ The installed binary name is `mosaic`.
 - [`docs/getting-started.md`](./docs/getting-started.md)
 - [`docs/cli.md`](./docs/cli.md)
 - [`docs/channels.md`](./docs/channels.md)
+- [`docs/capabilities.md`](./docs/capabilities.md)
 - [`docs/telegram-step-by-step.md`](./docs/telegram-step-by-step.md)
 - [`docs/full-stack.md`](./docs/full-stack.md)
 - [`docs/telegram-real-e2e.md`](./docs/telegram-real-e2e.md)

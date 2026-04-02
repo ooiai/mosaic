@@ -129,6 +129,7 @@ pub enum RunEvent {
         run_id: String,
         error: String,
         failure_kind: Option<String>,
+        failure_origin: Option<String>,
     },
     RunCanceled {
         run_id: String,

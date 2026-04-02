@@ -40,6 +40,18 @@ Node semantics are shared by gateway, runtime, CLI node commands, and tests. The
 - Downstream crates: `mosaic-gateway` owns node lifecycle and affinity; `mosaic-runtime` consults the router for tool execution; CLI node commands operate directly on this store.
 - Runtime/control-plane coupling: `gateway` manages nodes and `runtime` routes to them. This crate should not orchestrate runs or decide which provider to use.
 
+## Capability Taxonomy
+
+Nodes are not a top-level capability kind.
+
+In Mosaic taxonomy, node participation is expressed as:
+
+- tool route remains `route_kind=tool`
+- execution moves to `execution_target=node`
+- failures should surface as `failure_origin=node`
+
+This crate should stay focused on node registration, selection, and dispatch protocol, not on redefining tool or workflow semantics.
+
 ## Minimal Use
 
 ```rust

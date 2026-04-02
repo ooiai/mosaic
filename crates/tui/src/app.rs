@@ -1159,6 +1159,7 @@ Output preview: {}",
                 run_id,
                 error,
                 failure_kind,
+                ..
             } => {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
@@ -2870,6 +2871,7 @@ mod tests {
             run_id: "run-1".to_owned(),
             error: "boom".to_owned(),
             failure_kind: Some("runtime".to_owned()),
+            failure_origin: Some("runtime".to_owned()),
         });
 
         assert_eq!(app.runtime_status, "error");

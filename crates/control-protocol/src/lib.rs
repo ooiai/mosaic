@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 pub use mosaic_inspect::{
     AttachmentFailureTrace, AttachmentKind, AttachmentRouteMode, AttachmentRouteTrace,
-    ChannelAttachment, ChannelDeliveryResult, ChannelDeliveryStatus, ChannelDeliveryTrace,
-    ChannelOutboundMessage, IngressTrace, RouteDecisionTrace, RouteMode,
+    CapabilitySourceKind, ChannelAttachment, ChannelDeliveryResult, ChannelDeliveryStatus,
+    ChannelDeliveryTrace, ChannelOutboundMessage, ExecutionTarget, FailureOrigin, IngressTrace,
+    OrchestrationOwner, RouteDecisionTrace, RouteKind, RouteMode,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -186,6 +187,7 @@ pub struct RunSummaryDto {
     pub output_preview: Option<String>,
     pub error: Option<String>,
     pub failure_kind: Option<String>,
+    pub failure_origin: Option<String>,
     pub trace_path: Option<String>,
 }
 

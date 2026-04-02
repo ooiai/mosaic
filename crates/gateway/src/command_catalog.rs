@@ -565,7 +565,7 @@ fn normalized_catalog_source(
         value if value.starts_with("manifest:") => "extension".to_owned(),
         "" | "unknown" => match tool_source {
             Some(ToolSource::Builtin) | None => "builtin".to_owned(),
-            Some(ToolSource::Mcp { .. }) => "workspace_config".to_owned(),
+            Some(ToolSource::Mcp { .. }) => "mcp".to_owned(),
         },
         other => other.to_owned(),
     }

@@ -57,6 +57,7 @@ impl GatewayHandle {
         record.set_error(
             Some("cancel requested by operator".to_owned()),
             Some("canceled".to_owned()),
+            Some("gateway".to_owned()),
         );
         self.inner.run_store.save(&record)?;
         sync_session_run_state(

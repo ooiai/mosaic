@@ -12,16 +12,27 @@ pub(crate) enum PlannedRoute {
         name: String,
         reason: String,
         source: String,
+        source_kind: CapabilitySourceKind,
+        execution_target: ExecutionTarget,
+        policy_source: Option<String>,
+        sandbox_scope: Option<String>,
     },
     Skill {
         name: String,
         reason: String,
         source: String,
+        source_kind: CapabilitySourceKind,
+        execution_target: ExecutionTarget,
+        policy_source: Option<String>,
+        sandbox_scope: Option<String>,
     },
     Workflow {
         name: String,
         reason: String,
         source: String,
+        source_kind: CapabilitySourceKind,
+        execution_target: ExecutionTarget,
+        policy_source: Option<String>,
     },
 }
 
@@ -37,6 +48,7 @@ impl PlannedRoute {
 
     pub(crate) fn decision(&self, profile_used: Option<&str>) -> RouteDecisionTrace {
         let (
+            route_kind,
             selected_capability_type,
             selected_capability_name,
             selected_tool,
@@ -44,13 +56,37 @@ impl PlannedRoute {
             selected_workflow,
             selection_reason,
             capability_source,
+            capability_source_kind,
+            execution_target,
+            orchestration_owner,
+            policy_source,
+            sandbox_scope,
         ) = match self {
-            Self::Assistant { reason } => (None, None, None, None, None, reason.clone(), None),
+            Self::Assistant { reason } => (
+                Some(RouteKind::Assistant),
+                None,
+                None,
+                None,
+                None,
+                None,
+                reason.clone(),
+                None,
+                None,
+                Some(ExecutionTarget::Provider),
+                Some(OrchestrationOwner::Runtime),
+                None,
+                None,
+            ),
             Self::Tool {
                 name,
                 reason,
                 source,
+                source_kind,
+                execution_target,
+                policy_source,
+                sandbox_scope,
             } => (
+                Some(RouteKind::Tool),
                 Some("tool".to_owned()),
                 Some(name.clone()),
                 Some(name.clone()),
@@ -58,12 +94,22 @@ impl PlannedRoute {
                 None,
                 reason.clone(),
                 Some(source.clone()),
+                Some(*source_kind),
+                Some(*execution_target),
+                Some(OrchestrationOwner::Runtime),
+                policy_source.clone(),
+                sandbox_scope.clone(),
             ),
             Self::Skill {
                 name,
                 reason,
                 source,
+                source_kind,
+                execution_target,
+                policy_source,
+                sandbox_scope,
             } => (
+                Some(RouteKind::Skill),
                 Some("skill".to_owned()),
                 Some(name.clone()),
                 None,
@@ -71,12 +117,21 @@ impl PlannedRoute {
                 None,
                 reason.clone(),
                 Some(source.clone()),
+                Some(*source_kind),
+                Some(*execution_target),
+                Some(OrchestrationOwner::Runtime),
+                policy_source.clone(),
+                sandbox_scope.clone(),
             ),
             Self::Workflow {
                 name,
                 reason,
                 source,
+                source_kind,
+                execution_target,
+                policy_source,
             } => (
+                Some(RouteKind::Workflow),
                 Some("workflow".to_owned()),
                 Some(name.clone()),
                 None,
@@ -84,11 +139,17 @@ impl PlannedRoute {
                 Some(name.clone()),
                 reason.clone(),
                 Some(source.clone()),
+                Some(*source_kind),
+                Some(*execution_target),
+                Some(OrchestrationOwner::WorkflowEngine),
+                policy_source.clone(),
+                None,
             ),
         };
 
         RouteDecisionTrace {
             route_mode: self.mode(),
+            route_kind,
             selected_capability_type,
             selected_capability_name,
             selected_tool,
@@ -96,6 +157,11 @@ impl PlannedRoute {
             selected_workflow,
             selection_reason,
             capability_source,
+            capability_source_kind,
+            execution_target,
+            orchestration_owner,
+            policy_source,
+            sandbox_scope,
             profile_used: profile_used.map(ToOwned::to_owned),
             selected_category: None,
             catalog_scope: None,
@@ -135,6 +201,10 @@ impl AgentRuntime {
                 name: tool_name.clone(),
                 reason: "explicit /mosaic tool command".to_owned(),
                 source: tool.metadata().exposure.source.clone(),
+                source_kind: Self::tool_capability_source_kind(tool.metadata()),
+                execution_target: Self::tool_execution_target(tool.metadata()),
+                policy_source: Self::tool_policy_source(tool.metadata()),
+                sandbox_scope: Self::tool_sandbox_scope(tool.metadata()),
             });
         }
 
@@ -150,6 +220,10 @@ impl AgentRuntime {
                 name: skill_name.clone(),
                 reason: "explicit /mosaic skill command".to_owned(),
                 source: skill.metadata().exposure.source.clone(),
+                source_kind: Self::skill_capability_source_kind(skill.metadata()),
+                execution_target: Self::skill_execution_target(skill.metadata()),
+                policy_source: Self::skill_policy_source(skill.metadata()),
+                sandbox_scope: Self::skill_sandbox_scope(skill.metadata()),
             });
         }
 
@@ -170,6 +244,9 @@ impl AgentRuntime {
                 name: workflow_name.clone(),
                 reason: "explicit /mosaic workflow command".to_owned(),
                 source: workflow.metadata.exposure.source.clone(),
+                source_kind: Self::workflow_capability_source_kind(&workflow.metadata),
+                execution_target: Self::workflow_execution_target(),
+                policy_source: Self::workflow_policy_source(&workflow.metadata),
             });
         }
 
@@ -345,6 +422,10 @@ impl AgentRuntime {
                 name,
                 reason,
                 source: skill.metadata().exposure.source.clone(),
+                source_kind: Self::skill_capability_source_kind(skill.metadata()),
+                execution_target: Self::skill_execution_target(skill.metadata()),
+                policy_source: Self::skill_policy_source(skill.metadata()),
+                sandbox_scope: Self::skill_sandbox_scope(skill.metadata()),
             })
         })
     }
@@ -374,6 +455,9 @@ impl AgentRuntime {
                 name,
                 reason,
                 source: registered.metadata.exposure.source.clone(),
+                source_kind: Self::workflow_capability_source_kind(&registered.metadata),
+                execution_target: Self::workflow_execution_target(),
+                policy_source: Self::workflow_policy_source(&registered.metadata),
             })
         })
     }

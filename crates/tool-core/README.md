@@ -33,6 +33,21 @@ Capability Execution Layer.
 - Source attribution: `ToolSource`, `mcp_tool_name`.
 - Built-ins: `EchoTool`, `ReadFileTool`, `TimeNowTool`, `ExecTool`, `WebhookTool`, `CronRegisterTool`.
 
+## Capability Taxonomy
+
+Inside Mosaic taxonomy, tools are always:
+
+- `route_kind=tool`
+
+What changes is the source and target:
+
+- builtin/workspace/extension tool -> `capability_source_kind=builtin|workspace_config|extension`
+- MCP tool -> `capability_source_kind=mcp`
+- local tool execution -> `execution_target=local`
+- node-routed tool execution -> `execution_target=node`
+
+This crate should define tool metadata cleanly, but it must not redefine skill/workflow/node semantics.
+
 ## Why This Is In `crates/`
 
 Tools are used by multiple paths: runtime execution, provider tool exposure policy, inspect traces, gateway capability jobs, node routing, and bootstrap. That makes `tool-core` a stable shared module instead of a CLI-only implementation detail.

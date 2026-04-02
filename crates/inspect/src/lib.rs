@@ -31,9 +31,132 @@ impl RouteMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteKind {
+    Assistant,
+    Tool,
+    Skill,
+    Workflow,
+}
+
+impl RouteKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Assistant => "assistant",
+            Self::Tool => "tool",
+            Self::Skill => "skill",
+            Self::Workflow => "workflow",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilitySourceKind {
+    Builtin,
+    WorkspaceConfig,
+    Extension,
+    Mcp,
+    NativeSkill,
+    ManifestSkill,
+    MarkdownSkillPack,
+}
+
+impl CapabilitySourceKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::WorkspaceConfig => "workspace_config",
+            Self::Extension => "extension",
+            Self::Mcp => "mcp",
+            Self::NativeSkill => "native_skill",
+            Self::ManifestSkill => "manifest_skill",
+            Self::MarkdownSkillPack => "markdown_skill_pack",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionTarget {
+    #[default]
+    Local,
+    McpServer,
+    Node,
+    Provider,
+    WorkflowEngine,
+}
+
+impl ExecutionTarget {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::McpServer => "mcp_server",
+            Self::Node => "node",
+            Self::Provider => "provider",
+            Self::WorkflowEngine => "workflow_engine",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum OrchestrationOwner {
+    #[default]
+    Runtime,
+    WorkflowEngine,
+    Gateway,
+}
+
+impl OrchestrationOwner {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::WorkflowEngine => "workflow_engine",
+            Self::Gateway => "gateway",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureOrigin {
+    Provider,
+    #[default]
+    Runtime,
+    Tool,
+    Mcp,
+    Node,
+    Skill,
+    Workflow,
+    Sandbox,
+    Config,
+    Gateway,
+}
+
+impl FailureOrigin {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Provider => "provider",
+            Self::Runtime => "runtime",
+            Self::Tool => "tool",
+            Self::Mcp => "mcp",
+            Self::Node => "node",
+            Self::Skill => "skill",
+            Self::Workflow => "workflow",
+            Self::Sandbox => "sandbox",
+            Self::Config => "config",
+            Self::Gateway => "gateway",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RouteDecisionTrace {
     pub route_mode: RouteMode,
+    #[serde(default)]
+    pub route_kind: Option<RouteKind>,
     #[serde(default)]
     pub selected_capability_type: Option<String>,
     #[serde(default)]
@@ -48,6 +171,16 @@ pub struct RouteDecisionTrace {
     #[serde(default)]
     pub capability_source: Option<String>,
     #[serde(default)]
+    pub capability_source_kind: Option<CapabilitySourceKind>,
+    #[serde(default)]
+    pub execution_target: Option<ExecutionTarget>,
+    #[serde(default)]
+    pub orchestration_owner: Option<OrchestrationOwner>,
+    #[serde(default)]
+    pub policy_source: Option<String>,
+    #[serde(default)]
+    pub sandbox_scope: Option<String>,
+    #[serde(default)]
     pub profile_used: Option<String>,
     #[serde(default)]
     pub selected_category: Option<String>,
@@ -61,6 +194,8 @@ pub struct ToolTrace {
     pub name: String,
     #[serde(default)]
     pub source: ToolSource,
+    #[serde(default)]
+    pub capability_source_kind: Option<CapabilitySourceKind>,
     pub input: serde_json::Value,
     pub output: Option<String>,
     #[serde(default)]
@@ -77,6 +212,14 @@ pub struct ToolTrace {
     pub disconnect_context: Option<String>,
     #[serde(default = "default_execution_target")]
     pub effective_execution_target: String,
+    #[serde(default)]
+    pub execution_target: ExecutionTarget,
+    #[serde(default)]
+    pub orchestration_owner: OrchestrationOwner,
+    #[serde(default)]
+    pub policy_source: Option<String>,
+    #[serde(default)]
+    pub sandbox_scope: Option<String>,
     #[serde(default)]
     pub sandbox: Option<SandboxEnvTrace>,
     pub started_at: DateTime<Utc>,
@@ -98,6 +241,10 @@ pub struct CapabilityInvocationTrace {
     pub job_id: String,
     pub call_id: Option<String>,
     pub tool_name: String,
+    #[serde(default)]
+    pub route_kind: Option<RouteKind>,
+    #[serde(default)]
+    pub capability_source_kind: Option<CapabilitySourceKind>,
     pub kind: CapabilityKind,
     #[serde(default)]
     pub permission_scopes: Vec<PermissionScope>,
@@ -119,6 +266,16 @@ pub struct CapabilityInvocationTrace {
     pub disconnect_context: Option<String>,
     #[serde(default = "default_execution_target")]
     pub effective_execution_target: String,
+    #[serde(default)]
+    pub execution_target: ExecutionTarget,
+    #[serde(default)]
+    pub orchestration_owner: OrchestrationOwner,
+    #[serde(default)]
+    pub policy_source: Option<String>,
+    #[serde(default)]
+    pub sandbox_scope: Option<String>,
+    #[serde(default)]
+    pub failure_origin: Option<FailureOrigin>,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
@@ -171,11 +328,21 @@ pub struct SkillTrace {
     #[serde(default)]
     pub source_kind: Option<String>,
     #[serde(default)]
+    pub capability_source_kind: Option<CapabilitySourceKind>,
+    #[serde(default)]
     pub source_path: Option<String>,
     #[serde(default)]
     pub skill_version: Option<String>,
     #[serde(default)]
     pub runtime_requirements: Vec<String>,
+    #[serde(default)]
+    pub execution_target: ExecutionTarget,
+    #[serde(default)]
+    pub orchestration_owner: OrchestrationOwner,
+    #[serde(default)]
+    pub policy_source: Option<String>,
+    #[serde(default)]
+    pub sandbox_scope: Option<String>,
     #[serde(default)]
     pub sandbox: Option<SandboxEnvTrace>,
     pub input: serde_json::Value,
@@ -513,6 +680,8 @@ impl RunLifecycleStatus {
 pub struct RunFailureTrace {
     pub kind: String,
     pub stage: String,
+    #[serde(default)]
+    pub origin: FailureOrigin,
     pub retryable: bool,
     pub message: String,
 }
@@ -531,6 +700,10 @@ impl SkillTrace {
 pub struct WorkflowStepTrace {
     pub name: String,
     pub kind: String,
+    #[serde(default)]
+    pub execution_target: Option<ExecutionTarget>,
+    #[serde(default)]
+    pub orchestration_owner: Option<OrchestrationOwner>,
     pub input: String,
     pub output: Option<String>,
     pub started_at: DateTime<Utc>,
@@ -610,6 +783,7 @@ pub struct GovernanceTrace {
 pub struct RunSummary {
     pub status: String,
     pub failure_kind: Option<String>,
+    pub failure_origin: Option<String>,
     pub tool_calls: usize,
     pub capability_invocations: usize,
     pub skill_calls: usize,
@@ -907,6 +1081,7 @@ impl RunTrace {
         self.failure = Some(RunFailureTrace {
             kind: "canceled".to_owned(),
             stage: "gateway".to_owned(),
+            origin: FailureOrigin::Gateway,
             retryable: true,
             message: reason,
         });
@@ -984,6 +1159,10 @@ impl RunTrace {
         RunSummary {
             status: self.status().to_owned(),
             failure_kind: self.failure.as_ref().map(|failure| failure.kind.clone()),
+            failure_origin: self
+                .failure
+                .as_ref()
+                .map(|failure| failure.origin.label().to_owned()),
             tool_calls: self.tool_calls.len(),
             capability_invocations: self.capability_invocations.len(),
             skill_calls: self.skill_calls.len(),
@@ -1109,6 +1288,7 @@ mod tests {
             call_id: Some("call-1".to_owned()),
             name: "echo".to_owned(),
             source: ToolSource::Builtin,
+            capability_source_kind: Some(CapabilitySourceKind::Builtin),
             input: serde_json::json!({ "text": "hello" }),
             output: Some("hello".to_owned()),
             node_attempted: false,
@@ -1118,6 +1298,10 @@ mod tests {
             capability_route: None,
             disconnect_context: None,
             effective_execution_target: "local".to_owned(),
+            execution_target: ExecutionTarget::Local,
+            orchestration_owner: OrchestrationOwner::Runtime,
+            policy_source: None,
+            sandbox_scope: None,
             sandbox: None,
             started_at: Utc::now(),
             finished_at: Some(Utc::now()),
@@ -1222,6 +1406,7 @@ mod tests {
                 call_id: Some("call-1".to_owned()),
                 name: "echo".to_owned(),
                 source: ToolSource::Builtin,
+                capability_source_kind: Some(CapabilitySourceKind::Builtin),
                 input: serde_json::json!({ "text": "hello" }),
                 output: Some("hello".to_owned()),
                 node_attempted: false,
@@ -1231,6 +1416,10 @@ mod tests {
                 capability_route: None,
                 disconnect_context: None,
                 effective_execution_target: "local".to_owned(),
+                execution_target: ExecutionTarget::Local,
+                orchestration_owner: OrchestrationOwner::Runtime,
+                policy_source: None,
+                sandbox_scope: None,
                 sandbox: None,
                 started_at,
                 finished_at: Some(started_at + Duration::milliseconds(3)),
@@ -1243,6 +1432,8 @@ mod tests {
             step_traces: vec![WorkflowStepTrace {
                 name: "draft".to_owned(),
                 kind: "prompt".to_owned(),
+                execution_target: Some(ExecutionTarget::Provider),
+                orchestration_owner: Some(OrchestrationOwner::WorkflowEngine),
                 input: "hello".to_owned(),
                 output: Some("world".to_owned()),
                 started_at,

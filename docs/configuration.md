@@ -4,6 +4,13 @@ Mosaic reads configuration from YAML and merges multiple sources into one runtim
 
 This guide focuses on the operator-visible config knobs, especially the Telegram bot registry and attachment routing added in k1-k4.
 
+For the capability taxonomy that config ultimately feeds into, see [capabilities.md](./capabilities.md). In particular:
+
+- config can change `capability_source_kind`
+- config and policy can affect `route_kind`
+- config can change `execution_target` indirectly through MCP registration, node routing, and workflow composition
+- config failures should surface as `failure_origin=config` instead of being confused with runtime/provider failures
+
 ## File Locations
 
 Workspace config:

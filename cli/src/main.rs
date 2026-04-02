@@ -1605,11 +1605,12 @@ fn print_run_list(runs: &[RunSummaryDto]) -> Result<()> {
                 .unwrap_or_else(|| "-".to_owned()),
         );
         println!(
-            "    correlation={} run_id={} provider={} failure_kind={}",
+            "    correlation={} run_id={} provider={} failure_kind={} failure_origin={}",
             run.correlation_id,
             run.run_id,
             run.effective_provider_type.as_deref().unwrap_or("-"),
             run.failure_kind.as_deref().unwrap_or("-"),
+            run.failure_origin.as_deref().unwrap_or("-"),
         );
         println!(
             "    input={} output={} error={}",
@@ -1661,6 +1662,7 @@ fn print_run_detail(run: &RunDetailDto) -> Result<()> {
     println!("updated_at: {}", summary.updated_at);
     println!("finished_at: {:?}", summary.finished_at);
     println!("failure_kind: {:?}", summary.failure_kind);
+    println!("failure_origin: {:?}", summary.failure_origin);
     println!("trace_path: {:?}", summary.trace_path);
     println!("ingress: {:?}", run.ingress);
     if let Some(ingress) = run.ingress.as_ref() {
@@ -1742,6 +1744,18 @@ fn operator_failure_hint(failure_kind: Option<&str>, error: Option<&str>) -> Opt
         ),
         Some("tool") => Some(
             "tool stage failed; inspect capability policy, route selection, and tool input/output",
+        ),
+        Some("mcp") => Some(
+            "MCP tool failed; inspect tool calls, capability invocations, and MCP server health",
+        ),
+        Some("node") => Some(
+            "node-routed capability failed; inspect capability invocations, node routing, and node availability",
+        ),
+        Some("sandbox") => Some(
+            "sandbox setup or execution failed; inspect sandbox status, env records, and capability sandbox bindings",
+        ),
+        Some("config") => Some(
+            "configuration or policy prevented the run; inspect config, route decision, and required capability visibility",
         ),
         Some("workflow") => Some(
             "workflow stage failed; inspect step traces, referenced skill names, and route decision",
@@ -1837,6 +1851,7 @@ fn print_gateway_incident_bundle(bundle: &IncidentBundleDto, path: &Path) -> Res
     if let Some(run) = &bundle.run {
         println!("run_status: {}", run.summary.status.label());
         println!("run_failure_kind: {:?}", run.summary.failure_kind);
+        println!("run_failure_origin: {:?}", run.summary.failure_origin);
     }
     println!("audit_events: {}", bundle.audit_events.len());
     println!(
@@ -2130,10 +2145,11 @@ fn gateway_event_label(event: &GatewayEvent) -> String {
         GatewayEvent::RunSubmitted { profile, .. } => format!("run_submitted profile={profile}"),
         GatewayEvent::Runtime(_) => "runtime_event".to_owned(),
         GatewayEvent::RunUpdated { run } => format!(
-            "run_updated id={} status={} failure_kind={}",
+            "run_updated id={} status={} failure_kind={} failure_origin={}",
             run.gateway_run_id,
             run.status.label(),
             run.failure_kind.as_deref().unwrap_or("-"),
+            run.failure_origin.as_deref().unwrap_or("-"),
         ),
         GatewayEvent::CapabilityJobUpdated { job } => format!(
             "capability_job id={} status={} kind={}",

@@ -46,6 +46,20 @@ Skills are consumed by runtime execution, extension loading, bootstrap, and test
 - Downstream crates: `mosaic-runtime` invokes skills during runs and workflows; `mosaic-extension-core` loads external skills into the registry; `cli` bootstraps built-in skills but should not own skill logic.
 - Runtime/control-plane coupling: `runtime` decides when a skill runs, `gateway` exposes runs that may involve skills, and `cli` surfaces those flows. This crate should only describe and execute skills once selected.
 
+## Capability Taxonomy
+
+Inside Mosaic taxonomy, skills are:
+
+- `route_kind=skill`
+
+The source is one of:
+
+- `capability_source_kind=native_skill`
+- `capability_source_kind=manifest_skill`
+- `capability_source_kind=markdown_skill_pack`
+
+Skills are reusable capability units. They are not MCP adapters, not node routes, and not workflow graphs.
+
 ## Minimal Use
 
 ```rust

@@ -235,7 +235,7 @@ In the saved trace you should see:
 
 - `channel: telegram`
 - `adapter: telegram_bot`
-- `route decision:` with `route_mode: assistant`
+- `route decision:` with `route_mode: assistant`, `route_kind: assistant`, and `execution_target: provider`
 - a real `effective_profile` using `openai`
 - one outbound delivery back to Telegram
 
@@ -275,6 +275,7 @@ Expected result:
 - Telegram receives a timestamp reply
 - `mosaic inspect "$TRACE_PATH" --verbose` shows `route_mode: assistant`
 - the same trace shows a `tool_calls` entry for `time_now`
+- the capability trace shows `capability_source_kind: builtin` and `execution_target: local`
 
 ### Explicit `read_file`
 
@@ -287,7 +288,7 @@ Send this explicit Telegram command:
 Expected result:
 
 - Telegram receives the file content or preview
-- the trace shows `route_mode: tool`
+- the trace shows `route_mode: tool` and `route_kind: tool`
 - `selected_tool: read_file`
 - `capability_invocations` contains the file read summary
 - the audit log still ties the run back to the same Telegram conversation
@@ -303,9 +304,10 @@ Send this explicit Telegram command:
 Expected result:
 
 - Telegram receives a `summary:` style reply
-- the trace shows `route_mode: skill`
+- the trace shows `route_mode: skill` and `route_kind: skill`
 - `selected_skill: summarize_notes`
 - the trace includes `SkillStarted` and `SkillFinished` facts through `skill_calls`
+- the skill trace shows `capability_source_kind: manifest_skill` or `markdown_skill_pack`, depending on the loaded skill
 
 Check it with:
 
@@ -325,9 +327,9 @@ Send this explicit Telegram command:
 Expected result:
 
 - Telegram receives the workflow result in the same chat
-- the trace shows `route_mode: workflow`
+- the trace shows `route_mode: workflow` and `route_kind: workflow`
 - `selected_workflow: summarize_operator_note`
-- `step traces` include the workflow step chain
+- `step traces` include the workflow step chain with `execution_target` and `orchestration_owner`
 
 Check it with:
 
@@ -425,12 +427,17 @@ At the end of the full Telegram lane you should have:
 The inspect output for the explicit command runs should expose:
 
 - `route_mode`
+- `route_kind`
 - `selected_tool`, `selected_skill`, or `selected_workflow`
 - `selection_reason`
 - `capability_source`
+- `capability_source_kind`
+- `execution_target`
+- `orchestration_owner`
 - `profile_used`
 - `attachment_route`
 - `bot_identity`
+- `failure_origin` when a run fails
 
 ## Troubleshooting
 

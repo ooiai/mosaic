@@ -40,6 +40,18 @@ MCP integration is shared by extension loading, gateway startup, runtime tool ex
 - Downstream crates: `mosaic-gateway` owns MCP server lifecycle, `mosaic-extension-core` can describe MCP servers from extensions, and `mosaic-runtime` executes the registered tool adapters.
 - Runtime/control-plane coupling: `gateway` starts and supervises MCP servers, while `runtime` treats discovered tools like any other callable tool.
 
+## Capability Taxonomy
+
+MCP does not introduce a new top-level route kind.
+
+Instead, MCP capabilities are represented as:
+
+- `route_kind=tool`
+- `capability_source_kind=mcp`
+- `execution_target=mcp_server`
+
+That distinction matters because operators should not confuse MCP tools with skills, workflows, or node routes.
+
 ## Minimal Use
 
 ```rust
