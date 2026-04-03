@@ -119,6 +119,8 @@ Attach the operator console to a remote Gateway:
 mosaic tui --attach http://127.0.0.1:8080 --session remote-demo
 ```
 
+The CLI does not replace the TUI local operator lane. Its role here is to launch, configure, and script the system. The local Codex-style operator UX proof still belongs to `mosaic tui`; the CLI remains the scripted/operator automation surface around it.
+
 Run one file-backed job without entering the long-lived console:
 
 ```bash

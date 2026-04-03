@@ -5,7 +5,8 @@ This guide is the beginner path for connecting Mosaic to a real Telegram bot.
 Maintenance rule:
 
 - Telegram is the strongest real external interactive GUI lane and release-facing channel proof
-- TUI is the primary local chat-first operator surface
+- TUI is the primary local Codex-style operator surface
+- CLI is the scripted/operator automation surface for webhook registration, inspect, and release verification
 - if a change affects the real Telegram operator path or the TUI/Telegram proof split, update this guide, [telegram-real-e2e.md](./telegram-real-e2e.md), [tui.md](./tui.md), and the matching Telegram examples in the same change set
 
 Important baseline:
@@ -23,6 +24,12 @@ Use this when you want the exact order of operations:
 5. register the webhook
 6. send the first real Telegram message
 7. verify inbound and outbound behavior from the CLI
+
+Product role split for this guide:
+
+- use Telegram to prove the external human-facing lane
+- use TUI to prove the local operator shell when local transcript behavior changes, especially slash popup, active-turn rendering, inline detail reveal, cancel/retry, and draft preservation
+- use CLI to drive setup, validation, webhook management, inspect, and release checks
 
 If you already know how Telegram bots and webhooks work and you only need the formal release sign-off path, go to [telegram-real-e2e.md](./telegram-real-e2e.md).
 

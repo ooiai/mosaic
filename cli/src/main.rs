@@ -3372,7 +3372,7 @@ mod tests {
             "POST /ingress/telegram",
             "Telegram Documentation Maintenance Rule",
             "Telegram is the strongest real external GUI acceptance lane.",
-            "TUI is the primary local chat-first operator surface.",
+            "TUI is the primary local Codex-style operator surface.",
             "docs/skills.md",
             "docs/sandbox.md",
             "/mosaic help",
@@ -3467,7 +3467,7 @@ mod tests {
             "capabilities/README.md",
             "sandbox/README.md",
             "composition/README.md",
-            "mosaic tui` is the primary local chat-first operator surface",
+            "mosaic tui` is the primary local Codex-style operator surface",
             "Telegram is the current real external interactive acceptance path and release-facing channel lane",
         ] {
             assert!(
@@ -3515,12 +3515,13 @@ mod tests {
 
         let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
         for required in [
-            "The Mosaic TUI is now a chat-first terminal operator surface.",
-            "/mosaic sandbox status",
-            "/mosaic sandbox inspect <env>",
-            "/mosaic sandbox rebuild <env>",
-            "/mosaic sandbox clean",
-            "Short aliases like `/session show` and `/model list` still work",
+            "The Mosaic TUI is now a chat-first single-shell terminal operator surface.",
+            "There are no persistent session, model, inspect, or observability panes.",
+            "/sandbox status",
+            "/sandbox inspect <env>",
+            "/sandbox rebuild <env>",
+            "/sandbox clean",
+            "compatibility alias inside the local shell",
         ] {
             assert!(tui.contains(required), "tui guide missing {required}");
         }
@@ -3532,6 +3533,7 @@ mod tests {
             "docs/sandbox.md",
             "examples/skills/README.md",
             "examples/sandbox/README.md",
+            "single-shell conversation surface with no persistent session/model/inspect panes",
             "whether a failed run came from provider, tool, MCP, node, or sandbox",
             "Telegram-affecting work is not release-ready unless the matching Telegram docs and examples changed in the same change set.",
         ] {
@@ -3665,7 +3667,7 @@ mod tests {
 
         let readme = fs::read_to_string(root.join("README.md")).expect("README should load");
         for required in [
-            "`mosaic tui` is the primary local chat-first operator surface today",
+            "`mosaic tui` is the primary local Codex-style operator shell today",
             "Telegram is the strongest real external interactive GUI acceptance surface and still carries the release-facing channel lane",
             "if a change affects Telegram commands, capability discovery, skills, attachments, sandbox readiness, or multi-bot behavior",
             "docs/telegram-step-by-step.md",
@@ -3679,7 +3681,7 @@ mod tests {
         for required in [
             "Maintenance rule:",
             "Telegram is the strongest real external interactive GUI lane and release-facing channel proof",
-            "TUI is the primary local chat-first operator surface",
+            "TUI is the primary local Codex-style operator surface",
             "mosaic sandbox status",
             "mosaic sandbox list",
             "[skills.md](./skills.md)",
@@ -3699,7 +3701,7 @@ mod tests {
             "mosaic sandbox status",
             "mosaic sandbox list",
             "Telegram is the strongest real external interactive GUI acceptance lane and release-facing channel proof",
-            "TUI is the primary local chat-first operator surface",
+            "TUI is the primary local Codex-style operator surface",
             "[tui.md](./tui.md)",
         ] {
             assert!(
@@ -3746,7 +3748,7 @@ mod tests {
             "Crate-by-Crate Product Proof Matrix",
             "Telegram-first release-blocking acceptance lane",
             "Local operator acceptance",
-            "TUI is now the primary local chat-first operator surface.",
+            "TUI is now the primary local Codex-style single-shell operator surface.",
             "channel command catalog discovery",
             "Telegram image upload",
             "Telegram document upload",
@@ -3827,6 +3829,21 @@ mod tests {
             "# PLANLOG",
             "executed_at",
             "commit_ref",
+            "## Reference / Umbrella",
+            "## Planned / Pending",
+            "specs/plan_l23.md",
+            "specs/completed/plan_l24.md",
+            "specs/completed/plan_l25.md",
+            "specs/completed/plan_l26.md",
+            "specs/completed/plan_l27.md",
+            "specs/completed/plan_l15.md",
+            "specs/completed/plan_l16.md",
+            "specs/completed/plan_l17.md",
+            "specs/completed/plan_l18.md",
+            "specs/completed/plan_l19.md",
+            "specs/completed/plan_l20.md",
+            "specs/completed/plan_l21.md",
+            "specs/completed/plan_l22.md",
             "specs/completed/plan_l7.md",
             "specs/completed/plan_l8.md",
             "specs/completed/plan_l9.md",
@@ -3837,6 +3854,7 @@ mod tests {
             "specs/completed/plan_l12.md",
             "specs/completed/plan_l13.md",
             "specs/completed/plan_l14.md",
+            "specs/completed/plan_l15.md",
             "specs/completed/plan_k1.md",
             "specs/completed/plan_i1.md",
             "completed (working tree)",
@@ -3848,7 +3866,20 @@ mod tests {
             "plan_l12.md",
             "plan_l13.md",
             "plan_l14.md",
-            "No pending plans are currently tracked in `specs/`.",
+            "plan_l15.md",
+            "plan_l16.md",
+            "plan_l17.md",
+            "plan_l18.md",
+            "plan_l19.md",
+            "plan_l20.md",
+            "plan_l21.md",
+            "plan_l22.md",
+            "plan_l23.md",
+            "plan_l24.md",
+            "plan_l25.md",
+            "plan_l26.md",
+            "plan_l27.md",
+            "umbrella / reference",
         ] {
             assert!(planlog.contains(required), "PLANLOG missing {required}");
         }
@@ -3865,6 +3896,18 @@ mod tests {
             "specs/completed/plan_l12.md",
             "specs/completed/plan_l13.md",
             "specs/completed/plan_l14.md",
+            "specs/completed/plan_l15.md",
+            "specs/completed/plan_l16.md",
+            "specs/completed/plan_l17.md",
+            "specs/completed/plan_l18.md",
+            "specs/completed/plan_l19.md",
+            "specs/completed/plan_l20.md",
+            "specs/completed/plan_l21.md",
+            "specs/completed/plan_l22.md",
+            "specs/completed/plan_l24.md",
+            "specs/completed/plan_l25.md",
+            "specs/completed/plan_l26.md",
+            "specs/completed/plan_l27.md",
             "specs/completed/plan_k1.md",
             "specs/completed/plan_i1.md",
             "specs/completed/plan_d2.md",
@@ -3886,8 +3929,8 @@ mod tests {
         for required in [
             "chat-first TUI",
             "transcript-driven TUI sandbox operations",
-            "/mosaic sandbox status",
-            "/mosaic sandbox inspect <env>",
+            "/sandbox status",
+            "/sandbox inspect <env>",
             "TUI slash-command and inline-card regression tests for sandbox flows",
         ] {
             assert!(l12.contains(required), "plan_l12 missing {required}");
@@ -3910,8 +3953,8 @@ mod tests {
         for required in [
             "chat-first TUI discovery and execution visibility",
             "TUI slash-command discovery and transcript rendering for markdown skills",
-            "slash completion for `/mosaic skill <name>`",
-            "TUI `/mosaic skill` discoverability and transcript rendering tests",
+            "slash completion for `/skill <name>`",
+            "TUI `/skill` discoverability and transcript rendering tests",
         ] {
             assert!(l13.contains(required), "plan_l13 missing {required}");
         }
@@ -3923,9 +3966,433 @@ mod tests {
             "CLI/TUI/docs/testing for capability execution proof",
             "Add TUI local operator proof for capability execution",
             "TUI transcript/operator-card tests for tool, MCP, node, and workflow explanations",
-            "/mosaic inspect last",
+            "/inspect last",
         ] {
             assert!(l14.contains(required), "plan_l14 missing {required}");
+        }
+
+        let l15 = fs::read_to_string(root.join("specs/completed/plan_l15.md"))
+            .expect("plan_l15 should load");
+        for required in [
+            "Codex-style terminal assistant shell",
+            "one compact header",
+            "one bottom composer",
+            "no persistent session/model/inspect/observability panes",
+            "single-shell conversation-first operator surface",
+        ] {
+            assert!(l15.contains(required), "plan_l15 missing {required}");
+        }
+
+        let l16 = fs::read_to_string(root.join("specs/completed/plan_l16.md"))
+            .expect("plan_l16 should load");
+        for required in [
+            "bare slash commands are the primary TUI contract",
+            "/help",
+            "/new",
+            "/mosaic ...",
+            "popup groups commands by domain",
+        ] {
+            assert!(l16.contains(required), "plan_l16 missing {required}");
+        }
+
+        let l17 = fs::read_to_string(root.join("specs/completed/plan_l17.md"))
+            .expect("plan_l17 should load");
+        for required in [
+            "collapsed execution cards",
+            "streaming partial output",
+            "tool calls",
+            "MCP activity",
+            "draft persistence while background refresh and streaming occur",
+        ] {
+            assert!(l17.contains(required), "plan_l17 missing {required}");
+        }
+
+        let l18 = fs::read_to_string(root.join("specs/completed/plan_l18.md"))
+            .expect("plan_l18 should load");
+        for required in [
+            "TUI = primary local operator shell",
+            "Telegram = primary external human-facing channel acceptance lane",
+            "CLI = scripted/operator automation surface",
+            "bare slash examples in TUI docs",
+            "L15-L18 are completed",
+        ] {
+            assert!(l18.contains(required), "plan_l18 missing {required}");
+        }
+    }
+
+    #[test]
+    fn l17_tui_docs_cover_collapsed_cards_and_failure_guidance() {
+        let root = repo_root();
+
+        let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
+        for required in [
+            "collapsed execution cards",
+            "failure cards",
+            "next operator action",
+            "without losing the current composer draft",
+        ] {
+            assert!(tui.contains(required), "tui guide missing {required}");
+        }
+
+        let testing =
+            fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
+        for required in [
+            "collapsed execution cards",
+            "failure attribution cards",
+            "background refresh and streaming do not clear the active composer draft",
+        ] {
+            assert!(
+                testing.contains(required),
+                "testing guide missing {required}"
+            );
+        }
+
+        let release =
+            fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
+        for required in [
+            "collapsed cards by default",
+            "failure cards include the next operator action",
+            "do not clear the active composer draft",
+        ] {
+            assert!(
+                release.contains(required),
+                "release guide missing {required}"
+            );
+        }
+
+        let readme = fs::read_to_string(root.join("README.md")).expect("readme should load");
+        assert!(
+            readme.contains("collapsed cards with next-step guidance on failures"),
+            "readme missing l17 transcript summary"
+        );
+    }
+
+    #[test]
+    fn l18_docs_define_tui_telegram_cli_surface_split() {
+        let root = repo_root();
+
+        let readme = fs::read_to_string(root.join("README.md")).expect("readme should load");
+        for required in [
+            "TUI",
+            "Telegram",
+            "CLI",
+            "scripted/operator automation surface",
+        ] {
+            assert!(readme.contains(required), "readme missing {required}");
+        }
+
+        let getting_started = fs::read_to_string(root.join("docs/getting-started.md"))
+            .expect("getting-started guide should load");
+        for required in [
+            "TUI = primary local operator shell",
+            "Telegram = primary external human-facing channel lane",
+            "CLI = scripted/operator automation surface",
+        ] {
+            assert!(
+                getting_started.contains(required),
+                "getting-started guide missing {required}"
+            );
+        }
+
+        let channels =
+            fs::read_to_string(root.join("docs/channels.md")).expect("channels guide should load");
+        for required in [
+            "CLI is the scripted/operator automation surface",
+            "docs/cli.md",
+        ] {
+            assert!(
+                channels.contains(required),
+                "channels guide missing {required}"
+            );
+        }
+
+        let telegram_step = fs::read_to_string(root.join("docs/telegram-step-by-step.md"))
+            .expect("telegram step-by-step should load");
+        for required in [
+            "CLI is the scripted/operator automation surface",
+            "use Telegram to prove the external human-facing lane",
+            "use TUI to prove the local operator shell",
+        ] {
+            assert!(
+                telegram_step.contains(required),
+                "telegram step-by-step missing {required}"
+            );
+        }
+
+        let telegram_e2e = fs::read_to_string(root.join("docs/telegram-real-e2e.md"))
+            .expect("telegram real e2e should load");
+        for required in [
+            "CLI is the scripted/operator automation surface",
+            "Telegram proves the external human-facing channel lane",
+            "CLI drives the repeatable acceptance steps",
+        ] {
+            assert!(
+                telegram_e2e.contains(required),
+                "telegram real e2e missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn l19_l22_cover_codex_style_tui_parity() {
+        let root = repo_root();
+
+        let l19 = fs::read_to_string(root.join("specs/completed/plan_l19.md"))
+            .expect("plan_l19 should load");
+        for required in [
+            "Codex-style chat shell",
+            "chat-widget/cell architecture",
+            "bottom-pane",
+            "overlays",
+            "session refresh not mutating composer state",
+        ] {
+            assert!(l19.contains(required), "plan_l19 missing {required}");
+        }
+
+        let l20 = fs::read_to_string(root.join("specs/completed/plan_l20.md"))
+            .expect("plan_l20 should load");
+        for required in [
+            "Codex-style density",
+            "slash popup",
+            "busy / send-disabled state",
+            "terminal assistant",
+            "real PTY verification step",
+        ] {
+            assert!(l20.contains(required), "plan_l20 missing {required}");
+        }
+
+        let l21 = fs::read_to_string(root.join("specs/completed/plan_l21.md"))
+            .expect("plan_l21 should load");
+        for required in [
+            "active-turn lifecycle",
+            "capability activity",
+            "inline expansion",
+            "MCP startup",
+            "sandbox preparation",
+        ] {
+            assert!(l21.contains(required), "plan_l21 missing {required}");
+        }
+
+        let l22 = fs::read_to_string(root.join("specs/completed/plan_l22.md"))
+            .expect("plan_l22 should load");
+        for required in [
+            "Codex-style TUI parity",
+            "primary local operator UX",
+            "primary external human-facing channel UX",
+            "scripted/operator automation",
+            "PTY/manual acceptance guidance",
+        ] {
+            assert!(l22.contains(required), "plan_l22 missing {required}");
+        }
+    }
+
+    #[test]
+    fn l23_l27_define_completion_grade_tui_finish_series() {
+        let root = repo_root();
+
+        let l23 = fs::read_to_string(root.join("specs/plan_l23.md")).expect("plan_l23 should load");
+        for required in [
+            "umbrella/reference",
+            "plan_l24.md",
+            "plan_l25.md",
+            "plan_l26.md",
+            "plan_l27.md",
+            "staged execution plans",
+        ] {
+            assert!(l23.contains(required), "plan_l23 missing {required}");
+        }
+
+        let l24 = fs::read_to_string(root.join("specs/completed/plan_l24.md"))
+            .expect("plan_l24 should load");
+        for required in [
+            "shell data model",
+            "HistoryCells",
+            "TranscriptSurfaceView",
+            "ShellSnapshot",
+            "stable conversation-cell model",
+        ] {
+            assert!(l24.contains(required), "plan_l24 missing {required}");
+        }
+
+        let l25 = fs::read_to_string(root.join("specs/completed/plan_l25.md"))
+            .expect("plan_l25 should load");
+        for required in [
+            "Codex-parity shell UX",
+            "bottom pane",
+            "slash popup",
+            "keyboard-first contract",
+            "interaction rhythm",
+        ] {
+            assert!(l25.contains(required), "plan_l25 missing {required}");
+        }
+
+        let l26 = fs::read_to_string(root.join("specs/completed/plan_l26.md"))
+            .expect("plan_l26 should load");
+        for required in [
+            "live assistant turn",
+            "capability attachment",
+            "failure, retry, and cancel",
+            "stable cell identity",
+            "append-only transcript behavior",
+        ] {
+            assert!(l26.contains(required), "plan_l26 missing {required}");
+        }
+
+        let l27 = fs::read_to_string(root.join("specs/completed/plan_l27.md"))
+            .expect("plan_l27 should load");
+        for required in [
+            "PTY acceptance lane",
+            "TUI = primary local operator shell",
+            "Telegram = primary external human-facing acceptance lane",
+            "CLI = scripted/operator automation surface",
+            "l24-l27",
+        ] {
+            assert!(l27.contains(required), "plan_l27 missing {required}");
+        }
+    }
+
+    #[test]
+    fn l22_docs_define_codex_style_local_acceptance_and_surface_split() {
+        let root = repo_root();
+
+        let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
+        for required in [
+            "Local operator acceptance lane",
+            "one full assistant response stream in place",
+            "one capability-backed turn",
+            "Ctrl+O",
+            "Codex-style operator shell",
+        ] {
+            assert!(tui.contains(required), "tui guide missing {required}");
+        }
+
+        let telegram_step = fs::read_to_string(root.join("docs/telegram-step-by-step.md"))
+            .expect("telegram step-by-step should load");
+        for required in [
+            "primary local Codex-style operator surface",
+            "slash popup",
+            "active-turn rendering",
+            "draft preservation",
+        ] {
+            assert!(
+                telegram_step.contains(required),
+                "telegram step-by-step missing {required}"
+            );
+        }
+
+        let telegram_e2e = fs::read_to_string(root.join("docs/telegram-real-e2e.md"))
+            .expect("telegram real e2e should load");
+        for required in [
+            "primary local Codex-style operator surface",
+            "dynamic active turns",
+            "inline detail reveal",
+            "draft preservation",
+        ] {
+            assert!(
+                telegram_e2e.contains(required),
+                "telegram real e2e missing {required}"
+            );
+        }
+
+        let cli = fs::read_to_string(root.join("docs/cli.md")).expect("cli guide should load");
+        for required in [
+            "does not replace the TUI local operator lane",
+            "scripted/operator automation surface",
+            "Codex-style operator UX proof still belongs to `mosaic tui`",
+        ] {
+            assert!(cli.contains(required), "cli guide missing {required}");
+        }
+    }
+
+    #[test]
+    fn l21_docs_cover_dynamic_turns_and_inline_detail_reveal() {
+        let root = repo_root();
+
+        let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
+        for required in [
+            "one evolving assistant turn",
+            "submitted, queued, streaming, capability-active, waiting-on-capability, failed, canceled, and completed phases",
+            "Ctrl+O",
+            "MCP startup",
+            "sandbox preparation",
+        ] {
+            assert!(tui.contains(required), "tui guide missing {required}");
+        }
+
+        let testing =
+            fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
+        for required in [
+            "one assistant turn should evolve",
+            "`Ctrl+O` should expand the latest active turn",
+            "sandbox preparation",
+            "node waits",
+        ] {
+            assert!(
+                testing.contains(required),
+                "testing guide missing {required}"
+            );
+        }
+
+        let release =
+            fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
+        for required in [
+            "one assistant turn evolves in place",
+            "`Ctrl+O` expands the latest active turn",
+            "provider/tool/MCP/sandbox/node/workflow details inline",
+        ] {
+            assert!(
+                release.contains(required),
+                "release guide missing {required}"
+            );
+        }
+
+        let readme = fs::read_to_string(root.join("README.md")).expect("readme should load");
+        assert!(
+            readme.contains("Ctrl+O"),
+            "readme missing active-turn detail toggle guidance"
+        );
+    }
+
+    #[test]
+    fn l20_docs_cover_shell_density_busy_state_and_pty_guidance() {
+        let root = repo_root();
+
+        let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
+        for required in [
+            "denser Codex-style presentation",
+            "busy / send-disabled feedback",
+            "slash popup anchored to the bottom pane",
+            "Release-Grade PTY Acceptance Run",
+        ] {
+            assert!(tui.contains(required), "tui guide missing {required}");
+        }
+
+        let testing =
+            fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
+        for required in [
+            "shell chrome stays compact",
+            "slash popup stays visually anchored to the bottom pane",
+            "busy / send-disabled state",
+            "documented acceptance run",
+        ] {
+            assert!(
+                testing.contains(required),
+                "testing guide missing {required}"
+            );
+        }
+
+        let release =
+            fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
+        for required in [
+            "compact and transcript-first",
+            "slash command popup near the bottom pane",
+            "busy / send-disabled state",
+            "PTY-style acceptance run",
+        ] {
+            assert!(
+                release.contains(required),
+                "release guide missing {required}"
+            );
         }
     }
 
@@ -3935,9 +4402,9 @@ mod tests {
 
         let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
         for required in [
-            "/mosaic adapter status",
-            "/mosaic node list",
-            "/mosaic node show <id>",
+            "/adapter status",
+            "/node list",
+            "/node show <id>",
             "capability proof",
             "execution target",
         ] {
@@ -3948,8 +4415,8 @@ mod tests {
             fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
         for required in [
             "CLI, TUI, Telegram",
-            "/mosaic adapter status",
-            "/mosaic node list",
+            "/adapter status",
+            "/node list",
             "execution_target=mcp_server",
             "inline capability proof",
         ] {
@@ -3962,9 +4429,9 @@ mod tests {
         let release =
             fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
         for required in [
-            "/mosaic adapter status",
-            "/mosaic node list",
-            "/mosaic node show <id>",
+            "/adapter status",
+            "/node list",
+            "/node show <id>",
             "execution target",
             "CLI, TUI, or Telegram sign-off",
         ] {
@@ -4011,6 +4478,71 @@ mod tests {
             assert!(
                 node_readme.contains(required),
                 "node readme missing {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn l27_docs_freeze_release_grade_pty_lane_and_surface_split() {
+        let root = repo_root();
+
+        let tui = fs::read_to_string(root.join("docs/tui.md")).expect("tui guide should load");
+        for required in [
+            "Release-Grade PTY Acceptance Run",
+            "Current documented PTY proof in this workspace",
+            "one successful streaming turn",
+            "one successful capability-backed turn",
+        ] {
+            assert!(tui.contains(required), "tui guide missing {required}");
+        }
+
+        let testing =
+            fs::read_to_string(root.join("docs/testing.md")).expect("testing guide should load");
+        for required in [
+            "documented acceptance run",
+            "partial PTY probe",
+            "one successful streaming assistant turn",
+            "one successful capability-backed turn with attached activity",
+        ] {
+            assert!(
+                testing.contains(required),
+                "testing guide missing {required}"
+            );
+        }
+
+        let release =
+            fs::read_to_string(root.join("docs/release.md")).expect("release guide should load");
+        for required in [
+            "record at least one PTY-style acceptance run",
+            "record which PTY steps were actually exercised",
+            "one successful streaming turn in place",
+            "one successful capability-backed turn",
+        ] {
+            assert!(
+                release.contains(required),
+                "release guide missing {required}"
+            );
+        }
+
+        let readme = fs::read_to_string(root.join("README.md")).expect("readme should load");
+        for required in [
+            "release-grade local TUI proof now requires one documented PTY acceptance run",
+            "Telegram is the strongest real external interactive GUI acceptance surface",
+            "the CLI is the scripted/operator automation surface",
+        ] {
+            assert!(readme.contains(required), "readme missing {required}");
+        }
+
+        let tui_readme =
+            fs::read_to_string(root.join("crates/tui/README.md")).expect("tui readme should load");
+        for required in [
+            "real PTY/operator acceptance run",
+            "successful provider-backed turn",
+            "release-grade local shell acceptance",
+        ] {
+            assert!(
+                tui_readme.contains(required),
+                "tui crate readme missing {required}"
             );
         }
     }

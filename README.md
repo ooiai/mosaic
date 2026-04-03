@@ -215,8 +215,10 @@ The operator-first path is:
 4. `mosaic config show`
 5. `mosaic model list`
 6. `mosaic tui`
-7. Use `/start`, `/help`, or `/mosaic help` inside a real channel or the interactive console.
+7. Use `/help` inside the TUI, or `/start`, `/help`, and `/mosaic help` inside a real channel.
 8. Inspect the resulting run with `mosaic inspect .mosaic/runs/<run-id>.json`
+
+The local TUI now follows a denser Codex-style shell model: compact status chrome, one transcript, one bottom composer, slash-popup command discovery, collapsed execution cards, `Ctrl+O` turn-detail overlays, and `Ctrl+T` transcript overlays.
 
 For the Telegram-first real acceptance lane, start with:
 
@@ -226,10 +228,16 @@ For the Telegram-first real acceptance lane, start with:
 
 Current operator reality:
 
-- `mosaic tui` is the primary local chat-first operator surface today and routes normal turns through the attached Gateway/runtime
+- `mosaic tui` is the primary local Codex-style operator shell today and routes normal turns through the attached Gateway/runtime
+- release-grade local TUI proof now requires one documented PTY acceptance run covering startup input, slash popup, `Tab`, direct chat submission, one successful streaming turn, one successful capability-backed turn, detail inspection, and retry/cancel behavior
+- transcript execution feedback now defaults to collapsed cards with next-step guidance on failures
+- the local TUI shell uses denser Codex-style chrome with a bottom-pane-centered slash popup and explicit busy / send-disabled state
+- the TUI transcript now keeps one active assistant turn that evolves through queue/stream/capability/failure/completion states, with `Ctrl+O` revealing nested detail blocks inline
 - Telegram is the strongest real external interactive GUI acceptance surface and still carries the release-facing channel lane
+- the CLI is the scripted/operator automation surface for setup, validation, inspect, incidents, webhook management, and release gating
 - if a change affects TUI slash commands, transcript behavior, inline capability visibility, or local operator diagnostics, update `docs/tui.md`, `docs/getting-started.md`, `docs/testing.md`, and `docs/release.md` in the same change set
 - if a change affects Telegram commands, capability discovery, skills, attachments, sandbox readiness, or multi-bot behavior, update the Telegram guides and matching examples in the same change set
+- if a change affects scripted operator workflows, release gating, or setup/inspect commands, update `docs/cli.md`, `docs/testing.md`, and `docs/release.md` in the same change set
 
 For release evidence, use:
 
@@ -302,9 +310,13 @@ The shared operator vocabulary lives in:
 
 ## Current Operator Surface
 
-The repository currently includes a chat-first terminal control-plane slice.
+The repository currently includes:
 
-Until TUI reaches the same product completeness and release proof as the Telegram lane, Telegram remains the primary real interactive acceptance surface for GUI-style operator validation.
+- a Codex-style local operator shell in TUI
+- a release-grade external human-facing lane in Telegram
+- a scripted/operator automation lane in CLI
+
+TUI now owns the primary local operator UX. Telegram remains the primary real external interactive acceptance surface for channel-facing validation.
 
 <details open>
 <summary><strong>TUI capabilities</strong></summary>
@@ -313,8 +325,10 @@ Until TUI reaches the same product completeness and release proof as the Telegra
 - compact header with workspace, session, profile, runtime, and gateway state
 - bottom composer for normal turns and slash commands
 - popup command catalog opened by `/`
+- no persistent session/model/inspect panes; operator actions render back into the transcript
 - inline tool, skill, workflow, and provider/runtime event cards
-- real run actions such as `/mosaic run stop`, `/mosaic run retry`, `/mosaic inspect last`, `/mosaic tool`, `/mosaic skill`, and `/mosaic workflow`
+- one active assistant turn with inline detail reveal for provider/tool/MCP/skill/workflow/sandbox/node activity
+- real run actions such as `/run stop`, `/run retry`, `/inspect last`, `/tool`, `/skill`, and `/workflow`
 
 </details>
 
@@ -330,6 +344,7 @@ Until TUI reaches the same product completeness and release proof as the Telegra
 | `PageUp` / `PageDown` | Scroll the transcript               |
 | `Esc`               | Clear the draft or close the popup    |
 | `F1` / `?`          | Inject the command reference inline   |
+| `Ctrl+O`            | Expand or collapse the latest turn details |
 | `Ctrl+C`            | Quit                                  |
 
 </details>
@@ -339,21 +354,21 @@ Until TUI reaches the same product completeness and release proof as the Telegra
 
 | Command                 | Effect                                        |
 | ----------------------- | --------------------------------------------- |
-| `/mosaic`                 | Show the grouped command catalog in the transcript |
-| `/mosaic help [category]` | Narrow the catalog to one command family          |
-| `/mosaic session list`    | List known sessions inline                        |
-| `/mosaic session show`    | Show current session metadata inline              |
-| `/mosaic model list`      | List available runtime profiles                   |
-| `/mosaic model use <profile>` | Change the profile for future turns          |
-| `/mosaic gateway status`  | Show gateway and node summary                     |
-| `/mosaic run stop`        | Cancel the active run                             |
-| `/mosaic run retry`       | Retry the last run                                |
-| `/mosaic inspect last`    | Inspect the latest run inline                     |
-| `/mosaic tool <name> <input>` | Submit an explicit tool run                 |
-| `/mosaic skill <name> <input>` | Submit an explicit skill run               |
-| `/mosaic workflow <name> <input>` | Submit an explicit workflow run         |
+| `/help [category]`      | Show the grouped command catalog in the transcript |
+| `/new [id]`             | Create or stage a new active session inline        |
+| `/session list`         | List known sessions inline                         |
+| `/session show`         | Show current session metadata inline               |
+| `/model list`           | List available runtime profiles                    |
+| `/model use <profile>`  | Change the profile for future turns                |
+| `/gateway status`       | Show gateway and node summary                      |
+| `/run stop`             | Cancel the active run                              |
+| `/run retry`            | Retry the last run                                 |
+| `/inspect last`         | Inspect the latest run inline                      |
+| `/tool <name> <input>`  | Submit an explicit tool run                        |
+| `/skill <name> <input>` | Submit an explicit skill run                       |
+| `/workflow <name> <input>` | Submit an explicit workflow run                |
 
-Short aliases such as `/help`, `/session ...`, `/model ...`, `/sandbox ...`, `/inspect ...`, `/tool ...`, `/skill ...`, and `/workflow ...` still work for operator speed, but `/mosaic ...` is the canonical documented contract.
+`/mosaic ...` remains supported in the TUI as a compatibility alias, but bare slash commands are the canonical documented contract for the local shell.
 
 </details>
 

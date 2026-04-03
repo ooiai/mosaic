@@ -1,13 +1,42 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{cell::RefCell, collections::BTreeMap, path::PathBuf};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 use mosaic_control_protocol::RunDetailDto;
 use mosaic_runtime::events::RunEvent;
 use mosaic_session_core::{
     SessionRecord as StoredSessionRecord, TranscriptMessage, TranscriptRole, session_route_for_id,
 };
+use ratatui::text::Line;
 
+use crate::app_event::{AppEvent, interpret_key_event};
+pub use crate::bottom_pane::{BottomPaneState, InputMode};
+use crate::chat_widget::{ChatView, TranscriptSurfaceView};
+use crate::command_popup::CommandPopupView;
+use crate::composer::ComposerView;
+use crate::history_cell::{HistoryCellKey, HistoryCells};
 use crate::mock;
+use crate::overlays::{
+    OverlayStackView, OverlayState, TranscriptOverlayView, TurnDetailOverlayView,
+};
+use crate::shell_view::{ShellChromeView, ShellSnapshot};
+use crate::status_bar::{StatusBarView, display_workspace_path};
+pub use crate::transcript::{
+    ActiveTurn, TimelineEntry, TimelineKind, TranscriptBlock, TranscriptDetail,
+    TranscriptDetailKind, TranscriptState, TranscriptView, TurnPhase,
+};
+
+#[derive(Debug, Clone)]
+struct TranscriptOverlayCache {
+    key: (usize, Option<usize>, bool),
+    lines: Vec<Line<'static>>,
+}
+
+#[derive(Debug, Clone)]
+struct DetailOverlayCache {
+    key: (usize, Option<usize>, bool, Option<HistoryCellKey>),
+    title: String,
+    lines: Vec<Line<'static>>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandCategory {
@@ -64,173 +93,213 @@ impl CommandCategory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandSpec {
     pub command: &'static str,
+    pub arg_hint: &'static str,
     pub category: CommandCategory,
     pub summary: &'static str,
-    pub usage: &'static str,
     pub detail: &'static str,
+    pub aliases: &'static [&'static str],
 }
 
-pub const LOCAL_COMMANDS: [CommandSpec; 23] = [
+impl CommandSpec {
+    pub fn usage(self) -> String {
+        if self.arg_hint.is_empty() {
+            self.command.to_owned()
+        } else {
+            format!("{} {}", self.command, self.arg_hint)
+        }
+    }
+}
+
+pub const LOCAL_COMMANDS: [CommandSpec; 22] = [
     CommandSpec {
-        command: "/mosaic",
-        category: CommandCategory::Ui,
-        summary: "Show the Mosaic command catalog inline",
-        usage: "/mosaic",
-        detail: "Renders the grouped Mosaic command catalog for this gateway-backed TUI session directly into the transcript.",
-    },
-    CommandSpec {
-        command: "/mosaic help",
+        command: "/help",
+        arg_hint: "[category]",
         category: CommandCategory::Ui,
         summary: "Show grouped help or one command category",
-        usage: "/mosaic help [category]",
-        detail: "Lists grouped commands for this TUI session or narrows the output to one category such as session, model, sandbox, tool, skill, workflow, gateway, node, adapter, or inspect.",
+        detail: "Renders the grouped TUI command catalog inline or narrows it to one category such as session, model, sandbox, tool, skill, workflow, gateway, node, adapter, or inspect.",
+        aliases: &["/mosaic", "/mosaic help"],
     },
     CommandSpec {
-        command: "/mosaic gateway status",
+        command: "/new",
+        arg_hint: "[id]",
+        category: CommandCategory::Session,
+        summary: "Create a fresh active session",
+        detail: "Creates or stages a fresh active session. If no id is supplied, the TUI generates one and keeps the operator inside the same transcript shell.",
+        aliases: &["/session new", "/mosaic session new"],
+    },
+    CommandSpec {
+        command: "/gateway status",
+        arg_hint: "",
         category: CommandCategory::Gateway,
         summary: "Show gateway transport and readiness",
-        usage: "/mosaic gateway status",
         detail: "Prints the current gateway transport, readiness, node summary, and adapter state into the transcript. Short alias: /gateway status.",
+        aliases: &["/mosaic gateway status"],
     },
     CommandSpec {
-        command: "/mosaic adapter status",
+        command: "/adapter status",
+        arg_hint: "",
         category: CommandCategory::Adapter,
         summary: "Show adapter readiness and outbound state",
-        usage: "/mosaic adapter status",
         detail: "Prints registered adapters, bot bindings, outbound readiness, and channel-facing detail inline in the transcript. Short alias: /adapter status.",
+        aliases: &["/mosaic adapter status"],
     },
     CommandSpec {
-        command: "/mosaic node list",
+        command: "/node list",
+        arg_hint: "",
         category: CommandCategory::Node,
         summary: "List node health and affinity state",
-        usage: "/mosaic node list",
         detail: "Shows registered nodes, health, disconnect state, and whether the current session is pinned to a specific node. Short alias: /node list.",
+        aliases: &["/mosaic node list"],
     },
     CommandSpec {
-        command: "/mosaic node show <id>",
+        command: "/node show",
+        arg_hint: "<id>",
         category: CommandCategory::Node,
         summary: "Inspect one node and its declared capabilities",
-        usage: "/mosaic node show <id>",
         detail: "Prints one node's transport, platform, health, disconnect reason, and declared capabilities into the transcript. Short alias: /node show <id>.",
+        aliases: &["/mosaic node show"],
     },
     CommandSpec {
-        command: "/mosaic session list",
+        command: "/session list",
+        arg_hint: "",
         category: CommandCategory::Session,
         summary: "List known sessions",
-        usage: "/mosaic session list",
         detail: "Shows the sessions currently loaded into this TUI context so the operator can switch without leaving chat. Short alias: /session list.",
+        aliases: &["/mosaic session list"],
     },
     CommandSpec {
-        command: "/mosaic session new <id>",
-        category: CommandCategory::Session,
-        summary: "Create or stage a new session",
-        usage: "/mosaic session new <id>",
-        detail: "Creates a new active session target. The next submitted turn persists the session if it does not already exist. Short alias: /session new <id>.",
-    },
-    CommandSpec {
-        command: "/mosaic session show",
+        command: "/session show",
+        arg_hint: "",
         category: CommandCategory::Session,
         summary: "Explain the current session binding",
-        usage: "/mosaic session show",
         detail: "Prints the active session route, run ids, channel metadata, memory summary, compressed context, and references. Short alias: /session show.",
+        aliases: &["/mosaic session show"],
     },
     CommandSpec {
-        command: "/mosaic session switch <id>",
+        command: "/session switch",
+        arg_hint: "<id>",
         category: CommandCategory::Session,
         summary: "Switch the active conversation",
-        usage: "/mosaic session switch <id>",
         detail: "Moves the composer to another session and refreshes that session from the gateway or local runtime store. Short alias: /session switch <id>.",
+        aliases: &["/mosaic session switch"],
     },
     CommandSpec {
-        command: "/mosaic model list",
+        command: "/model list",
+        arg_hint: "",
         category: CommandCategory::Model,
         summary: "List available runtime profiles",
-        usage: "/mosaic model list",
         detail: "Prints configured runtime profiles with provider type and model so the next turn can be scheduled intentionally. Short aliases: /model list and /profile list.",
+        aliases: &[
+            "/mosaic model list",
+            "/profile list",
+            "/mosaic profile list",
+        ],
     },
     CommandSpec {
-        command: "/mosaic model use <profile>",
+        command: "/model use",
+        arg_hint: "<profile>",
         category: CommandCategory::Model,
         summary: "Switch the profile for future turns",
-        usage: "/mosaic model use <profile>",
         detail: "Updates the active profile used by interactive submissions; the next message will use the new profile. Short aliases: /model use <profile> and /profile <name>.",
+        aliases: &[
+            "/mosaic model use",
+            "/profile",
+            "/profile use",
+            "/mosaic profile",
+            "/mosaic profile use",
+        ],
     },
     CommandSpec {
-        command: "/mosaic model show",
+        command: "/model show",
+        arg_hint: "",
         category: CommandCategory::Model,
         summary: "Show the current profile and model binding",
-        usage: "/mosaic model show",
         detail: "Explains which runtime profile is selected for the next turn and which provider/model the current session last used. Short aliases: /model show and /profile show.",
+        aliases: &[
+            "/mosaic model show",
+            "/profile show",
+            "/mosaic profile show",
+        ],
     },
     CommandSpec {
-        command: "/mosaic run stop",
+        command: "/run stop",
+        arg_hint: "",
         category: CommandCategory::Run,
         summary: "Cancel the active run for this session",
-        usage: "/mosaic run stop",
         detail: "Sends a real cancel request to the attached gateway for the current run when one is active. Short alias: /run stop.",
+        aliases: &["/mosaic run stop"],
     },
     CommandSpec {
-        command: "/mosaic run retry",
+        command: "/run retry",
+        arg_hint: "",
         category: CommandCategory::Run,
         summary: "Retry the last completed run",
-        usage: "/mosaic run retry",
         detail: "Requests a real retry from the attached gateway using the last known gateway run id for this session. Short alias: /run retry.",
+        aliases: &["/mosaic run retry"],
     },
     CommandSpec {
-        command: "/mosaic sandbox status",
+        command: "/sandbox status",
+        arg_hint: "",
         category: CommandCategory::Sandbox,
         summary: "Show workspace sandbox lifecycle status",
-        usage: "/mosaic sandbox status",
         detail: "Prints Python and Node sandbox strategies, install policies, runtime availability, and current env counts into the transcript. Short alias: /sandbox status.",
+        aliases: &["/mosaic sandbox status"],
     },
     CommandSpec {
-        command: "/mosaic sandbox inspect <env>",
+        command: "/sandbox inspect",
+        arg_hint: "<env>",
         category: CommandCategory::Sandbox,
         summary: "Inspect one sandbox env record",
-        usage: "/mosaic sandbox inspect <env>",
         detail: "Loads one sandbox env record and renders lifecycle state, install policy, dependencies, and failure details inline. Short alias: /sandbox inspect <env>.",
+        aliases: &["/mosaic sandbox inspect"],
     },
     CommandSpec {
-        command: "/mosaic sandbox rebuild <env>",
+        command: "/sandbox rebuild",
+        arg_hint: "<env>",
         category: CommandCategory::Sandbox,
         summary: "Rebuild a sandbox env",
-        usage: "/mosaic sandbox rebuild <env>",
         detail: "Deletes and recreates one sandbox env so the next capability run can reuse a fresh local execution environment. Short alias: /sandbox rebuild <env>.",
+        aliases: &["/mosaic sandbox rebuild"],
     },
     CommandSpec {
-        command: "/mosaic sandbox clean",
+        command: "/sandbox clean",
+        arg_hint: "",
         category: CommandCategory::Sandbox,
         summary: "Clean sandbox run and attachment workdirs",
-        usage: "/mosaic sandbox clean",
         detail: "Removes sandbox run workdirs and attachment workdirs without leaving the chat transcript. Short alias: /sandbox clean.",
+        aliases: &["/mosaic sandbox clean"],
     },
     CommandSpec {
-        command: "/mosaic inspect last",
+        command: "/inspect last",
+        arg_hint: "",
         category: CommandCategory::Inspect,
         summary: "Inspect the most recent run inline",
-        usage: "/mosaic inspect last",
         detail: "Fetches the most recent run detail for the active session and renders the summary inline in the transcript. Short alias: /inspect last.",
+        aliases: &["/mosaic inspect last"],
     },
     CommandSpec {
-        command: "/mosaic tool <name> <input>",
+        command: "/tool",
+        arg_hint: "<name> <input>",
         category: CommandCategory::Tool,
         summary: "Invoke a tool explicitly",
-        usage: "/mosaic tool <name> <input>",
         detail: "Submits a real run that explicitly targets one tool and shows the capability events inline in the transcript. Short alias: /tool <name> <input>.",
+        aliases: &["/mosaic tool"],
     },
     CommandSpec {
-        command: "/mosaic skill <name> <input>",
+        command: "/skill",
+        arg_hint: "<name> <input>",
         category: CommandCategory::Skill,
         summary: "Invoke a skill explicitly",
-        usage: "/mosaic skill <name> <input>",
         detail: "Submits a real run that explicitly targets one skill and streams the result back into the active transcript. Short alias: /skill <name> <input>.",
+        aliases: &["/mosaic skill"],
     },
     CommandSpec {
-        command: "/mosaic workflow <name> <input>",
+        command: "/workflow",
+        arg_hint: "<name> <input>",
         category: CommandCategory::Workflow,
         summary: "Invoke a workflow explicitly",
-        usage: "/mosaic workflow <name> <input>",
         detail: "Submits a real run that explicitly targets one workflow and renders step activity inline in the transcript. Short alias: /workflow <name> <input>.",
+        aliases: &["/mosaic workflow"],
     },
 ];
 
@@ -269,18 +338,24 @@ pub enum AppMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InputMode {
-    Chat,
-    Command,
-    Search,
+pub enum ShellState {
+    Idle,
+    Composing,
+    Commanding,
+    Running,
+    TranscriptOverlay,
+    TurnDetailOverlay,
 }
 
-impl InputMode {
+impl ShellState {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Chat => "chat",
-            Self::Command => "command",
-            Self::Search => "search",
+            Self::Idle => "idle",
+            Self::Composing => "composing",
+            Self::Commanding => "command",
+            Self::Running => "running",
+            Self::TranscriptOverlay => "transcript",
+            Self::TurnDetailOverlay => "detail",
         }
     }
 }
@@ -297,62 +372,15 @@ pub struct SkillOption {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Surface {
-    Console,
-    Resume,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResumeScope {
-    Local,
-    Remote,
-    All,
-}
-
-impl ResumeScope {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Local => Self::Remote,
-            Self::Remote => Self::All,
-            Self::All => Self::Local,
-        }
-    }
-
-    pub fn previous(self) -> Self {
-        match self {
-            Self::Local => Self::All,
-            Self::Remote => Self::Local,
-            Self::All => Self::Remote,
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Local => "Local",
-            Self::Remote => "Remote",
-            Self::All => "All",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Focus {
-    Sessions,
-    Timeline,
-    Composer,
-    Observability,
-}
-
-impl Focus {
-    pub fn next(self) -> Self {
-        match self {
-            Self::Sessions => Self::Timeline,
-            Self::Timeline => Self::Composer,
-            Self::Composer => Self::Observability,
-            Self::Observability => Self::Sessions,
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSurfaceView {
+    pub query: Option<String>,
+    pub matches: Vec<CommandSpec>,
+    pub selected: Option<CommandSpec>,
+    pub selected_index: usize,
+    pub skill_completion: Option<String>,
+    pub completion_suffix: Option<String>,
+    pub popup: CommandPopupView,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -395,32 +423,12 @@ fn runtime_status_is_busy(status: &str) -> bool {
     matches!(status, "running" | "streaming" | "canceling")
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TimelineKind {
-    Operator,
-    Agent,
-    Tool,
-    System,
-}
-
-impl TimelineKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Operator => "operator",
-            Self::Agent => "agent",
-            Self::Tool => "tool",
-            Self::System => "system",
-        }
+fn active_turn_matches_run(active_turn: &ActiveTurn, run_id: Option<&str>) -> bool {
+    match (active_turn.cell.run_id.as_deref(), run_id) {
+        (_, None) => true,
+        (None, Some(_)) => true,
+        (Some(existing), Some(incoming)) => existing == incoming,
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct TimelineEntry {
-    pub timestamp: String,
-    pub kind: TimelineKind,
-    pub actor: String,
-    pub title: String,
-    pub body: String,
 }
 
 #[derive(Debug, Clone)]
@@ -448,6 +456,7 @@ pub struct SessionRecord {
     pub references: Vec<String>,
     pub streaming_preview: Option<String>,
     pub streaming_run_id: Option<String>,
+    pub active_turn: Option<ActiveTurn>,
     pub timeline: Vec<TimelineEntry>,
 }
 
@@ -465,18 +474,15 @@ pub struct App {
     pub workspace_path: String,
     pub sessions: Vec<SessionRecord>,
     pub activity: Vec<ActivityEntry>,
-    pub surface: Surface,
     pub selected_session: usize,
-    pub resume_scope: ResumeScope,
-    pub resume_query: String,
-    pub resume_search: bool,
-    pub command_menu_index: usize,
-    pub show_console_history: bool,
-    pub focus: Focus,
-    pub show_observability: bool,
-    pub show_help_overlay: bool,
-    pub timeline_scroll: u16,
-    pub observability_scroll: u16,
+    pub bottom_pane: BottomPaneState,
+    pub overlay: OverlayState,
+    pub transcript_overlay_open: bool,
+    pub detail_overlay_open: bool,
+    pub detail_overlay_target: Option<HistoryCellKey>,
+    pub transcript: TranscriptState,
+    pub transcript_overlay: TranscriptState,
+    pub detail_overlay: TranscriptState,
     pub gateway_connected: bool,
     pub gateway_target: String,
     pub runtime_status: String,
@@ -492,6 +498,8 @@ pub struct App {
     pub node_summary: Option<String>,
     pub node_detail: Option<String>,
     heartbeat: usize,
+    transcript_overlay_cache: RefCell<Option<TranscriptOverlayCache>>,
+    detail_overlay_cache: RefCell<Option<DetailOverlayCache>>,
 }
 
 impl App {
@@ -513,18 +521,15 @@ impl App {
             workspace_path,
             sessions: mock::sessions(),
             activity: mock::activity_feed(),
-            surface: Surface::Console,
             selected_session: 0,
-            resume_scope: ResumeScope::Local,
-            resume_query: String::new(),
-            resume_search: false,
-            command_menu_index: 0,
-            show_console_history: true,
-            focus: Focus::Composer,
-            show_observability: false,
-            show_help_overlay: false,
-            timeline_scroll: 0,
-            observability_scroll: 0,
+            bottom_pane: BottomPaneState::default(),
+            overlay: OverlayState::None,
+            transcript_overlay_open: false,
+            detail_overlay_open: false,
+            detail_overlay_target: None,
+            transcript: TranscriptState::default(),
+            transcript_overlay: TranscriptState::default(),
+            detail_overlay: TranscriptState::default(),
             gateway_connected: true,
             gateway_target: "local".to_owned(),
             runtime_status: "warm".to_owned(),
@@ -540,6 +545,8 @@ impl App {
             node_summary: None,
             node_detail: None,
             heartbeat: 0,
+            transcript_overlay_cache: RefCell::new(None),
+            detail_overlay_cache: RefCell::new(None),
         };
         if start_in_resume {
             app.push_system_entry(
@@ -579,18 +586,15 @@ impl App {
                     session_id, profile, model
                 ),
             }],
-            surface: Surface::Console,
             selected_session: 0,
-            resume_scope: ResumeScope::Local,
-            resume_query: String::new(),
-            resume_search: false,
-            command_menu_index: 0,
-            show_console_history: true,
-            focus: Focus::Composer,
-            show_observability: false,
-            show_help_overlay: false,
-            timeline_scroll: 0,
-            observability_scroll: 0,
+            bottom_pane: BottomPaneState::default(),
+            overlay: OverlayState::None,
+            transcript_overlay_open: false,
+            detail_overlay_open: false,
+            detail_overlay_target: None,
+            transcript: TranscriptState::default(),
+            transcript_overlay: TranscriptState::default(),
+            detail_overlay: TranscriptState::default(),
             gateway_connected: true,
             gateway_target: "local".to_owned(),
             runtime_status: "idle".to_owned(),
@@ -606,6 +610,8 @@ impl App {
             node_summary: None,
             node_detail: None,
             heartbeat: 0,
+            transcript_overlay_cache: RefCell::new(None),
+            detail_overlay_cache: RefCell::new(None),
         };
         if start_in_resume {
             app.push_system_entry(
@@ -622,6 +628,14 @@ impl App {
 
     pub fn active_profile(&self) -> &str {
         &self.selected_profile
+    }
+
+    pub fn control_model(&self) -> &str {
+        &self.control_model
+    }
+
+    pub fn gateway_connected(&self) -> bool {
+        self.gateway_connected
     }
 
     pub fn set_extension_state(
@@ -664,6 +678,20 @@ impl App {
     ) {
         let draft = self.active_session().draft.clone();
         let unread = self.active_session().unread;
+        let preserved_turn = self
+            .sessions
+            .get(self.selected_session)
+            .and_then(|existing| {
+                existing
+                    .active_turn
+                    .as_ref()
+                    .map(|active| active.cell.clone())
+            })
+            .or_else(|| {
+                self.sessions
+                    .get(self.selected_session)
+                    .and_then(preserved_expandable_turn)
+            });
         let run_label = session.run.status.label();
         let state = session_state_from_run_label(run_label);
         self.runtime_status = runtime_status_from_run_label(run_label).to_owned();
@@ -677,10 +705,21 @@ impl App {
                     view.timeline.push(transcript_entry(message));
                 }
             }
+            if runtime_status_is_busy(run_label)
+                && let Some(turn) = preserved_turn
+                && view.active_turn.is_none()
+                && !view.timeline.iter().any(|entry| entry.phase.is_some())
+            {
+                view.active_turn = Some(ActiveTurn {
+                    cell: turn,
+                    revision: 1,
+                });
+            }
             view.transcript_len = transcript_len;
             if !runtime_status_is_busy(run_label) {
                 view.streaming_preview = None;
                 view.streaming_run_id = None;
+                view.active_turn = None;
             }
             view.id = session.id.clone();
             view.title = session.title.clone();
@@ -719,77 +758,350 @@ impl App {
                 .map(|reference| format!("{} ({})", reference.session_id, reference.reason))
                 .collect();
         }
-
-        self.show_console_history = true;
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> AppAction {
-        if matches!(
+        let event = interpret_key_event(
             key,
-            KeyEvent {
-                code: KeyCode::Char('c'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
+            self.command_menu_active(),
+            self.command_menu_should_complete(),
+            self.active_draft().is_empty(),
+        );
+
+        match event {
+            AppEvent::Quit => AppAction::Quit,
+            AppEvent::OpenHelp => {
+                self.push_help(None);
+                AppAction::Continue
             }
-        ) {
-            return AppAction::Quit;
-        }
-
-        if matches!(key.code, KeyCode::F(1))
-            || (matches!(key.code, KeyCode::Char('?')) && self.active_draft().is_empty())
-        {
-            self.push_help(None);
-            return AppAction::Continue;
-        }
-
-        if self.command_menu_active() {
-            match key.code {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.select_next_command_match();
-                    return AppAction::Continue;
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.select_previous_command_match();
-                    return AppAction::Continue;
-                }
-                KeyCode::Tab if self.command_menu_should_complete() => {
-                    self.complete_selected_command();
-                    return AppAction::Continue;
-                }
-                _ => {}
+            AppEvent::ToggleTurnDetail => {
+                self.toggle_latest_turn_details();
+                AppAction::Continue
             }
-        }
-
-        match key.code {
-            KeyCode::Esc => {
-                if self.command_menu_active() || !self.active_draft().is_empty() {
+            AppEvent::ToggleTranscriptOverlay => {
+                self.toggle_transcript_overlay();
+                AppAction::Continue
+            }
+            AppEvent::CommandNext => {
+                self.select_next_command_match();
+                AppAction::Continue
+            }
+            AppEvent::CommandPrevious => {
+                self.select_previous_command_match();
+                AppAction::Continue
+            }
+            AppEvent::CommandComplete => {
+                self.complete_selected_command();
+                AppAction::Continue
+            }
+            AppEvent::ClearDraftOrCloseOverlay => {
+                if self.transcript_overlay_open {
+                    self.transcript_overlay_open = false;
+                    self.transcript_overlay.scroll_home();
+                    self.refresh_overlay_state();
+                } else if self.detail_overlay_open {
+                    self.detail_overlay_open = false;
+                    self.detail_overlay_target = None;
+                    self.detail_overlay.scroll_home();
+                    self.sync_detail_overlay_flags();
+                    self.refresh_overlay_state();
+                } else if self.command_menu_active() || !self.active_draft().is_empty() {
                     self.active_session_mut().draft.clear();
-                    self.command_menu_index = 0;
+                    self.bottom_pane.reset_command_selection();
+                    self.refresh_overlay_state();
                 }
                 AppAction::Continue
             }
-            KeyCode::PageDown => {
-                self.timeline_scroll = self.timeline_scroll.saturating_add(5);
+            AppEvent::ScrollDown => {
+                if self.transcript_overlay_open {
+                    self.transcript_overlay.scroll_down(5);
+                } else if self.detail_overlay_open {
+                    self.detail_overlay.scroll_down(5);
+                } else {
+                    self.transcript.scroll_down(5);
+                }
                 AppAction::Continue
             }
-            KeyCode::PageUp => {
-                self.timeline_scroll = self.timeline_scroll.saturating_sub(5);
+            AppEvent::ScrollUp => {
+                if self.transcript_overlay_open {
+                    self.transcript_overlay.scroll_up(5);
+                } else if self.detail_overlay_open {
+                    self.detail_overlay.scroll_up(5);
+                } else {
+                    self.transcript.scroll_up(5);
+                }
                 AppAction::Continue
             }
-            KeyCode::Home => {
-                self.timeline_scroll = 0;
+            AppEvent::ScrollHome => {
+                if self.transcript_overlay_open {
+                    self.transcript_overlay.scroll_home();
+                } else if self.detail_overlay_open {
+                    self.detail_overlay.scroll_home();
+                } else {
+                    self.transcript.scroll_home();
+                }
                 AppAction::Continue
             }
-            KeyCode::End => {
-                self.timeline_scroll = self.timeline_scroll.saturating_add(20);
+            AppEvent::ScrollEnd => {
+                if self.transcript_overlay_open {
+                    self.transcript_overlay.scroll_end();
+                } else if self.detail_overlay_open {
+                    self.detail_overlay.scroll_end();
+                } else {
+                    self.transcript.scroll_end();
+                }
                 AppAction::Continue
             }
-            _ => self.handle_composer_key(key),
+            AppEvent::SubmitComposer => self.submit_composer(),
+            AppEvent::BackspaceDraft => {
+                self.active_session_mut().draft.pop();
+                self.bottom_pane.reset_command_selection();
+                self.refresh_overlay_state();
+                AppAction::Continue
+            }
+            AppEvent::InsertChar(character) => {
+                self.active_session_mut().draft.push(character);
+                self.bottom_pane.reset_command_selection();
+                self.refresh_overlay_state();
+                AppAction::Continue
+            }
+            AppEvent::None => AppAction::Continue,
         }
     }
 
     pub fn tick(&mut self) {
         self.heartbeat = self.heartbeat.wrapping_add(1);
+    }
+
+    fn start_or_refresh_active_turn(
+        &mut self,
+        run_id: Option<&str>,
+        phase: TurnPhase,
+        title: impl Into<String>,
+        body: impl Into<String>,
+    ) {
+        let title = title.into();
+        let body = body.into();
+        let timestamp = current_hhmm();
+        if let Some(session) = self.sessions.get_mut(self.selected_session) {
+            let reuse_existing = session
+                .active_turn
+                .as_ref()
+                .is_some_and(|active_turn| active_turn_matches_run(active_turn, run_id));
+            if !reuse_existing {
+                session.active_turn = Some(ActiveTurn {
+                    cell: new_active_turn_entry(&timestamp, run_id, phase, &title, &body),
+                    revision: 0,
+                });
+            }
+            let active_turn = session.active_turn.as_mut().expect("active turn to exist");
+            let entry = &mut active_turn.cell;
+            entry.timestamp = timestamp;
+            entry.kind = TimelineKind::Agent;
+            entry.block = TranscriptBlock::AssistantMessage;
+            entry.actor = "assistant".to_owned();
+            entry.title = title;
+            if !body.is_empty() || entry.body.trim().is_empty() {
+                entry.body = body.clone();
+            }
+            entry.run_id = run_id
+                .map(str::to_owned)
+                .or_else(|| entry.run_id.clone())
+                .or_else(|| session.streaming_run_id.clone());
+            entry.phase = Some(phase);
+
+            if matches!(phase, TurnPhase::Streaming) {
+                session.streaming_preview = Some(entry.body.clone());
+                session.streaming_run_id = entry.run_id.clone();
+            }
+            active_turn.revision = active_turn.revision.saturating_add(1);
+        }
+    }
+
+    fn append_active_turn_output(&mut self, run_id: &str, chunk: &str) {
+        let timestamp = current_hhmm();
+        if let Some(session) = self.sessions.get_mut(self.selected_session) {
+            let reuse_existing = session
+                .active_turn
+                .as_ref()
+                .is_some_and(|active_turn| active_turn_matches_run(active_turn, Some(run_id)));
+            if !reuse_existing {
+                session.active_turn = Some(ActiveTurn {
+                    cell: new_active_turn_entry(
+                        &timestamp,
+                        Some(run_id),
+                        TurnPhase::Streaming,
+                        "Assistant response",
+                        "",
+                    ),
+                    revision: 0,
+                });
+            }
+            let active_turn = session.active_turn.as_mut().expect("active turn to exist");
+            let entry = &mut active_turn.cell;
+            let was_streaming = matches!(entry.phase, Some(TurnPhase::Streaming));
+            entry.timestamp = timestamp;
+            entry.phase = Some(TurnPhase::Streaming);
+            entry.run_id = Some(run_id.to_owned());
+            entry.block = TranscriptBlock::AssistantMessage;
+            if !was_streaming {
+                entry.body.clear();
+            }
+            entry.body.push_str(chunk);
+            session.streaming_preview = Some(entry.body.clone());
+            session.streaming_run_id = Some(run_id.to_owned());
+            active_turn.revision = active_turn.revision.saturating_add(1);
+        }
+    }
+
+    fn attach_turn_detail(
+        &mut self,
+        run_id: Option<&str>,
+        phase: TurnPhase,
+        kind: TranscriptDetailKind,
+        title: impl Into<String>,
+        body: impl Into<String>,
+    ) {
+        let title = title.into();
+        let body = body.into();
+        let turn_title = match phase {
+            TurnPhase::Failed => "Assistant response",
+            TurnPhase::Canceled => "Assistant response",
+            _ => "Assistant response",
+        };
+        self.start_or_refresh_active_turn(run_id, phase, turn_title, "");
+
+        if let Some(session) = self.sessions.get_mut(self.selected_session) {
+            let Some(active_turn) = session.active_turn.as_mut() else {
+                return;
+            };
+            let entry = &mut active_turn.cell;
+            entry.timestamp = current_hhmm();
+            entry.phase = Some(phase);
+            if kind == TranscriptDetailKind::Failure {
+                entry.block = TranscriptBlock::AssistantMessage;
+            }
+            entry.details.push(TranscriptDetail { kind, title, body });
+            active_turn.revision = active_turn.revision.saturating_add(1);
+        }
+    }
+
+    fn finalize_active_turn(
+        &mut self,
+        run_id: &str,
+        phase: TurnPhase,
+        body: impl Into<String>,
+        detail: Option<(TranscriptDetailKind, String, String)>,
+    ) {
+        let body = body.into();
+        let mut committed_index = None;
+        if let Some(session) = self.sessions.get_mut(self.selected_session) {
+            let timestamp = current_hhmm();
+            let reuse_existing = session
+                .active_turn
+                .as_ref()
+                .is_some_and(|active_turn| active_turn_matches_run(active_turn, Some(run_id)));
+            let mut active_turn = if reuse_existing {
+                session.active_turn.take().expect("active turn to exist")
+            } else {
+                ActiveTurn {
+                    cell: new_active_turn_entry(
+                        &timestamp,
+                        Some(run_id),
+                        phase,
+                        "Assistant response",
+                        &body,
+                    ),
+                    revision: 0,
+                }
+            };
+            let entry = &mut active_turn.cell;
+            entry.timestamp = timestamp;
+            entry.phase = Some(phase);
+            entry.run_id = Some(run_id.to_owned());
+            entry.kind = TimelineKind::Agent;
+            entry.block = TranscriptBlock::AssistantMessage;
+            entry.actor = "assistant".to_owned();
+            entry.title = "Assistant response".to_owned();
+            if !body.is_empty() && (matches!(phase, TurnPhase::Completed) || entry.body.is_empty())
+            {
+                entry.body = body;
+            }
+            if let Some((kind, title, detail_body)) = detail {
+                entry.details.push(TranscriptDetail {
+                    kind,
+                    title,
+                    body: detail_body,
+                });
+            }
+            session.timeline.push(entry.clone());
+            trim_timeline(session);
+            committed_index = Some(session.timeline.len().saturating_sub(1));
+            session.streaming_preview = None;
+            session.streaming_run_id = None;
+            session.active_turn = None;
+        }
+        if self.detail_overlay_open
+            && matches!(self.detail_overlay_target, Some(HistoryCellKey::Active))
+        {
+            if let Some(index) = committed_index {
+                self.detail_overlay_target = Some(HistoryCellKey::Committed(index));
+            }
+        }
+        self.sync_detail_overlay_flags();
+    }
+
+    fn toggle_latest_turn_details(&mut self) {
+        let cells = self.history_cells();
+        let latest_turn_title = cells.latest_expandable_title().map(str::to_owned);
+        let activity = if let Some(title) = latest_turn_title {
+            self.transcript_overlay_open = false;
+            self.transcript_overlay.scroll_home();
+            self.detail_overlay_open = !self.detail_overlay_open;
+            if self.detail_overlay_open {
+                self.detail_overlay_target =
+                    cells.resolve_detail_target(self.detail_overlay_target);
+                self.detail_overlay.scroll_home();
+            } else {
+                self.detail_overlay_target = None;
+            }
+            self.sync_detail_overlay_flags();
+            self.refresh_overlay_state();
+            Some(format!(
+                "{} detail overlay for {}",
+                if self.detail_overlay_open {
+                    "Opened"
+                } else {
+                    "Closed"
+                },
+                title
+            ))
+        } else {
+            None
+        };
+        if let Some(activity) = activity {
+            self.push_activity("tui", activity);
+        }
+    }
+
+    fn toggle_transcript_overlay(&mut self) {
+        self.detail_overlay_open = false;
+        self.detail_overlay_target = None;
+        self.detail_overlay.scroll_home();
+        self.sync_detail_overlay_flags();
+        self.transcript_overlay_open = !self.transcript_overlay_open;
+        if self.transcript_overlay_open {
+            self.transcript_overlay.scroll_home();
+        }
+        self.refresh_overlay_state();
+        self.push_activity(
+            "tui",
+            if self.transcript_overlay_open {
+                "Opened transcript overlay".to_owned()
+            } else {
+                "Closed transcript overlay".to_owned()
+            },
+        );
     }
 
     pub fn apply_run_event(&mut self, event: RunEvent) {
@@ -798,13 +1110,19 @@ impl App {
                 self.runtime_status = "running".to_owned();
                 self.active_session_mut().state = SessionState::Active;
                 self.push_activity("runtime", "Run started");
-                self.push_timeline(
-                    TimelineKind::System,
-                    "runtime",
+                self.start_or_refresh_active_turn(
+                    Some(&run_id),
+                    TurnPhase::Queued,
+                    "Assistant response",
+                    "Waiting for assistant output.",
+                );
+                self.attach_turn_detail(
+                    Some(&run_id),
+                    TurnPhase::Queued,
+                    TranscriptDetailKind::Notice,
                     "Run started",
-                    &format!(
-                        "run_id={}
-Input: {}",
+                    format!(
+                        "run_id={}\ninput={}",
                         run_id,
                         truncate_for_timeline(&input, 180)
                     ),
@@ -815,11 +1133,12 @@ Input: {}",
                     "workflow",
                     format!("Workflow started: {} ({} steps)", name, step_count),
                 );
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "workflow",
-                    "Workflow started",
-                    &format!("Workflow: {}\nsteps={}", name, step_count),
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::CapabilityActive,
+                    TranscriptDetailKind::Workflow,
+                    format!("Workflow started: {}", name),
+                    format!("steps={step_count}\nroute=workflow"),
                 );
             }
             RunEvent::WorkflowStepStarted {
@@ -832,11 +1151,12 @@ Input: {}",
                     "workflow",
                     format!("Step started: {}.{} ({})", workflow, step, kind),
                 );
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "workflow",
-                    &format!("Workflow step: {}", step),
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::CapabilityActive,
+                    TranscriptDetailKind::Workflow,
+                    format!("Workflow step: {}", step),
+                    match summary {
                         Some(summary) => {
                             format!("workflow={}\nkind={}\n{}", workflow, kind, summary)
                         }
@@ -850,11 +1170,12 @@ Input: {}",
                 summary,
             } => {
                 self.push_activity("workflow", format!("Step finished: {}.{}", workflow, step));
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "workflow",
-                    &format!("Workflow step finished: {}", step),
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::WaitingOnCapability,
+                    TranscriptDetailKind::Workflow,
+                    format!("Workflow step finished: {}", step),
+                    match summary {
                         Some(summary) => format!("workflow={}\n{}", workflow, summary),
                         None => format!("workflow={}", workflow),
                     },
@@ -869,41 +1190,48 @@ Input: {}",
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("workflow", format!("Step failed: {}.{}", workflow, step));
-                self.push_timeline(
-                    TimelineKind::System,
-                    "workflow",
-                    &format!("Workflow step failed: {}", step),
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Failed,
+                    TranscriptDetailKind::Failure,
+                    format!("Workflow step failed: {}", step),
+                    match summary {
                         Some(summary) => format!(
-                            "workflow={}\n{}\nerror={}",
+                            "failure={}\nworkflow={}\n{}\nerror={}\nnext={}",
+                            classify_failure(Some("workflow"), None),
                             workflow,
                             summary,
-                            truncate_for_timeline(&error, 180)
+                            truncate_for_timeline(&error, 180),
+                            next_action_for_failure(Some("workflow"))
                         ),
                         None => format!(
-                            "workflow={}\nerror={}",
+                            "failure={}\nworkflow={}\nerror={}\nnext={}",
+                            classify_failure(Some("workflow"), None),
                             workflow,
-                            truncate_for_timeline(&error, 180)
+                            truncate_for_timeline(&error, 180),
+                            next_action_for_failure(Some("workflow"))
                         ),
                     },
                 );
             }
             RunEvent::WorkflowFinished { name } => {
                 self.push_activity("workflow", format!("Workflow finished: {}", name));
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "workflow",
-                    "Workflow finished",
-                    &format!("Workflow: {}", name),
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::WaitingOnCapability,
+                    TranscriptDetailKind::Workflow,
+                    format!("Workflow finished: {}", name),
+                    "route=workflow".to_owned(),
                 );
             }
             RunEvent::SkillStarted { name, summary } => {
                 self.push_activity("skill", &format!("Executing skill: {}", name));
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "skill",
-                    "Skill started",
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::CapabilityActive,
+                    detail_kind_from_text("skill", summary.as_deref().unwrap_or("")),
+                    format!("Skill started: {}", name),
+                    match summary {
                         Some(summary) => format!("Skill: {}\n{}", name, summary),
                         None => format!("Skill: {}", name),
                     },
@@ -911,11 +1239,12 @@ Input: {}",
             }
             RunEvent::SkillFinished { name, summary } => {
                 self.push_activity("skill", &format!("Skill finished: {}", name));
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "skill",
-                    "Skill finished",
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::WaitingOnCapability,
+                    detail_kind_from_text("skill", summary.as_deref().unwrap_or("")),
+                    format!("Skill finished: {}", name),
+                    match summary {
                         Some(summary) => format!("Skill: {}\n{}", name, summary),
                         None => format!("Skill: {}", name),
                     },
@@ -929,21 +1258,26 @@ Input: {}",
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("skill", &format!("Skill failed: {}", name));
-                self.push_timeline(
-                    TimelineKind::System,
-                    "skill",
-                    "Skill failed",
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Failed,
+                    TranscriptDetailKind::Failure,
+                    format!("Skill failed: {}", name),
+                    match summary {
                         Some(summary) => format!(
-                            "Skill: {}\n{}\nError: {}",
+                            "failure={}\nSkill: {}\n{}\nError: {}\nnext={}",
+                            classify_failure(Some("skill"), None),
                             name,
                             summary,
-                            truncate_for_timeline(&error, 180)
+                            truncate_for_timeline(&error, 180),
+                            next_action_for_failure(Some("skill"))
                         ),
                         None => format!(
-                            "Skill: {}\nError: {}",
+                            "failure={}\nSkill: {}\nError: {}\nnext={}",
+                            classify_failure(Some("skill"), None),
                             name,
-                            truncate_for_timeline(&error, 180)
+                            truncate_for_timeline(&error, 180),
+                            next_action_for_failure(Some("skill"))
                         ),
                     },
                 );
@@ -963,11 +1297,12 @@ Input: {}",
                         provider_type, profile, model, tool_count, message_count, max_attempts
                     ),
                 );
-                self.push_timeline(
-                    TimelineKind::System,
-                    "provider",
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Queued,
+                    TranscriptDetailKind::Provider,
                     "Provider request",
-                    &format!(
+                    format!(
                         "provider={} profile={} model={} tools={} messages={} attempts={}",
                         provider_type, profile, model, tool_count, message_count, max_attempts
                     ),
@@ -990,11 +1325,12 @@ Input: {}",
                         provider_type, profile, model, attempt, max_attempts, kind
                     ),
                 );
-                self.push_timeline(
-                    TimelineKind::System,
-                    "provider",
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Queued,
+                    TranscriptDetailKind::Provider,
                     "Provider retry",
-                    &format!(
+                    format!(
                         "provider={} profile={} model={} attempt={}/{} kind={} error={}",
                         provider_type,
                         profile,
@@ -1023,17 +1359,20 @@ Input: {}",
                         provider_type, profile, model, kind
                     ),
                 );
-                self.push_timeline(
-                    TimelineKind::System,
-                    "provider",
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Failed,
+                    TranscriptDetailKind::Failure,
                     "Provider failed",
-                    &format!(
-                        "provider={} profile={} model={} kind={} error={}",
+                    format!(
+                        "failure={}\nprovider={} profile={} model={} kind={} error={}\nnext={}",
+                        classify_failure(Some("provider"), None),
                         provider_type,
                         profile,
                         model,
                         kind,
-                        truncate_for_timeline(&error, 180)
+                        truncate_for_timeline(&error, 180),
+                        next_action_for_failure(Some("provider"))
                     ),
                 );
             }
@@ -1043,11 +1382,12 @@ Input: {}",
                 summary,
             } => {
                 self.push_activity("tool", &format!("Calling tool: {}", name));
-                self.push_timeline(
-                    TimelineKind::Tool,
-                    "tool",
-                    &format!("Tool call: {}", name),
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::CapabilityActive,
+                    detail_kind_from_text("tool", summary.as_deref().unwrap_or("")),
+                    format!("Tool call: {}", name),
+                    match summary {
                         Some(summary) => format!("call_id={}\n{}", call_id, summary),
                         None => format!("call_id={}", call_id),
                     },
@@ -1059,11 +1399,12 @@ Input: {}",
                 summary,
             } => {
                 self.push_activity("tool", &format!("Tool finished: {}", name));
-                self.push_timeline(
-                    TimelineKind::Tool,
-                    "tool",
-                    &format!("Tool finished: {}", name),
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::WaitingOnCapability,
+                    detail_kind_from_text("tool", summary.as_deref().unwrap_or("")),
+                    format!("Tool finished: {}", name),
+                    match summary {
                         Some(summary) => format!("call_id={}\n{}", call_id, summary),
                         None => format!("call_id={}", call_id),
                     },
@@ -1078,21 +1419,26 @@ Input: {}",
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("tool", &format!("Tool failed: {}", name));
-                self.push_timeline(
-                    TimelineKind::System,
-                    "tool",
-                    &format!("Tool failed: {}", name),
-                    &match summary {
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Failed,
+                    TranscriptDetailKind::Failure,
+                    format!("Tool failed: {}", name),
+                    match summary {
                         Some(summary) => format!(
-                            "call_id={}\n{}\nerror={}",
+                            "failure={}\ncall_id={}\n{}\nerror={}\nnext={}",
+                            classify_failure(Some("tool"), None),
                             call_id,
                             summary,
-                            truncate_for_timeline(&error, 180)
+                            truncate_for_timeline(&error, 180),
+                            next_action_for_failure(Some("tool"))
                         ),
                         None => format!(
-                            "call_id={}\nerror={}",
+                            "failure={}\ncall_id={}\nerror={}\nnext={}",
+                            classify_failure(Some("tool"), None),
                             call_id,
-                            truncate_for_timeline(&error, 180)
+                            truncate_for_timeline(&error, 180),
+                            next_action_for_failure(Some("tool"))
                         ),
                     },
                 );
@@ -1108,11 +1454,12 @@ Input: {}",
                     "capability",
                     &format!("Queued capability job: {} ({}, risk={})", name, kind, risk),
                 );
-                self.push_timeline(
-                    TimelineKind::Tool,
-                    "capability",
-                    &format!("Capability queued: {}", name),
-                    &format!(
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::CapabilityActive,
+                    detail_kind_from_text("capability", &format!("{name} {kind}")),
+                    format!("Capability queued: {}", name),
+                    format!(
                         "job_id={}
 kind={}
 risk={}
@@ -1126,11 +1473,12 @@ permissions={}",
             }
             RunEvent::CapabilityJobStarted { job_id, name } => {
                 self.push_activity("capability", &format!("Capability running: {}", name));
-                self.push_timeline(
-                    TimelineKind::Tool,
-                    "capability",
-                    &format!("Capability running: {}", name),
-                    &format!("job_id={}", job_id),
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::CapabilityActive,
+                    detail_kind_from_text("capability", &name),
+                    format!("Capability running: {}", name),
+                    format!("job_id={}", job_id),
                 );
             }
             RunEvent::CapabilityJobRetried {
@@ -1143,11 +1491,12 @@ permissions={}",
                     "capability",
                     &format!("Capability retry {}: {}", attempt, name),
                 );
-                self.push_timeline(
-                    TimelineKind::System,
-                    "capability",
-                    &format!("Capability retry: {}", name),
-                    &format!(
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::WaitingOnCapability,
+                    detail_kind_from_text("capability", &name),
+                    format!("Capability retry: {}", name),
+                    format!(
                         "job_id={}
 attempt={}
 error={}",
@@ -1167,11 +1516,12 @@ error={}",
                     "capability",
                     &format!("Capability finished: {} ({})", name, status),
                 );
-                self.push_timeline(
-                    TimelineKind::Tool,
-                    "capability",
-                    &format!("Capability finished: {}", name),
-                    &format!(
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::WaitingOnCapability,
+                    detail_kind_from_text("capability", &format!("{name} {summary}")),
+                    format!("Capability finished: {}", name),
+                    format!(
                         "job_id={}
 status={}
 summary={}",
@@ -1189,15 +1539,17 @@ summary={}",
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("capability", &format!("Capability failed: {}", name));
-                self.push_timeline(
-                    TimelineKind::System,
-                    "capability",
-                    &format!("Capability failed: {}", name),
-                    &format!(
-                        "job_id={}
-error={}",
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Failed,
+                    TranscriptDetailKind::Failure,
+                    format!("Capability failed: {}", name),
+                    format!(
+                        "failure={}\njob_id={}\nerror={}\nnext={}",
+                        classify_failure(None, Some("tool")),
                         job_id,
-                        truncate_for_timeline(&error, 180)
+                        truncate_for_timeline(&error, 180),
+                        next_action_for_failure(Some("tool"))
                     ),
                 );
             }
@@ -1212,68 +1564,43 @@ error={}",
                     "permission",
                     &format!("Permission denied for capability: {}", name),
                 );
-                self.push_timeline(
-                    TimelineKind::System,
-                    "permission",
-                    &format!("Permission check failed: {}", name),
-                    &format!(
-                        "call_id={}
-reason={}",
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Failed,
+                    TranscriptDetailKind::Failure,
+                    format!("Permission check failed: {}", name),
+                    format!(
+                        "failure={}\ncall_id={}\nreason={}\nnext={}",
+                        classify_failure(Some("permission"), None),
                         call_id,
-                        truncate_for_timeline(&reason, 180)
+                        truncate_for_timeline(&reason, 180),
+                        next_action_for_failure(Some("permission"))
                     ),
                 );
             }
             RunEvent::OutputDelta {
                 run_id,
                 chunk,
-                accumulated_chars,
+                accumulated_chars: _,
             } => {
                 self.runtime_status = "streaming".to_owned();
                 self.active_session_mut().state = SessionState::Active;
                 if self.is_interactive() {
-                    let session = self.active_session_mut();
-                    session.streaming_run_id = Some(run_id);
-                    let preview = session.streaming_preview.get_or_insert_with(String::new);
-                    preview.push_str(&chunk);
+                    self.append_active_turn_output(&run_id, &chunk);
                     return;
                 }
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "runtime",
-                    "Output delta",
-                    &format!(
-                        "run_id={}
-chars={}
-chunk={}",
-                        run_id,
-                        accumulated_chars,
-                        truncate_for_timeline(&chunk, 180)
-                    ),
-                );
+                self.append_active_turn_output(&run_id, &chunk);
             }
             RunEvent::FinalAnswerReady { run_id } => {
                 self.runtime_status = "streaming".to_owned();
                 self.active_session_mut().state = SessionState::Active;
                 self.push_activity("runtime", "Final answer ready");
-                if self.is_interactive() {
-                    self.push_timeline(
-                        TimelineKind::Agent,
-                        "runtime",
-                        "Final answer ready",
-                        &format!("run_id={run_id}\nWaiting for the final transcript to land."),
-                    );
-                    return;
-                }
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "runtime",
+                self.attach_turn_detail(
+                    Some(&run_id),
+                    TurnPhase::WaitingOnCapability,
+                    TranscriptDetailKind::Notice,
                     "Final answer ready",
-                    &format!(
-                        "run_id={}
-Assistant output is ready to present.",
-                        run_id
-                    ),
+                    format!("run_id={run_id}\nWaiting for the final transcript to land."),
                 );
             }
             RunEvent::RunFinished {
@@ -1283,72 +1610,69 @@ Assistant output is ready to present.",
                 self.runtime_status = "idle".to_owned();
                 self.active_session_mut().state = SessionState::Waiting;
                 self.push_activity("runtime", "Run finished");
-                if self.is_interactive() {
-                    self.push_timeline(
-                        TimelineKind::Agent,
-                        "runtime",
-                        "Run finished",
-                        &format!(
-                            "run_id={}\nOutput preview: {}",
+                self.finalize_active_turn(
+                    &run_id,
+                    TurnPhase::Completed,
+                    if output_preview.is_empty() {
+                        String::new()
+                    } else {
+                        truncate_for_timeline(&output_preview, 600)
+                    },
+                    Some((
+                        TranscriptDetailKind::Notice,
+                        "Run finished".to_owned(),
+                        format!(
+                            "run_id={}\noutput_preview={}",
                             run_id,
                             truncate_for_timeline(&output_preview, 180)
                         ),
-                    );
-                    return;
-                }
-                self.push_timeline(
-                    TimelineKind::Agent,
-                    "runtime",
-                    "Run finished",
-                    &format!(
-                        "run_id={}
-Output preview: {}",
-                        run_id,
-                        truncate_for_timeline(&output_preview, 180)
-                    ),
+                    )),
                 );
             }
             RunEvent::RunFailed {
                 run_id,
                 error,
                 failure_kind,
-                ..
+                failure_origin,
             } => {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
-                self.active_session_mut().streaming_preview = None;
-                self.active_session_mut().streaming_run_id = None;
                 self.push_activity("runtime", "Run failed");
-                self.push_timeline(
-                    TimelineKind::System,
-                    "runtime",
-                    "Run failed",
-                    &format!(
-                        "run_id={}
-failure_kind={}
-error={}",
-                        run_id,
-                        failure_kind.unwrap_or_else(|| "<none>".to_owned()),
-                        truncate_for_timeline(&error, 180)
-                    ),
+                self.finalize_active_turn(
+                    &run_id,
+                    TurnPhase::Failed,
+                    "The run failed before the assistant finished responding.".to_owned(),
+                    Some((
+                        TranscriptDetailKind::Failure,
+                        "Run failed".to_owned(),
+                        format!(
+                            "failure={}\nrun_id={}\nfailure_kind={}\nerror={}\nnext={}",
+                            classify_failure(failure_origin.as_deref(), failure_kind.as_deref()),
+                            run_id,
+                            failure_kind.unwrap_or_else(|| "<none>".to_owned()),
+                            truncate_for_timeline(&error, 180),
+                            next_action_for_failure(failure_origin.as_deref())
+                        ),
+                    )),
                 );
             }
             RunEvent::RunCanceled { run_id, reason } => {
                 self.runtime_status = "canceled".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
-                self.active_session_mut().streaming_preview = None;
-                self.active_session_mut().streaming_run_id = None;
                 self.push_activity("runtime", "Run canceled");
-                self.push_timeline(
-                    TimelineKind::System,
-                    "runtime",
-                    "Run canceled",
-                    &format!(
-                        "run_id={}
-reason={}",
-                        run_id,
-                        truncate_for_timeline(&reason, 180)
-                    ),
+                self.finalize_active_turn(
+                    &run_id,
+                    TurnPhase::Canceled,
+                    "The run was canceled before the assistant finished responding.".to_owned(),
+                    Some((
+                        TranscriptDetailKind::Notice,
+                        "Run canceled".to_owned(),
+                        format!(
+                            "run_id={}\nreason={}",
+                            run_id,
+                            truncate_for_timeline(&reason, 180)
+                        ),
+                    )),
                 );
             }
         }
@@ -1375,7 +1699,73 @@ reason={}",
     }
 
     pub fn active_streaming_preview(&self) -> Option<&str> {
+        if let Some(active_turn) = self.active_session().active_turn.as_ref()
+            && matches!(active_turn.cell.phase, Some(TurnPhase::Streaming))
+        {
+            return Some(active_turn.cell.body.as_str());
+        }
+
         self.active_session().streaming_preview.as_deref()
+    }
+
+    pub fn transcript_view(&self) -> TranscriptView<'_> {
+        transcript_view_for_session(self.active_session(), self.transcript.scroll)
+    }
+
+    pub fn history_cells(&self) -> HistoryCells {
+        HistoryCells::from(&self.transcript_view())
+    }
+
+    pub fn chat_view(&self) -> ChatView {
+        ChatView::new(self.history_cells(), self.transcript_scroll())
+    }
+
+    fn transcript_overlay_lines_for_cells(&self, cells: &HistoryCells) -> Vec<Line<'static>> {
+        let key = cells.transcript_key();
+        let mut cache = self.transcript_overlay_cache.borrow_mut();
+        let should_refresh = cache.as_ref().is_none_or(|entry| entry.key != key);
+        if should_refresh {
+            *cache = Some(TranscriptOverlayCache {
+                key,
+                lines: cells.summary_lines(),
+            });
+        }
+        cache
+            .as_ref()
+            .map(|entry| entry.lines.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn transcript_overlay_lines(&self) -> Vec<Line<'static>> {
+        self.transcript_overlay_lines_for_cells(&self.history_cells())
+    }
+
+    pub fn transcript_overlay_cache_key(&self) -> Option<(usize, Option<usize>, bool)> {
+        self.transcript_overlay_cache
+            .borrow()
+            .as_ref()
+            .map(|entry| entry.key)
+    }
+
+    pub fn detail_overlay_cache_key(
+        &self,
+    ) -> Option<(usize, Option<usize>, bool, Option<HistoryCellKey>)> {
+        self.detail_overlay_cache
+            .borrow()
+            .as_ref()
+            .map(|entry| entry.key)
+    }
+
+    pub fn transcript_scroll(&self) -> u16 {
+        self.transcript.scroll
+    }
+
+    pub fn transcript_overlay_scroll(&self) -> u16 {
+        self.transcript_overlay.scroll
+    }
+
+    pub fn detail_overlay_scroll(&self) -> u16 {
+        self.detail_overlay.scroll
     }
 
     pub fn current_run_identifier(&self) -> Option<&str> {
@@ -1398,10 +1788,22 @@ reason={}",
     }
 
     pub fn input_mode(&self) -> InputMode {
-        if self.active_draft().trim_start().starts_with('/') {
-            InputMode::Command
+        self.bottom_pane.input_mode(self.active_draft())
+    }
+
+    pub fn shell_state(&self) -> ShellState {
+        if self.overlay_state().is_turn_detail() {
+            ShellState::TurnDetailOverlay
+        } else if self.overlay_state().is_transcript() {
+            ShellState::TranscriptOverlay
+        } else if self.command_menu_active() {
+            ShellState::Commanding
+        } else if self.is_busy() {
+            ShellState::Running
+        } else if !self.active_draft().trim().is_empty() {
+            ShellState::Composing
         } else {
-            InputMode::Chat
+            ShellState::Idle
         }
     }
 
@@ -1457,11 +1859,9 @@ reason={}",
 
     pub fn composer_placeholder(&self) -> &'static str {
         match self.input_mode() {
-            InputMode::Chat => {
-                "Send a message to the active session. Type / to browse the /mosaic command catalog."
-            }
+            InputMode::Chat => "Send a message to the active session. Type / to browse commands.",
             InputMode::Command => {
-                "Run a /mosaic command. Tab accepts the highlighted command and Enter executes it."
+                "Run a slash command. Tab accepts the highlighted command and Enter executes it."
             }
             InputMode::Search => "Type / to browse commands.",
         }
@@ -1469,6 +1869,18 @@ reason={}",
 
     pub fn gateway_target_label(&self) -> &str {
         &self.gateway_target
+    }
+
+    pub fn overlay_state(&self) -> OverlayState {
+        OverlayState::from_shell_state(
+            self.command_query(),
+            self.transcript_overlay_open,
+            self.detail_overlay_open,
+        )
+    }
+
+    pub fn selected_command_index(&self) -> usize {
+        self.bottom_pane.command_menu_index
     }
 
     pub fn enter_hint(&self) -> String {
@@ -1499,15 +1911,55 @@ reason={}",
         self.active_draft().trim_start().strip_prefix('/')
     }
 
+    pub fn command_surface_view(&self) -> CommandSurfaceView {
+        let query = self.command_query().map(str::to_owned);
+        let selected_index = self.selected_command_index();
+        let matches = matching_commands(query.as_deref().unwrap_or_default());
+        let selected = matches
+            .get(selected_index.min(matches.len().saturating_sub(1)))
+            .copied();
+        let skill_completion = self.selected_skill_completion();
+        let completion_suffix = if let Some(completion) = skill_completion.as_ref() {
+            completion
+                .strip_prefix(self.active_draft())
+                .filter(|suffix| !suffix.is_empty())
+                .map(str::to_owned)
+        } else if let Some(command) = selected {
+            let completion = command_completion(command.command);
+            completion
+                .strip_prefix(self.active_draft())
+                .filter(|suffix| !suffix.is_empty())
+                .map(str::to_owned)
+        } else {
+            None
+        };
+        let popup = CommandPopupView::new(
+            query.clone().unwrap_or_default(),
+            matches.clone(),
+            selected_index,
+        );
+
+        CommandSurfaceView {
+            query,
+            matches,
+            selected,
+            selected_index,
+            skill_completion,
+            completion_suffix,
+            popup,
+        }
+    }
+
     pub fn command_matches(&self) -> Vec<CommandSpec> {
-        matching_commands(self.command_query().unwrap_or_default())
+        self.command_surface_view().matches
+    }
+
+    pub fn command_popup_view(&self) -> CommandPopupView {
+        self.command_surface_view().popup
     }
 
     pub fn selected_command_match(&self) -> Option<CommandSpec> {
-        let matches = self.command_matches();
-        matches
-            .get(self.command_menu_index.min(matches.len().saturating_sub(1)))
-            .copied()
+        self.command_surface_view().selected
     }
 
     pub fn command_suggestions(&self) -> Vec<CommandSpec> {
@@ -1515,20 +1967,177 @@ reason={}",
     }
 
     pub fn command_completion_suffix(&self) -> Option<String> {
-        if let Some(completion) = self.selected_skill_completion() {
-            return completion
-                .strip_prefix(self.active_draft())
-                .filter(|suffix| !suffix.is_empty())
-                .map(str::to_owned);
+        self.command_surface_view().completion_suffix
+    }
+
+    fn composer_view_from_command_surface(
+        &self,
+        command_surface: &CommandSurfaceView,
+    ) -> ComposerView {
+        let busy = runtime_status_is_busy(&self.runtime_status);
+        let status_label = if busy {
+            "busy".to_owned()
+        } else {
+            "ready".to_owned()
+        };
+        let status_detail = if busy {
+            if let Some(run_id) = self.current_run_identifier() {
+                format!("send disabled · /run stop ({run_id})")
+            } else {
+                "send disabled · /run stop".to_owned()
+            }
+        } else {
+            format!("{} · Enter {}", self.session_label(), self.enter_hint())
+        };
+        ComposerView {
+            draft: self.active_draft().to_owned(),
+            mode: self.input_mode(),
+            shell_state: self.shell_state(),
+            placeholder: self.composer_placeholder().to_owned(),
+            completion_suffix: command_surface.completion_suffix.clone(),
+            busy,
+            status_label,
+            status_detail,
+            enter_hint: self.enter_hint(),
+            escape_hint: self.escape_hint().to_owned(),
+            spinner: self.task_spinner(),
+        }
+    }
+
+    pub fn composer_view(&self) -> ComposerView {
+        let command_surface = self.command_surface_view();
+        self.composer_view_from_command_surface(&command_surface)
+    }
+
+    pub fn status_bar_view(&self) -> StatusBarView {
+        let runtime_summary = self
+            .active_turn_banner()
+            .unwrap_or_else(|| self.operator_status());
+        let runtime_label = if self.is_busy() {
+            format!("{} {}", self.task_spinner(), self.runtime_status)
+        } else {
+            self.runtime_status.clone()
+        };
+
+        StatusBarView {
+            workspace: display_workspace_path(&self.workspace_path),
+            session_label: self.session_label().to_owned(),
+            active_profile: self.active_profile().to_owned(),
+            control_model: self.control_model().to_owned(),
+            gateway_live: self.gateway_connected(),
+            gateway_target: self.gateway_target_label().to_owned(),
+            hide_runtime_summary: self.hide_status_summary_during_streaming(),
+            shell_state_label: self.shell_state().label(),
+            runtime_label,
+            runtime_summary,
+        }
+    }
+
+    pub fn detail_overlay_lines(&self) -> Option<Vec<Line<'static>>> {
+        self.turn_detail_overlay_view_for_cells(&self.history_cells())
+            .map(|view| view.lines)
+    }
+
+    pub fn transcript_overlay_view_model(&self) -> TranscriptOverlayView {
+        TranscriptOverlayView {
+            lines: self.transcript_overlay_lines_for_cells(&self.history_cells()),
+            scroll: self.transcript_overlay_scroll(),
+        }
+    }
+
+    pub fn turn_detail_overlay_view_model(&self) -> Option<TurnDetailOverlayView> {
+        self.turn_detail_overlay_view_for_cells(&self.history_cells())
+    }
+
+    fn turn_detail_overlay_view_for_cells(
+        &self,
+        cells: &HistoryCells,
+    ) -> Option<TurnDetailOverlayView> {
+        if !self.detail_overlay_open {
+            return None;
         }
 
-        let command = self.selected_command_match()?;
-        let completion = command_completion(command.command);
-        let draft = self.active_draft();
-        completion
-            .strip_prefix(draft)
-            .filter(|suffix| !suffix.is_empty())
-            .map(str::to_owned)
+        let (count, revision, streaming) = cells.transcript_key();
+        let key = (count, revision, streaming, self.detail_overlay_target);
+        let mut cache = self.detail_overlay_cache.borrow_mut();
+        let should_refresh = cache.as_ref().is_none_or(|entry| entry.key != key);
+        if should_refresh {
+            *cache =
+                cells
+                    .detail_view(self.detail_overlay_target)
+                    .map(|detail| DetailOverlayCache {
+                        key,
+                        title: detail.title,
+                        lines: detail.lines,
+                    });
+        }
+        let entry = cache.as_ref()?;
+        Some(TurnDetailOverlayView {
+            title: entry.title.clone(),
+            lines: entry.lines.clone(),
+            scroll: self.detail_overlay_scroll(),
+        })
+    }
+
+    pub fn transcript_surface_view(&self) -> TranscriptSurfaceView {
+        let cells = self.history_cells();
+        TranscriptSurfaceView {
+            chat: ChatView::new(cells.clone(), self.transcript_scroll()),
+            transcript_overlay: TranscriptOverlayView {
+                lines: self.transcript_overlay_lines_for_cells(&cells),
+                scroll: self.transcript_overlay_scroll(),
+            },
+            turn_detail_overlay: self.turn_detail_overlay_view_for_cells(&cells),
+        }
+    }
+
+    pub fn overlay_stack_view(
+        &self,
+        surface: &TranscriptSurfaceView,
+        command_surface: &CommandSurfaceView,
+    ) -> OverlayStackView {
+        OverlayStackView {
+            state: self.overlay_state(),
+            command_popup: command_surface.popup.clone(),
+            transcript: surface.transcript_overlay.clone(),
+            turn_detail: surface.turn_detail_overlay.clone(),
+        }
+    }
+
+    pub fn shell_snapshot(&self) -> ShellSnapshot {
+        let surface = self.transcript_surface_view();
+        let command_surface = self.command_surface_view();
+        ShellSnapshot {
+            chrome: ShellChromeView {
+                status_bar: self.status_bar_view().into_chrome(),
+                composer: self
+                    .composer_view_from_command_surface(&command_surface)
+                    .into_chrome(),
+            },
+            overlays: self.overlay_stack_view(&surface, &command_surface),
+            surface,
+        }
+    }
+
+    pub fn active_turn_banner(&self) -> Option<String> {
+        self.history_cells().active_banner()
+    }
+
+    pub fn hide_status_summary_during_streaming(&self) -> bool {
+        self.active_session()
+            .active_turn
+            .as_ref()
+            .is_some_and(|turn| matches!(turn.cell.phase, Some(TurnPhase::Streaming)))
+            || self.active_streaming_preview().is_some()
+    }
+
+    pub fn is_busy(&self) -> bool {
+        runtime_status_is_busy(&self.runtime_status)
+    }
+
+    pub fn task_spinner(&self) -> &'static str {
+        const FRAMES: [&str; 4] = ["-", "\\", "|", "/"];
+        FRAMES[self.pulse_frame() % FRAMES.len()]
     }
 
     pub fn sync_session_catalog(
@@ -1585,6 +2194,9 @@ reason={}",
                 if session.streaming_run_id.is_none() {
                     session.streaming_run_id = existing.streaming_run_id.clone();
                 }
+                if session.active_turn.is_none() {
+                    session.active_turn = existing.active_turn.clone();
+                }
                 if session.actor.is_none() {
                     session.actor = existing.actor.clone();
                 }
@@ -1623,53 +2235,6 @@ reason={}",
         {
             self.select_session(index);
         }
-        self.normalize_resume_scope();
-    }
-
-    pub fn visible_session_indices(&self) -> Vec<usize> {
-        self.sessions
-            .iter()
-            .enumerate()
-            .filter_map(|(index, session)| self.session_visible_in_resume(session).then_some(index))
-            .collect()
-    }
-
-    fn handle_composer_key(&mut self, key: KeyEvent) -> AppAction {
-        if self.command_menu_active() {
-            match key.code {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.select_next_command_match();
-                    return AppAction::Continue;
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.select_previous_command_match();
-                    return AppAction::Continue;
-                }
-                KeyCode::Enter if self.command_menu_should_complete() => {
-                    self.complete_selected_command();
-                    return AppAction::Continue;
-                }
-                _ => {}
-            }
-        }
-
-        match key.code {
-            KeyCode::Enter => return self.submit_composer(),
-            KeyCode::Backspace => {
-                self.active_session_mut().draft.pop();
-                self.command_menu_index = 0;
-            }
-            KeyCode::Char(character)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.active_session_mut().draft.push(character);
-                self.command_menu_index = 0;
-            }
-            _ => {}
-        }
-
-        AppAction::Continue
     }
 
     fn submit_composer(&mut self) -> AppAction {
@@ -1690,14 +2255,19 @@ reason={}",
                 let model = self.control_model.clone();
                 self.runtime_status = "running".to_owned();
                 self.active_session_mut().state = SessionState::Active;
-                self.push_system_entry(
-                    "Assistant pending",
+                self.push_timeline(
+                    TimelineKind::Operator,
+                    "you",
+                    "You",
+                    &truncate_for_timeline(&message, 600),
+                );
+                self.start_or_refresh_active_turn(
+                    None,
+                    TurnPhase::Submitted,
+                    "Assistant response",
                     format!(
-                        "Waiting for session {} to reply via profile {} ({}).\ninput: {}",
-                        session_id,
-                        profile,
-                        model,
-                        truncate_for_timeline(&message, 180)
+                        "Waiting for session {} to reply via profile {} ({}).",
+                        session_id, profile, model
                     ),
                 );
                 self.push_activity(
@@ -1716,9 +2286,16 @@ reason={}",
             AppAction::Continue
         };
 
-        self.show_console_history = true;
         self.active_session_mut().draft.clear();
-        self.timeline_scroll = 0;
+        self.bottom_pane.reset_command_selection();
+        self.transcript_overlay_open = false;
+        self.detail_overlay_open = false;
+        self.detail_overlay_target = None;
+        self.transcript_overlay.scroll_home();
+        self.detail_overlay.scroll_home();
+        self.sync_detail_overlay_flags();
+        self.refresh_overlay_state();
+        self.transcript.scroll_home();
 
         action
     }
@@ -1741,78 +2318,47 @@ reason={}",
 
     fn select_session(&mut self, index: usize) {
         self.selected_session = index;
-        self.timeline_scroll = 0;
+        self.transcript.scroll_home();
+        self.transcript_overlay.scroll_home();
+        self.detail_overlay.scroll_home();
         self.sessions[index].unread = 0;
-    }
-
-    fn ensure_selected_session_visible(&mut self) {
-        if self
-            .visible_session_indices()
-            .contains(&self.selected_session)
-        {
-            return;
-        }
-
-        if let Some(first) = self.visible_session_indices().first().copied() {
-            self.select_session(first);
-        }
-    }
-
-    fn normalize_resume_scope(&mut self) {
-        if !self.resume_query.is_empty() {
-            return;
-        }
-
-        let has_local = self
-            .sessions
-            .iter()
-            .any(|session| session.origin == "Local");
-        let has_remote = self
-            .sessions
-            .iter()
-            .any(|session| session.origin == "Remote");
-
-        self.resume_scope = match (has_local, has_remote) {
-            (true, false) => ResumeScope::Local,
-            (false, true) => ResumeScope::Remote,
-            _ => {
-                if self.visible_session_indices().is_empty() {
-                    ResumeScope::All
-                } else {
-                    self.resume_scope
-                }
-            }
-        };
-        self.ensure_selected_session_visible();
-    }
-
-    fn session_visible_in_resume(&self, session: &SessionRecord) -> bool {
-        let matches_scope = match self.resume_scope {
-            ResumeScope::Local => session.origin == "Local",
-            ResumeScope::Remote => session.origin == "Remote",
-            ResumeScope::All => true,
-        };
-        let query = self.resume_query.trim();
-        let matches_query = query.is_empty()
-            || [
-                session.id.as_str(),
-                session.title.as_str(),
-                session.origin.as_str(),
-                session.route.as_str(),
-                session.channel.as_str(),
-            ]
-            .iter()
-            .any(|value| {
-                value
-                    .to_ascii_lowercase()
-                    .contains(&query.to_ascii_lowercase())
-            });
-
-        matches_scope && matches_query
+        self.transcript_overlay_open = false;
+        self.detail_overlay_open = false;
+        self.detail_overlay_target = None;
+        self.sync_detail_overlay_flags();
+        self.refresh_overlay_state();
     }
 
     fn command_menu_active(&self) -> bool {
-        self.focus == Focus::Composer && self.command_query().is_some()
+        self.overlay_state().is_command_palette()
+    }
+
+    fn refresh_overlay_state(&mut self) {
+        self.overlay = OverlayState::from_shell_state(
+            self.command_query(),
+            self.transcript_overlay_open,
+            self.detail_overlay_open,
+        );
+    }
+
+    fn sync_detail_overlay_flags(&mut self) {
+        let active_target = if self.detail_overlay_open {
+            self.history_cells()
+                .resolve_detail_target(self.detail_overlay_target)
+        } else {
+            None
+        };
+        self.detail_overlay_target = active_target;
+        if let Some(session) = self.sessions.get_mut(self.selected_session) {
+            if let Some(active_turn) = session.active_turn.as_mut() {
+                active_turn.cell.details_expanded =
+                    matches!(active_target, Some(HistoryCellKey::Active))
+                        && !active_turn.cell.details.is_empty();
+            }
+            for (index, entry) in session.timeline.iter_mut().enumerate() {
+                entry.details_expanded = matches!(active_target, Some(HistoryCellKey::Committed(selected)) if selected == index);
+            }
+        }
     }
 
     fn command_menu_should_complete(&self) -> bool {
@@ -1824,11 +2370,13 @@ reason={}",
             return false;
         }
 
-        if let Some(completion) = self.selected_skill_completion() {
+        let surface = self.command_surface_view();
+
+        if let Some(completion) = surface.skill_completion {
             return self.active_draft().trim_end() != completion.trim_end();
         }
 
-        let Some(command) = self.selected_command_match() else {
+        let Some(command) = surface.selected else {
             return false;
         };
 
@@ -1836,42 +2384,32 @@ reason={}",
     }
 
     fn select_next_command_match(&mut self) {
-        let matches = self.command_matches();
-        if matches.is_empty() {
-            self.command_menu_index = 0;
-            return;
-        }
-
-        self.command_menu_index = (self.command_menu_index + 1) % matches.len();
+        self.bottom_pane
+            .select_next_command_match(self.command_surface_view().matches.len());
     }
 
     fn select_previous_command_match(&mut self) {
-        let matches = self.command_matches();
-        if matches.is_empty() {
-            self.command_menu_index = 0;
-            return;
-        }
-
-        self.command_menu_index = if self.command_menu_index == 0 {
-            matches.len() - 1
-        } else {
-            self.command_menu_index - 1
-        };
+        self.bottom_pane
+            .select_previous_command_match(self.command_surface_view().matches.len());
     }
 
     fn complete_selected_command(&mut self) {
-        if let Some(completion) = self.selected_skill_completion() {
+        let surface = self.command_surface_view();
+
+        if let Some(completion) = surface.skill_completion {
             self.active_session_mut().draft = completion;
-            self.command_menu_index = 0;
+            self.bottom_pane.reset_command_selection();
+            self.refresh_overlay_state();
             return;
         }
 
-        let Some(command) = self.selected_command_match() else {
+        let Some(command) = surface.selected else {
             return;
         };
 
         self.active_session_mut().draft = command_completion(command.command);
-        self.command_menu_index = 0;
+        self.bottom_pane.reset_command_selection();
+        self.refresh_overlay_state();
     }
 
     fn selected_skill_completion(&self) -> Option<String> {
@@ -1899,45 +2437,42 @@ reason={}",
                         .starts_with(&query.to_ascii_lowercase())
             })
             .collect::<Vec<_>>();
-        let selected = matches.get(self.command_menu_index.min(matches.len().saturating_sub(1)))?;
+        let selected = matches.get(
+            self.bottom_pane
+                .command_menu_index
+                .min(matches.len().saturating_sub(1)),
+        )?;
         Some(format!("{command_prefix}{} ", selected.name))
     }
 
     fn route_command(&mut self, command: &str) -> AppAction {
-        let parts = command.split_whitespace().collect::<Vec<_>>();
+        let canonical = rewrite_command_alias(command);
+        let parts = canonical.split_whitespace().collect::<Vec<_>>();
         let Some(name) = parts.first().copied() else {
-            self.push_command_error("Usage: /mosaic help");
+            self.push_command_error("Usage: /help");
             return AppAction::Continue;
         };
 
         match name {
-            "mosaic" => match parts.as_slice() {
-                ["mosaic"] => {
+            "help" => match parts.as_slice() {
+                ["help"] => {
                     self.push_help(None);
                     AppAction::Continue
                 }
-                ["mosaic", "help"] => {
-                    self.push_help(None);
-                    AppAction::Continue
-                }
-                ["mosaic", "help", category, ..] => {
+                ["help", category, ..] => {
                     if let Some(category) = CommandCategory::parse(category) {
                         self.push_help(Some(category));
                     } else {
                         self.push_command_error(format!(
-                            "Unknown /mosaic help category: {}. Use /mosaic help to browse the grouped catalog.",
+                            "Unknown help category: {}. Use /help to browse the grouped catalog.",
                             category
                         ));
                     }
                     AppAction::Continue
                 }
-                ["mosaic", root, rest @ ..] => self.route_command_root(root, rest),
                 _ => AppAction::Continue,
             },
-            "help" => {
-                self.push_help(None);
-                AppAction::Continue
-            }
+            "new" => self.route_new_command(&parts[1..]),
             "gateway" | "adapter" | "node" | "sandbox" | "model" | "profile" | "run"
             | "inspect" | "tool" | "skill" | "workflow" | "session" => {
                 self.route_command_root(name, &parts[1..])
@@ -1968,6 +2503,15 @@ reason={}",
                 AppAction::Continue
             }
         }
+    }
+
+    fn route_new_command(&mut self, args: &[&str]) -> AppAction {
+        let session_id = if args.is_empty() {
+            generate_session_id()
+        } else {
+            args.join(" ")
+        };
+        self.prepare_session_switch(&session_id, true)
     }
 
     fn route_model_command(&mut self, args: Vec<&str>) -> AppAction {
@@ -2013,9 +2557,7 @@ reason={}",
                 AppAction::Continue
             }
             _ => {
-                self.push_command_error(
-                    "Usage: /mosaic model list | /mosaic model show | /mosaic model use <profile>",
-                );
+                self.push_command_error("Usage: /model list | /model show | /model use <profile>");
                 AppAction::Continue
             }
         }
@@ -2032,9 +2574,7 @@ reason={}",
             }
             [profile] => self.route_model_command(vec!["use", profile]),
             _ => {
-                self.push_command_error(
-                    "Usage: /mosaic profile <name> | /mosaic profile show | /mosaic profile list",
-                );
+                self.push_command_error("Usage: /profile <name> | /profile show | /profile list");
                 AppAction::Continue
             }
         }
@@ -2047,7 +2587,7 @@ reason={}",
                 AppAction::Continue
             }
             _ => {
-                self.push_command_error("Usage: /mosaic gateway status");
+                self.push_command_error("Usage: /gateway status");
                 AppAction::Continue
             }
         }
@@ -2064,7 +2604,7 @@ reason={}",
                 AppAction::AdapterStatus
             }
             _ => {
-                self.push_command_error("Usage: /mosaic adapter status");
+                self.push_command_error("Usage: /adapter status");
                 AppAction::Continue
             }
         }
@@ -2090,7 +2630,7 @@ reason={}",
                 AppAction::NodeShow(node_id)
             }
             _ => {
-                self.push_command_error("Usage: /mosaic node list | /mosaic node show <id>");
+                self.push_command_error("Usage: /node list | /node show <id>");
                 AppAction::Continue
             }
         }
@@ -2140,7 +2680,7 @@ reason={}",
             }
             _ => {
                 self.push_command_error(
-                    "Usage: /mosaic sandbox status | /mosaic sandbox inspect <env> | /mosaic sandbox rebuild <env> | /mosaic sandbox clean",
+                    "Usage: /sandbox status | /sandbox inspect <env> | /sandbox rebuild <env> | /sandbox clean",
                 );
                 AppAction::Continue
             }
@@ -2195,7 +2735,7 @@ reason={}",
             }
             _ => {
                 self.push_command_error(
-                    "Usage: /mosaic session list | /mosaic session show | /mosaic session switch <id> | /mosaic session new <id>",
+                    "Usage: /session list | /session show | /session switch <id> | /new [id]",
                 );
                 AppAction::Continue
             }
@@ -2209,10 +2749,18 @@ reason={}",
                     self.push_command_error("No active run is attached to the current session.");
                     return AppAction::Continue;
                 };
+                self.runtime_status = "canceling".to_owned();
+                self.active_session_mut().state = SessionState::Active;
                 self.push_activity("run", format!("Requested cancellation for {run_id}."));
-                self.push_system_entry(
+                self.attach_turn_detail(
+                    Some(&run_id),
+                    TurnPhase::WaitingOnCapability,
+                    TranscriptDetailKind::Notice,
                     "Run cancellation requested",
-                    format!("Submitting a real cancel request for run {run_id}."),
+                    format!(
+                        "run_id={}\nWaiting for the runtime to stop the current assistant turn.",
+                        run_id
+                    ),
                 );
                 AppAction::CancelRun(run_id)
             }
@@ -2223,15 +2771,32 @@ reason={}",
                     );
                     return AppAction::Continue;
                 };
+                self.runtime_status = "running".to_owned();
+                self.active_session_mut().state = SessionState::Active;
                 self.push_activity("run", format!("Requested retry for {run_id}."));
-                self.push_system_entry(
+                self.start_or_refresh_active_turn(
+                    None,
+                    TurnPhase::Submitted,
+                    "Assistant response",
+                    format!(
+                        "Retry requested for run {}. Waiting for the runtime to start a new assistant turn.",
+                        run_id
+                    ),
+                );
+                self.attach_turn_detail(
+                    None,
+                    TurnPhase::Submitted,
+                    TranscriptDetailKind::Notice,
                     "Run retry requested",
-                    format!("Submitting a real retry request for run {run_id}."),
+                    format!(
+                        "retry_of={}\nWaiting for the runtime to start a new assistant turn.",
+                        run_id
+                    ),
                 );
                 AppAction::RetryRun(run_id)
             }
             _ => {
-                self.push_command_error("Usage: /mosaic run stop | /mosaic run retry");
+                self.push_command_error("Usage: /run stop | /run retry");
                 AppAction::Continue
             }
         }
@@ -2248,7 +2813,7 @@ reason={}",
                 AppAction::InspectRun(run_id)
             }
             _ => {
-                self.push_command_error("Usage: /mosaic inspect last");
+                self.push_command_error("Usage: /inspect last");
                 AppAction::Continue
             }
         }
@@ -2257,9 +2822,9 @@ reason={}",
     fn route_explicit_capability(&mut self, kind: &str, args: Vec<&str>) -> AppAction {
         let Some((name, input)) = split_capability_args(args) else {
             self.push_command_error(match kind {
-                "tool" => "Usage: /mosaic tool <name> <input>",
-                "skill" => "Usage: /mosaic skill <name> <input>",
-                _ => "Usage: /mosaic workflow <name> <input>",
+                "tool" => "Usage: /tool <name> <input>",
+                "skill" => "Usage: /skill <name> <input>",
+                _ => "Usage: /workflow <name> <input>",
             });
             return AppAction::Continue;
         };
@@ -2281,6 +2846,17 @@ reason={}",
             format!(
                 "{} {}\ninput: {}",
                 capitalize(kind),
+                name,
+                truncate_for_timeline(&request.input, 180)
+            ),
+        );
+        self.start_or_refresh_active_turn(
+            None,
+            TurnPhase::Submitted,
+            "Assistant response",
+            format!(
+                "Waiting for explicit {} {} to run.\ninput={}",
+                kind,
                 name,
                 truncate_for_timeline(&request.input, 180)
             ),
@@ -2315,7 +2891,7 @@ reason={}",
 ",
             );
         self.push_activity("session", "Displayed operator session list.");
-        self.push_system_entry("Sessions", body);
+        self.push_system_entry("Session list", body);
     }
 
     fn show_session_details(&mut self) {
@@ -2412,9 +2988,6 @@ references={}",
         };
 
         self.select_session(target_index);
-        self.surface = Surface::Console;
-        self.focus = Focus::Composer;
-        self.show_console_history = true;
         self.push_activity(
             "session",
             format!("Selected session {} in the operator console.", session_id),
@@ -2576,7 +3149,7 @@ references={}",
             let entries = LOCAL_COMMANDS
                 .iter()
                 .filter(|spec| spec.category == category)
-                .map(|spec| format!("{}  {}", spec.usage, spec.summary))
+                .map(|spec| format!("{}  {}", spec.usage(), spec.summary))
                 .collect::<Vec<_>>();
             grouped.insert(category.label(), entries);
         }
@@ -2590,10 +3163,10 @@ references={}",
                     "queue a mock instruction"
                 }
             ),
-            "input.command / opens the /mosaic popup, typing filters, Tab completes, Enter executes"
+            "input.command / opens the slash popup, typing filters, Tab completes, Enter executes"
                 .to_owned(),
             "navigation     PageUp/PageDown scroll the transcript, Ctrl+C quits".to_owned(),
-            "aliases        Short forms like /session show and /model list still work, but /mosaic ... is canonical.".to_owned(),
+            "aliases        /mosaic ... remains supported as a compatibility alias, but bare slash commands are canonical inside TUI.".to_owned(),
             String::new(),
         ];
         for (category, entries) in grouped {
@@ -2633,11 +3206,18 @@ references={}",
     }
 
     pub(crate) fn push_system_entry(&mut self, title: impl Into<String>, body: impl Into<String>) {
-        self.push_timeline(
+        self.push_operator_card(title, body);
+    }
+
+    pub(crate) fn push_operator_card(&mut self, title: impl Into<String>, body: impl Into<String>) {
+        let title = title.into();
+        let body = body.into();
+        self.push_timeline_block(
             TimelineKind::System,
+            TranscriptBlock::OperatorResultCard,
             "control-plane",
-            &title.into(),
-            &body.into(),
+            &title,
+            &body,
         );
     }
 
@@ -2655,22 +3235,89 @@ references={}",
     }
 
     fn push_timeline(&mut self, kind: TimelineKind, actor: &str, title: &str, body: &str) {
+        self.push_timeline_block(kind, kind.default_block(), actor, title, body);
+    }
+
+    fn push_timeline_block(
+        &mut self,
+        kind: TimelineKind,
+        block: TranscriptBlock,
+        actor: &str,
+        title: &str,
+        body: &str,
+    ) {
         if let Some(session) = self.sessions.get_mut(self.selected_session) {
             session.timeline.push(TimelineEntry {
                 timestamp: current_hhmm(),
                 kind,
+                block,
                 actor: actor.to_owned(),
                 title: title.to_owned(),
                 body: body.to_owned(),
+                run_id: None,
+                phase: None,
+                details: Vec::new(),
+                details_expanded: false,
             });
-
-            if session.timeline.len() > 400 {
-                let overflow = session.timeline.len() - 400;
-                session.timeline.drain(0..overflow);
-            }
+            trim_timeline(session);
         }
+    }
+}
 
-        self.show_console_history = true;
+fn new_active_turn_entry(
+    timestamp: &str,
+    run_id: Option<&str>,
+    phase: TurnPhase,
+    title: impl Into<String>,
+    body: impl Into<String>,
+) -> TimelineEntry {
+    TimelineEntry {
+        timestamp: timestamp.to_owned(),
+        kind: TimelineKind::Agent,
+        block: TranscriptBlock::AssistantMessage,
+        actor: "assistant".to_owned(),
+        title: title.into(),
+        body: body.into(),
+        run_id: run_id.map(str::to_owned),
+        phase: Some(phase),
+        details: Vec::new(),
+        details_expanded: false,
+    }
+}
+
+fn transcript_view_for_session<'a>(session: &'a SessionRecord, scroll: u16) -> TranscriptView<'a> {
+    TranscriptView {
+        entries: &session.timeline,
+        active_entry: session.active_turn.as_ref().map(|turn| &turn.cell),
+        active_revision: session.active_turn.as_ref().map(|turn| turn.revision),
+        streaming_preview: session
+            .active_turn
+            .as_ref()
+            .filter(|turn| matches!(turn.cell.phase, Some(TurnPhase::Streaming)))
+            .map(|turn| turn.cell.body.as_str())
+            .or(session.streaming_preview.as_deref()),
+        scroll,
+    }
+}
+
+fn preserved_expandable_turn(session: &SessionRecord) -> Option<TimelineEntry> {
+    let view = transcript_view_for_session(session, 0);
+    view.active_entry
+        .filter(|entry| !entry.details.is_empty())
+        .cloned()
+        .or_else(|| {
+            view.entries
+                .iter()
+                .rev()
+                .find(|entry| !entry.details.is_empty())
+                .cloned()
+        })
+}
+
+fn trim_timeline(session: &mut SessionRecord) {
+    if session.timeline.len() > 400 {
+        let overflow = session.timeline.len() - 400;
+        session.timeline.drain(0..overflow);
     }
 }
 
@@ -2699,24 +3346,50 @@ fn interactive_session_record(session_id: &str, model: &str) -> SessionRecord {
         references: Vec::new(),
         streaming_preview: None,
         streaming_run_id: None,
+        active_turn: None,
         timeline: Vec::new(),
     }
 }
 
 fn transcript_entry(message: &TranscriptMessage) -> TimelineEntry {
-    let (kind, actor, title) = match message.role {
-        TranscriptRole::System => (TimelineKind::System, "system", "System"),
-        TranscriptRole::User => (TimelineKind::Operator, "user", "User"),
-        TranscriptRole::Assistant => (TimelineKind::Agent, "assistant", "Assistant"),
-        TranscriptRole::Tool => (TimelineKind::Tool, "tool", "Tool"),
+    let (kind, block, actor, title) = match message.role {
+        TranscriptRole::System => (
+            TimelineKind::System,
+            TranscriptBlock::SystemNotice,
+            "system",
+            "System",
+        ),
+        TranscriptRole::User => (
+            TimelineKind::Operator,
+            TranscriptBlock::UserMessage,
+            "user",
+            "User",
+        ),
+        TranscriptRole::Assistant => (
+            TimelineKind::Agent,
+            TranscriptBlock::AssistantMessage,
+            "assistant",
+            "Assistant",
+        ),
+        TranscriptRole::Tool => (
+            TimelineKind::Tool,
+            TranscriptBlock::ExecutionCard,
+            "tool",
+            "Tool",
+        ),
     };
 
     TimelineEntry {
         timestamp: message.created_at.format("%H:%M").to_string(),
         kind,
+        block,
         actor: actor.to_owned(),
         title: title.to_owned(),
         body: message.content.clone(),
+        run_id: None,
+        phase: None,
+        details: Vec::new(),
+        details_expanded: false,
     }
 }
 
@@ -2733,6 +3406,70 @@ fn truncate_for_timeline(value: &str, limit: usize) -> String {
 
     let truncated: String = value.chars().take(limit).collect();
     format!("{truncated}...")
+}
+
+fn detail_kind_from_text(actor: &str, body: &str) -> TranscriptDetailKind {
+    let actor = actor.to_ascii_lowercase();
+    let body = body.to_ascii_lowercase();
+
+    if actor.contains("workflow") {
+        return TranscriptDetailKind::Workflow;
+    }
+    if actor.contains("skill") {
+        return TranscriptDetailKind::Skill;
+    }
+    if actor.contains("provider") {
+        return TranscriptDetailKind::Provider;
+    }
+    if actor.contains("tool") && !body.contains("mcp") {
+        return TranscriptDetailKind::Tool;
+    }
+    if body.contains("mcp") {
+        return TranscriptDetailKind::Mcp;
+    }
+    if body.contains("sandbox") {
+        return TranscriptDetailKind::Sandbox;
+    }
+    if body.contains("node") {
+        return TranscriptDetailKind::Node;
+    }
+    TranscriptDetailKind::Capability
+}
+
+fn classify_failure(origin: Option<&str>, fallback: Option<&str>) -> &'static str {
+    match origin.unwrap_or_default() {
+        "provider" => "provider failure",
+        "tool" => "tool logic failure",
+        "mcp" | "mcp_transport" => "MCP transport failure",
+        "node" => "node execution failure",
+        "sandbox" => "sandbox preparation failure",
+        "workflow" | "orchestration" => "workflow/orchestration failure",
+        "gateway" => "gateway/control-plane failure",
+        "permission" => "permission failure",
+        "skill" => "skill execution failure",
+        _ => match fallback.unwrap_or_default() {
+            "provider" => "provider failure",
+            "tool" => "tool logic failure",
+            "workflow" => "workflow/orchestration failure",
+            "skill" => "skill execution failure",
+            _ => "runtime failure",
+        },
+    }
+}
+
+fn next_action_for_failure(origin: Option<&str>) -> &'static str {
+    match origin.unwrap_or_default() {
+        "provider" => "/run retry or /inspect last",
+        "tool" => "/inspect last or rerun /tool <name> <input>",
+        "mcp" | "mcp_transport" => "/inspect last and verify MCP server health",
+        "node" => "/node list, /node show <id>, or /inspect last",
+        "sandbox" => "/sandbox status, /sandbox inspect <env>, or /sandbox rebuild <env>",
+        "workflow" | "orchestration" => "/inspect last or rerun /workflow <name> <input>",
+        "gateway" => "/gateway status or /run retry",
+        "permission" => "/inspect last and review the active policy",
+        "skill" => "/inspect last or rerun /skill <name> <input>",
+        _ => "/inspect last",
+    }
 }
 
 fn split_capability_args(args: Vec<&str>) -> Option<(&str, String)> {
@@ -2754,28 +3491,19 @@ fn capitalize(value: &str) -> String {
 }
 
 fn command_completion(command: &str) -> String {
-    let tokens = command
-        .split_whitespace()
-        .take_while(|token| !token.starts_with('<'))
-        .collect::<Vec<_>>();
-    if tokens.is_empty() {
-        command.to_owned()
-    } else {
-        format!("{} ", tokens.join(" "))
-    }
+    format!("{} ", command.trim())
 }
 
 fn command_invocation_ready(draft: &str) -> bool {
-    let command = draft.trim().trim_start_matches('/');
+    let command = rewrite_command_alias(draft.trim().trim_start_matches('/'));
     if command.is_empty() {
         return false;
     }
 
     let parts = command.split_whitespace().collect::<Vec<_>>();
     match parts.as_slice() {
-        ["mosaic"] | ["help"] | ["mosaic", "help"] => true,
-        ["mosaic", "help", ..] => true,
-        ["mosaic", root, rest @ ..] => command_root_invocation_ready(root, rest),
+        ["help"] | ["help", ..] => true,
+        ["new"] | ["new", ..] => true,
         [root, rest @ ..] => command_root_invocation_ready(root, rest),
         _ => false,
     }
@@ -2826,7 +3554,7 @@ fn unknown_command_message(command: &str) -> String {
     let suggestions = suggest_commands(command);
     if suggestions.is_empty() {
         return format!(
-            "Unknown command: /{}. Use /mosaic help to browse the command catalog.",
+            "Unknown command: /{}. Use /help to browse the command catalog.",
             command.trim()
         );
     }
@@ -2837,7 +3565,7 @@ fn unknown_command_message(command: &str) -> String {
         suggestions
             .into_iter()
             .take(3)
-            .map(|spec| spec.command)
+            .map(|spec| spec.usage())
             .collect::<Vec<_>>()
             .join(", ")
     )
@@ -2854,7 +3582,7 @@ fn suggest_commands(query: &str) -> Vec<CommandSpec> {
         .copied()
         .map(|spec| {
             let searchable = command_search_text(spec.command);
-            let alias_searchable = command_alias_search_text(spec.command);
+            let alias_searchable = command_alias_search_text(spec);
             let score = if searchable.starts_with(&normalized)
                 || alias_searchable.starts_with(&normalized)
             {
@@ -2898,27 +3626,22 @@ fn command_matches_query(spec: CommandSpec, normalized_query: &str) -> bool {
     }
 
     command_tokens_match_query(&command_tokens, &query_tokens)
-        || if command_tokens
-            .first()
-            .is_some_and(|token| token == "mosaic")
-        {
-            command_tokens_match_query(&command_tokens[1..], &query_tokens)
-        } else {
-            false
-        }
+        || spec.aliases.iter().any(|alias| {
+            let alias_tokens = command_search_tokens(alias);
+            command_tokens_match_query(&alias_tokens, &query_tokens)
+        })
 }
 
 fn command_search_text(command: &str) -> String {
     normalize_command_text(command)
 }
 
-fn command_alias_search_text(command: &str) -> String {
-    let tokens = command_search_tokens(command);
-    if tokens.first().is_some_and(|token| token == "mosaic") && tokens.len() > 1 {
-        tokens[1..].join(" ")
-    } else {
-        tokens.join(" ")
-    }
+fn command_alias_search_text(spec: CommandSpec) -> String {
+    spec.aliases
+        .iter()
+        .map(|alias| command_search_text(alias))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn command_search_tokens(command: &str) -> Vec<String> {
@@ -2949,6 +3672,50 @@ fn normalize_command_text(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn rewrite_command_alias(command: &str) -> String {
+    let trimmed = command.trim().trim_start_matches('/').trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    let mut best: Option<(usize, String)> = None;
+    for spec in LOCAL_COMMANDS {
+        for alias in spec.aliases {
+            let alias_completion = command_completion(alias);
+            let alias_prefix = alias_completion.trim().trim_start_matches('/');
+            if trimmed == alias_prefix || trimmed.starts_with(&format!("{alias_prefix} ")) {
+                let matched_len = alias_prefix.len();
+                let canonical_prefix = spec.command.trim_start_matches('/');
+                let rewritten = if trimmed == alias_prefix {
+                    canonical_prefix.to_owned()
+                } else {
+                    let remainder = trimmed[matched_len..].trim_start();
+                    if remainder.is_empty() {
+                        canonical_prefix.to_owned()
+                    } else {
+                        format!("{canonical_prefix} {remainder}")
+                    }
+                };
+                if best
+                    .as_ref()
+                    .is_none_or(|(best_len, _)| matched_len > *best_len)
+                {
+                    best = Some((matched_len, rewritten));
+                }
+            }
+        }
+    }
+
+    best.map(|(_, rewritten)| rewritten)
+        .unwrap_or_else(|| trimmed.to_owned())
+}
+
+fn generate_session_id() -> String {
+    use chrono::Local;
+
+    format!("session-{}", Local::now().format("%Y%m%d-%H%M%S"))
 }
 
 fn edit_distance(left: &str, right: &str) -> usize {
@@ -2985,18 +3752,231 @@ mod tests {
     use mosaic_inspect::{CapabilityExplanationTrace, RunLifecycleStatus};
     use mosaic_runtime::events::RunEvent;
 
-    use super::{App, AppAction, ComposerRunRequest, InputMode, SkillOption, TimelineKind};
+    use super::{
+        App, AppAction, ComposerRunRequest, InputMode, ProfileOption, ShellState, SkillOption,
+        TimelineKind, TranscriptBlock, interactive_session_record, preserved_expandable_turn,
+    };
+    use crate::history_cell::HistoryCellKey;
+    use crate::transcript::{
+        ActiveTurn, TimelineEntry, TranscriptDetail, TranscriptDetailKind, TurnPhase,
+    };
 
     #[test]
     fn switching_sessions_resets_unread_and_scroll() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.timeline_scroll = 8;
+        app.transcript.scroll = 8;
+        app.transcript_overlay.scroll = 5;
+        app.detail_overlay.scroll = 3;
         app.sessions[1].unread = 3;
 
         app.select_session(1);
 
-        assert_eq!(app.timeline_scroll, 0);
+        assert_eq!(app.transcript.scroll, 0);
+        assert_eq!(app.transcript_overlay.scroll, 0);
+        assert_eq!(app.detail_overlay.scroll, 0);
         assert_eq!(app.sessions[1].unread, 0);
+    }
+
+    #[test]
+    fn composer_view_tracks_mode_and_busy_state() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/help".to_owned();
+        app.runtime_status = "running".to_owned();
+
+        let pane = app.composer_view();
+
+        assert_eq!(pane.mode, InputMode::Command);
+        assert_eq!(pane.shell_state, ShellState::Commanding);
+        assert!(pane.busy);
+        assert!(pane.placeholder.contains("slash command"));
+    }
+
+    #[test]
+    fn shell_state_transitions_between_idle_composing_running_and_overlays() {
+        let mut app = App::new("/tmp/mosaic".into());
+        assert_eq!(app.shell_state(), ShellState::Idle);
+
+        app.active_session_mut().draft = "hello".to_owned();
+        assert_eq!(app.shell_state(), ShellState::Composing);
+
+        app.runtime_status = "running".to_owned();
+        assert_eq!(app.shell_state(), ShellState::Running);
+
+        app.active_session_mut().draft = "/help".to_owned();
+        assert_eq!(app.shell_state(), ShellState::Commanding);
+
+        app.active_session_mut().draft.clear();
+        app.transcript_overlay_open = true;
+        assert_eq!(app.shell_state(), ShellState::TranscriptOverlay);
+
+        app.transcript_overlay_open = false;
+        app.detail_overlay_open = true;
+        assert_eq!(app.shell_state(), ShellState::TurnDetailOverlay);
+    }
+
+    #[test]
+    fn overlay_state_tracks_slash_draft_without_stealing_input() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/hel".to_owned();
+        assert!(app.overlay_state().is_command_palette());
+        assert_eq!(app.active_draft(), "/hel");
+
+        app.active_session_mut().draft.clear();
+        assert!(!app.overlay_state().is_command_palette());
+    }
+
+    #[test]
+    fn ctrl_t_toggles_transcript_overlay_without_mutating_draft() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "draft".to_owned();
+
+        let _ = app.handle_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert!(app.overlay_state().is_transcript());
+        assert_eq!(app.active_draft(), "draft");
+
+        let _ = app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.overlay_state().is_transcript());
+        assert_eq!(app.active_draft(), "draft");
+    }
+
+    #[test]
+    fn overlay_scroll_keys_target_the_open_overlay_not_main_transcript() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.transcript.scroll = 2;
+        app.transcript_overlay_open = true;
+        app.refresh_overlay_state();
+
+        let _ = app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        assert_eq!(app.transcript.scroll, 2);
+        assert_eq!(app.transcript_overlay.scroll, 5);
+
+        app.transcript_overlay_open = false;
+        app.detail_overlay_open = true;
+        app.refresh_overlay_state();
+        let _ = app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        assert_eq!(app.detail_overlay.scroll, 5);
+        assert_eq!(app.transcript.scroll, 2);
+    }
+
+    #[test]
+    fn transcript_view_exposes_scroll_and_streaming_preview() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+        app.transcript.scroll = 9;
+        app.active_session_mut().streaming_preview = Some("partial".to_owned());
+
+        let view = app.transcript_view();
+
+        assert_eq!(view.scroll, 9);
+        assert_eq!(view.streaming_preview, Some("partial"));
+        assert_eq!(view.entries.len(), app.visible_timeline().len());
+    }
+
+    #[test]
+    fn transcript_overlay_cache_tracks_active_turn_revision() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
+            input: "hello".to_owned(),
+        });
+
+        let _ = app.transcript_overlay_lines();
+        let first_key = app.transcript_overlay_cache_key();
+
+        app.apply_run_event(RunEvent::OutputDelta {
+            run_id: "run-1".to_owned(),
+            chunk: "world".to_owned(),
+            accumulated_chars: 5,
+        });
+        let _ = app.transcript_overlay_lines();
+        let second_key = app.transcript_overlay_cache_key();
+
+        assert_ne!(first_key, second_key);
+    }
+
+    #[test]
+    fn detail_overlay_cache_tracks_active_turn_revision() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::ToolCalling {
+            name: "read_file".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("target=tool:read_file".to_owned()),
+        });
+        app.detail_overlay_open = true;
+        app.detail_overlay_target = Some(HistoryCellKey::Active);
+        app.sync_detail_overlay_flags();
+
+        let _ = app.detail_overlay_lines();
+        let first_key = app.detail_overlay_cache_key();
+
+        app.apply_run_event(RunEvent::ToolFinished {
+            name: "read_file".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("target=tool:read_file\nstatus=ok".to_owned()),
+        });
+        let _ = app.detail_overlay_lines();
+        let second_key = app.detail_overlay_cache_key();
+
+        assert_ne!(first_key, second_key);
+    }
+
+    #[test]
+    fn detail_overlay_cache_key_tracks_selected_history_cell_target() {
+        let mut app = App::new("/tmp/mosaic".into());
+        let first_index = app.active_session().timeline.len();
+        app.active_session_mut().timeline.push(TimelineEntry {
+            timestamp: "12:00".to_owned(),
+            kind: TimelineKind::Agent,
+            block: TranscriptBlock::AssistantMessage,
+            actor: "assistant".to_owned(),
+            title: "First".to_owned(),
+            body: "done".to_owned(),
+            run_id: Some("run-1".to_owned()),
+            phase: Some(TurnPhase::Completed),
+            details: vec![TranscriptDetail {
+                kind: TranscriptDetailKind::Tool,
+                title: "first".to_owned(),
+                body: "target=tool:first".to_owned(),
+            }],
+            details_expanded: false,
+        });
+        let second_index = app.active_session().timeline.len();
+        app.active_session_mut().timeline.push(TimelineEntry {
+            timestamp: "12:01".to_owned(),
+            kind: TimelineKind::Agent,
+            block: TranscriptBlock::AssistantMessage,
+            actor: "assistant".to_owned(),
+            title: "Second".to_owned(),
+            body: "done".to_owned(),
+            run_id: Some("run-2".to_owned()),
+            phase: Some(TurnPhase::Completed),
+            details: vec![TranscriptDetail {
+                kind: TranscriptDetailKind::Tool,
+                title: "second".to_owned(),
+                body: "target=tool:second".to_owned(),
+            }],
+            details_expanded: false,
+        });
+
+        app.detail_overlay_open = true;
+        app.detail_overlay_target = Some(HistoryCellKey::Committed(first_index));
+        app.sync_detail_overlay_flags();
+        let _ = app.detail_overlay_lines();
+        let first_key = app.detail_overlay_cache_key();
+
+        app.detail_overlay_target = Some(HistoryCellKey::Committed(second_index));
+        app.sync_detail_overlay_flags();
+        let _ = app.detail_overlay_lines();
+        let second_key = app.detail_overlay_cache_key();
+
+        assert_ne!(first_key, second_key);
     }
 
     #[test]
@@ -3120,17 +4100,17 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "/mosaic gateway status ");
+        assert_eq!(app.active_draft(), "/gateway status ");
     }
 
     #[test]
     fn tab_accepts_current_command_completion() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/m".to_owned();
+        app.active_session_mut().draft = "/he".to_owned();
 
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "/mosaic ");
+        assert_eq!(app.active_draft(), "/help ");
     }
 
     #[test]
@@ -3140,7 +4120,7 @@ mod tests {
         app.gateway_detail = Some("transport=http+sse".to_owned());
         app.node_summary = Some("nodes=1".to_owned());
         app.node_detail = Some("healthy".to_owned());
-        app.active_session_mut().draft = "/mosaic gateway status".to_owned();
+        app.active_session_mut().draft = "/gateway status".to_owned();
 
         app.submit_composer();
 
@@ -3156,7 +4136,7 @@ mod tests {
     #[test]
     fn sandbox_status_command_returns_inline_action() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/mosaic sandbox status".to_owned();
+        app.active_session_mut().draft = "/sandbox status".to_owned();
 
         let action = app.submit_composer();
 
@@ -3173,8 +4153,7 @@ mod tests {
     #[test]
     fn sandbox_rebuild_command_returns_targeted_action() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft =
-            "/mosaic sandbox rebuild python-capability-demo".to_owned();
+        app.active_session_mut().draft = "/sandbox rebuild python-capability-demo".to_owned();
 
         let action = app.submit_composer();
 
@@ -3191,7 +4170,7 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
 
-        assert_eq!(app.active_draft(), "/mosaic sandbox status ");
+        assert_eq!(app.active_draft(), "/sandbox status ");
     }
 
     #[test]
@@ -3237,7 +4216,7 @@ mod tests {
     #[test]
     fn adapter_status_command_returns_inline_action() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/mosaic adapter status".to_owned();
+        app.active_session_mut().draft = "/adapter status".to_owned();
 
         let action = app.submit_composer();
 
@@ -3254,11 +4233,11 @@ mod tests {
     #[test]
     fn node_commands_return_expected_actions() {
         let mut list_app = App::new("/tmp/mosaic".into());
-        list_app.active_session_mut().draft = "/mosaic node list".to_owned();
+        list_app.active_session_mut().draft = "/node list".to_owned();
         assert_eq!(list_app.submit_composer(), AppAction::NodeList);
 
         let mut show_app = App::new("/tmp/mosaic".into());
-        show_app.active_session_mut().draft = "/mosaic node show headless-1".to_owned();
+        show_app.active_session_mut().draft = "/node show headless-1".to_owned();
         assert_eq!(
             show_app.submit_composer(),
             AppAction::NodeShow("headless-1".to_owned())
@@ -3335,9 +4314,9 @@ mod tests {
     }
 
     #[test]
-    fn entering_mosaic_runs_inline_help_instead_of_stalling_on_completion() {
+    fn entering_help_runs_inline_catalog_instead_of_stalling_on_completion() {
         let mut app = App::new("/tmp/mosaic".into());
-        app.active_session_mut().draft = "/mosaic".to_owned();
+        app.active_session_mut().draft = "/help".to_owned();
 
         let action = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
@@ -3349,6 +4328,41 @@ mod tests {
                 .last()
                 .map(|entry| entry.title.as_str()),
             Some("Mosaic command reference")
+        );
+    }
+
+    #[test]
+    fn mosaic_alias_still_routes_to_inline_help_catalog() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/mosaic".to_owned();
+
+        let action = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(action, AppAction::Continue);
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Mosaic command reference")
+        );
+    }
+
+    #[test]
+    fn new_command_creates_a_fresh_session_inline() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/new".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(action, AppAction::Continue);
+        assert!(app.session_label().starts_with("session-"));
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Session selected")
         );
     }
 
@@ -3366,7 +4380,43 @@ mod tests {
                 .timeline
                 .last()
                 .map(|entry| entry.title.as_str()),
-            Some("Sessions")
+            Some("Session list")
+        );
+    }
+
+    #[test]
+    fn model_list_renders_inline_operator_card_in_the_transcript_shell() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            vec![
+                ProfileOption {
+                    name: "openai".to_owned(),
+                    model: "gpt-5.4-mini".to_owned(),
+                    provider_type: "openai".to_owned(),
+                },
+                ProfileOption {
+                    name: "ollama".to_owned(),
+                    model: "qwen3".to_owned(),
+                    provider_type: "ollama".to_owned(),
+                },
+            ],
+            Vec::new(),
+            false,
+        );
+        app.active_session_mut().draft = "/model list".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(action, AppAction::Continue);
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Runtime profiles")
         );
     }
 
@@ -3402,8 +4452,6 @@ mod tests {
     fn app_starts_in_chat_surface_even_when_resume_flag_is_set() {
         let app = App::new_with_resume("/tmp/mosaic".into(), true);
 
-        assert_eq!(app.surface, super::Surface::Console);
-        assert_eq!(app.focus, super::Focus::Composer);
         assert_eq!(
             app.active_session()
                 .timeline
@@ -3425,18 +4473,24 @@ mod tests {
         });
 
         assert_eq!(app.runtime_status, "running");
-        assert!(app.show_console_history);
         assert_eq!(app.activity.len(), initial_activity_len + 1);
+        assert_eq!(app.active_session().timeline.len(), initial_timeline_len);
         assert_eq!(
-            app.active_session().timeline.len(),
-            initial_timeline_len + 1
+            app.active_session()
+                .active_turn
+                .as_ref()
+                .map(|turn| &turn.cell)
+                .and_then(|entry| entry.details.last())
+                .map(|detail| detail.title.as_str()),
+            Some("Run started")
         );
         assert_eq!(
             app.active_session()
-                .timeline
-                .last()
-                .map(|entry| entry.title.as_str()),
-            Some("Run started")
+                .active_turn
+                .as_ref()
+                .map(|turn| &turn.cell)
+                .and_then(|entry| entry.phase),
+            Some(TurnPhase::Queued)
         );
     }
 
@@ -3454,9 +4508,11 @@ mod tests {
 
         let body = app
             .active_session()
-            .timeline
-            .last()
-            .map(|entry| entry.body.clone())
+            .active_turn
+            .as_ref()
+            .map(|turn| &turn.cell)
+            .and_then(|entry| entry.details.last())
+            .map(|detail| detail.body.clone())
             .unwrap_or_default();
         assert!(body.contains("template=note.md"));
         assert!(body.contains("script=annotate.py"));
@@ -3485,6 +4541,29 @@ mod tests {
     }
 
     #[test]
+    fn output_delta_replaces_waiting_placeholder_with_streamed_body() {
+        let mut app = App::new("/tmp/mosaic".into());
+
+        app.apply_run_event(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
+            input: "hello".to_owned(),
+        });
+        app.apply_run_event(RunEvent::OutputDelta {
+            run_id: "run-1".to_owned(),
+            chunk: "partial reply".to_owned(),
+            accumulated_chars: 13,
+        });
+
+        let active = app
+            .active_session()
+            .active_turn
+            .as_ref()
+            .expect("active turn should exist");
+        assert_eq!(active.cell.phase, Some(TurnPhase::Streaming));
+        assert_eq!(active.cell.body, "partial reply");
+    }
+
+    #[test]
     fn apply_run_event_marks_failures_in_activity_and_timeline() {
         let mut app = App::new("/tmp/mosaic".into());
 
@@ -3498,12 +4577,18 @@ mod tests {
         assert_eq!(app.runtime_status, "error");
         let last = app
             .active_session()
-            .timeline
-            .last()
-            .expect("timeline entry should exist");
-        assert_eq!(last.kind, TimelineKind::System);
-        assert_eq!(last.title, "Tool failed: read_file");
-        assert!(last.body.contains("permission denied"));
+            .active_turn
+            .as_ref()
+            .map(|turn| &turn.cell)
+            .expect("active turn should exist");
+        assert_eq!(last.kind, TimelineKind::Agent);
+        assert_eq!(last.block, TranscriptBlock::AssistantMessage);
+        assert_eq!(last.title, "Assistant response");
+        assert_eq!(last.phase, Some(TurnPhase::Failed));
+        let detail = last.details.last().expect("failure detail should exist");
+        assert_eq!(detail.title, "Tool failed: read_file");
+        assert!(detail.body.contains("permission denied"));
+        assert!(detail.body.contains("next=/inspect last"));
     }
 
     #[test]
@@ -3522,19 +4607,254 @@ mod tests {
             summary: Some("target=read_file | orchestration_owner=workflow_engine".to_owned()),
         });
 
-        let timeline = &app.active_session().timeline;
-        let tool_body = timeline
+        let last = app
+            .active_session()
+            .active_turn
+            .as_ref()
+            .map(|turn| &turn.cell)
+            .expect("turn should exist");
+        let tool_body = last
+            .details
             .iter()
-            .find(|entry| entry.title == "Tool call: read_file")
-            .map(|entry| entry.body.clone())
+            .find(|detail| detail.title == "Tool call: read_file")
+            .map(|detail| detail.body.clone())
             .unwrap_or_default();
-        let workflow_body = timeline
+        let workflow_body = last
+            .details
             .iter()
-            .find(|entry| entry.title == "Workflow step: fanout")
-            .map(|entry| entry.body.clone())
+            .find(|detail| detail.title == "Workflow step: fanout")
+            .map(|detail| detail.body.clone())
             .unwrap_or_default();
+        assert_eq!(last.block, TranscriptBlock::AssistantMessage);
         assert!(tool_body.contains("exec_target=local"));
         assert!(workflow_body.contains("orchestration_owner=workflow_engine"));
+    }
+
+    #[test]
+    fn run_failed_captures_failure_origin_and_next_action() {
+        let mut app = App::new("/tmp/mosaic".into());
+
+        app.apply_run_event(RunEvent::RunFailed {
+            run_id: "run-1".to_owned(),
+            error: "sandbox dependencies missing".to_owned(),
+            failure_kind: Some("runtime".to_owned()),
+            failure_origin: Some("sandbox".to_owned()),
+        });
+
+        let last = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("finalized turn should exist");
+        assert_eq!(last.block, TranscriptBlock::AssistantMessage);
+        assert_eq!(last.phase, Some(TurnPhase::Failed));
+        let detail = last.details.last().expect("failure detail should exist");
+        assert!(detail.body.contains("failure=sandbox preparation failure"));
+        assert!(detail.body.contains("next=/sandbox status"));
+    }
+
+    #[test]
+    fn sync_session_catalog_preserves_draft_while_streaming_preview_is_active() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "retry later".to_owned();
+        app.active_session_mut().streaming_preview = Some("partial reply".to_owned());
+        let current_id = app.session_label().to_owned();
+
+        app.sync_session_catalog(Vec::new(), &current_id);
+
+        assert_eq!(app.active_draft(), "retry later");
+        assert_eq!(app.active_streaming_preview(), Some("partial reply"));
+    }
+
+    #[test]
+    fn run_canceled_renders_notice_and_clears_streaming_preview() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().streaming_preview = Some("partial".to_owned());
+        app.active_session_mut().streaming_run_id = Some("run-1".to_owned());
+
+        app.apply_run_event(RunEvent::RunCanceled {
+            run_id: "run-1".to_owned(),
+            reason: "operator requested stop".to_owned(),
+        });
+
+        let last = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("timeline entry should exist");
+        assert_eq!(last.block, TranscriptBlock::AssistantMessage);
+        assert_eq!(last.phase, Some(TurnPhase::Canceled));
+        assert_eq!(
+            last.details.last().map(|detail| detail.title.as_str()),
+            Some("Run canceled")
+        );
+        assert_eq!(app.active_streaming_preview(), None);
+    }
+
+    #[test]
+    fn run_retry_command_starts_submitted_live_turn_instead_of_system_card() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().last_gateway_run_id = Some("gw-run-1".to_owned());
+        app.active_session_mut().draft = "/run retry".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(action, AppAction::RetryRun("gw-run-1".to_owned()));
+        assert_eq!(app.runtime_status, "running");
+        let active = app
+            .active_session()
+            .active_turn
+            .as_ref()
+            .expect("retry should create a live turn");
+        assert_eq!(active.cell.phase, Some(TurnPhase::Submitted));
+        assert!(
+            active
+                .cell
+                .body
+                .contains("Retry requested for run gw-run-1")
+        );
+        assert_eq!(
+            active
+                .cell
+                .details
+                .last()
+                .map(|detail| detail.title.as_str()),
+            Some("Run retry requested")
+        );
+        assert_ne!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Run retry requested")
+        );
+    }
+
+    #[test]
+    fn run_stop_command_mutates_current_live_turn_in_place() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().current_gateway_run_id = Some("gw-run-1".to_owned());
+        app.active_session_mut().active_turn = Some(ActiveTurn {
+            cell: TimelineEntry {
+                timestamp: "12:00".to_owned(),
+                kind: TimelineKind::Agent,
+                block: TranscriptBlock::AssistantMessage,
+                actor: "assistant".to_owned(),
+                title: "Assistant response".to_owned(),
+                body: "partial reply".to_owned(),
+                run_id: Some("gw-run-1".to_owned()),
+                phase: Some(TurnPhase::Streaming),
+                details: Vec::new(),
+                details_expanded: false,
+            },
+            revision: 1,
+        });
+        app.active_session_mut().draft = "/run stop".to_owned();
+
+        let action = app.submit_composer();
+
+        assert_eq!(action, AppAction::CancelRun("gw-run-1".to_owned()));
+        assert_eq!(app.runtime_status, "canceling");
+        let active = app
+            .active_session()
+            .active_turn
+            .as_ref()
+            .expect("cancel request should keep the live turn");
+        assert_eq!(active.cell.phase, Some(TurnPhase::WaitingOnCapability));
+        assert_eq!(active.cell.body, "partial reply");
+        assert_eq!(
+            active
+                .cell
+                .details
+                .last()
+                .map(|detail| detail.title.as_str()),
+            Some("Run cancellation requested")
+        );
+        assert_ne!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Run cancellation requested")
+        );
+    }
+
+    #[test]
+    fn run_finished_preserves_streamed_body_and_pins_detail_to_committed_cell() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
+            input: "hello".to_owned(),
+        });
+        app.apply_run_event(RunEvent::OutputDelta {
+            run_id: "run-1".to_owned(),
+            chunk: "partial reply".to_owned(),
+            accumulated_chars: 13,
+        });
+        app.detail_overlay_open = true;
+        app.detail_overlay_target = Some(HistoryCellKey::Active);
+        app.sync_detail_overlay_flags();
+
+        app.apply_run_event(RunEvent::RunFinished {
+            run_id: "run-1".to_owned(),
+            output_preview: String::new(),
+        });
+
+        let committed_index = app.active_session().timeline.len().saturating_sub(1);
+        let last = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("finalized turn should exist");
+        assert_eq!(last.body, "partial reply");
+        assert_eq!(last.phase, Some(TurnPhase::Completed));
+        assert_eq!(
+            app.detail_overlay_target,
+            Some(HistoryCellKey::Committed(committed_index))
+        );
+        let lines = app
+            .detail_overlay_lines()
+            .expect("detail overlay should stay open on the committed turn")
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert!(lines.iter().any(|line| line.contains("partial reply")));
+        assert!(lines.iter().any(|line| line.contains("Run finished")));
+    }
+
+    #[test]
+    fn run_failed_preserves_partial_streamed_body_in_committed_cell() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
+            input: "hello".to_owned(),
+        });
+        app.apply_run_event(RunEvent::OutputDelta {
+            run_id: "run-1".to_owned(),
+            chunk: "partial reply".to_owned(),
+            accumulated_chars: 13,
+        });
+
+        app.apply_run_event(RunEvent::RunFailed {
+            run_id: "run-1".to_owned(),
+            error: "boom".to_owned(),
+            failure_kind: Some("runtime".to_owned()),
+            failure_origin: Some("runtime".to_owned()),
+        });
+
+        let last = app
+            .active_session()
+            .timeline
+            .last()
+            .expect("failed turn should be committed");
+        assert_eq!(last.phase, Some(TurnPhase::Failed));
+        assert_eq!(last.body, "partial reply");
+        assert!(
+            last.details
+                .last()
+                .map(|detail| detail.body.contains("boom"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
@@ -3621,8 +4941,16 @@ mod tests {
             .timeline
             .last()
             .expect("timeline entry should exist");
-        assert_eq!(last_timeline.title, "Run finished");
+        assert_eq!(last_timeline.title, "Assistant response");
+        assert_eq!(last_timeline.phase, Some(TurnPhase::Completed));
         assert!(last_timeline.body.contains("done"));
+        assert_eq!(
+            last_timeline
+                .details
+                .last()
+                .map(|detail| detail.title.as_str()),
+            Some("Run finished")
+        );
     }
 
     #[test]
@@ -3642,19 +4970,310 @@ mod tests {
             .timeline
             .last()
             .expect("timeline entry should exist");
-        assert_eq!(last_timeline.title, "Run failed");
-        assert!(last_timeline.body.contains("boom"));
+        assert_eq!(last_timeline.title, "Assistant response");
+        assert_eq!(last_timeline.phase, Some(TurnPhase::Failed));
+        assert!(
+            last_timeline
+                .details
+                .last()
+                .map(|detail| detail.body.contains("boom"))
+                .unwrap_or(false)
+        );
     }
 
     #[test]
-    fn resume_scope_filtering_still_works_for_session_list_logic() {
-        let mut app = App::new_with_resume("/tmp/mosaic".into(), true);
-        app.resume_scope = super::ResumeScope::Remote;
-        app.resume_query = "ios".to_owned();
-        app.ensure_selected_session_visible();
+    fn ctrl_o_toggles_latest_turn_detail_expansion() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::ToolCalling {
+            name: "read_file".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("source=builtin | exec_target=local".to_owned()),
+        });
 
-        let visible = app.visible_session_indices();
-        assert_eq!(visible.len(), 1);
-        assert_eq!(app.sessions[visible[0]].id, "sess-node-007");
+        assert_eq!(
+            app.active_session()
+                .active_turn
+                .as_ref()
+                .map(|turn| turn.cell.details_expanded),
+            Some(false)
+        );
+        let _ = app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        assert_eq!(
+            app.active_session()
+                .active_turn
+                .as_ref()
+                .map(|turn| turn.cell.details_expanded),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn detail_overlay_lines_prefer_active_turn_history_cell() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::ToolCalling {
+            name: "read_file".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("target=tool:read_file".to_owned()),
+        });
+        let _ = app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+
+        let lines = app
+            .detail_overlay_lines()
+            .expect("detail overlay should expose active turn lines")
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("Tool call: read_file"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("target=tool:read_file"))
+        );
+    }
+
+    #[test]
+    fn detail_overlay_preserves_selected_committed_cell_when_new_active_turn_appears() {
+        let mut app = App::new("/tmp/mosaic".into());
+        let committed_index = app.active_session().timeline.len();
+        app.active_session_mut().timeline.push(TimelineEntry {
+            timestamp: "12:00".to_owned(),
+            kind: TimelineKind::Agent,
+            block: TranscriptBlock::AssistantMessage,
+            actor: "assistant".to_owned(),
+            title: "Committed".to_owned(),
+            body: "done".to_owned(),
+            run_id: Some("run-1".to_owned()),
+            phase: Some(TurnPhase::Completed),
+            details: vec![TranscriptDetail {
+                kind: TranscriptDetailKind::Tool,
+                title: "old".to_owned(),
+                body: "target=tool:old".to_owned(),
+            }],
+            details_expanded: false,
+        });
+        app.detail_overlay_open = true;
+        app.detail_overlay_target = Some(HistoryCellKey::Committed(committed_index));
+        app.sync_detail_overlay_flags();
+
+        app.active_session_mut().active_turn = Some(ActiveTurn {
+            cell: TimelineEntry {
+                timestamp: "12:01".to_owned(),
+                kind: TimelineKind::Agent,
+                block: TranscriptBlock::AssistantMessage,
+                actor: "assistant".to_owned(),
+                title: "Active".to_owned(),
+                body: "working".to_owned(),
+                run_id: Some("run-2".to_owned()),
+                phase: Some(TurnPhase::Streaming),
+                details: vec![TranscriptDetail {
+                    kind: TranscriptDetailKind::Tool,
+                    title: "new".to_owned(),
+                    body: "target=tool:new".to_owned(),
+                }],
+                details_expanded: false,
+            },
+            revision: 1,
+        });
+        app.sync_detail_overlay_flags();
+
+        let lines = app
+            .detail_overlay_lines()
+            .expect("detail overlay should keep the committed target")
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert!(lines.iter().any(|line| line.contains("Committed")));
+        assert!(lines.iter().any(|line| line.contains("target=tool:old")));
+        assert!(!lines.iter().any(|line| line.contains("target=tool:new")));
+        assert_eq!(
+            app.detail_overlay_target,
+            Some(HistoryCellKey::Committed(committed_index))
+        );
+    }
+
+    #[test]
+    fn preserved_expandable_turn_prefers_active_turn_then_latest_committed_detail() {
+        let mut session = interactive_session_record("demo", "gpt-5.4-mini");
+        session.timeline.push(TimelineEntry {
+            timestamp: "12:00".to_owned(),
+            kind: TimelineKind::Agent,
+            block: TranscriptBlock::AssistantMessage,
+            actor: "assistant".to_owned(),
+            title: "Committed".to_owned(),
+            body: "done".to_owned(),
+            run_id: Some("run-1".to_owned()),
+            phase: Some(TurnPhase::Completed),
+            details: vec![TranscriptDetail {
+                kind: TranscriptDetailKind::Tool,
+                title: "old".to_owned(),
+                body: "target=tool:old".to_owned(),
+            }],
+            details_expanded: false,
+        });
+
+        let committed = preserved_expandable_turn(&session).expect("committed detail should exist");
+        assert_eq!(committed.title, "Committed");
+
+        session.active_turn = Some(ActiveTurn {
+            cell: TimelineEntry {
+                timestamp: "12:01".to_owned(),
+                kind: TimelineKind::Agent,
+                block: TranscriptBlock::AssistantMessage,
+                actor: "assistant".to_owned(),
+                title: "Active".to_owned(),
+                body: "working".to_owned(),
+                run_id: Some("run-2".to_owned()),
+                phase: Some(TurnPhase::Streaming),
+                details: vec![TranscriptDetail {
+                    kind: TranscriptDetailKind::Tool,
+                    title: "new".to_owned(),
+                    body: "target=tool:new".to_owned(),
+                }],
+                details_expanded: false,
+            },
+            revision: 1,
+        });
+
+        let active = preserved_expandable_turn(&session).expect("active detail should exist");
+        assert_eq!(active.title, "Active");
+    }
+
+    #[test]
+    fn transcript_surface_view_shares_history_snapshot_between_chat_and_overlay() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::ToolCalling {
+            name: "read_file".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("target=tool:read_file".to_owned()),
+        });
+
+        let surface = app.transcript_surface_view();
+        assert_eq!(surface.chat.lines(), surface.transcript_overlay.lines);
+    }
+
+    #[test]
+    fn shell_snapshot_reuses_single_transcript_surface() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::ToolCalling {
+            name: "read_file".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("target=tool:read_file".to_owned()),
+        });
+
+        let snapshot = app.shell_snapshot();
+        assert_eq!(
+            snapshot.surface.chat.lines(),
+            snapshot.surface.transcript_overlay.lines
+        );
+        assert_eq!(snapshot.overlays.state, app.overlay_state());
+        assert_eq!(
+            snapshot.overlays.transcript.lines,
+            snapshot.surface.transcript_overlay.lines
+        );
+        assert!(
+            snapshot
+                .chrome
+                .status_bar
+                .header
+                .to_string()
+                .contains("Mosaic")
+        );
+        assert!(
+            snapshot
+                .chrome
+                .composer
+                .hint_line
+                .to_string()
+                .contains("Tab complete")
+        );
+    }
+
+    #[test]
+    fn command_surface_view_keeps_popup_selection_and_completion_in_sync() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "/he".to_owned();
+
+        let surface = app.command_surface_view();
+
+        assert_eq!(surface.query.as_deref(), Some("he"));
+        assert_eq!(
+            surface.selected.map(|command| command.command),
+            Some("/help")
+        );
+        assert_eq!(
+            surface.popup.selected.map(|command| command.command),
+            Some("/help")
+        );
+        assert_eq!(surface.completion_suffix.as_deref(), Some("lp "));
+    }
+
+    #[test]
+    fn active_turn_details_distinguish_mcp_and_sandbox_states() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.apply_run_event(RunEvent::ToolCalling {
+            name: "remote_fetch".to_owned(),
+            call_id: "call-1".to_owned(),
+            summary: Some("source=mcp_server | mcp_startup=connecting".to_owned()),
+        });
+        app.apply_run_event(RunEvent::CapabilityJobQueued {
+            job_id: "job-1".to_owned(),
+            name: "sandbox-prepare".to_owned(),
+            kind: "python".to_owned(),
+            risk: "medium".to_owned(),
+            permission_scopes: vec!["fs.read".to_owned()],
+        });
+
+        let details = &app
+            .active_session()
+            .active_turn
+            .as_ref()
+            .map(|turn| &turn.cell)
+            .expect("active turn should exist")
+            .details;
+        assert_eq!(
+            details.first().map(|detail| detail.kind),
+            Some(TranscriptDetailKind::Mcp)
+        );
+        assert_eq!(
+            details.last().map(|detail| detail.kind),
+            Some(TranscriptDetailKind::Sandbox)
+        );
+    }
+
+    #[test]
+    fn session_list_and_switch_stay_inside_the_transcript_shell() {
+        let mut app = App::new_with_resume("/tmp/mosaic".into(), true);
+        app.active_session_mut().draft = "/session list".to_owned();
+        let list_action = app.submit_composer();
+
+        assert_eq!(list_action, AppAction::Continue);
+        assert_eq!(
+            app.active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Session list")
+        );
+
+        let mut switch_app = App::new_with_resume("/tmp/mosaic".into(), true);
+        switch_app.active_session_mut().draft = "/session switch sess-node-007".to_owned();
+        let switch_action = switch_app.submit_composer();
+
+        assert_eq!(switch_action, AppAction::Continue);
+        assert_eq!(switch_app.session_label(), "sess-node-007");
+        assert_eq!(
+            switch_app
+                .active_session()
+                .timeline
+                .last()
+                .map(|entry| entry.title.as_str()),
+            Some("Session selected")
+        );
     }
 }

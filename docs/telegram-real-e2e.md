@@ -5,7 +5,8 @@ This is the k5 Telegram-first release-blocking acceptance lane when Telegram is 
 Maintenance rule:
 
 - Telegram is the strongest real external interactive GUI acceptance lane and release-facing channel proof
-- TUI is the primary local chat-first operator surface
+- TUI is the primary local Codex-style operator surface
+- CLI is the scripted/operator automation surface used to set up, validate, inspect, and sign off the lane
 - when Telegram command behavior, skills, attachments, sandbox prerequisites, multi-bot behavior, or the TUI/Telegram proof split change, update this runbook, [telegram-step-by-step.md](./telegram-step-by-step.md), [tui.md](./tui.md), and the matching examples in the same change set
 
 If you have not created a Telegram bot before, start with [telegram-step-by-step.md](./telegram-step-by-step.md) first and then come back here for the stricter acceptance checklist.
@@ -19,6 +20,12 @@ Use it when Telegram is a real release target and you need one repeatable path t
 - image and document uploads route through the expected attachment policy
 - bot A and bot B remain isolated when the multi-bot lane is in scope
 - `session`, `inspect`, `audit`, `replay`, and `incident` all describe the same run truth
+
+Surface roles in this runbook:
+
+- Telegram proves the external human-facing channel lane
+- TUI proves the local operator shell when slash popup behavior, dynamic active turns, inline detail reveal, cancel/retry, or draft preservation are part of the release scope
+- CLI drives the repeatable acceptance steps, artifact collection, and release sign-off
 
 This lane is intentionally no-mock. It does not use fake ingress or a mock provider.
 

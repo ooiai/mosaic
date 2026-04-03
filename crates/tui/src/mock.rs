@@ -31,6 +31,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             references: vec!["sess-node-007 (node follow-up)".to_owned()],
             streaming_preview: None,
             streaming_run_id: None,
+            active_turn: None,
             timeline: vec![
                 entry(
                     "15:02",
@@ -81,6 +82,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             references: vec![],
             streaming_preview: None,
             streaming_run_id: None,
+            active_turn: None,
             timeline: vec![
                 entry(
                     "14:51",
@@ -131,6 +133,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             references: vec![],
             streaming_preview: None,
             streaming_run_id: None,
+            active_turn: None,
             timeline: vec![
                 entry(
                     "14:24",
@@ -172,6 +175,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             references: vec![],
             streaming_preview: None,
             streaming_run_id: None,
+            active_turn: None,
             timeline: vec![entry(
                 "13:02",
                 TimelineKind::System,
@@ -204,6 +208,7 @@ pub fn sessions() -> Vec<SessionRecord> {
             references: vec![],
             streaming_preview: None,
             streaming_run_id: None,
+            active_turn: None,
             timeline: vec![entry(
                 "11:48",
                 TimelineKind::Agent,
@@ -261,8 +266,13 @@ fn entry(
     TimelineEntry {
         timestamp: timestamp.to_owned(),
         kind,
+        block: kind.default_block(),
         actor: actor.to_owned(),
         title: title.to_owned(),
         body: body.to_owned(),
+        run_id: None,
+        phase: None,
+        details: Vec::new(),
+        details_expanded: false,
     }
 }

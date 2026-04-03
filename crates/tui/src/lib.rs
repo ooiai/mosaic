@@ -1,9 +1,20 @@
 //! Mosaic terminal UI crate.
-//! This crate owns terminal rendering, keyboard interaction, local operator
-//! view-state, and the first event loop boundary for the control-plane console.
+//! This crate owns the single-shell terminal operator surface: compact header,
+//! scrolling transcript, bottom composer, transient slash popup, and the first
+//! event-loop boundary for local Gateway-backed interaction.
 
 pub mod app;
+pub mod app_event;
+pub mod bottom_pane;
+pub mod chat_widget;
+pub mod command_popup;
+pub mod composer;
+pub mod history_cell;
 pub mod mock;
+pub mod overlays;
+pub mod shell_view;
+pub mod status_bar;
+pub mod transcript;
 pub mod ui;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1254,6 +1265,7 @@ fn local_session_summary_to_ui(summary: &SessionSummary) -> UiSessionRecord {
         },
         streaming_preview: None,
         streaming_run_id: None,
+        active_turn: None,
         timeline: Vec::new(),
     }
 }
@@ -1299,6 +1311,7 @@ fn remote_session_summary_to_ui(summary: &SessionSummaryDto) -> UiSessionRecord 
         },
         streaming_preview: None,
         streaming_run_id: None,
+        active_turn: None,
         timeline: Vec::new(),
     }
 }
@@ -1418,7 +1431,7 @@ mod tests {
     use mosaic_runtime::events::{RunEvent, RunEventSink};
     use mosaic_session_core::{SessionRecord, SessionStore, SessionSummary, TranscriptRole};
 
-    use crate::app::{App, Surface};
+    use crate::app::App;
 
     use super::{
         TuiEventBuffer, TuiEventSink, apply_gateway_state, build_app, drain_run_events,
@@ -1447,7 +1460,6 @@ mod tests {
     fn build_app_keeps_chat_first_surface_even_with_resume_flag() {
         let app = build_app("/tmp/mosaic".into(), true);
 
-        assert!(matches!(app.surface, Surface::Console));
         assert_eq!(
             app.active_session()
                 .timeline

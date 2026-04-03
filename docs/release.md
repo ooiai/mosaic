@@ -9,6 +9,12 @@ As of k5, release sign-off is not just `cargo test`. It is a combination of:
 - automated no-mock real lanes
 - operator-manual acceptance when a scoped channel requires it
 
+Release surface split:
+
+- TUI = primary local operator shell
+- Telegram = primary external human-facing channel acceptance lane
+- CLI = scripted/operator automation surface
+
 ## Automated gate
 
 Run the delivery gate before cutting a release:
@@ -54,19 +60,52 @@ When Telegram is in release scope, this is also required:
 - record which bot or bots were used for sign-off
 - record whether the image upload, document upload, and `/mosaic help` catalog discovery lanes were part of the scoped release
 
+Telegram remains the strongest external real-user proof lane, but it no longer substitutes for the local operator shell acceptance described below.
+
 ### Local operator sign-off
 
 When TUI behavior is in release scope, also verify the local operator lane:
 
 - `cargo test -p mosaic-tui`
 - `mosaic tui`
+- confirm the TUI still behaves as one single-shell conversation surface with no persistent session/model/inspect panes
+- confirm the shell chrome remains compact and transcript-first instead of drifting back toward a dashboard layout
 - submit one normal message and confirm a real run starts
-- confirm `/` opens the `/mosaic` command popup and `Tab` completes the highlighted command
-- confirm `/mosaic session show`, `/mosaic model list`, `/mosaic adapter status`, `/mosaic node list`, `/mosaic node show <id>`, and `/mosaic inspect last` render inline operator cards
-- confirm short aliases such as `/session show` and `/inspect last` still resolve to the same actions
+- confirm `/` opens the bare slash command popup near the bottom pane and `Tab` completes the highlighted command
+- confirm `/session show`, `/model list`, `/adapter status`, `/node list`, `/node show <id>`, and `/inspect last` render inline operator cards
+- confirm `/mosaic ...` compatibility aliases still resolve to the same actions
 - confirm inline tool, MCP, node-routed tool, skill, or workflow blocks remain visible when the scoped release affects those surfaces
-- confirm `/mosaic inspect last` explains route kind, source kind, execution target, and failure origin for the affected capability paths
+- confirm execution feedback renders as collapsed cards by default rather than flooding the transcript
+- confirm one assistant turn evolves in place through queue/stream/capability/final states instead of fragmenting into disconnected notices
+- confirm the bottom pane shows explicit busy / send-disabled state while a run is active
+- confirm failure cards include the next operator action such as `/inspect last`, `/sandbox status`, `/node list`, or `/run retry`
+- confirm `Ctrl+O` expands the latest active turn and reveals provider/tool/MCP/sandbox/node/workflow details inline
+- confirm streaming output and background refresh do not clear the active composer draft
+- confirm `/inspect last` explains route kind, source kind, execution target, and failure origin for the affected capability paths
 - confirm [tui.md](./tui.md), [getting-started.md](./getting-started.md), [testing.md](./testing.md), and [release.md](./release.md) were updated when the local operator contract changed
+- record at least one PTY-style acceptance run for startup input, slash popup placement, busy-state rendering, and direct operator interaction when shell UX changes are in scope
+- record which PTY steps were actually exercised and which were blocked by missing provider/runtime prerequisites
+
+Minimum local TUI acceptance should explicitly cover:
+
+1. immediate typing after startup
+2. bare slash popup and `Tab` completion
+3. one full streaming assistant turn
+4. one capability-backed turn
+5. `Ctrl+O` inline detail reveal
+6. active run stop/retry
+7. draft preservation during background refresh
+
+Release sign-off should not accept a PTY run that stops at shell startup and popup behavior.
+The PTY record must show:
+
+- one direct chat submission
+- one successful streaming turn in place
+- one successful capability-backed turn
+- one detail-overlay interaction
+- one retry or cancel action
+
+If the current workspace cannot satisfy those because provider or capability infrastructure is unavailable, record that limitation explicitly and do not mark local operator sign-off complete.
 
 ### Compatibility addendum lanes
 

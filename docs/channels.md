@@ -21,7 +21,8 @@ Examples used by this guide:
 ## Telegram Documentation Maintenance Rule
 
 Telegram is the strongest real external GUI acceptance lane.
-TUI is the primary local chat-first operator surface.
+TUI is the primary local Codex-style operator surface.
+CLI is the scripted/operator automation surface for webhook, inspect, setup, and release work.
 
 Because of that, a Telegram-affecting change is not complete unless the matching docs and examples change with it.
 
@@ -59,6 +60,16 @@ When a change alters how proof is divided between local operator work and extern
 - `docs/tui.md`
 - `docs/testing.md`
 - `docs/release.md`
+- `docs/cli.md`
+
+That local operator proof now specifically includes the Codex-style shell contract:
+
+- immediate typing
+- slash popup and `Tab` completion
+- one evolving active turn
+- inline detail reveal
+- cancel/retry
+- draft preservation during background refresh
 
 ## Unified Channel Story
 
