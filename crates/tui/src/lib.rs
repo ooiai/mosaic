@@ -9,6 +9,8 @@ pub mod bottom_pane;
 pub mod chat_widget;
 pub mod command_popup;
 pub mod composer;
+pub mod diff_render;
+pub mod highlight;
 pub mod history_cell;
 pub mod markdown;
 pub mod mock;

@@ -24,6 +24,80 @@ pub struct HistoryCell {
     pub summary_lines: Vec<Line<'static>>,
     pub detail_lines: Vec<Line<'static>>,
     pub expandable: bool,
+    /// Raw body text stored for width-adaptive re-rendering.
+    pub body_raw: String,
+    /// Block type, determines how body is rendered.
+    pub block: TranscriptBlock,
+    /// Whether this cell is the active (in-progress) turn.
+    pub active: bool,
+    /// How many lines in `summary_lines` belong to the body section.
+    /// Used by `render_lines` to splice in width-adaptive body.
+    pub body_line_count: usize,
+}
+
+impl HistoryCell {
+    /// Render this cell's display lines at the given terminal width.
+    ///
+    /// The header and footer lines are reused from `summary_lines`; only the
+    /// body section is regenerated at the correct width.  This produces
+    /// correct word-wrap and markdown layout for any terminal width.
+    pub fn render_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let body_lines = self.body_at_width(width);
+        let header_count = 1usize;
+        let footer_start = header_count + self.body_line_count;
+        let mut lines = Vec::with_capacity(
+            header_count + body_lines.len() + self.summary_lines.len().saturating_sub(footer_start),
+        );
+        // Header line (always first)
+        if let Some(header) = self.summary_lines.first() {
+            lines.push(header.clone());
+        }
+        // Width-adaptive body
+        lines.extend(body_lines);
+        // Footer (detail chips, empty line, etc.)
+        if footer_start < self.summary_lines.len() {
+            lines.extend(self.summary_lines[footer_start..].iter().cloned());
+        }
+        lines
+    }
+
+    /// Return the number of display lines this cell occupies at `width`.
+    pub fn height(&self, width: u16) -> usize {
+        self.render_lines(width).len()
+    }
+
+    fn body_at_width(&self, width: u16) -> Vec<Line<'static>> {
+        if self.body_raw.is_empty() {
+            return Vec::new();
+        }
+        let rail_style = Style::default().fg(if self.active {
+            Color::Green
+        } else {
+            Color::DarkGray
+        });
+        if self.block == TranscriptBlock::AssistantMessage {
+            crate::markdown::render_markdown(&self.body_raw, width)
+                .into_iter()
+                .map(|md_line| {
+                    let mut spans = vec![
+                        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("│ ", rail_style),
+                    ];
+                    spans.extend(md_line.spans);
+                    Line::from(spans)
+                })
+                .collect()
+        } else {
+            // For non-markdown blocks, use the pre-computed body lines unchanged.
+            // These blocks are typically short (3-4 lines) so no wrapping is needed.
+            self.summary_lines
+                .iter()
+                .skip(1) // skip header
+                .take(self.body_line_count)
+                .cloned()
+                .collect()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,12 +217,12 @@ pub fn build_history_cells<'a>(transcript: &'a TranscriptView<'a>) -> HistoryCel
         .iter()
         .enumerate()
         .map(|(index, entry)| {
-            build_history_cell_with_key(entry, false, HistoryCellKey::Committed(index))
+            build_history_cell_with_key(entry, false, HistoryCellKey::Committed(index), 0)
         })
         .collect::<Vec<_>>();
-    let active = transcript
-        .active_entry
-        .map(|entry| build_history_cell_with_key(entry, true, HistoryCellKey::Active));
+    let active = transcript.active_entry.map(|entry| {
+        build_history_cell_with_key(entry, true, HistoryCellKey::Active, transcript.spinner_tick)
+    });
 
     let has_active_streaming_turn = transcript
         .active_entry
@@ -203,6 +277,10 @@ fn empty_state_cell() -> HistoryCell {
         summary_lines: lines.clone(),
         detail_lines: lines,
         expandable: false,
+        body_raw: String::new(),
+        block: TranscriptBlock::SystemNotice,
+        active: false,
+        body_line_count: 3,
     }
 }
 
@@ -253,6 +331,7 @@ pub fn build_history_cell(entry: &crate::transcript::TimelineEntry, active: bool
         } else {
             HistoryCellKey::Committed(0)
         },
+        0,
     )
 }
 
@@ -260,6 +339,7 @@ fn build_history_cell_with_key(
     entry: &crate::transcript::TimelineEntry,
     active: bool,
     key: HistoryCellKey,
+    spinner_tick: usize,
 ) -> HistoryCell {
     let (label, label_style, body_style) = cell_identity(entry);
 
@@ -336,6 +416,61 @@ fn build_history_cell_with_key(
         }
     }
 
+    // Record how many body lines were added (excluding header and footer).
+    let body_line_count = summary_lines.len() - 1; // -1 for the header line
+
+    // Render exec/tool call rows.
+    for exec in &entry.exec_calls {
+        let exec_rail = Style::default().fg(if exec.running {
+            Color::Yellow
+        } else if exec.exit_ok == Some(true) {
+            Color::Green
+        } else {
+            Color::Red
+        });
+        let status_span = if exec.running {
+            Span::styled(
+                format!(
+                    "  {} running",
+                    crate::transcript::spinner_frame(spinner_tick)
+                ),
+                Style::default().fg(Color::Yellow),
+            )
+        } else if exec.exit_ok == Some(true) {
+            Span::styled("  ✓ done", Style::default().fg(Color::Green))
+        } else {
+            Span::styled("  ✗ failed", Style::default().fg(Color::Red))
+        };
+        let mut exec_header_spans = vec![
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("┆ ", exec_rail),
+            Span::styled(
+                format!("[{}]", exec.tool_name),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            status_span,
+        ];
+        if !exec.input_summary.is_empty() {
+            exec_header_spans.push(Span::styled(
+                format!(
+                    "  {}",
+                    exec.input_summary.chars().take(60).collect::<String>()
+                ),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        summary_lines.push(Line::from(exec_header_spans));
+        for out_line in &exec.output_lines {
+            summary_lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("┆   ", exec_rail),
+                Span::styled(out_line.clone(), Style::default().fg(Color::Gray)),
+            ]));
+        }
+    }
+
     if !entry.details.is_empty() {
         summary_lines.push(detail_summary_line(entry, active));
         if let Some(preview) = detail_preview_line(entry, active) {
@@ -367,6 +502,10 @@ fn build_history_cell_with_key(
         summary_lines,
         detail_lines: build_detail_lines(entry, label, label_style, body_style),
         expandable: !entry.details.is_empty(),
+        body_raw: entry.body.clone(),
+        block: entry.block,
+        active,
+        body_line_count,
     }
 }
 
@@ -456,11 +595,20 @@ fn build_detail_lines(
                 Span::styled("  ", Style::default().fg(Color::DarkGray)),
                 Span::raw(detail.title.clone()),
             ]));
-            for body_line in detail.body.lines().filter(|line| !line.trim().is_empty()) {
-                lines.push(Line::from(vec![
-                    Span::styled("    ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(body_line.to_owned(), Style::default().fg(Color::Gray)),
-                ]));
+            if crate::diff_render::is_diff(&detail.body) {
+                for diff_line in crate::diff_render::render_diff(&detail.body, 100) {
+                    let mut spans =
+                        vec![Span::styled("    ", Style::default().fg(Color::DarkGray))];
+                    spans.extend(diff_line.spans);
+                    lines.push(Line::from(spans));
+                }
+            } else {
+                for body_line in detail.body.lines().filter(|line| !line.trim().is_empty()) {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(body_line.to_owned(), Style::default().fg(Color::Gray)),
+                    ]));
+                }
             }
             lines.push(Line::from(""));
         }
@@ -643,6 +791,7 @@ mod tests {
             phase: Some(TurnPhase::Streaming),
             details: Vec::new(),
             details_expanded: false,
+            exec_calls: vec![],
         }
     }
 
@@ -720,6 +869,7 @@ mod tests {
             active_revision: Some(3),
             streaming_preview: None,
             scroll: 0,
+            spinner_tick: 0,
         };
 
         let cells = HistoryCells::from(&view);

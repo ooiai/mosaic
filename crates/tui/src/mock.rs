@@ -274,5 +274,6 @@ fn entry(
         phase: None,
         details: Vec::new(),
         details_expanded: false,
+        exec_calls: vec![],
     }
 }

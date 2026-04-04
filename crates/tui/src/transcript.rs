@@ -105,6 +105,33 @@ impl TranscriptDetailKind {
     }
 }
 
+/// Maximum number of output lines retained per exec call.
+pub const EXEC_MAX_OUTPUT_LINES: usize = 12;
+
+/// Spinner frames for running tool calls.
+pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠸", "⠴", "⠦", "⠇"];
+
+/// Returns the spinner character for a given tick counter.
+pub fn spinner_frame(tick: usize) -> &'static str {
+    SPINNER_FRAMES[tick % SPINNER_FRAMES.len()]
+}
+
+/// Live state for a single tool call within a turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecCallState {
+    pub call_id: String,
+    pub tool_name: String,
+    /// First 120 chars of the call summary/input.
+    pub input_summary: String,
+    /// Last `EXEC_MAX_OUTPUT_LINES` lines of tool output.
+    pub output_lines: Vec<String>,
+    /// `None` = still running, `Some(true)` = success, `Some(false)` = failure.
+    pub exit_ok: Option<bool>,
+    /// Approximate duration label, set on completion.
+    pub duration_label: Option<String>,
+    pub running: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptDetail {
     pub kind: TranscriptDetailKind,
@@ -124,6 +151,8 @@ pub struct TranscriptCell {
     pub phase: Option<TurnPhase>,
     pub details: Vec<TranscriptDetail>,
     pub details_expanded: bool,
+    /// Live tool/exec calls attached to this turn.
+    pub exec_calls: Vec<ExecCallState>,
 }
 
 pub type TimelineEntry = TranscriptCell;
@@ -137,23 +166,45 @@ pub struct ActiveTurn {
 #[derive(Debug, Clone, Default)]
 pub struct TranscriptState {
     pub scroll: u16,
+    /// When `true`, the view follows new content by scrolling to the bottom.
+    /// Set to `false` when the operator manually scrolls up.
+    pub follow: bool,
 }
 
 impl TranscriptState {
+    pub fn new() -> Self {
+        Self {
+            scroll: 0,
+            follow: true,
+        }
+    }
+
     pub fn scroll_down(&mut self, amount: u16) {
+        self.follow = false;
         self.scroll = self.scroll.saturating_add(amount);
     }
 
     pub fn scroll_up(&mut self, amount: u16) {
+        self.follow = false;
         self.scroll = self.scroll.saturating_sub(amount);
     }
 
     pub fn scroll_home(&mut self) {
+        self.follow = false;
         self.scroll = 0;
     }
 
     pub fn scroll_end(&mut self) {
+        self.follow = true;
         self.scroll = self.scroll.saturating_add(20);
+    }
+
+    /// Update scroll to follow new content given total lines and visible height.
+    /// Only takes effect when `follow == true`.
+    pub fn sync_follow(&mut self, total_lines: u16, visible_height: u16) {
+        if self.follow {
+            self.scroll = total_lines.saturating_sub(visible_height);
+        }
     }
 }
 
@@ -163,6 +214,8 @@ pub struct TranscriptView<'a> {
     pub active_revision: Option<usize>,
     pub streaming_preview: Option<&'a str>,
     pub scroll: u16,
+    /// Current spinner tick for animating running tool calls.
+    pub spinner_tick: usize,
 }
 
 pub fn body_lines(entry: &TimelineEntry) -> Vec<String> {

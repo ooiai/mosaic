@@ -6,32 +6,29 @@ use ratatui::{
 // ── Language keyword lists ────────────────────────────────────────────────
 
 const BASH_KEYWORDS: &[&str] = &[
-    "if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case",
-    "esac", "in", "return", "exit", "function", "select", "until",
+    "if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac", "in",
+    "return", "exit", "function", "select", "until",
 ];
 
 const BASH_BUILTINS: &[&str] = &[
-    "echo", "cd", "ls", "mkdir", "rm", "cp", "mv", "cat", "grep", "sed",
-    "awk", "curl", "export", "source", "read", "printf", "test", "true",
-    "false", "set", "unset", "shift", "exec", "eval", "trap", "wait",
-    "kill", "jobs", "bg", "fg", "pushd", "popd", "pwd", "type", "which",
-    "chmod", "chown", "touch", "head", "tail", "sort", "uniq", "wc", "find",
-    "xargs", "tee", "cut", "tr", "basename", "dirname",
+    "echo", "cd", "ls", "mkdir", "rm", "cp", "mv", "cat", "grep", "sed", "awk", "curl", "export",
+    "source", "read", "printf", "test", "true", "false", "set", "unset", "shift", "exec", "eval",
+    "trap", "wait", "kill", "jobs", "bg", "fg", "pushd", "popd", "pwd", "type", "which", "chmod",
+    "chown", "touch", "head", "tail", "sort", "uniq", "wc", "find", "xargs", "tee", "cut", "tr",
+    "basename", "dirname",
 ];
 
 const RUST_KEYWORDS: &[&str] = &[
-    "fn", "let", "mut", "pub", "use", "mod", "struct", "enum", "impl",
-    "trait", "where", "for", "if", "else", "match", "return", "async",
-    "await", "move", "ref", "self", "super", "crate", "type", "const",
-    "static", "dyn", "unsafe", "loop", "while", "break", "continue", "in",
-    "as", "extern", "true", "false",
+    "fn", "let", "mut", "pub", "use", "mod", "struct", "enum", "impl", "trait", "where", "for",
+    "if", "else", "match", "return", "async", "await", "move", "ref", "self", "super", "crate",
+    "type", "const", "static", "dyn", "unsafe", "loop", "while", "break", "continue", "in", "as",
+    "extern", "true", "false",
 ];
 
 const PYTHON_KEYWORDS: &[&str] = &[
-    "def", "class", "import", "from", "as", "if", "elif", "else", "for",
-    "while", "with", "try", "except", "finally", "raise", "return", "yield",
-    "lambda", "pass", "break", "continue", "global", "nonlocal", "assert",
-    "del", "in", "not", "and", "or", "is", "True", "False", "None",
+    "def", "class", "import", "from", "as", "if", "elif", "else", "for", "while", "with", "try",
+    "except", "finally", "raise", "return", "yield", "lambda", "pass", "break", "continue",
+    "global", "nonlocal", "assert", "del", "in", "not", "and", "or", "is", "True", "False", "None",
     "async", "await",
 ];
 
@@ -238,7 +235,12 @@ fn highlight_rust(line: &str) -> Vec<Span<'static>> {
                 }
                 let style = if RUST_KEYWORDS.contains(&word.as_str()) {
                     Style::default().fg(Color::Magenta)
-                } else if word.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                } else if word
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                {
                     Style::default().fg(Color::LightBlue)
                 } else {
                     Style::default().fg(Color::Cyan)
@@ -386,10 +388,7 @@ fn highlight_json(line: &str) -> Vec<Span<'static>> {
                 let peek2 = {
                     let rest = &line[_start..];
                     // rough: check if the next non-space char is ':'
-                    rest.chars()
-                        .skip(s.len())
-                        .find(|c| !c.is_whitespace())
-                        == Some(':')
+                    rest.chars().skip(s.len()).find(|c| !c.is_whitespace()) == Some(':')
                 };
                 let color = if !seen_colon && peek2 {
                     Color::LightBlue // key
@@ -412,10 +411,22 @@ fn highlight_json(line: &str) -> Vec<Span<'static>> {
                 ));
             }
             // Numbers
-            c if c.is_ascii_digit() || (c == '-' && chars.peek().map(|&(_, nc)| nc.is_ascii_digit()).unwrap_or(false)) => {
+            c if c.is_ascii_digit()
+                || (c == '-'
+                    && chars
+                        .peek()
+                        .map(|&(_, nc)| nc.is_ascii_digit())
+                        .unwrap_or(false)) =>
+            {
                 let mut n = String::from(c);
                 while let Some(&(_, nc)) = chars.peek() {
-                    if nc.is_ascii_digit() || nc == '.' || nc == 'e' || nc == 'E' || nc == '+' || nc == '-' {
+                    if nc.is_ascii_digit()
+                        || nc == '.'
+                        || nc == 'e'
+                        || nc == 'E'
+                        || nc == '+'
+                        || nc == '-'
+                    {
                         n.push(nc);
                         chars.next();
                     } else {
@@ -497,7 +508,9 @@ mod tests {
     fn bash_variable_is_yellow() {
         let spans = highlight_code("bash", "echo $HOME");
         assert!(
-            spans.iter().any(|s| s.style.fg == Some(Color::Yellow) && s.content.contains("HOME")),
+            spans
+                .iter()
+                .any(|s| s.style.fg == Some(Color::Yellow) && s.content.contains("HOME")),
             "bash variable $HOME should be yellow"
         );
     }
@@ -527,7 +540,9 @@ mod tests {
     fn rust_string_is_green() {
         let spans = highlight_code("rust", r#"let s = "hello";"#);
         assert!(
-            spans.iter().any(|s| s.style.fg == Some(Color::Green) && s.content.contains("hello")),
+            spans
+                .iter()
+                .any(|s| s.style.fg == Some(Color::Green) && s.content.contains("hello")),
             "rust string should be Green"
         );
     }

@@ -58,22 +58,13 @@ pub fn render_diff(patch: &str, width: u16) -> Vec<Line<'static>> {
             ))
         } else if raw_line.starts_with("@@ ") {
             // Hunk header
-            Line::from(Span::styled(
-                truncated,
-                Style::default().fg(Color::Cyan),
-            ))
+            Line::from(Span::styled(truncated, Style::default().fg(Color::Cyan)))
         } else if raw_line.starts_with('+') {
             // Added line
-            Line::from(Span::styled(
-                truncated,
-                Style::default().fg(Color::Green),
-            ))
+            Line::from(Span::styled(truncated, Style::default().fg(Color::Green)))
         } else if raw_line.starts_with('-') {
             // Removed line
-            Line::from(Span::styled(
-                truncated,
-                Style::default().fg(Color::Red),
-            ))
+            Line::from(Span::styled(truncated, Style::default().fg(Color::Red)))
         } else if raw_line.starts_with('\\') {
             // "No newline at end of file" marker — treat as context
             Line::from(Span::styled(
@@ -100,16 +91,18 @@ mod tests {
     use ratatui::style::Color;
 
     fn sample_diff() -> &'static str {
-        "diff --git a/foo.rs b/foo.rs\n\
-         index abc..def 100644\n\
-         --- a/foo.rs\n\
-         +++ b/foo.rs\n\
-         @@ -1,3 +1,4 @@\n\
-          fn main() {\n\
-         -    println!(\"hello\");\n\
-         +    println!(\"hello world\");\n\
-         +    println!(\"extra\");\n\
-          }"
+        concat!(
+            "diff --git a/foo.rs b/foo.rs\n",
+            "index abc..def 100644\n",
+            "--- a/foo.rs\n",
+            "+++ b/foo.rs\n",
+            "@@ -1,3 +1,4 @@\n",
+            " fn main() {\n",
+            "-    println!(\"hello\");\n",
+            "+    println!(\"hello world\");\n",
+            "+    println!(\"extra\");\n",
+            " }",
+        )
     }
 
     #[test]
@@ -117,7 +110,11 @@ mod tests {
         let lines = render_diff(sample_diff(), 120);
         let added = lines
             .iter()
-            .find(|l| l.spans.iter().any(|s| s.content.starts_with('+')))
+            .find(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.starts_with('+') && !s.content.starts_with("+++"))
+            })
             .expect("should have an added line");
         assert!(
             added.spans.iter().any(|s| s.style.fg == Some(Color::Green)),
@@ -130,7 +127,11 @@ mod tests {
         let lines = render_diff(sample_diff(), 120);
         let removed = lines
             .iter()
-            .find(|l| l.spans.iter().any(|s| s.content.starts_with('-') && !s.content.starts_with("---")))
+            .find(|l| {
+                l.spans
+                    .iter()
+                    .any(|s| s.content.starts_with('-') && !s.content.starts_with("---"))
+            })
             .expect("should have a removed line");
         assert!(
             removed.spans.iter().any(|s| s.style.fg == Some(Color::Red)),
@@ -176,7 +177,9 @@ mod tests {
             .find(|l| l.spans.iter().any(|s| s.content.starts_with(" fn")))
             .expect("should have a context line");
         assert!(
-            ctx.spans.iter().any(|s| s.style.fg == Some(Color::DarkGray)),
+            ctx.spans
+                .iter()
+                .any(|s| s.style.fg == Some(Color::DarkGray)),
             "context line should be dark gray"
         );
     }

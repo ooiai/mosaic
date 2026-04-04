@@ -74,10 +74,9 @@ pub fn render_markdown(text: &str, width: u16) -> Vec<Line<'static>> {
             Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
                 for code_line in &code_block_lines {
-                    lines.push(Line::from(vec![
-                        Span::styled("  ", Style::default()),
-                        Span::styled(code_line.clone(), Style::default().fg(Color::Cyan)),
-                    ]));
+                    let mut spans = vec![Span::styled("  ", Style::default())];
+                    spans.extend(crate::highlight::highlight_code(&code_lang, code_line));
+                    lines.push(Line::from(spans));
                 }
                 if !code_block_lines.is_empty() {
                     lines.push(Line::from(""));
@@ -284,13 +283,14 @@ mod tests {
         let md = "```rust\nfn main() {}\n```";
         let lines = render_markdown(md, 80);
         assert!(!lines.is_empty());
+        // The highlighter tokenizes `fn` and `main` as separate spans
         let has_code = lines
             .iter()
-            .any(|l| l.spans.iter().any(|s| s.content.contains("fn main")));
+            .any(|l| l.spans.iter().any(|s| s.content.contains("main")));
         assert!(has_code, "fenced code block should appear in output");
         let code_line = lines
             .iter()
-            .find(|l| l.spans.iter().any(|s| s.content.contains("fn main")))
+            .find(|l| l.spans.iter().any(|s| s.content.contains("main")))
             .unwrap();
         assert!(
             code_line

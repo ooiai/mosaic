@@ -232,6 +232,7 @@ fn format_run_event(event: &RunEvent) -> String {
         RunEvent::RunCanceled { run_id, reason } => {
             format!("[run] canceled run_id={} reason={}", run_id, reason)
         }
+        RunEvent::TokenUsage { .. } => String::new(),
     }
 }
 

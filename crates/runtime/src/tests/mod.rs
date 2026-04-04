@@ -526,6 +526,7 @@ fn event_names(events: &[RunEvent]) -> Vec<&'static str> {
             RunEvent::RunFinished { .. } => "RunFinished",
             RunEvent::RunFailed { .. } => "RunFailed",
             RunEvent::RunCanceled { .. } => "RunCanceled",
+            RunEvent::TokenUsage { .. } => "TokenUsage",
         })
         .collect()
 }

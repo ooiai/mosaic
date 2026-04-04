@@ -40,12 +40,25 @@ impl ChatView {
     }
 
     pub fn lines(&self) -> Vec<Line<'static>> {
+        self.lines_at_width(None)
+    }
+
+    /// Produce display lines using width-adaptive rendering when `width` is given.
+    pub fn lines_at_width(&self, width: Option<u16>) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         for cell in &self.committed_cells {
-            lines.extend(cell.summary_lines.clone());
+            if let Some(w) = width {
+                lines.extend(cell.render_lines(w));
+            } else {
+                lines.extend(cell.summary_lines.clone());
+            }
         }
         if let Some(active) = &self.active_cell {
-            lines.extend(active.summary_lines.clone());
+            if let Some(w) = width {
+                lines.extend(active.render_lines(w));
+            } else {
+                lines.extend(active.summary_lines.clone());
+            }
         }
         if self.active_cell.is_none()
             && let Some(preview) = &self.streaming_preview
@@ -106,8 +119,14 @@ impl ChatWidget {
             .wrap(Wrap { trim: false })
     }
 
+    pub fn paragraph_at_width(&self, width: u16) -> Paragraph<'static> {
+        Paragraph::new(self.view.lines_at_width(Some(width)))
+            .scroll((self.view.scroll, 0))
+            .wrap(Wrap { trim: false })
+    }
+
     pub fn render(self, frame: &mut Frame<'_>, area: Rect) {
-        frame.render_widget(self.paragraph(), area);
+        frame.render_widget(self.paragraph_at_width(area.width), area);
     }
 }
 
@@ -123,6 +142,7 @@ mod tests {
     use crate::transcript::{
         TimelineEntry, TimelineKind, TranscriptBlock, TranscriptView, TurnPhase,
     };
+    use ratatui::text::Line;
 
     #[test]
     fn chat_widget_transcript_key_tracks_active_revision() {
@@ -137,6 +157,7 @@ mod tests {
             phase: Some(TurnPhase::Streaming),
             details: Vec::new(),
             details_expanded: false,
+            exec_calls: vec![],
         };
         let transcript = TranscriptView {
             entries: &[],
@@ -144,6 +165,7 @@ mod tests {
             active_revision: Some(7),
             streaming_preview: None,
             scroll: 0,
+            spinner_tick: 0,
         };
 
         let widget = ChatWidget::new(ChatView::from(&transcript));
@@ -153,7 +175,7 @@ mod tests {
             widget
                 .lines()
                 .iter()
-                .any(|line| line.to_string().contains("Working"))
+                .any(|line: &Line<'_>| line.to_string().contains("Working"))
         );
     }
 
@@ -170,6 +192,7 @@ mod tests {
             phase: None,
             details: Vec::new(),
             details_expanded: false,
+            exec_calls: vec![],
         };
         let active = TimelineEntry {
             timestamp: "12:00".to_owned(),
@@ -182,6 +205,7 @@ mod tests {
             phase: Some(TurnPhase::Streaming),
             details: Vec::new(),
             details_expanded: false,
+            exec_calls: vec![],
         };
         let transcript = TranscriptView {
             entries: &[committed],
@@ -189,6 +213,7 @@ mod tests {
             active_revision: Some(7),
             streaming_preview: None,
             scroll: 0,
+            spinner_tick: 0,
         };
 
         let view = ChatView::from(&transcript);

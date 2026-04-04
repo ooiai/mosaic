@@ -21,8 +21,8 @@ use crate::overlays::{
 use crate::shell_view::{ShellChromeView, ShellSnapshot};
 use crate::status_bar::{StatusBarView, display_workspace_path};
 pub use crate::transcript::{
-    ActiveTurn, TimelineEntry, TimelineKind, TranscriptBlock, TranscriptDetail,
-    TranscriptDetailKind, TranscriptState, TranscriptView, TurnPhase,
+    ActiveTurn, EXEC_MAX_OUTPUT_LINES, ExecCallState, TimelineEntry, TimelineKind, TranscriptBlock,
+    TranscriptDetail, TranscriptDetailKind, TranscriptState, TranscriptView, TurnPhase,
 };
 
 #[derive(Debug, Clone)]
@@ -504,6 +504,8 @@ pub struct App {
     pub tokens_in: u64,
     pub tokens_out: u64,
     pub tokens_cached: u64,
+    /// Incremented on every tick; drives spinner animation for running tool calls.
+    pub spinner_tick: usize,
 }
 
 impl App {
@@ -555,6 +557,7 @@ impl App {
             tokens_in: 0,
             tokens_out: 0,
             tokens_cached: 0,
+            spinner_tick: 0,
         };
         if start_in_resume {
             app.push_system_entry(
@@ -624,6 +627,7 @@ impl App {
             tokens_in: 0,
             tokens_out: 0,
             tokens_cached: 0,
+            spinner_tick: 0,
         };
         if start_in_resume {
             app.push_system_entry(
@@ -883,6 +887,7 @@ impl App {
 
     pub fn tick(&mut self) {
         self.heartbeat = self.heartbeat.wrapping_add(1);
+        self.spinner_tick = self.spinner_tick.wrapping_add(1);
     }
 
     fn start_or_refresh_active_turn(
@@ -1053,6 +1058,8 @@ impl App {
             session.streaming_run_id = None;
             session.active_turn = None;
         }
+        // A new committed turn means we should scroll to show it.
+        self.transcript.follow = true;
         if self.detail_overlay_open
             && matches!(self.detail_overlay_target, Some(HistoryCellKey::Active))
         {
@@ -1394,6 +1401,26 @@ impl App {
                 summary,
             } => {
                 self.push_activity("tool", &format!("Calling tool: {}", name));
+                // Push a live exec call entry onto the active turn.
+                if let Some(session) = self.sessions.get_mut(self.selected_session) {
+                    if let Some(active_turn) = session.active_turn.as_mut() {
+                        active_turn.cell.exec_calls.push(ExecCallState {
+                            call_id: call_id.clone(),
+                            tool_name: name.clone(),
+                            input_summary: summary
+                                .as_deref()
+                                .unwrap_or("")
+                                .chars()
+                                .take(120)
+                                .collect(),
+                            output_lines: Vec::new(),
+                            exit_ok: None,
+                            duration_label: None,
+                            running: true,
+                        });
+                        active_turn.revision = active_turn.revision.saturating_add(1);
+                    }
+                }
                 self.attach_turn_detail(
                     None,
                     TurnPhase::CapabilityActive,
@@ -1411,6 +1438,29 @@ impl App {
                 summary,
             } => {
                 self.push_activity("tool", &format!("Tool finished: {}", name));
+                // Mark the exec call as completed.
+                if let Some(session) = self.sessions.get_mut(self.selected_session) {
+                    if let Some(active_turn) = session.active_turn.as_mut() {
+                        if let Some(exec) = active_turn
+                            .cell
+                            .exec_calls
+                            .iter_mut()
+                            .find(|e| e.call_id == call_id)
+                        {
+                            exec.running = false;
+                            exec.exit_ok = Some(true);
+                            if let Some(ref s) = summary {
+                                for line in s.lines().take(EXEC_MAX_OUTPUT_LINES) {
+                                    if exec.output_lines.len() >= EXEC_MAX_OUTPUT_LINES {
+                                        exec.output_lines.remove(0);
+                                    }
+                                    exec.output_lines.push(line.to_owned());
+                                }
+                            }
+                        }
+                        active_turn.revision = active_turn.revision.saturating_add(1);
+                    }
+                }
                 self.attach_turn_detail(
                     None,
                     TurnPhase::WaitingOnCapability,
@@ -1431,6 +1481,23 @@ impl App {
                 self.runtime_status = "error".to_owned();
                 self.active_session_mut().state = SessionState::Degraded;
                 self.push_activity("tool", &format!("Tool failed: {}", name));
+                // Mark the exec call as failed.
+                if let Some(session) = self.sessions.get_mut(self.selected_session) {
+                    if let Some(active_turn) = session.active_turn.as_mut() {
+                        if let Some(exec) = active_turn
+                            .cell
+                            .exec_calls
+                            .iter_mut()
+                            .find(|e| e.call_id == call_id)
+                        {
+                            exec.running = false;
+                            exec.exit_ok = Some(false);
+                            exec.output_lines
+                                .push(format!("error: {}", truncate_for_timeline(&error, 120)));
+                        }
+                        active_turn.revision = active_turn.revision.saturating_add(1);
+                    }
+                }
                 self.attach_turn_detail(
                     None,
                     TurnPhase::Failed,
@@ -1730,7 +1797,11 @@ summary={}",
     }
 
     pub fn transcript_view(&self) -> TranscriptView<'_> {
-        transcript_view_for_session(self.active_session(), self.transcript.scroll)
+        transcript_view_for_session(
+            self.active_session(),
+            self.transcript.scroll,
+            self.spinner_tick,
+        )
     }
 
     pub fn history_cells(&self) -> HistoryCells {
@@ -3282,6 +3353,7 @@ references={}",
                 phase: None,
                 details: Vec::new(),
                 details_expanded: false,
+                exec_calls: vec![],
             });
             trim_timeline(session);
         }
@@ -3306,10 +3378,15 @@ fn new_active_turn_entry(
         phase: Some(phase),
         details: Vec::new(),
         details_expanded: false,
+        exec_calls: vec![],
     }
 }
 
-fn transcript_view_for_session<'a>(session: &'a SessionRecord, scroll: u16) -> TranscriptView<'a> {
+fn transcript_view_for_session<'a>(
+    session: &'a SessionRecord,
+    scroll: u16,
+    spinner_tick: usize,
+) -> TranscriptView<'a> {
     TranscriptView {
         entries: &session.timeline,
         active_entry: session.active_turn.as_ref().map(|turn| &turn.cell),
@@ -3321,11 +3398,12 @@ fn transcript_view_for_session<'a>(session: &'a SessionRecord, scroll: u16) -> T
             .map(|turn| turn.cell.body.as_str())
             .or(session.streaming_preview.as_deref()),
         scroll,
+        spinner_tick,
     }
 }
 
 fn preserved_expandable_turn(session: &SessionRecord) -> Option<TimelineEntry> {
-    let view = transcript_view_for_session(session, 0);
+    let view = transcript_view_for_session(session, 0, 0);
     view.active_entry
         .filter(|entry| !entry.details.is_empty())
         .cloned()
@@ -3414,6 +3492,7 @@ fn transcript_entry(message: &TranscriptMessage) -> TimelineEntry {
         phase: None,
         details: Vec::new(),
         details_expanded: false,
+        exec_calls: vec![],
     }
 }
 
@@ -3970,6 +4049,7 @@ mod tests {
                 body: "target=tool:first".to_owned(),
             }],
             details_expanded: false,
+            exec_calls: vec![],
         });
         let second_index = app.active_session().timeline.len();
         app.active_session_mut().timeline.push(TimelineEntry {
@@ -3987,6 +4067,7 @@ mod tests {
                 body: "target=tool:second".to_owned(),
             }],
             details_expanded: false,
+            exec_calls: vec![],
         });
 
         app.detail_overlay_open = true;
@@ -4770,6 +4851,7 @@ mod tests {
                 phase: Some(TurnPhase::Streaming),
                 details: Vec::new(),
                 details_expanded: false,
+                exec_calls: vec![],
             },
             revision: 1,
         });
@@ -5079,6 +5161,7 @@ mod tests {
                 body: "target=tool:old".to_owned(),
             }],
             details_expanded: false,
+            exec_calls: vec![],
         });
         app.detail_overlay_open = true;
         app.detail_overlay_target = Some(HistoryCellKey::Committed(committed_index));
@@ -5100,6 +5183,7 @@ mod tests {
                     body: "target=tool:new".to_owned(),
                 }],
                 details_expanded: false,
+                exec_calls: vec![],
             },
             revision: 1,
         });
@@ -5139,6 +5223,7 @@ mod tests {
                 body: "target=tool:old".to_owned(),
             }],
             details_expanded: false,
+            exec_calls: vec![],
         });
 
         let committed = preserved_expandable_turn(&session).expect("committed detail should exist");
@@ -5160,6 +5245,7 @@ mod tests {
                     body: "target=tool:new".to_owned(),
                 }],
                 details_expanded: false,
+                exec_calls: vec![],
             },
             revision: 1,
         });
