@@ -1951,6 +1951,12 @@ summary={}",
         self.transcript.scroll
     }
 
+    /// Compute the number of rendered lines in the chat transcript at a given terminal width.
+    /// Used by the event loop to call `sync_follow` before each draw.
+    pub fn chat_total_lines(&self, width: u16) -> u16 {
+        self.chat_view().lines_at_width(Some(width)).len() as u16
+    }
+
     pub fn transcript_overlay_scroll(&self) -> u16 {
         self.transcript_overlay.scroll
     }
@@ -2402,6 +2408,7 @@ summary={}",
                 .find(|candidate| candidate.id == session.id)
             {
                 session.draft = existing.draft.clone();
+                session.cursor_pos = existing.cursor_pos;
                 session.unread = existing.unread;
                 if session.memory_summary.is_none() {
                     session.memory_summary = existing.memory_summary.clone();
@@ -2535,7 +2542,7 @@ summary={}",
         self.detail_overlay.scroll_home();
         self.sync_detail_overlay_flags();
         self.refresh_overlay_state();
-        self.transcript.scroll_home();
+        self.transcript.follow = true;
 
         action
     }
@@ -3505,6 +3512,7 @@ references={}",
             });
             trim_timeline(session);
         }
+        self.transcript.follow = true;
     }
 }
 
@@ -4005,8 +4013,9 @@ mod tests {
     use mosaic_runtime::events::RunEvent;
 
     use super::{
-        App, AppAction, ComposerRunRequest, InputMode, ProfileOption, ShellState, SkillOption,
-        TimelineKind, TranscriptBlock, interactive_session_record, preserved_expandable_turn,
+        App, AppAction, ComposerRunRequest, InputMode, ProfileOption, SessionRecord, SessionState,
+        ShellState, SkillOption, TimelineKind, TranscriptBlock, interactive_session_record,
+        preserved_expandable_turn,
     };
     use crate::history_cell::HistoryCellKey;
     use crate::transcript::{
@@ -5533,6 +5542,88 @@ mod tests {
                 .last()
                 .map(|entry| entry.title.as_str()),
             Some("Session selected")
+        );
+    }
+
+    #[test]
+    fn sync_session_catalog_preserves_cursor_pos_alongside_draft() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+
+        for ch in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        assert_eq!(app.active_session().cursor_pos, 5);
+
+        // Simulate a catalog refresh: fresh record always has cursor_pos=0.
+        let fresh = SessionRecord {
+            id: "demo".to_owned(),
+            title: "Demo session".to_owned(),
+            origin: "Local".to_owned(),
+            modified: "00:00".to_owned(),
+            created: "00:00".to_owned(),
+            channel: "control".to_owned(),
+            actor: None,
+            thread: None,
+            route: "default".to_owned(),
+            runtime: "agent-runtime".to_owned(),
+            model: "gpt-5.4-mini".to_owned(),
+            state: SessionState::Waiting,
+            unread: 0,
+            draft: String::new(),
+            cursor_pos: 0,
+            transcript_len: 0,
+            current_run_id: None,
+            current_gateway_run_id: None,
+            last_gateway_run_id: None,
+            memory_summary: None,
+            compressed_context: None,
+            references: Vec::new(),
+            streaming_preview: None,
+            streaming_run_id: None,
+            active_turn: None,
+            timeline: Vec::new(),
+        };
+        app.sync_session_catalog(vec![fresh], "demo");
+
+        // Both draft and cursor_pos must be preserved through the catalog refresh.
+        assert_eq!(app.active_draft(), "hello");
+        assert_eq!(app.active_session().cursor_pos, 5);
+    }
+
+    #[test]
+    fn push_timeline_sets_transcript_follow_flag() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.transcript.follow = false;
+        app.transcript.scroll = 3;
+
+        app.push_system_entry("test", "should trigger follow");
+
+        assert!(
+            app.transcript.follow,
+            "transcript should follow after a new entry is pushed"
+        );
+    }
+
+    #[test]
+    fn submit_composer_sets_follow_instead_of_scrolling_to_top() {
+        let mut app = App::new("/tmp/mosaic".into());
+        app.active_session_mut().draft = "test message".to_owned();
+        app.transcript.scroll = 10;
+        app.transcript.follow = false;
+
+        let _ = app.submit_composer();
+
+        assert!(
+            app.transcript.follow,
+            "transcript must follow new content after submit, not reset to top"
         );
     }
 }

@@ -282,6 +282,13 @@ fn run_interactive_app(
             refresh_interactive_session_from_gateway(&mut app, &context, &session_id);
         }
 
+        // Sync transcript scroll to follow new content (when follow=true) before drawing.
+        if let Ok(size) = terminal.size() {
+            let total_lines = app.chat_total_lines(size.width);
+            let visible_height = size.height.saturating_sub(4); // 1 header + 3 composer
+            app.transcript.sync_follow(total_lines, visible_height);
+        }
+
         terminal.draw(|frame| ui::render(frame, &app))?;
 
         match poll_input_event(&input_source, Duration::from_millis(200))? {
