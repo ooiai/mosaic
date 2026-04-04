@@ -3880,6 +3880,14 @@ mod tests {
             "plan_l26.md",
             "plan_l27.md",
             "umbrella / reference",
+            "plan_m1.md",
+            "plan_m2.md",
+            "plan_m3.md",
+            "plan_m4.md",
+            "plan_m5.md",
+            "plan_m6.md",
+            "plan_m7.md",
+            "plan_m8.md",
         ] {
             assert!(planlog.contains(required), "PLANLOG missing {required}");
         }
@@ -3912,6 +3920,14 @@ mod tests {
             "specs/completed/plan_i1.md",
             "specs/completed/plan_d2.md",
             "specs/completed/plan_k6.md",
+            "specs/completed/plan_m1.md",
+            "specs/completed/plan_m2.md",
+            "specs/completed/plan_m3.md",
+            "specs/completed/plan_m4.md",
+            "specs/completed/plan_m5.md",
+            "specs/completed/plan_m6.md",
+            "specs/completed/plan_m7.md",
+            "specs/completed/plan_m8.md",
         ] {
             assert!(
                 root.join(relative).is_file(),
@@ -4557,5 +4573,83 @@ mod tests {
         assert_eq!(source.label(), "mcp");
         assert_eq!(source.server_name(), Some("filesystem"));
         assert_eq!(source.remote_tool_name(), Some("read_file"));
+    }
+
+    #[test]
+    fn m1_m7_define_codex_tui_parity_series() {
+        let root = repo_root();
+
+        // All M-series plan files must exist as archived specs.
+        for relative in [
+            "specs/completed/plan_m1.md",
+            "specs/completed/plan_m2.md",
+            "specs/completed/plan_m3.md",
+            "specs/completed/plan_m4.md",
+            "specs/completed/plan_m5.md",
+            "specs/completed/plan_m6.md",
+            "specs/completed/plan_m7.md",
+            "specs/completed/plan_m8.md",
+        ] {
+            assert!(
+                root.join(relative).is_file(),
+                "missing archived M-series spec {relative}"
+            );
+        }
+
+        // PLANLOG must reference all M-series entries.
+        let planlog =
+            fs::read_to_string(root.join("specs/PLANLOG.md")).expect("PLANLOG should load");
+        for tag in [
+            "plan_m1.md",
+            "plan_m2.md",
+            "plan_m3.md",
+            "plan_m4.md",
+            "plan_m5.md",
+            "plan_m6.md",
+            "plan_m7.md",
+            "plan_m8.md",
+        ] {
+            assert!(
+                planlog.contains(tag),
+                "PLANLOG missing M-series entry {tag}"
+            );
+        }
+
+        // M1 plan covers markdown rendering.
+        let m1 = fs::read_to_string(root.join("specs/completed/plan_m1.md"))
+            .expect("plan_m1 should load");
+        for required in ["markdown", "pulldown-cmark", "render_markdown"] {
+            assert!(m1.contains(required), "plan_m1 missing keyword: {required}");
+        }
+
+        // M4 plan covers exec cell and spinner.
+        let m4 = fs::read_to_string(root.join("specs/completed/plan_m4.md"))
+            .expect("plan_m4 should load");
+        for required in ["spinner", "ExecCell", "output_lines"] {
+            assert!(m4.contains(required), "plan_m4 missing keyword: {required}");
+        }
+
+        // M7 plan covers approval overlay.
+        let m7 = fs::read_to_string(root.join("specs/completed/plan_m7.md"))
+            .expect("plan_m7 should load");
+        for required in ["ApprovalRequest", "RiskLevel", "approve", "deny"] {
+            assert!(m7.contains(required), "plan_m7 missing keyword: {required}");
+        }
+
+        // docs/tui.md must mention the new features.
+        let tui_doc =
+            fs::read_to_string(root.join("docs/tui.md")).expect("docs/tui.md should load");
+        for required in [
+            "markdown rendering",
+            "syntax highlighting",
+            "approval overlay",
+            "git branch",
+            "token usage",
+        ] {
+            assert!(
+                tui_doc.contains(required),
+                "docs/tui.md missing M-series feature: {required}"
+            );
+        }
     }
 }

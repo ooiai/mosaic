@@ -56,9 +56,14 @@ mosaic tui --attach http://127.0.0.1:8080 --session remote-demo
 - collapsed execution cards for tool, MCP, skill, workflow, sandbox, gateway, adapter, and node activity
 - one active assistant turn that moves through submitted, queued, streaming, capability-active, waiting-on-capability, failed, canceled, and completed phases
 - inline MCP, node-routed, and workflow execution summaries with concise capability proof
-- streaming assistant output
+- streaming assistant output with **full markdown rendering**: headers, bold/italic, inline code, fenced code blocks with syntax highlighting, bullet lists, numbered lists
+- fenced code blocks highlighted by language (bash, rust, python, JSON)
 - failure cards that keep the next operator action visible inline
 - inline operator cards for session/model/gateway/adapter/node/inspect/sandbox commands
+- **rich exec/tool call rows** on the active turn: animated spinner while running, ✓/✗ on completion, output tail for the last several lines
+- git branch detection in the status bar subheader alongside token usage counters (input / output)
+- inline diff display in the detail overlay for file-patch bodies (+ lines in green, − lines in red)
+- **approval overlay**: when a capability call requires operator sign-off, the composer is replaced by a `[y] approve  [n / Esc] deny` prompt showing the tool name, command preview, and risk level
 
 ## Basic keys
 
