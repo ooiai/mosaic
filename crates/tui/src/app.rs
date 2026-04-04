@@ -724,10 +724,17 @@ impl App {
         if let Some(view) = self.sessions.get_mut(self.selected_session) {
             let transcript_len = session.transcript.len();
             if view.transcript_len == 0 || transcript_len < view.transcript_len {
-                view.timeline = session.transcript.iter().map(transcript_entry).collect();
+                view.timeline = session
+                    .transcript
+                    .iter()
+                    .filter(|m| m.role != TranscriptRole::System)
+                    .map(transcript_entry)
+                    .collect();
             } else {
                 for message in session.transcript.iter().skip(view.transcript_len) {
-                    view.timeline.push(transcript_entry(message));
+                    if message.role != TranscriptRole::System {
+                        view.timeline.push(transcript_entry(message));
+                    }
                 }
             }
             if runtime_status_is_busy(run_label)
@@ -2352,12 +2359,17 @@ summary={}",
     pub fn shell_snapshot(&self) -> ShellSnapshot {
         let surface = self.transcript_surface_view();
         let command_surface = self.command_surface_view();
+        let status_bar = self.status_bar_view().into_chrome();
+        let mut composer = self
+            .composer_view_from_command_surface(&command_surface)
+            .into_chrome();
+        // Inject the context line (workspace/session/model info) from the status bar
+        // into the composer so it appears as the top row of the input area.
+        composer.context_line = status_bar.header.clone();
         ShellSnapshot {
             chrome: ShellChromeView {
-                status_bar: self.status_bar_view().into_chrome(),
-                composer: self
-                    .composer_view_from_command_surface(&command_surface)
-                    .into_chrome(),
+                status_bar,
+                composer,
             },
             overlays: self.overlay_stack_view(&surface, &command_surface),
             surface,
@@ -2473,13 +2485,27 @@ summary={}",
             sessions.push(placeholder);
         }
 
+        // Save current selected session ID BEFORE replacing the list so we can
+        // detect a real session switch vs. a same-session catalog refresh.
+        let current_selected_id = self
+            .sessions
+            .get(self.selected_session)
+            .map(|s| s.id.clone())
+            .unwrap_or_default();
+
         self.sessions = sessions;
         if let Some(index) = self
             .sessions
             .iter()
             .position(|session| session.id == selected_session_id)
         {
-            self.select_session(index);
+            if selected_session_id != current_selected_id {
+                // Actual session switch — reset scroll, overlays, unread count.
+                self.select_session(index);
+            } else {
+                // Same session, just keep the index in sync (e.g. catalog reordering).
+                self.selected_session = index;
+            }
         }
     }
 
@@ -5456,7 +5482,7 @@ mod tests {
             snapshot
                 .chrome
                 .composer
-                .status_line
+                .hint_line
                 .to_string()
                 .contains("/ commands")
         );
@@ -5624,6 +5650,60 @@ mod tests {
         assert!(
             app.transcript.follow,
             "transcript must follow new content after submit, not reset to top"
+        );
+    }
+
+    #[test]
+    fn sync_session_catalog_same_session_preserves_scroll_and_follow() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+        let session_id = app.active_session().id.clone();
+
+        // Simulate user having scrolled somewhere (follow=false means user scrolled up).
+        app.transcript.scroll = 8;
+        app.transcript.follow = false;
+
+        // Simulate a catalog refresh with the same session still selected.
+        app.sync_session_catalog(Vec::new(), &session_id);
+
+        assert_eq!(
+            app.transcript.scroll, 8,
+            "scroll must be preserved when same session is re-selected"
+        );
+        assert!(
+            !app.transcript.follow,
+            "follow flag must be preserved when same session is re-selected"
+        );
+    }
+
+    #[test]
+    fn sync_session_catalog_session_switch_resets_scroll() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+        app.transcript.scroll = 8;
+        app.transcript.follow = false;
+
+        // Introduce a second session and switch to it.
+        let other_session = interactive_session_record("other-session", "gpt-5.4-mini");
+        app.sync_session_catalog(vec![other_session], "other-session");
+
+        assert_eq!(
+            app.transcript.scroll, 0,
+            "scroll must reset to 0 when switching to a different session"
         );
     }
 }

@@ -70,19 +70,11 @@ impl HistoryCell {
         if self.body_raw.is_empty() {
             return Vec::new();
         }
-        let rail_style = Style::default().fg(if self.active {
-            Color::Green
-        } else {
-            Color::DarkGray
-        });
         if self.block == TranscriptBlock::AssistantMessage {
             crate::markdown::render_markdown(&self.body_raw, width)
                 .into_iter()
                 .map(|md_line| {
-                    let mut spans = vec![
-                        Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                        Span::styled("│ ", rail_style),
-                    ];
+                    let mut spans = vec![Span::styled("  ", Style::default().fg(Color::DarkGray))];
                     spans.extend(md_line.spans);
                     Line::from(spans)
                 })
@@ -342,10 +334,12 @@ fn build_history_cell_with_key(
     spinner_tick: usize,
 ) -> HistoryCell {
     let (label, label_style, body_style) = cell_identity(entry);
+    let dot_color = dot_color_for_entry(entry, active);
 
     let mut header = vec![
+        Span::styled("●", Style::default().fg(dot_color).add_modifier(Modifier::BOLD)),
         Span::styled(
-            format!("  {}  ", entry.timestamp),
+            format!(" {}  ", entry.timestamp),
             Style::default().fg(Color::DarkGray),
         ),
         Span::styled(label, label_style),
@@ -357,33 +351,18 @@ fn build_history_cell_with_key(
             Style::default().fg(Color::DarkGray),
         ));
     }
-    header.push(Span::styled("   ", Style::default().fg(Color::DarkGray)));
+    header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
     header.push(Span::styled(
         entry.title.clone(),
         Style::default().add_modifier(Modifier::BOLD),
     ));
-    if !entry.actor.is_empty() && entry.actor != label {
-        header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
-        header.push(Span::styled(
-            entry.actor.clone(),
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
 
     let mut summary_lines = vec![Line::from(header)];
-    let rail_style = Style::default().fg(if active {
-        Color::Green
-    } else {
-        Color::DarkGray
-    });
 
     if entry.block == TranscriptBlock::AssistantMessage && !entry.body.is_empty() {
         let md_lines = crate::markdown::render_markdown(&entry.body, 100);
         for md_line in md_lines {
-            let mut spans = vec![
-                Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("│ ", rail_style),
-            ];
+            let mut spans = vec![Span::styled("  ", Style::default().fg(Color::DarkGray))];
             spans.extend(md_line.spans);
             summary_lines.push(Line::from(spans));
         }
@@ -391,7 +370,6 @@ fn build_history_cell_with_key(
         for line in body_lines(entry) {
             summary_lines.push(Line::from(vec![
                 Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("│ ", rail_style),
                 Span::styled(line, body_style),
             ]));
         }
@@ -424,7 +402,7 @@ fn build_history_cell_with_key(
         };
         let mut exec_header_spans = vec![
             Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("┆ ", exec_rail),
+            Span::styled("└ ", exec_rail),
             Span::styled(
                 format!("[{}]", exec.tool_name),
                 Style::default()
@@ -445,8 +423,7 @@ fn build_history_cell_with_key(
         summary_lines.push(Line::from(exec_header_spans));
         for out_line in &exec.output_lines {
             summary_lines.push(Line::from(vec![
-                Span::styled("  ", Style::default().fg(Color::DarkGray)),
-                Span::styled("┆   ", exec_rail),
+                Span::styled("    ", Style::default().fg(Color::DarkGray)),
                 Span::styled(out_line.clone(), Style::default().fg(Color::Gray)),
             ]));
         }
@@ -653,15 +630,36 @@ fn cell_identity(entry: &crate::transcript::TimelineEntry) -> (&'static str, Sty
     }
 }
 
-fn detail_summary_line(entry: &crate::transcript::TimelineEntry, active: bool) -> Line<'static> {
-    let accent = if active {
-        Color::Green
-    } else {
-        Color::DarkGray
-    };
+fn dot_color_for_entry(entry: &crate::transcript::TimelineEntry, active: bool) -> Color {
+    match entry.block {
+        TranscriptBlock::UserMessage => Color::Cyan,
+        TranscriptBlock::AssistantMessage => {
+            if active {
+                Color::Green
+            } else {
+                match entry.phase {
+                    Some(crate::transcript::TurnPhase::Failed) => Color::Red,
+                    Some(crate::transcript::TurnPhase::Canceled) => Color::Yellow,
+                    _ => Color::DarkGray,
+                }
+            }
+        }
+        TranscriptBlock::SystemNotice => Color::Magenta,
+        TranscriptBlock::OperatorResultCard => Color::Blue,
+        TranscriptBlock::ExecutionCard => {
+            if active {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            }
+        }
+        TranscriptBlock::FailureCard => Color::Red,
+    }
+}
+
+fn detail_summary_line(entry: &crate::transcript::TimelineEntry, _active: bool) -> Line<'static> {
     let mut spans = vec![
         Span::styled("  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("│ ", Style::default().fg(accent)),
     ];
     let preview_len = entry.details.len().min(3);
     for (index, detail) in entry.details.iter().rev().take(preview_len).enumerate() {
@@ -682,13 +680,8 @@ fn detail_summary_line(entry: &crate::transcript::TimelineEntry, active: bool) -
 
 fn detail_preview_line(
     entry: &crate::transcript::TimelineEntry,
-    active: bool,
+    _active: bool,
 ) -> Option<Line<'static>> {
-    let accent = if active {
-        Color::Green
-    } else {
-        Color::DarkGray
-    };
     let detail = entry.details.last()?;
     let lines = detail
         .body
@@ -707,8 +700,7 @@ fn detail_preview_line(
         .copied()
         .or_else(|| lines.first().copied())?;
     Some(Line::from(vec![
-        Span::styled("  ", Style::default().fg(Color::DarkGray)),
-        Span::styled("│ ", Style::default().fg(accent)),
+        Span::styled("    ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             truncate_inline(body, 88),
             Style::default().fg(Color::DarkGray),
@@ -783,7 +775,7 @@ mod tests {
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>();
-        assert!(rendered.iter().any(|line| line.contains("│ first line")));
+        assert!(rendered.iter().any(|line| line.contains("first line")));
         assert!(rendered.iter().any(|line| line.contains("assistant")));
     }
 

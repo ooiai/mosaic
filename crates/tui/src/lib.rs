@@ -285,7 +285,7 @@ fn run_interactive_app(
         // Sync transcript scroll to follow new content (when follow=true) before drawing.
         if let Ok(size) = terminal.size() {
             let total_lines = app.chat_total_lines(size.width);
-            let visible_height = size.height.saturating_sub(4); // 1 header + 3 composer
+            let visible_height = size.height.saturating_sub(4); // 4-row composer (border+context+input+hint)
             app.transcript.sync_follow(total_lines, visible_height);
         }
 

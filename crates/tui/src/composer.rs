@@ -24,8 +24,10 @@ pub struct ComposerView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerChromeView {
+    /// Context line (workspace / session / model info) — injected by `ShellView`.
+    pub context_line: Line<'static>,
     pub prompt_line: Line<'static>,
-    pub status_line: Line<'static>,
+    pub hint_line: Line<'static>,
     pub busy: bool,
     pub cursor_pos: usize,
     pub cursor_visible: bool,
@@ -86,15 +88,10 @@ impl ComposerView {
         }
 
         let prompt_line = Line::from(prompt_spans);
-        let status_line = Line::from(vec![
+        let hint_line = Line::from(vec![
             Span::styled(badge_text, badge_style),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                self.shell_state.label(),
-                shell_state_style(self.shell_state),
-            ),
-            Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(busy_label, Style::default().fg(Color::Gray)),
+            Span::styled("  ", Style::default()),
+            Span::styled(busy_label, Style::default().fg(Color::DarkGray)),
             Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
             Span::styled(self.status_detail, Style::default().fg(Color::DarkGray)),
             Span::styled("   / commands  ·  Esc ", Style::default().fg(Color::DarkGray)),
@@ -102,8 +99,9 @@ impl ComposerView {
         ]);
 
         ComposerChromeView {
+            context_line: Line::default(),
             prompt_line,
-            status_line,
+            hint_line,
             busy: self.busy,
             cursor_pos: self.cursor_pos,
             cursor_visible: true,
@@ -115,7 +113,8 @@ impl ComposerView {
 }
 
 pub struct ComposerWidget {
-    status_line: Line<'static>,
+    context_line: Line<'static>,
+    hint_line: Line<'static>,
     draft_text: String,
     placeholder: String,
     completion_suffix: Option<String>,
@@ -131,7 +130,8 @@ impl ComposerWidget {
 
     pub fn from_chrome(chrome: ComposerChromeView) -> Self {
         Self {
-            status_line: chrome.status_line,
+            context_line: chrome.context_line,
+            hint_line: chrome.hint_line,
             draft_text: chrome.draft_text,
             placeholder: chrome.placeholder,
             completion_suffix: chrome.completion_suffix,
@@ -186,8 +186,9 @@ impl ComposerWidget {
         }
 
         let paragraph = Paragraph::new(vec![
+            self.context_line,
             Line::from(prompt_spans),
-            self.status_line,
+            self.hint_line,
         ])
         .block(Block::default().borders(Borders::TOP).border_style(
             if self.busy {
@@ -209,8 +210,8 @@ impl ComposerWidget {
             .saturating_add(prefix_len as u16)
             .saturating_add((cursor_pos - scroll) as u16)
             .min(max_cursor_x);
-        // area.y is the TOP border row; content starts at area.y + 1.
-        let cursor_y = area.y.saturating_add(1);
+        // area.y is the TOP border row; context is area.y+1; input is area.y+2.
+        let cursor_y = area.y.saturating_add(2);
         frame.set_cursor_position((cursor_x, cursor_y));
     }
 }
@@ -253,8 +254,8 @@ mod tests {
         assert_eq!(chrome.cursor_pos, 3);
         assert!(chrome.busy);
         assert!(chrome.prompt_line.to_string().contains("/help"));
-        assert!(chrome.status_line.to_string().contains("busy"));
-        assert!(chrome.status_line.to_string().contains("/ commands"));
-        assert!(!chrome.status_line.to_string().contains("Ctrl+C quit"));
+        assert!(chrome.hint_line.to_string().contains("busy"));
+        assert!(chrome.hint_line.to_string().contains("/ commands"));
+        assert!(!chrome.hint_line.to_string().contains("Ctrl+C quit"));
     }
 }
