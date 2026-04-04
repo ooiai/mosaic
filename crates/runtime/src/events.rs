@@ -96,6 +96,13 @@ pub enum RunEvent {
         risk: String,
         permission_scopes: Vec<String>,
     },
+    /// Emitted when a capability call needs operator approval before proceeding.
+    CapabilityApprovalRequired {
+        call_id: String,
+        tool_name: String,
+        command_preview: String,
+        risk_level: String,
+    },
     CapabilityJobStarted {
         job_id: String,
         name: String,

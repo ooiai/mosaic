@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::BTreeMap, path::PathBuf};
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 use mosaic_control_protocol::RunDetailDto;
 use mosaic_runtime::events::RunEvent;
 use mosaic_session_core::{
@@ -9,7 +9,7 @@ use mosaic_session_core::{
 use ratatui::text::Line;
 
 use crate::app_event::{AppEvent, interpret_key_event};
-pub use crate::bottom_pane::{BottomPaneState, InputMode};
+pub use crate::bottom_pane::{ApprovalRequest, BottomPaneState, InputMode, RiskLevel};
 use crate::chat_widget::{ChatView, TranscriptSurfaceView};
 use crate::command_popup::CommandPopupView;
 use crate::composer::ComposerView;
@@ -329,6 +329,10 @@ pub enum AppAction {
     CancelRun(String),
     RetryRun(String),
     InspectRun(String),
+    /// Operator approved the pending capability call with the given call_id.
+    ApproveCapability(String),
+    /// Operator denied the pending capability call with the given call_id.
+    DenyCapability(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -506,6 +510,8 @@ pub struct App {
     pub tokens_cached: u64,
     /// Incremented on every tick; drives spinner animation for running tool calls.
     pub spinner_tick: usize,
+    /// Pending approval request, if any. When set, the approval overlay is shown.
+    pub pending_approval: Option<ApprovalRequest>,
 }
 
 impl App {
@@ -558,6 +564,7 @@ impl App {
             tokens_out: 0,
             tokens_cached: 0,
             spinner_tick: 0,
+            pending_approval: None,
         };
         if start_in_resume {
             app.push_system_entry(
@@ -628,6 +635,7 @@ impl App {
             tokens_out: 0,
             tokens_cached: 0,
             spinner_tick: 0,
+            pending_approval: None,
         };
         if start_in_resume {
             app.push_system_entry(
@@ -777,6 +785,25 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+        // If the approval overlay is active, route keys to it first.
+        if let Some(approval) = self.pending_approval.take() {
+            match key.code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                    let call_id = approval.call_id.clone();
+                    return AppAction::ApproveCapability(call_id);
+                }
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                    let call_id = approval.call_id.clone();
+                    return AppAction::DenyCapability(call_id);
+                }
+                _ => {
+                    // Any other key: put the approval back and ignore.
+                    self.pending_approval = Some(approval);
+                    return AppAction::Continue;
+                }
+            }
+        }
+
         let event = interpret_key_event(
             key,
             self.command_menu_active(),
@@ -1763,6 +1790,19 @@ summary={}",
                 self.tokens_out = self.tokens_out.saturating_add(output_tokens);
                 self.tokens_cached = self.tokens_cached.saturating_add(cached_tokens);
             }
+            RunEvent::CapabilityApprovalRequired {
+                call_id,
+                tool_name,
+                command_preview,
+                risk_level,
+            } => {
+                self.pending_approval = Some(ApprovalRequest {
+                    call_id,
+                    tool_name,
+                    command_preview,
+                    risk_level: RiskLevel::from_str(&risk_level),
+                });
+            }
         }
     }
 
@@ -2126,6 +2166,52 @@ summary={}",
             tokens_in: self.tokens_in,
             tokens_out: self.tokens_out,
         }
+    }
+
+    /// Returns rendered lines for the approval overlay, or `None` if no approval is pending.
+    pub fn approval_overlay_lines(&self) -> Option<Vec<Line<'static>>> {
+        use ratatui::style::{Modifier, Style};
+        use ratatui::text::{Line, Span};
+        let approval = self.pending_approval.as_ref()?;
+        let risk_style = Style::default()
+            .fg(approval.risk_level.color())
+            .add_modifier(Modifier::BOLD);
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("  ⚠ ", Style::default().fg(ratatui::style::Color::Yellow)),
+                Span::styled(
+                    "Capability Approval Required",
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(vec![
+                Span::raw("  tool: "),
+                Span::styled(
+                    approval.tool_name.clone(),
+                    Style::default()
+                        .fg(ratatui::style::Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  risk: "),
+                Span::styled(approval.risk_level.label(), risk_style),
+            ]),
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    approval
+                        .command_preview
+                        .chars()
+                        .take(80)
+                        .collect::<String>(),
+                    Style::default().fg(ratatui::style::Color::Gray),
+                ),
+            ]),
+            Line::from(vec![Span::styled(
+                "  [y] approve  [n / Esc] deny",
+                Style::default().fg(ratatui::style::Color::DarkGray),
+            )]),
+        ];
+        Some(lines)
     }
 
     pub fn detail_overlay_lines(&self) -> Option<Vec<Line<'static>>> {

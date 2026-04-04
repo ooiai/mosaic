@@ -358,6 +358,15 @@ fn run_interactive_app(
                 AppAction::InspectRun(run_id) => {
                     handle_tui_inspect_run(&mut app, &context, &run_id);
                 }
+                AppAction::ApproveCapability(call_id) => {
+                    app.push_system_entry(
+                        "approval",
+                        format!("Approved capability call {call_id}"),
+                    );
+                }
+                AppAction::DenyCapability(call_id) => {
+                    app.push_system_entry("approval", format!("Denied capability call {call_id}"));
+                }
             },
             None => {}
         }

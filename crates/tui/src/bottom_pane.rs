@@ -1,3 +1,46 @@
+/// Risk classification for a capability approval request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+}
+
+impl RiskLevel {
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "high" => Self::High,
+            "medium" | "med" => Self::Medium,
+            _ => Self::Low,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
+    pub fn color(self) -> ratatui::style::Color {
+        match self {
+            Self::Low => ratatui::style::Color::Green,
+            Self::Medium => ratatui::style::Color::Yellow,
+            Self::High => ratatui::style::Color::Red,
+        }
+    }
+}
+
+/// A pending approval request for a capability call.
+#[derive(Debug, Clone)]
+pub struct ApprovalRequest {
+    pub call_id: String,
+    pub tool_name: String,
+    pub command_preview: String,
+    pub risk_level: RiskLevel,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Chat,

@@ -167,6 +167,15 @@ fn format_run_event(event: &RunEvent) -> String {
             "[run] capability queued: {} kind={} risk={}",
             name, kind, risk
         ),
+        RunEvent::CapabilityApprovalRequired {
+            tool_name,
+            command_preview,
+            risk_level,
+            ..
+        } => format!(
+            "[run] approval required: {} risk={} cmd={}",
+            tool_name, risk_level, command_preview
+        ),
         RunEvent::CapabilityJobStarted { name, job_id } => {
             format!("[run] capability started: {} (job_id={})", name, job_id)
         }

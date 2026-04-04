@@ -516,6 +516,7 @@ fn event_names(events: &[RunEvent]) -> Vec<&'static str> {
             RunEvent::ToolFinished { .. } => "ToolFinished",
             RunEvent::ToolFailed { .. } => "ToolFailed",
             RunEvent::CapabilityJobQueued { .. } => "CapabilityJobQueued",
+            RunEvent::CapabilityApprovalRequired { .. } => "CapabilityApprovalRequired",
             RunEvent::CapabilityJobStarted { .. } => "CapabilityJobStarted",
             RunEvent::CapabilityJobRetried { .. } => "CapabilityJobRetried",
             RunEvent::CapabilityJobFinished { .. } => "CapabilityJobFinished",
