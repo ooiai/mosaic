@@ -42,9 +42,7 @@ mod tests {
         assert!(screen.contains("Mosaic"));
         assert!(screen.contains("idle"));
         assert!(screen.contains("ready"));
-        assert!(screen.contains("Enter Queue"));
         assert!(screen.contains("sess-gateway-001"));
-        assert!(screen.contains("/ commands"));
         assert!(screen.contains("/ commands"));
         assert!(screen.contains("Esc"));
     }

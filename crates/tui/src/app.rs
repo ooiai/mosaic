@@ -2176,7 +2176,7 @@ summary={}",
                 "send disabled · /run stop".to_owned()
             }
         } else {
-            format!("{} · Enter {}", self.session_label(), self.enter_hint())
+            self.session_label().to_owned()
         };
         ComposerView {
             draft: self.active_draft().to_owned(),
