@@ -11,6 +11,10 @@ pub enum AppEvent {
     ScrollUp,
     ScrollHome,
     ScrollEnd,
+    CursorLeft,
+    CursorRight,
+    CursorHome,
+    CursorEnd,
     CommandNext,
     CommandPrevious,
     CommandComplete,
@@ -64,6 +68,28 @@ pub fn interpret_key_event(
         return AppEvent::ToggleTranscriptOverlay;
     }
 
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('a'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        }
+    ) {
+        return AppEvent::CursorHome;
+    }
+
+    if matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('e'),
+            modifiers: KeyModifiers::CONTROL,
+            ..
+        }
+    ) {
+        return AppEvent::CursorEnd;
+    }
+
     if command_menu_active {
         match key.code {
             KeyCode::Down | KeyCode::Char('j') => return AppEvent::CommandNext,
@@ -77,8 +103,10 @@ pub fn interpret_key_event(
         KeyCode::Esc => AppEvent::ClearDraftOrCloseOverlay,
         KeyCode::PageDown => AppEvent::ScrollDown,
         KeyCode::PageUp => AppEvent::ScrollUp,
-        KeyCode::Home => AppEvent::ScrollHome,
-        KeyCode::End => AppEvent::ScrollEnd,
+        KeyCode::Left => AppEvent::CursorLeft,
+        KeyCode::Right => AppEvent::CursorRight,
+        KeyCode::Home => AppEvent::CursorHome,
+        KeyCode::End => AppEvent::CursorEnd,
         KeyCode::Enter if command_menu_active && command_menu_should_complete => {
             AppEvent::CommandComplete
         }

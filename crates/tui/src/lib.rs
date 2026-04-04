@@ -31,7 +31,7 @@ use std::{
 
 use chrono::Utc;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -64,6 +64,7 @@ enum InputSource {
 
 enum InputEvent {
     Key(KeyEvent),
+    Scroll(i32),
 }
 
 #[derive(Clone)]
@@ -210,7 +211,7 @@ fn run_app(
                     break;
                 }
             }
-            None => {}
+            Some(InputEvent::Scroll(_)) | None => {}
         }
 
         app.tick();
@@ -368,6 +369,13 @@ fn run_interactive_app(
                     app.push_system_entry("approval", format!("Denied capability call {call_id}"));
                 }
             },
+            Some(InputEvent::Scroll(delta)) => {
+                if delta > 0 {
+                    app.transcript.scroll_down(delta as u16);
+                } else {
+                    app.transcript.scroll_up((-delta) as u16);
+                }
+            }
             None => {}
         }
 
@@ -417,6 +425,11 @@ fn poll_input_event(
                     Event::Paste(text) => Ok(text.chars().next().map(|character| {
                         InputEvent::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
                     })),
+                    Event::Mouse(m) => Ok(match m.kind {
+                        MouseEventKind::ScrollDown => Some(InputEvent::Scroll(3)),
+                        MouseEventKind::ScrollUp => Some(InputEvent::Scroll(-3)),
+                        _ => None,
+                    }),
                     Event::Resize(_, _) => Ok(None),
                     _ => Ok(None),
                 }
@@ -1266,6 +1279,7 @@ fn local_session_summary_to_ui(summary: &SessionSummary) -> UiSessionRecord {
         state: session_state_from_run_label(summary.run.status.label()),
         unread: 0,
         draft: String::new(),
+                cursor_pos: 0,
         transcript_len: 0,
         current_run_id: summary.run.current_run_id.clone(),
         current_gateway_run_id: summary.run.current_gateway_run_id.clone(),
@@ -1312,6 +1326,7 @@ fn remote_session_summary_to_ui(summary: &SessionSummaryDto) -> UiSessionRecord 
         state: session_state_from_run_label(summary.run.status.label()),
         unread: 0,
         draft: String::new(),
+                cursor_pos: 0,
         transcript_len: 0,
         current_run_id: summary.run.current_run_id.clone(),
         current_gateway_run_id: summary.run.current_gateway_run_id.clone(),
@@ -1682,7 +1697,7 @@ mod tests {
 fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, crossterm::event::EnableMouseCapture)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -1693,7 +1708,11 @@ fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        crossterm::event::DisableMouseCapture
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }

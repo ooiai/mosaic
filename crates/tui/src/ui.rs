@@ -45,7 +45,8 @@ mod tests {
         assert!(screen.contains("Enter Queue"));
         assert!(screen.contains("sess-gateway-001"));
         assert!(screen.contains("/ commands"));
-        assert!(screen.contains("Ctrl+T transcript"));
+        assert!(screen.contains("/ commands"));
+        assert!(screen.contains("Esc"));
     }
 
     #[test]

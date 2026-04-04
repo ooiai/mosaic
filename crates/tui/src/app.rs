@@ -451,6 +451,7 @@ pub struct SessionRecord {
     pub state: SessionState,
     pub unread: usize,
     pub draft: String,
+    pub cursor_pos: usize,
     pub transcript_len: usize,
     pub current_run_id: Option<String>,
     pub current_gateway_run_id: Option<String>,
@@ -850,6 +851,7 @@ impl App {
                     self.refresh_overlay_state();
                 } else if self.command_menu_active() || !self.active_draft().is_empty() {
                     self.active_session_mut().draft.clear();
+                    self.active_session_mut().cursor_pos = 0;
                     self.bottom_pane.reset_command_selection();
                     self.refresh_overlay_state();
                 }
@@ -897,15 +899,72 @@ impl App {
             }
             AppEvent::SubmitComposer => self.submit_composer(),
             AppEvent::BackspaceDraft => {
-                self.active_session_mut().draft.pop();
+                let session = self.active_session_mut();
+                if session.cursor_pos > 0 {
+                    let pos = session.cursor_pos - 1;
+                    let byte_pos = session.draft.char_indices().nth(pos).map(|(i, _)| i);
+                    if let Some(byte_pos) = byte_pos {
+                        session.draft.remove(byte_pos);
+                        session.cursor_pos -= 1;
+                    }
+                }
                 self.bottom_pane.reset_command_selection();
                 self.refresh_overlay_state();
                 AppAction::Continue
             }
             AppEvent::InsertChar(character) => {
-                self.active_session_mut().draft.push(character);
+                let session = self.active_session_mut();
+                let pos = session.cursor_pos;
+                let byte_pos = session
+                    .draft
+                    .char_indices()
+                    .nth(pos)
+                    .map(|(i, _)| i)
+                    .unwrap_or(session.draft.len());
+                session.draft.insert(byte_pos, character);
+                session.cursor_pos += 1;
                 self.bottom_pane.reset_command_selection();
                 self.refresh_overlay_state();
+                AppAction::Continue
+            }
+            AppEvent::CursorLeft => {
+                let session = self.active_session_mut();
+                session.cursor_pos = session.cursor_pos.saturating_sub(1);
+                AppAction::Continue
+            }
+            AppEvent::CursorRight => {
+                let session = self.active_session_mut();
+                let max = session.draft.chars().count();
+                session.cursor_pos = (session.cursor_pos + 1).min(max);
+                AppAction::Continue
+            }
+            AppEvent::CursorHome => {
+                if self.active_draft().is_empty() {
+                    if self.transcript_overlay_open {
+                        self.transcript_overlay.scroll_home();
+                    } else if self.detail_overlay_open {
+                        self.detail_overlay.scroll_home();
+                    } else {
+                        self.transcript.scroll_home();
+                    }
+                } else {
+                    self.active_session_mut().cursor_pos = 0;
+                }
+                AppAction::Continue
+            }
+            AppEvent::CursorEnd => {
+                if self.active_draft().is_empty() {
+                    if self.transcript_overlay_open {
+                        self.transcript_overlay.scroll_end();
+                    } else if self.detail_overlay_open {
+                        self.detail_overlay.scroll_end();
+                    } else {
+                        self.transcript.scroll_end();
+                    }
+                } else {
+                    let max = self.active_draft().chars().count();
+                    self.active_session_mut().cursor_pos = max;
+                }
                 AppAction::Continue
             }
             AppEvent::None => AppAction::Continue,
@@ -2123,6 +2182,7 @@ summary={}",
         };
         ComposerView {
             draft: self.active_draft().to_owned(),
+            cursor_pos: self.active_session().cursor_pos,
             mode: self.input_mode(),
             shell_state: self.shell_state(),
             placeholder: self.composer_placeholder().to_owned(),
@@ -2468,6 +2528,7 @@ summary={}",
         };
 
         self.active_session_mut().draft.clear();
+        self.active_session_mut().cursor_pos = 0;
         self.bottom_pane.reset_command_selection();
         self.transcript_overlay_open = false;
         self.detail_overlay_open = false;
@@ -2578,6 +2639,7 @@ summary={}",
         let surface = self.command_surface_view();
 
         if let Some(completion) = surface.skill_completion {
+            self.active_session_mut().cursor_pos = completion.chars().count();
             self.active_session_mut().draft = completion;
             self.bottom_pane.reset_command_selection();
             self.refresh_overlay_state();
@@ -2588,7 +2650,9 @@ summary={}",
             return;
         };
 
-        self.active_session_mut().draft = command_completion(command.command);
+        let completion = command_completion(command.command);
+        self.active_session_mut().cursor_pos = completion.chars().count();
+        self.active_session_mut().draft = completion;
         self.bottom_pane.reset_command_selection();
         self.refresh_overlay_state();
     }
@@ -3525,6 +3589,7 @@ fn interactive_session_record(session_id: &str, model: &str) -> SessionRecord {
         state: SessionState::Waiting,
         unread: 0,
         draft: String::new(),
+        cursor_pos: 0,
         transcript_len: 0,
         current_run_id: None,
         current_gateway_run_id: None,
@@ -5386,7 +5451,7 @@ mod tests {
                 .composer
                 .hint_line
                 .to_string()
-                .contains("Tab complete")
+                .contains("/ commands")
         );
     }
 
