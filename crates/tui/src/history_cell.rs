@@ -343,40 +343,21 @@ fn build_history_cell_with_key(
 ) -> HistoryCell {
     let (label, label_style, body_style) = cell_identity(entry);
 
-    let lead = if active { "● " } else { "· " };
-    let lead_style = if active {
-        Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
     let mut header = vec![
-        Span::styled(lead, lead_style),
         Span::styled(
-            format!("{}  ", entry.timestamp),
+            format!("  {}  ", entry.timestamp),
             Style::default().fg(Color::DarkGray),
         ),
-        Span::styled(format!("[{}]", label), label_style),
+        Span::styled(label, label_style),
     ];
     if let Some(phase) = entry.phase {
         header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
         header.push(Span::styled(
-            format!("[{}]", phase.label()),
+            phase.label(),
             Style::default().fg(Color::DarkGray),
         ));
     }
-    if active {
-        header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
-        header.push(Span::styled(
-            "live",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-    header.push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
+    header.push(Span::styled("   ", Style::default().fg(Color::DarkGray)));
     header.push(Span::styled(
         entry.title.clone(),
         Style::default().add_modifier(Modifier::BOLD),
@@ -384,7 +365,7 @@ fn build_history_cell_with_key(
     if !entry.actor.is_empty() && entry.actor != label {
         header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
         header.push(Span::styled(
-            format!("· {}", entry.actor),
+            entry.actor.clone(),
             Style::default().fg(Color::DarkGray),
         ));
     }
@@ -802,9 +783,8 @@ mod tests {
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>();
-        assert!(rendered.iter().any(|line| line.contains("● ")));
-        assert!(rendered.iter().any(|line| line.contains("live")));
         assert!(rendered.iter().any(|line| line.contains("│ first line")));
+        assert!(rendered.iter().any(|line| line.contains("assistant")));
     }
 
     #[test]
@@ -820,7 +800,7 @@ mod tests {
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>();
-        assert!(summary.iter().any(|line| line.contains("live")));
+        assert!(summary.iter().any(|line| line.contains("assistant")));
         assert!(detail.iter().any(|line| line.contains("phase streaming")));
         assert!(detail.iter().any(|line| line.contains("run run-123")));
     }

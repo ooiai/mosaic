@@ -36,9 +36,9 @@ impl ShellView {
         let outer = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),
+                Constraint::Length(1),
                 Constraint::Min(8),
-                Constraint::Length(4),
+                Constraint::Length(3),
             ])
             .split(frame_area);
 

@@ -123,7 +123,7 @@ mod tests {
         let screen = render_to_text(&app, 120, 28);
 
         assert!(screen.contains("assistant"));
-        assert!(screen.contains("[capability-active]"));
+        assert!(screen.contains("capability-active"));
         assert!(screen.contains("[tool]Tool call: read_file"));
         assert!(screen.contains("route=capability_match"));
         assert!(screen.contains("Ctrl+O detail"));
@@ -142,7 +142,7 @@ mod tests {
         let screen = render_to_text(&app, 120, 28);
 
         assert!(screen.contains("assistant"));
-        assert!(screen.contains("[failed]"));
+        assert!(screen.contains("failed"));
         assert!(screen.contains("[failure]Run failed"));
         assert!(screen.contains("Ctrl+O detail"));
     }

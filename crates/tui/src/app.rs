@@ -2050,11 +2050,9 @@ summary={}",
 
     pub fn composer_placeholder(&self) -> &'static str {
         match self.input_mode() {
-            InputMode::Chat => "Send a message to the active session. Type / to browse commands.",
-            InputMode::Command => {
-                "Run a slash command. Tab accepts the highlighted command and Enter executes it."
-            }
-            InputMode::Search => "Type / to browse commands.",
+            InputMode::Chat => "Message…",
+            InputMode::Command => "Run a slash command. Tab accepts, Enter executes.",
+            InputMode::Search => "Type to filter…",
         }
     }
 
@@ -2095,7 +2093,7 @@ summary={}",
     }
 
     pub fn escape_hint(&self) -> &'static str {
-        "clear draft or close the command popup"
+        "clear"
     }
 
     pub fn command_query(&self) -> Option<&str> {
@@ -4042,7 +4040,7 @@ mod tests {
         assert_eq!(pane.mode, InputMode::Command);
         assert_eq!(pane.shell_state, ShellState::Commanding);
         assert!(pane.busy);
-        assert!(pane.placeholder.contains("slash command"));
+        assert!(pane.placeholder.contains("slash"));
     }
 
     #[test]
@@ -4330,7 +4328,7 @@ mod tests {
 
         assert_eq!(app.input_mode(), InputMode::Command);
         assert!(app.enter_hint().contains("Complete"));
-        assert_eq!(app.escape_hint(), "clear draft or close the command popup");
+        assert_eq!(app.escape_hint(), "clear");
     }
 
     #[test]
@@ -5449,7 +5447,7 @@ mod tests {
             snapshot
                 .chrome
                 .composer
-                .hint_line
+                .status_line
                 .to_string()
                 .contains("/ commands")
         );

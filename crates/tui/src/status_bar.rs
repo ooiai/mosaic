@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
@@ -25,84 +25,63 @@ pub struct StatusBarView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusBarChromeView {
     pub header: Line<'static>,
-    pub subheader: Option<Line<'static>>,
 }
 
 impl StatusBarView {
     pub fn into_chrome(self) -> StatusBarChromeView {
-        let (gateway_dot, gateway_label, gateway_style) = if self.gateway_live {
-            (
-                "●",
-                format!("live {}", self.gateway_target),
-                Style::default().fg(Color::Green),
-            )
+        let (gateway_dot, gateway_style) = if self.gateway_live {
+            ("●", Style::default().fg(Color::Green))
         } else {
-            (
-                "●",
-                format!("paused {}", self.gateway_target),
-                Style::default().fg(Color::Yellow),
-            )
+            ("●", Style::default().fg(Color::Yellow))
         };
 
-        let header = Line::from(vec![
+        let mut spans = vec![
             Span::styled(
                 "Mosaic",
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(self.workspace, Style::default().fg(Color::Gray)),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(self.session_label, Style::default().fg(Color::Cyan)),
+            Span::styled("  ", Style::default()),
+            Span::styled(self.workspace, Style::default().fg(Color::DarkGray)),
             Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(self.active_profile, Style::default().fg(Color::Yellow)),
-            Span::styled("/", Style::default().fg(Color::DarkGray)),
-            Span::styled(self.control_model, Style::default().fg(Color::Gray)),
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(self.session_label, Style::default().fg(Color::Cyan)),
+            Span::styled("  ", Style::default()),
             Span::styled(gateway_dot, gateway_style.add_modifier(Modifier::BOLD)),
-            Span::raw(" "),
-            Span::styled(gateway_label, Style::default().fg(Color::DarkGray)),
-        ]);
+            Span::styled("  ", Style::default()),
+            Span::styled(self.active_profile, Style::default().fg(Color::Yellow)),
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.shell_state_label,
+                Style::default().fg(Color::DarkGray),
+            ),
+        ];
 
-        let subheader = if self.hide_runtime_summary {
-            None
-        } else {
-            let mut spans = vec![
-                Span::styled(self.shell_state_label, Style::default().fg(Color::Cyan)),
-                Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(self.runtime_label, Style::default().fg(Color::Green)),
-                Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(self.runtime_summary, Style::default().fg(Color::Gray)),
-            ];
-            if let Some(branch) = self.git_branch {
-                spans.push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
-                spans.push(Span::styled(
-                    format!("⎇ {}", branch),
-                    Style::default().fg(Color::Cyan),
-                ));
-            }
-            if self.tokens_in > 0 || self.tokens_out > 0 {
-                spans.push(Span::styled("  ·  ", Style::default().fg(Color::DarkGray)));
-                spans.push(Span::styled(
-                    format!(
-                        "{} in / {} out",
-                        fmt_tokens(self.tokens_in),
-                        fmt_tokens(self.tokens_out)
-                    ),
-                    Style::default().fg(Color::DarkGray),
-                ));
-            }
-            Some(Line::from(spans))
-        };
+        if let Some(branch) = self.git_branch {
+            spans.push(Span::styled("  ⎇ ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(branch, Style::default().fg(Color::Cyan)));
+        }
 
-        StatusBarChromeView { header, subheader }
+        if self.tokens_in > 0 || self.tokens_out > 0 {
+            spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                format!(
+                    "{} in / {} out",
+                    fmt_tokens(self.tokens_in),
+                    fmt_tokens(self.tokens_out)
+                ),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+
+        StatusBarChromeView {
+            header: Line::from(spans),
+        }
     }
 }
 
 pub struct StatusBarWidget {
     header: Paragraph<'static>,
-    subheader: Paragraph<'static>,
 }
 
 impl StatusBarWidget {
@@ -111,22 +90,13 @@ impl StatusBarWidget {
     }
 
     pub fn from_chrome(chrome: StatusBarChromeView) -> Self {
-        let header = Paragraph::new(chrome.header);
-        let subheader = chrome
-            .subheader
-            .map(Paragraph::new)
-            .unwrap_or_else(|| Paragraph::new(""));
-
-        Self { header, subheader }
+        Self {
+            header: Paragraph::new(chrome.header),
+        }
     }
 
     pub fn render(self, frame: &mut ratatui::Frame<'_>, area: Rect) {
-        let sections = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Length(1)])
-            .split(area);
-        frame.render_widget(self.header, sections[0]);
-        frame.render_widget(self.subheader, sections[1]);
+        frame.render_widget(self.header, area);
     }
 }
 
@@ -152,7 +122,7 @@ mod tests {
     use super::{StatusBarView, fmt_tokens};
 
     #[test]
-    fn status_bar_chrome_hides_subheader_when_runtime_summary_is_suppressed() {
+    fn status_bar_chrome_contains_mosaic_branding() {
         let chrome = StatusBarView {
             workspace: "~/mosaic".to_owned(),
             session_label: "session".to_owned(),
@@ -171,7 +141,6 @@ mod tests {
         .into_chrome();
 
         assert!(chrome.header.to_string().contains("Mosaic"));
-        assert!(chrome.subheader.is_none());
     }
 
     #[test]
@@ -192,11 +161,15 @@ mod tests {
             tokens_out: 0,
         }
         .into_chrome();
-        let sub = chrome.subheader.unwrap();
-        let text: String = sub.spans.iter().map(|s| s.content.as_ref()).collect();
+        let text: String = chrome
+            .header
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
         assert!(
             text.contains("main"),
-            "subheader should contain branch name"
+            "header should contain branch name"
         );
     }
 
@@ -218,10 +191,14 @@ mod tests {
             tokens_out: 400,
         }
         .into_chrome();
-        let sub = chrome.subheader.unwrap();
-        let text: String = sub.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(text.contains("in"), "subheader should show token counts");
-        assert!(text.contains("out"), "subheader should show token out");
+        let text: String = chrome
+            .header
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(text.contains("in"), "header should show token in count");
+        assert!(text.contains("out"), "header should show token out count");
     }
 
     #[test]

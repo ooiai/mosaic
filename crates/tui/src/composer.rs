@@ -26,7 +26,6 @@ pub struct ComposerView {
 pub struct ComposerChromeView {
     pub prompt_line: Line<'static>,
     pub status_line: Line<'static>,
-    pub hint_line: Line<'static>,
     pub busy: bool,
     pub cursor_pos: usize,
     pub cursor_visible: bool,
@@ -62,7 +61,7 @@ impl ComposerView {
 
         let mut prompt_spans = vec![
             Span::styled(
-                "›",
+                "❯",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -98,16 +97,13 @@ impl ComposerView {
             Span::styled(busy_label, Style::default().fg(Color::Gray)),
             Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
             Span::styled(self.status_detail, Style::default().fg(Color::DarkGray)),
+            Span::styled("   / commands  ·  Esc ", Style::default().fg(Color::DarkGray)),
+            Span::styled(self.escape_hint, Style::default().fg(Color::DarkGray)),
         ]);
-        let hint_line = Line::from(vec![Span::styled(
-            format!("{}  ·  / commands  ·  Esc {}", self.enter_hint, self.escape_hint),
-            Style::default().fg(Color::DarkGray),
-        )]);
 
         ComposerChromeView {
             prompt_line,
             status_line,
-            hint_line,
             busy: self.busy,
             cursor_pos: self.cursor_pos,
             cursor_visible: true,
@@ -120,7 +116,6 @@ impl ComposerView {
 
 pub struct ComposerWidget {
     status_line: Line<'static>,
-    hint_line: Line<'static>,
     draft_text: String,
     placeholder: String,
     completion_suffix: Option<String>,
@@ -137,7 +132,6 @@ impl ComposerWidget {
     pub fn from_chrome(chrome: ComposerChromeView) -> Self {
         Self {
             status_line: chrome.status_line,
-            hint_line: chrome.hint_line,
             draft_text: chrome.draft_text,
             placeholder: chrome.placeholder,
             completion_suffix: chrome.completion_suffix,
@@ -148,7 +142,7 @@ impl ComposerWidget {
     }
 
     pub fn render(self, frame: &mut ratatui::Frame<'_>, area: Rect) {
-        // "› " prefix is 2 chars; leave 2 chars margin from right edge.
+        // "❯ " prefix is 2 chars; leave 2 chars margin from right edge.
         let prefix_len: usize = 2;
         let visible_width = (area.width as usize).saturating_sub(prefix_len + 2).max(1);
 
@@ -176,7 +170,7 @@ impl ComposerWidget {
 
         let mut prompt_spans = vec![
             Span::styled(
-                "›",
+                "❯",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -194,7 +188,6 @@ impl ComposerWidget {
         let paragraph = Paragraph::new(vec![
             Line::from(prompt_spans),
             self.status_line,
-            self.hint_line,
         ])
         .block(Block::default().borders(Borders::TOP).border_style(
             if self.busy {
@@ -206,7 +199,7 @@ impl ComposerWidget {
 
         frame.render_widget(paragraph, area);
 
-        if !self.cursor_visible || self.draft_text.is_empty() {
+        if !self.cursor_visible {
             return;
         }
 
@@ -261,7 +254,7 @@ mod tests {
         assert!(chrome.busy);
         assert!(chrome.prompt_line.to_string().contains("/help"));
         assert!(chrome.status_line.to_string().contains("busy"));
-        assert!(chrome.hint_line.to_string().contains("Enter run"));
-        assert!(!chrome.hint_line.to_string().contains("Ctrl+C quit"));
+        assert!(chrome.status_line.to_string().contains("/ commands"));
+        assert!(!chrome.status_line.to_string().contains("Ctrl+C quit"));
     }
 }
