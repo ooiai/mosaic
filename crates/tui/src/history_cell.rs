@@ -225,11 +225,20 @@ fn streaming_preview_lines(
         ),
         Span::styled("  [streaming]", Style::default().fg(Color::DarkGray)),
     ]));
-    for line in preview.lines() {
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::raw(line.to_owned()),
-        ]));
+    let md_lines = crate::markdown::render_markdown(preview, 100);
+    if md_lines.is_empty() {
+        for line in preview.lines() {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::raw(line.to_owned()),
+            ]));
+        }
+    } else {
+        for md_line in md_lines {
+            let mut spans = vec![Span::raw("  ")];
+            spans.extend(md_line.spans);
+            lines.push(Line::from(spans));
+        }
     }
     lines.push(Line::from(""));
     lines
@@ -301,19 +310,30 @@ fn build_history_cell_with_key(
     }
 
     let mut summary_lines = vec![Line::from(header)];
-    for line in body_lines(entry) {
-        summary_lines.push(Line::from(vec![
-            Span::styled("  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                "│ ",
-                Style::default().fg(if active {
-                    Color::Green
-                } else {
-                    Color::DarkGray
-                }),
-            ),
-            Span::styled(line, body_style),
-        ]));
+    let rail_style = Style::default().fg(if active {
+        Color::Green
+    } else {
+        Color::DarkGray
+    });
+
+    if entry.block == TranscriptBlock::AssistantMessage && !entry.body.is_empty() {
+        let md_lines = crate::markdown::render_markdown(&entry.body, 100);
+        for md_line in md_lines {
+            let mut spans = vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("│ ", rail_style),
+            ];
+            spans.extend(md_line.spans);
+            summary_lines.push(Line::from(spans));
+        }
+    } else {
+        for line in body_lines(entry) {
+            summary_lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("│ ", rail_style),
+                Span::styled(line, body_style),
+            ]));
+        }
     }
 
     if !entry.details.is_empty() {
@@ -401,11 +421,20 @@ fn build_detail_lines(
     let body = body_lines(entry);
     if !body.is_empty() {
         lines.push(Line::from(""));
-        for line in body {
-            lines.push(Line::from(vec![
-                Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-                Span::styled(line, body_style),
-            ]));
+        if entry.block == TranscriptBlock::AssistantMessage {
+            let md_lines = crate::markdown::render_markdown(&entry.body, 100);
+            for md_line in md_lines {
+                let mut spans = vec![Span::styled("│ ", Style::default().fg(Color::DarkGray))];
+                spans.extend(md_line.spans);
+                lines.push(Line::from(spans));
+            }
+        } else {
+            for line in body {
+                lines.push(Line::from(vec![
+                    Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(line, body_style),
+                ]));
+            }
         }
     }
 

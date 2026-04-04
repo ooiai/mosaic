@@ -144,6 +144,11 @@ pub enum RunEvent {
         run_id: String,
         reason: String,
     },
+    TokenUsage {
+        input_tokens: u64,
+        output_tokens: u64,
+        cached_tokens: u64,
+    },
 }
 
 pub trait RunEventSink: Send + Sync {

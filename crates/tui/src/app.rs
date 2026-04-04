@@ -500,6 +500,10 @@ pub struct App {
     heartbeat: usize,
     transcript_overlay_cache: RefCell<Option<TranscriptOverlayCache>>,
     detail_overlay_cache: RefCell<Option<DetailOverlayCache>>,
+    pub git_branch: Option<String>,
+    pub tokens_in: u64,
+    pub tokens_out: u64,
+    pub tokens_cached: u64,
 }
 
 impl App {
@@ -547,6 +551,10 @@ impl App {
             heartbeat: 0,
             transcript_overlay_cache: RefCell::new(None),
             detail_overlay_cache: RefCell::new(None),
+            git_branch: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            tokens_cached: 0,
         };
         if start_in_resume {
             app.push_system_entry(
@@ -612,6 +620,10 @@ impl App {
             heartbeat: 0,
             transcript_overlay_cache: RefCell::new(None),
             detail_overlay_cache: RefCell::new(None),
+            git_branch: None,
+            tokens_in: 0,
+            tokens_out: 0,
+            tokens_cached: 0,
         };
         if start_in_resume {
             app.push_system_entry(
@@ -1675,6 +1687,15 @@ summary={}",
                     )),
                 );
             }
+            RunEvent::TokenUsage {
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+            } => {
+                self.tokens_in = self.tokens_in.saturating_add(input_tokens);
+                self.tokens_out = self.tokens_out.saturating_add(output_tokens);
+                self.tokens_cached = self.tokens_cached.saturating_add(cached_tokens);
+            }
         }
     }
 
@@ -2030,6 +2051,9 @@ summary={}",
             shell_state_label: self.shell_state().label(),
             runtime_label,
             runtime_summary,
+            git_branch: self.git_branch.clone(),
+            tokens_in: self.tokens_in,
+            tokens_out: self.tokens_out,
         }
     }
 

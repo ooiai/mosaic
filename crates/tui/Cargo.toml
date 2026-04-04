@@ -14,6 +14,7 @@ mosaic-gateway = { path = "../gateway" }
 mosaic-runtime = { path = "../runtime" }
 mosaic-sdk = { path = "../sdk" }
 mosaic-session-core = { path = "../session-core" }
+pulldown-cmark.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

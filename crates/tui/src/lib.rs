@@ -10,6 +10,7 @@ pub mod chat_widget;
 pub mod command_popup;
 pub mod composer;
 pub mod history_cell;
+pub mod markdown;
 pub mod mock;
 pub mod overlays;
 pub mod shell_view;
@@ -189,6 +190,7 @@ fn run_app(
 ) -> io::Result<()> {
     let workspace_path = std::env::current_dir()?;
     let mut app = build_app(workspace_path, start_in_resume);
+    app.git_branch = detect_git_branch();
     let input_source = build_input_source();
 
     loop {
@@ -241,6 +243,7 @@ fn run_interactive_app(
     );
     app.set_gateway_state(None, None);
     app.set_node_state(None, None);
+    app.git_branch = detect_git_branch();
     let input_source = build_input_source();
     let gateway_link = Arc::new(AtomicBool::new(true));
     let current_session_id = Arc::new(Mutex::new(context.session_id.clone()));
@@ -1682,4 +1685,15 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+fn detect_git_branch() -> Option<String> {
+    std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
 }
