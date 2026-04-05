@@ -351,11 +351,17 @@ fn build_history_cell_with_key(
             Style::default().fg(Color::DarkGray),
         ));
     }
-    header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
-    header.push(Span::styled(
-        entry.title.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
-    ));
+    // For user/assistant messages the role label already conveys the identity;
+    // only show the title for tool/exec/failure cards where it adds context.
+    if entry.block != TranscriptBlock::UserMessage
+        && entry.block != TranscriptBlock::AssistantMessage
+    {
+        header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+        header.push(Span::styled(
+            entry.title.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
 
     let mut summary_lines = vec![Line::from(header)];
 

@@ -171,11 +171,12 @@ mod tests {
         let widget = ChatWidget::new(ChatView::from(&transcript));
         assert_eq!(widget.transcript_key(), (0, Some(7), false));
         assert!(widget.has_active_cell());
+        // Title is not displayed for AssistantMessage blocks; check body renders.
         assert!(
             widget
                 .lines()
                 .iter()
-                .any(|line: &Line<'_>| line.to_string().contains("Working"))
+                .any(|line: &Line<'_>| line.to_string().contains("hello"))
         );
     }
 
@@ -225,10 +226,11 @@ mod tests {
                 .iter()
                 .any(|line| line.to_string().contains("hello"))
         );
+        // Title is not displayed for AssistantMessage; check body text renders.
         assert!(
             view.lines()
                 .iter()
-                .any(|line| line.to_string().contains("Working"))
+                .any(|line| line.to_string().contains("reply"))
         );
     }
 }
