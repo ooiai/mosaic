@@ -540,9 +540,9 @@ impl App {
             transcript_overlay_open: false,
             detail_overlay_open: false,
             detail_overlay_target: None,
-            transcript: TranscriptState::default(),
-            transcript_overlay: TranscriptState::default(),
-            detail_overlay: TranscriptState::default(),
+            transcript: TranscriptState::new(),
+            transcript_overlay: TranscriptState::new(),
+            detail_overlay: TranscriptState::new(),
             gateway_connected: true,
             gateway_target: "local".to_owned(),
             runtime_status: "warm".to_owned(),
@@ -611,9 +611,9 @@ impl App {
             transcript_overlay_open: false,
             detail_overlay_open: false,
             detail_overlay_target: None,
-            transcript: TranscriptState::default(),
-            transcript_overlay: TranscriptState::default(),
-            detail_overlay: TranscriptState::default(),
+            transcript: TranscriptState::new(),
+            transcript_overlay: TranscriptState::new(),
+            detail_overlay: TranscriptState::new(),
             gateway_connected: true,
             gateway_target: "local".to_owned(),
             runtime_status: "idle".to_owned(),
@@ -723,21 +723,53 @@ impl App {
         self.runtime_status = runtime_status_from_run_label(run_label).to_owned();
 
         if let Some(view) = self.sessions.get_mut(self.selected_session) {
-            let transcript_len = session.transcript.len();
-            if view.transcript_len == 0 || transcript_len < view.transcript_len {
-                view.timeline = session
-                    .transcript
+            let db_entries: Vec<TimelineEntry> = session
+                .transcript
+                .iter()
+                .filter(|m| m.role != TranscriptRole::System)
+                .map(transcript_entry)
+                .collect();
+            let db_count = db_entries.len();
+
+            if view.transcript_len == 0 {
+                // First sync (no prior DB baseline): full replace to remove mock/system
+                // entries. Re-attach any locally-submitted (Operator) messages that
+                // haven't been confirmed by the DB yet so they survive the 200 ms window.
+                let locally_submitted: Vec<TimelineEntry> = view
+                    .timeline
                     .iter()
-                    .filter(|m| m.role != TranscriptRole::System)
-                    .map(transcript_entry)
+                    .skip(view.transcript_len)
+                    .filter(|e| e.kind == TimelineKind::Operator)
+                    .cloned()
                     .collect();
-            } else {
-                for message in session.transcript.iter().skip(view.transcript_len) {
-                    if message.role != TranscriptRole::System {
-                        view.timeline.push(transcript_entry(message));
+                view.timeline = db_entries;
+                for entry in locally_submitted {
+                    let in_db = view
+                        .timeline
+                        .iter()
+                        .any(|e| e.kind == entry.kind && e.body == entry.body);
+                    if !in_db {
+                        view.timeline.push(entry);
+                    }
+                }
+            } else if db_count > view.transcript_len {
+                // DB has new messages: append only entries not already present in the
+                // local tail (entries beyond transcript_len added by push_timeline or
+                // finalize_active_turn).  Dedup by (kind, body) prevents duplicates when
+                // DB confirms a locally-optimistic message.
+                for entry in db_entries.iter().skip(view.transcript_len) {
+                    let in_local = view
+                        .timeline
+                        .iter()
+                        .skip(view.transcript_len)
+                        .any(|e| e.kind == entry.kind && e.body == entry.body);
+                    if !in_local {
+                        view.timeline.push(entry.clone());
                     }
                 }
             }
+            // If db_count <= view.transcript_len and transcript_len != 0: no-op
+            // (DB hasn't moved forward; local tail is preserved as-is).
             if runtime_status_is_busy(run_label)
                 && let Some(turn) = preserved_turn
                 && view.active_turn.is_none()
@@ -748,7 +780,7 @@ impl App {
                     revision: 1,
                 });
             }
-            view.transcript_len = transcript_len;
+            view.transcript_len = db_count;
             if !runtime_status_is_busy(run_label) {
                 view.streaming_preview = None;
                 view.streaming_run_id = None;
@@ -1152,10 +1184,10 @@ impl App {
             session.streaming_preview = None;
             session.streaming_run_id = None;
             session.active_turn = None;
-            // Reset transcript_len so the next sync_runtime_session_with_origin
-            // does a full replace from DB rather than a partial append — this
-            // prevents the finalized entry from being pushed a second time.
-            session.transcript_len = 0;
+            // Advance transcript_len to the current timeline length so the next
+            // sync_runtime_session_with_origin treats the finalized entry as
+            // already-seen and won't append it again from DB (no duplicate).
+            session.transcript_len = session.timeline.len();
         }
         // A new committed turn means we should scroll to show it.
         self.transcript.follow = true;
@@ -5121,12 +5153,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(lines.iter().any(|line| line.contains("partial reply")));
         assert!(lines.iter().any(|line| line.contains("Run finished")));
-        // transcript_len must be reset to 0 so the next DB sync does a full
-        // replace instead of a partial append, preventing duplicate entries.
+        // transcript_len is advanced to timeline.len() after finalize so the next DB sync
+        // knows how many messages are already covered and won't append duplicates.
         assert_eq!(
             app.active_session().transcript_len,
-            0,
-            "transcript_len must be reset after finalize to prevent duplicate on next DB sync"
+            app.active_session().timeline.len(),
+            "transcript_len must equal timeline.len() after finalize to prevent duplicate on next DB sync"
         );
     }
 
@@ -5156,19 +5188,93 @@ mod tests {
             initial_timeline_len + 1,
             "finalize should push exactly one assistant entry"
         );
-        // transcript_len must be 0 so the next DB poll does a full replace.
-        assert_eq!(app.active_session().transcript_len, 0);
+        // transcript_len must match timeline.len() so next DB sync knows the window.
+        assert_eq!(
+            app.active_session().transcript_len,
+            app.active_session().timeline.len(),
+            "transcript_len must equal timeline.len() after finalize"
+        );
 
-        // 2. Simulate a DB sync that returns exactly 1 assistant message (full replace).
+        // 2. Simulate a DB sync that returns 1 assistant message (matching local state).
         let mut stored = StoredSessionRecord::new("demo", "Session", "openai", "agent", "gpt-5.4-mini");
         stored.append_message(TranscriptRole::Assistant, "world", None);
         app.sync_runtime_session_with_origin(&stored, "Local");
 
-        // Full replace from DB — timeline must have exactly 1 entry, not 2.
+        // DB has same count as transcript_len → no append, no full-replace.
+        // The assistant entry already in the timeline is preserved; no duplicate.
         assert_eq!(
             app.active_session().timeline.len(),
-            1,
-            "sync after finalize must do a full replace, not append, preventing duplicates"
+            initial_timeline_len + 1,
+            "sync after finalize must not produce a duplicate assistant entry"
+        );
+    }
+
+    #[test]
+    fn initial_transcript_state_has_follow_true_so_load_scrolls_to_bottom() {
+        // App::new uses TranscriptState::new() which sets follow=true.
+        let app = App::new("/tmp/mosaic".into());
+        assert!(
+            app.transcript.follow,
+            "transcript must start with follow=true so the first draw pins to bottom"
+        );
+    }
+
+    #[test]
+    fn user_message_survives_db_sync_when_db_is_empty() {
+        // Simulate: user has typed and submitted a message, but the DB poll fires
+        // before the runtime has saved the message to the DB.
+        let mut app = App::new("/tmp/mosaic".into());
+        // Do one sync to establish a non-zero transcript_len baseline (empty DB).
+        let stored_empty = StoredSessionRecord::new("demo", "Session", "openai", "agent", "gpt-5.4-mini");
+        app.sync_runtime_session_with_origin(&stored_empty, "Local");
+        let baseline_len = app.active_session().timeline.len();
+
+        // submit_composer (non-interactive path) calls queue_operator_instruction which
+        // pushes with TimelineKind::Operator — the same kind that transcript_entry()
+        // produces for TranscriptRole::User, making dedup possible.
+        app.active_session_mut().draft = "hello".to_owned();
+        let _ = app.submit_composer();
+        assert_eq!(app.active_session().timeline.len(), baseline_len + 1);
+
+        // DB poll fires and DB still has no messages.
+        app.sync_runtime_session_with_origin(&stored_empty, "Local");
+
+        // The user message must still be in the timeline.
+        assert_eq!(
+            app.active_session().timeline.len(),
+            baseline_len + 1,
+            "locally-pushed user message must survive a DB sync that hasn't caught up yet"
+        );
+        assert!(
+            app.active_session()
+                .timeline
+                .iter()
+                .any(|e| e.body.contains("hello")),
+            "the 'hello' entry must still be present after the empty sync"
+        );
+    }
+
+    #[test]
+    fn user_message_deduped_when_db_catches_up() {
+        // When DB eventually includes the message, it must not appear twice.
+        let mut app = App::new("/tmp/mosaic".into());
+        let stored_empty = StoredSessionRecord::new("demo", "Session", "openai", "agent", "gpt-5.4-mini");
+        app.sync_runtime_session_with_origin(&stored_empty, "Local");
+        let baseline_len = app.active_session().timeline.len();
+
+        // Submit "hello" locally (TimelineKind::Operator, body = "hello").
+        app.active_session_mut().draft = "hello".to_owned();
+        let _ = app.submit_composer();
+
+        // DB catches up and now has the same message (TranscriptRole::User → Operator kind).
+        let mut stored_with_message = StoredSessionRecord::new("demo", "Session", "openai", "agent", "gpt-5.4-mini");
+        stored_with_message.append_message(TranscriptRole::User, "hello", None);
+        app.sync_runtime_session_with_origin(&stored_with_message, "Local");
+
+        assert_eq!(
+            app.active_session().timeline.len(),
+            baseline_len + 1,
+            "when DB confirms the message, timeline must have exactly one copy"
         );
     }
 

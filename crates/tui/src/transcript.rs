@@ -291,7 +291,10 @@ mod tests {
         state.scroll_down(20); // scroll=20, follow=false
         // Content is now only 8 lines tall, visible=5 → max_scroll=3
         state.sync_follow(8, 5);
-        assert_eq!(state.scroll, 3, "scroll must be clamped when content shrinks");
+        assert_eq!(
+            state.scroll, 3,
+            "scroll must be clamped when content shrinks"
+        );
     }
 
     #[test]
