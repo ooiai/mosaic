@@ -4046,8 +4046,8 @@ mod tests {
 
     use super::{
         App, AppAction, ComposerRunRequest, InputMode, ProfileOption, SessionRecord, SessionState,
-        ShellState, SkillOption, TimelineKind, TranscriptBlock, interactive_session_record,
-        preserved_expandable_turn,
+        ShellState, SkillOption, StoredSessionRecord, TimelineKind, TranscriptBlock,
+        interactive_session_record, preserved_expandable_turn,
     };
     use crate::history_cell::HistoryCellKey;
     use crate::transcript::{
@@ -5642,6 +5642,32 @@ mod tests {
         // Both draft and cursor_pos must be preserved through the catalog refresh.
         assert_eq!(app.active_draft(), "hello");
         assert_eq!(app.active_session().cursor_pos, 5);
+    }
+
+    #[test]
+    fn sync_runtime_session_preserves_cursor_pos_across_gateway_refresh() {
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+
+        for ch in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        assert_eq!(app.active_session().cursor_pos, 5, "cursor must be at end after typing");
+
+        // Simulate a gateway sync (empty transcript, like the first 200ms poll).
+        let stored = StoredSessionRecord::new("demo", "Demo session", "openai", "agent", "gpt-5.4-mini");
+        app.sync_runtime_session_with_origin(&stored, "Local");
+
+        // Draft AND cursor_pos must survive the gateway sync.
+        assert_eq!(app.active_draft(), "hello", "draft must survive gateway sync");
+        assert_eq!(app.active_session().cursor_pos, 5, "cursor_pos must survive gateway sync");
     }
 
     #[test]
