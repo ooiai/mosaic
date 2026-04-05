@@ -197,4 +197,54 @@ mod tests {
         assert!(screen.contains("Transcript"));
         assert!(screen.contains("Ctrl+T toggles transcript view"));
     }
+
+    #[test]
+    fn typing_hello_appears_in_rendered_screen() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = App::new("/tmp/mosaic".into());
+        for ch in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        assert_eq!(app.active_session().draft, "hello");
+        let screen = render_to_text(&app, 120, 28);
+        assert!(
+            screen.contains("hello"),
+            "typed 'hello' must appear in rendered screen; got:\n{}",
+            screen
+        );
+    }
+
+    #[test]
+    fn submitted_message_appears_in_chat() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = App::new_interactive(
+            "/tmp/mosaic".into(),
+            "demo".to_owned(),
+            "openai".to_owned(),
+            "gpt-5.4-mini".to_owned(),
+            Vec::new(),
+            Vec::new(),
+            false,
+        );
+        for ch in "hello world".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        // Draft is cleared after submit
+        assert!(app.active_session().draft.is_empty(), "draft must clear after submit");
+        // Message must appear in the transcript timeline (body contains the actual text)
+        let found_in_timeline = app.visible_timeline().iter()
+            .any(|e| e.body.contains("hello world") || e.title.contains("hello world"));
+        assert!(
+            found_in_timeline,
+            "submitted message must appear in timeline; entries = {:?}",
+            app.visible_timeline().iter().map(|e| (e.title.clone(), e.body.clone())).collect::<Vec<_>>()
+        );
+        // And must render on screen
+        let screen = render_to_text(&app, 120, 28);
+        assert!(
+            screen.contains("hello world"),
+            "submitted message must appear on screen; got:\n{}", screen
+        );
+    }
 }

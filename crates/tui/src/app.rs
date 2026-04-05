@@ -702,6 +702,7 @@ impl App {
         origin: &str,
     ) {
         let draft = self.active_session().draft.clone();
+        let cursor_pos = self.active_session().cursor_pos;
         let unread = self.active_session().unread;
         let preserved_turn = self
             .sessions
@@ -779,6 +780,7 @@ impl App {
             view.state = state;
             view.unread = unread;
             view.draft = draft;
+            view.cursor_pos = cursor_pos;
             view.current_run_id = session.run.current_run_id.clone();
             view.current_gateway_run_id = session.run.current_gateway_run_id.clone();
             view.last_gateway_run_id = session.gateway.last_gateway_run_id.clone();
