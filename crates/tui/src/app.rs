@@ -1152,6 +1152,10 @@ impl App {
             session.streaming_preview = None;
             session.streaming_run_id = None;
             session.active_turn = None;
+            // Reset transcript_len so the next sync_runtime_session_with_origin
+            // does a full replace from DB rather than a partial append — this
+            // prevents the finalized entry from being pushed a second time.
+            session.transcript_len = 0;
         }
         // A new committed turn means we should scroll to show it.
         self.transcript.follow = true;
@@ -4049,6 +4053,7 @@ mod tests {
         ShellState, SkillOption, StoredSessionRecord, TimelineKind, TranscriptBlock,
         interactive_session_record, preserved_expandable_turn,
     };
+    use mosaic_session_core::TranscriptRole;
     use crate::history_cell::HistoryCellKey;
     use crate::transcript::{
         ActiveTurn, TimelineEntry, TranscriptDetail, TranscriptDetailKind, TurnPhase,
@@ -5116,6 +5121,55 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(lines.iter().any(|line| line.contains("partial reply")));
         assert!(lines.iter().any(|line| line.contains("Run finished")));
+        // transcript_len must be reset to 0 so the next DB sync does a full
+        // replace instead of a partial append, preventing duplicate entries.
+        assert_eq!(
+            app.active_session().transcript_len,
+            0,
+            "transcript_len must be reset after finalize to prevent duplicate on next DB sync"
+        );
+    }
+
+    #[test]
+    fn finalize_active_turn_does_not_cause_duplicate_on_next_sync() {
+        // 1. Simulate an interactive run: RunStarted → OutputDelta → RunFinished
+        let mut app = App::new("/tmp/mosaic".into());
+        let initial_timeline_len = app.active_session().timeline.len();
+
+        app.apply_run_event(RunEvent::RunStarted {
+            run_id: "run-1".to_owned(),
+            input: "hello".to_owned(),
+        });
+        app.apply_run_event(RunEvent::OutputDelta {
+            run_id: "run-1".to_owned(),
+            chunk: "world".to_owned(),
+            accumulated_chars: 5,
+        });
+        app.apply_run_event(RunEvent::RunFinished {
+            run_id: "run-1".to_owned(),
+            output_preview: String::new(),
+        });
+
+        // finalize_active_turn pushes exactly 1 entry (assistant).
+        assert_eq!(
+            app.active_session().timeline.len(),
+            initial_timeline_len + 1,
+            "finalize should push exactly one assistant entry"
+        );
+        // transcript_len must be 0 so the next DB poll does a full replace.
+        assert_eq!(app.active_session().transcript_len, 0);
+
+        // 2. Simulate a DB sync that returns exactly 1 assistant message (full replace).
+        let mut stored = StoredSessionRecord::new("demo", "Session", "openai", "agent", "gpt-5.4-mini");
+        stored.append_message(TranscriptRole::Assistant, "world", None);
+        app.sync_runtime_session_with_origin(&stored, "Local");
+
+        // Full replace from DB — timeline must have exactly 1 entry, not 2.
+        assert_eq!(
+            app.active_session().timeline.len(),
+            1,
+            "sync after finalize must do a full replace, not append, preventing duplicates"
+        );
     }
 
     #[test]

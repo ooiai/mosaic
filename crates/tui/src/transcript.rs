@@ -202,8 +202,12 @@ impl TranscriptState {
     /// Update scroll to follow new content given total lines and visible height.
     /// Only takes effect when `follow == true`.
     pub fn sync_follow(&mut self, total_lines: u16, visible_height: u16) {
+        let max_scroll = total_lines.saturating_sub(visible_height);
         if self.follow {
-            self.scroll = total_lines.saturating_sub(visible_height);
+            self.scroll = max_scroll;
+        } else {
+            // Clamp manual scroll so it can never go past the last line.
+            self.scroll = self.scroll.min(max_scroll);
         }
     }
 }
@@ -263,4 +267,39 @@ pub fn current_timestamp_label(entries: &[TimelineEntry]) -> String {
         .last()
         .map(|entry| entry.timestamp.clone())
         .unwrap_or_else(|| "now".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TranscriptState;
+
+    #[test]
+    fn scroll_down_is_clamped_to_content_height() {
+        let mut state = TranscriptState::new();
+        // Manually scroll so follow=false
+        state.scroll_down(3);
+        assert!(!state.follow);
+        // Try to scroll way past the content (total=10 lines, visible=5 → max_scroll=5)
+        state.scroll_down(100);
+        state.sync_follow(10, 5);
+        assert_eq!(state.scroll, 5, "scroll must be clamped to max_scroll");
+    }
+
+    #[test]
+    fn sync_follow_clamps_on_content_shrink() {
+        let mut state = TranscriptState::new();
+        state.scroll_down(20); // scroll=20, follow=false
+        // Content is now only 8 lines tall, visible=5 → max_scroll=3
+        state.sync_follow(8, 5);
+        assert_eq!(state.scroll, 3, "scroll must be clamped when content shrinks");
+    }
+
+    #[test]
+    fn sync_follow_true_always_pins_to_bottom() {
+        let mut state = TranscriptState::new();
+        state.scroll = 99;
+        state.follow = true;
+        state.sync_follow(20, 5);
+        assert_eq!(state.scroll, 15);
+    }
 }
