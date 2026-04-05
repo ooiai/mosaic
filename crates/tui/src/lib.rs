@@ -33,7 +33,11 @@ use chrono::Utc;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    },
+    event::EnableMouseCapture,
+    event::DisableMouseCapture,
 };
 use mosaic_control_protocol::{
     GatewayEvent, HealthResponse, IngressTrace, ReadinessResponse, SessionDetailDto,
@@ -1704,7 +1708,7 @@ mod tests {
 fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -1717,6 +1721,7 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
+        DisableMouseCapture,
         LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;

@@ -2366,6 +2366,10 @@ summary={}",
         // Inject the context line (workspace/session/model info) from the status bar
         // into the composer so it appears as the top row of the input area.
         composer.context_line = status_bar.header.clone();
+        // Hide cursor when a full-screen overlay is open so it does not bleed through.
+        if self.transcript_overlay_open || self.detail_overlay_open {
+            composer.cursor_visible = false;
+        }
         ShellSnapshot {
             chrome: ShellChromeView {
                 status_bar,
@@ -5486,6 +5490,20 @@ mod tests {
                 .to_string()
                 .contains("/ commands")
         );
+    }
+
+    #[test]
+    fn shell_snapshot_cursor_hidden_when_overlay_open() {
+        let mut app = App::new("/tmp/mosaic".into());
+        // Normal state: cursor should be visible.
+        assert!(app.shell_snapshot().chrome.composer.cursor_visible);
+        // Transcript overlay open: cursor must be hidden.
+        app.transcript_overlay_open = true;
+        assert!(!app.shell_snapshot().chrome.composer.cursor_visible);
+        app.transcript_overlay_open = false;
+        // Detail overlay open: cursor must also be hidden.
+        app.detail_overlay_open = true;
+        assert!(!app.shell_snapshot().chrome.composer.cursor_visible);
     }
 
     #[test]

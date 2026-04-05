@@ -94,7 +94,14 @@ impl ComposerView {
             Span::styled(busy_label, Style::default().fg(Color::DarkGray)),
             Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
             Span::styled(self.status_detail, Style::default().fg(Color::DarkGray)),
-            Span::styled("   / commands  ·  Esc ", Style::default().fg(Color::DarkGray)),
+            Span::styled("   Enter ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                self.enter_hint,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ·  / commands  ·  Esc ", Style::default().fg(Color::DarkGray)),
             Span::styled(self.escape_hint, Style::default().fg(Color::DarkGray)),
         ]);
 
@@ -255,6 +262,7 @@ mod tests {
         assert!(chrome.busy);
         assert!(chrome.prompt_line.to_string().contains("/help"));
         assert!(chrome.hint_line.to_string().contains("busy"));
+        assert!(chrome.hint_line.to_string().contains("Enter run"));
         assert!(chrome.hint_line.to_string().contains("/ commands"));
         assert!(!chrome.hint_line.to_string().contains("Ctrl+C quit"));
     }
