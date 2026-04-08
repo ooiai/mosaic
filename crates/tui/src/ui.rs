@@ -39,12 +39,9 @@ mod tests {
         let app = App::new("/tmp/mosaic".into());
         let screen = render_to_text(&app, 120, 28);
 
-        assert!(screen.contains("Mosaic"));
-        assert!(screen.contains("idle"));
-        assert!(screen.contains("ready"));
-        assert!(screen.contains("sess-gateway-001"));
-        assert!(screen.contains("/ commands"));
-        assert!(screen.contains("Esc"));
+        assert!(screen.contains("gpt-5.4-control"), "model name must appear in status bar");
+        assert!(screen.contains("switch mode"), "hint line must show keyboard hint");
+        assert!(screen.contains("reqs."), "hint line must show request count");
     }
 
     #[test]
@@ -181,7 +178,7 @@ mod tests {
 
         assert!(screen.contains("busy"));
         assert!(screen.contains("send disabled · /run stop (gw-run-1)"));
-        assert!(screen.contains("/ commands"));
+        assert!(screen.contains("reqs."));
     }
 
     #[test]

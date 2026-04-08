@@ -69,6 +69,7 @@ enum InputSource {
 enum InputEvent {
     Key(KeyEvent),
     Scroll(i32),
+    Paste(String),
 }
 
 #[derive(Clone)]
@@ -215,7 +216,17 @@ fn run_app(
                     break;
                 }
             }
-            Some(InputEvent::Scroll(_)) | None => {}
+            Some(InputEvent::Paste(text)) => {
+                app.insert_text(&text);
+            }
+            Some(InputEvent::Scroll(delta)) => {
+                if delta > 0 {
+                    app.scroll_active_surface_down(delta as u16);
+                } else {
+                    app.scroll_active_surface_up((-delta) as u16);
+                }
+            }
+            None => {}
         }
 
         app.tick();
@@ -380,11 +391,14 @@ fn run_interactive_app(
                     app.push_system_entry("approval", format!("Denied capability call {call_id}"));
                 }
             },
+            Some(InputEvent::Paste(text)) => {
+                app.insert_text(&text);
+            }
             Some(InputEvent::Scroll(delta)) => {
                 if delta > 0 {
-                    app.transcript.scroll_down(delta as u16);
+                    app.scroll_active_surface_down(delta as u16);
                 } else {
-                    app.transcript.scroll_up((-delta) as u16);
+                    app.scroll_active_surface_up((-delta) as u16);
                 }
             }
             None => {}
@@ -433,9 +447,7 @@ fn poll_input_event(
             if event::poll(timeout)? {
                 match event::read()? {
                     Event::Key(key) => Ok(Some(InputEvent::Key(key))),
-                    Event::Paste(text) => Ok(text.chars().next().map(|character| {
-                        InputEvent::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
-                    })),
+                    Event::Paste(text) => Ok(Some(InputEvent::Paste(text))),
                     Event::Mouse(m) => Ok(match m.kind {
                         MouseEventKind::ScrollDown => Some(InputEvent::Scroll(3)),
                         MouseEventKind::ScrollUp => Some(InputEvent::Scroll(-3)),
@@ -540,9 +552,10 @@ fn spawn_interactive_run(
             context.runtime_handle.spawn(async move {
                 match gateway.submit_run(request) {
                     Ok(submitted) => {
+                        let gateway_run_id = submitted.gateway_run_id().to_owned();
                         if let Err(err) = submitted.wait().await {
                             event_buffer.push(RunEvent::RunFailed {
-                                run_id: session_id.clone(),
+                                run_id: gateway_run_id,
                                 error: err.to_string(),
                                 failure_kind: Some("gateway".to_owned()),
                                 failure_origin: Some("gateway".to_owned()),

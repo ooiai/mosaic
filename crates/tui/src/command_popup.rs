@@ -108,8 +108,7 @@ impl CommandPopupWidget {
                     format!("{:<18}", command.command),
                     if is_selected {
                         Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Cyan)
+                            .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()

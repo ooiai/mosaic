@@ -20,12 +20,15 @@ pub struct ComposerView {
     pub enter_hint: String,
     pub escape_hint: String,
     pub spinner: &'static str,
+    pub request_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposerChromeView {
-    /// Context line (workspace / session / model info) — injected by `ShellView`.
-    pub context_line: Line<'static>,
+    /// Left portion of the context row (workspace path).
+    pub status_left: String,
+    /// Right portion of the context row (model + effort), right-aligned at render time.
+    pub status_right: String,
     pub prompt_line: Line<'static>,
     pub hint_line: Line<'static>,
     pub busy: bool,
@@ -43,18 +46,6 @@ impl ComposerView {
         } else {
             self.status_label.clone()
         };
-        let badge_style = match self.mode {
-            InputMode::Chat => Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            InputMode::Command => Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-            InputMode::Search => Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        };
-        let badge_text = format!("[{}]", self.mode.label());
         let prompt_style = if self.draft.is_empty() {
             Style::default().fg(Color::DarkGray)
         } else {
@@ -88,25 +79,32 @@ impl ComposerView {
         }
 
         let prompt_line = Line::from(prompt_spans);
-        let hint_line = Line::from(vec![
-            Span::styled(badge_text, badge_style),
-            Span::styled("  ", Style::default()),
-            Span::styled(busy_label, Style::default().fg(Color::DarkGray)),
-            Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(self.status_detail, Style::default().fg(Color::DarkGray)),
-            Span::styled("   Enter ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                self.enter_hint,
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("  ·  / commands  ·  Esc ", Style::default().fg(Color::DarkGray)),
-            Span::styled(self.escape_hint, Style::default().fg(Color::DarkGray)),
-        ]);
+        let hint_line = if self.busy {
+            Line::from(vec![
+                Span::styled(busy_label, Style::default().fg(Color::Yellow)),
+                Span::styled("  ·  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(self.status_detail, Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("    {} reqs.", self.request_count),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled("shift+tab", Style::default().fg(Color::DarkGray)),
+                Span::styled(" switch mode  ·  ", Style::default().fg(Color::DarkGray)),
+                Span::styled("ctrl+enter", Style::default().fg(Color::DarkGray)),
+                Span::styled(" enqueue", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("    {} reqs.", self.request_count),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])
+        };
 
         ComposerChromeView {
-            context_line: Line::default(),
+            status_left: String::new(),
+            status_right: String::new(),
             prompt_line,
             hint_line,
             busy: self.busy,
@@ -120,7 +118,8 @@ impl ComposerView {
 }
 
 pub struct ComposerWidget {
-    context_line: Line<'static>,
+    status_left: String,
+    status_right: String,
     hint_line: Line<'static>,
     draft_text: String,
     placeholder: String,
@@ -137,7 +136,8 @@ impl ComposerWidget {
 
     pub fn from_chrome(chrome: ComposerChromeView) -> Self {
         Self {
-            context_line: chrome.context_line,
+            status_left: chrome.status_left,
+            status_right: chrome.status_right,
             hint_line: chrome.hint_line,
             draft_text: chrome.draft_text,
             placeholder: chrome.placeholder,
@@ -192,8 +192,24 @@ impl ComposerWidget {
             }
         }
 
+        // Build the context row with right-aligned model+effort.
+        let left_len = self.status_left.chars().count() as u16;
+        let right_len = self.status_right.chars().count() as u16;
+        let total = left_len + right_len;
+        let padding = area.width.saturating_sub(total).max(1) as usize;
+        let context_line = Line::from(vec![
+            Span::styled(self.status_left, Style::default().fg(Color::DarkGray)),
+            Span::raw(" ".repeat(padding)),
+            Span::styled(
+                self.status_right,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+
         let paragraph = Paragraph::new(vec![
-            self.context_line,
+            context_line,
             Line::from(prompt_spans),
             self.hint_line,
         ])
@@ -223,18 +239,6 @@ impl ComposerWidget {
     }
 }
 
-fn shell_state_style(state: ShellState) -> Style {
-    match state {
-        ShellState::Idle => Style::default().fg(Color::DarkGray),
-        ShellState::Composing => Style::default().fg(Color::Cyan),
-        ShellState::Commanding => Style::default().fg(Color::Yellow),
-        ShellState::Running => Style::default().fg(Color::Green),
-        ShellState::TranscriptOverlay | ShellState::TurnDetailOverlay => {
-            Style::default().fg(Color::Magenta)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::ComposerView;
@@ -255,6 +259,7 @@ mod tests {
             enter_hint: "Enter run".to_owned(),
             escape_hint: "close".to_owned(),
             spinner: "|",
+            request_count: 0,
         }
         .into_chrome();
 
@@ -262,8 +267,7 @@ mod tests {
         assert!(chrome.busy);
         assert!(chrome.prompt_line.to_string().contains("/help"));
         assert!(chrome.hint_line.to_string().contains("busy"));
-        assert!(chrome.hint_line.to_string().contains("Enter run"));
-        assert!(chrome.hint_line.to_string().contains("/ commands"));
+        assert!(chrome.hint_line.to_string().contains("reqs"));
         assert!(!chrome.hint_line.to_string().contains("Ctrl+C quit"));
     }
 }

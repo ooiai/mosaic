@@ -246,24 +246,28 @@ pub fn transcript_lines<'a>(transcript: &'a TranscriptView<'a>) -> Vec<Line<'a>>
 fn empty_state_cell() -> HistoryCell {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::styled(
-        "Mosaic local shell",
+        "◈  Mosaic",
         Style::default()
-            .fg(Color::White)
+            .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
     )]));
+    lines.push(Line::from(vec![Span::styled(
+        "Your AI-powered development assistant.",
+        Style::default().fg(Color::DarkGray),
+    )]));
     lines.push(Line::from(vec![
-        Span::styled("Tip", Style::default().fg(Color::DarkGray)),
-        Span::styled("  /", Style::default().fg(Color::Yellow)),
-        Span::raw(" opens commands  ·  Enter sends  ·  Ctrl+O opens detail"),
-    ]));
-    lines.push(Line::from(vec![
-        Span::styled("     ", Style::default().fg(Color::DarkGray)),
-        Span::raw("Ctrl+T opens transcript overlay"),
+        Span::styled("Type ", Style::default().fg(Color::DarkGray)),
+        Span::styled("@", Style::default().fg(Color::Yellow)),
+        Span::styled(" for files  ·  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("/", Style::default().fg(Color::Yellow)),
+        Span::styled(" for commands  ·  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("?", Style::default().fg(Color::Yellow)),
+        Span::styled(" for shortcuts", Style::default().fg(Color::DarkGray)),
     ]));
     lines.push(Line::from(""));
     HistoryCell {
         key: HistoryCellKey::Placeholder,
-        title: "Mosaic local shell".to_owned(),
+        title: "◈  Mosaic".to_owned(),
         phase: None,
         detail_summary: None,
         summary_lines: lines.clone(),
@@ -272,7 +276,7 @@ fn empty_state_cell() -> HistoryCell {
         body_raw: String::new(),
         block: TranscriptBlock::SystemNotice,
         active: false,
-        body_line_count: 3,
+        body_line_count: 0,
     }
 }
 
