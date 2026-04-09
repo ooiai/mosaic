@@ -38,7 +38,25 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29.0"
 futures = "0.3"
+mosaic-channel-telegram = { path = "crates/channel-telegram" }
+mosaic-config = { path = "crates/config" }
+mosaic-control-protocol = { path = "crates/control-protocol" }
+mosaic-extension-core = { path = "crates/extension-core" }
+mosaic-gateway = { path = "crates/gateway" }
+mosaic-inspect = { path = "crates/inspect" }
+mosaic-mcp-core = { path = "crates/mcp-core" }
+mosaic-memory = { path = "crates/memory" }
+mosaic-node-protocol = { path = "crates/node-protocol" }
+mosaic-provider = { path = "crates/provider" }
+mosaic-runtime = { path = "crates/runtime" }
+mosaic-sandbox-core = { path = "crates/sandbox-core" }
+mosaic-scheduler-core = { path = "crates/scheduler-core" }
+mosaic-sdk = { path = "crates/sdk" }
+mosaic-session-core = { path = "crates/session-core" }
+mosaic-skill-core = { path = "crates/skill-core" }
+mosaic-tool-core = { path = "crates/tool-core" }
 mosaic-tui = { path = "crates/tui" }
+mosaic-workflow = { path = "crates/workflow" }
 ratatui = "0.29.0"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }

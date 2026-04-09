@@ -18,24 +18,24 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
-mosaic-config = { path = "../crates/config" }
-mosaic-channel-telegram = { path = "../crates/channel-telegram" }
-mosaic-extension-core = { path = "../crates/extension-core" }
-mosaic-control-protocol = { path = "../crates/control-protocol" }
-mosaic-gateway = { path = "../crates/gateway" }
-mosaic-inspect = { path = "../crates/inspect" }
-mosaic-memory = { path = "../crates/memory" }
-mosaic-node-protocol = { path = "../crates/node-protocol" }
-mosaic-mcp-core = { path = "../crates/mcp-core" }
-mosaic-provider = { path = "../crates/provider" }
-mosaic-sandbox-core = { path = "../crates/sandbox-core" }
-mosaic-runtime = { path = "../crates/runtime" }
-mosaic-scheduler-core = { path = "../crates/scheduler-core" }
-mosaic-sdk = { path = "../crates/sdk" }
-mosaic-session-core = { path = "../crates/session-core" }
-mosaic-skill-core = { path = "../crates/skill-core" }
-mosaic-tool-core = { path = "../crates/tool-core" }
-mosaic-workflow = { path = "../crates/workflow" }
+mosaic-config.workspace = true
+mosaic-channel-telegram.workspace = true
+mosaic-extension-core.workspace = true
+mosaic-control-protocol.workspace = true
+mosaic-gateway.workspace = true
+mosaic-inspect.workspace = true
+mosaic-memory.workspace = true
+mosaic-node-protocol.workspace = true
+mosaic-mcp-core.workspace = true
+mosaic-provider.workspace = true
+mosaic-sandbox-core.workspace = true
+mosaic-runtime.workspace = true
+mosaic-scheduler-core.workspace = true
+mosaic-sdk.workspace = true
+mosaic-session-core.workspace = true
+mosaic-skill-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

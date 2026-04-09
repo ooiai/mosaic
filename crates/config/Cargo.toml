@@ -10,7 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
 
-mosaic-skill-core = { path = "../skill-core" }
-mosaic-sandbox-core = { path = "../sandbox-core" }
-mosaic-tool-core = { path = "../tool-core" }
-mosaic-workflow = { path = "../workflow" }
+mosaic-skill-core.workspace = true
+mosaic-sandbox-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true

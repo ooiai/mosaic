@@ -10,9 +10,9 @@ async-trait.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-mosaic-config = { path = "../config" }
-mosaic-mcp-core = { path = "../mcp-core" }
-mosaic-scheduler-core = { path = "../scheduler-core" }
-mosaic-skill-core = { path = "../skill-core" }
-mosaic-tool-core = { path = "../tool-core" }
-mosaic-workflow = { path = "../workflow" }
+mosaic-config.workspace = true
+mosaic-mcp-core.workspace = true
+mosaic-scheduler-core.workspace = true
+mosaic-skill-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true

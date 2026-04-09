@@ -9,5 +9,5 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-mosaic-inspect = { path = "../inspect" }
-mosaic-runtime = { path = "../runtime" }
+mosaic-inspect.workspace = true
+mosaic-runtime.workspace = true

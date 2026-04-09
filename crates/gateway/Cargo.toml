@@ -15,25 +15,25 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
-mosaic-config = { path = "../config" }
-mosaic-channel-telegram = { path = "../channel-telegram" }
-mosaic-control-protocol = { path = "../control-protocol" }
-mosaic-extension-core = { path = "../extension-core" }
-mosaic-memory = { path = "../memory" }
-mosaic-node-protocol = { path = "../node-protocol" }
-mosaic-inspect = { path = "../inspect" }
-mosaic-mcp-core = { path = "../mcp-core" }
-mosaic-provider = { path = "../provider" }
-mosaic-sandbox-core = { path = "../sandbox-core" }
-mosaic-runtime = { path = "../runtime" }
-mosaic-scheduler-core = { path = "../scheduler-core" }
-mosaic-session-core = { path = "../session-core" }
-mosaic-skill-core = { path = "../skill-core" }
-mosaic-tool-core = { path = "../tool-core" }
-mosaic-workflow = { path = "../workflow" }
+mosaic-config.workspace = true
+mosaic-channel-telegram.workspace = true
+mosaic-control-protocol.workspace = true
+mosaic-extension-core.workspace = true
+mosaic-memory.workspace = true
+mosaic-node-protocol.workspace = true
+mosaic-inspect.workspace = true
+mosaic-mcp-core.workspace = true
+mosaic-provider.workspace = true
+mosaic-sandbox-core.workspace = true
+mosaic-runtime.workspace = true
+mosaic-scheduler-core.workspace = true
+mosaic-session-core.workspace = true
+mosaic-skill-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
-mosaic-config = { path = "../config" }
-mosaic-channel-telegram = { path = "../channel-telegram" }
+mosaic-config.workspace = true
+mosaic-channel-telegram.workspace = true
 reqwest.workspace = true

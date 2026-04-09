@@ -14,9 +14,9 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
-mosaic-config = { path = "../config" }
-mosaic-inspect = { path = "../inspect" }
-mosaic-tool-core = { path = "../tool-core" }
+mosaic-config.workspace = true
+mosaic-inspect.workspace = true
+mosaic-tool-core.workspace = true
 
 [dev-dependencies]
 axum.workspace = true

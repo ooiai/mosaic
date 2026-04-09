@@ -14,16 +14,16 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
-mosaic-inspect = { path = "../inspect" }
-mosaic-config = { path = "../config" }
-mosaic-memory = { path = "../memory" }
-mosaic-node-protocol = { path = "../node-protocol" }
-mosaic-provider = { path = "../provider" }
-mosaic-sandbox-core = { path = "../sandbox-core" }
-mosaic-session-core = { path = "../session-core" }
-mosaic-skill-core = { path = "../skill-core" }
-mosaic-tool-core = { path = "../tool-core" }
-mosaic-workflow = { path = "../workflow" }
+mosaic-inspect.workspace = true
+mosaic-config.workspace = true
+mosaic-memory.workspace = true
+mosaic-node-protocol.workspace = true
+mosaic-provider.workspace = true
+mosaic-sandbox-core.workspace = true
+mosaic-session-core.workspace = true
+mosaic-skill-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true
