@@ -1,0 +1,6 @@
+active_profile: ollama
+profiles:
+  ollama:
+    type: ollama
+    model: qwen3:14b
+    base_url: http://127.0.0.1:11434

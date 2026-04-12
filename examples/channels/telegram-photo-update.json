@@ -1,0 +1,33 @@
+{
+  "update_id": 400001,
+  "message": {
+    "message_id": 101,
+    "caption": "Please summarize what is visible in this uploaded image.",
+    "photo": [
+      {
+        "file_id": "telegram-photo-small-file-id",
+        "width": 90,
+        "height": 90,
+        "file_size": 1024
+      },
+      {
+        "file_id": "telegram-photo-large-file-id",
+        "width": 1280,
+        "height": 960,
+        "file_size": 204800
+      }
+    ],
+    "message_thread_id": 99,
+    "chat": {
+      "id": -100123,
+      "type": "supergroup",
+      "title": "Mosaic Operators"
+    },
+    "from": {
+      "id": 123456789,
+      "username": "demo_operator",
+      "first_name": "Demo",
+      "last_name": "Operator"
+    }
+  }
+}

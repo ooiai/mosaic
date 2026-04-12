@@ -1,0 +1,15 @@
+{
+  "session_id": "full-stack-openai-webchat",
+  "display_name": "Release Webchat Visitor",
+  "actor_id": "release-visitor-1",
+  "thread_id": "pricing-page",
+  "input": "Summarize why Mosaic uses a gateway-based control plane.",
+  "ingress": {
+    "kind": "webchat",
+    "channel": "webchat",
+    "source": "full-stack-openai",
+    "display_name": "Release Webchat Visitor",
+    "actor_id": "release-visitor-1",
+    "thread_id": "pricing-page"
+  }
+}

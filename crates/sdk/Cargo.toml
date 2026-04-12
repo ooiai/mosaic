@@ -1,0 +1,35 @@
+[package]
+name = "mosaic-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+mosaic-control-protocol.workspace = true
+mosaic-channel-telegram.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+mosaic-config.workspace = true
+mosaic-gateway.workspace = true
+mosaic-inspect.workspace = true
+mosaic-memory.workspace = true
+mosaic-node-protocol.workspace = true
+mosaic-provider.workspace = true
+mosaic-sandbox-core.workspace = true
+mosaic-scheduler-core.workspace = true
+mosaic-session-core.workspace = true
+mosaic-skill-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true

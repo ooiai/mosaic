@@ -1,0 +1,22 @@
+[package]
+name = "mosaic-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+mosaic-control-protocol.workspace = true
+mosaic-node-protocol.workspace = true
+mosaic-gateway.workspace = true
+mosaic-runtime.workspace = true
+mosaic-sdk.workspace = true
+mosaic-session-core.workspace = true
+pulldown-cmark.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+mosaic-inspect.workspace = true

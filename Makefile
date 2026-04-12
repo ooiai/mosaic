@@ -1,55 +1,24 @@
-# Variables
-GIT := git
-PNPM := pnpm
-CARGO := cargo
-DOCKER := docker
-CD := cd
+SHELL := /bin/sh
+.DEFAULT_GOAL := help
 
-MACOS_PATH := ./apps/macos
-WEB_PATH := ./apps/web
-CLI_PATH := ./cli
-SERVER_PATH := ./server
+# Notes: Toolchain and workspace entrypoint variables. Override from the command line if needed.
+GIT ?= git
+CARGO ?= cargo
+CLI_PATH ?= cli
+CLI_PACKAGE ?= mosaic-cli
+CLI_BIN ?= mosaic
+REAL_CC_BIN ?= /usr/bin/cc
+INSTALL_ROOT ?=
+INSTALL_FLAGS ?= --locked
+CARGO_LINKER_ENV := REAL_CC_BIN=$(REAL_CC_BIN) CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=$(CURDIR)/scripts/cc-linker-wrapper.sh
 
-.PHONY: \
-	clean \
-	cli-clean \
-	git-run \
-	git-commit \
-	help \
-	desktop \
-	macos-dev \
-	macos-dev-wait \
-	macos-build \
-	macos-test \
-	macos-package \
-	web \
-	web-build \
-	web-lint \
-	web-typecheck \
-	cli-build \
-	cli-build-release \
-	cli-run \
-	cli-install \
-	cli-test \
-	cli-quality \
-	cli-json-contract \
-	cli-regression \
-	cli-beta-check \
-	cli-release-tooling-smoke \
-	cli-release-install-smoke \
-	cli-beta-package \
-	cli-release-assets \
-	cli-release-manifests \
-	cli-release-notes \
-	cli-release-prepare \
-	cli-release-verify \
-	cli-release-verify-archives \
-	cli-release-publish-check \
-	docs-check
+ifneq ($(strip $(INSTALL_ROOT)),)
+INSTALL_ROOT_FLAG := --root $(INSTALL_ROOT)
+else
+INSTALL_ROOT_FLAG :=
+endif
 
-
-
-# Function to check if there are changes to commit
+# Notes: Add, commit, and push only when the worktree has changes.
 define git_push_if_needed
 	@if [ -n "$$($(GIT) status --porcelain)" ]; then \
 		$(GIT) add .; \
@@ -60,6 +29,7 @@ define git_push_if_needed
 	fi
 endef
 
+# Notes: Add and commit only when the worktree has changes.
 define git_commit_if_needed
 	@if [ -n "$$($(GIT) status --porcelain)" ]; then \
 		$(GIT) add .; \
@@ -69,300 +39,198 @@ define git_commit_if_needed
 	fi
 endef
 
-# Git run add commit push
-git-run:
+# Notes: Fail early when a required variable is missing.
+define require_arg
+	@if [ -z "$(strip $($(1)))" ]; then \
+		echo "Missing required variable: $(1)"; \
+		echo "Usage: make $(2) $(1)=<value>"; \
+		exit 1; \
+	fi
+endef
+
+.PHONY: \
+	help \
+	install \
+	uninstall \
+	run \
+	build \
+	package \
+	clean \
+	check \
+	test \
+	test-unit \
+	test-integration \
+	test-matrix \
+	test-real \
+	test-golden \
+	ci-fast \
+	ci-real \
+	smoke \
+	release-check \
+	verify \
+	git-run \
+	git-commit \
+	git-rm-cache
+
+help: ## Show available Make targets.
+	@awk 'BEGIN { FS = ":.*## "; print "Available targets:\n" } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-12s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@printf "\nUsage examples:\n"
+	@printf "  make build\n"
+	@printf "  make check\n"
+	@printf "  make test\n"
+	@printf "  make test-unit\n"
+	@printf "  make test-integration\n"
+	@printf "  make test-matrix\n"
+	@printf "  make test-golden\n"
+	@printf "  MOSAIC_REAL_TESTS=1 make test-real\n"
+	@printf "  make ci-fast\n"
+	@printf "  make smoke\n"
+	@printf "  make verify\n"
+	@printf "  make release-check\n"
+	@printf "  make package\n"
+	@printf "  make run\n"
+	@printf "  make install\n"
+	@printf "  make install INSTALL_ROOT=/tmp/mosaic-test-root\n"
+	@printf "  make uninstall INSTALL_ROOT=/tmp/mosaic-test-root\n"
+	@printf "  make git-commit m=\"docs: update readme\"\n"
+	@printf "  make git-run m=\"feat: improve tui\"\n"
+	@printf "  make git-rm-cache f=path/to/file\n"
+
+# Notes: Install the CLI binary from the workspace root.
+# Usage: make install
+# Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root
+# Usage: make install INSTALL_ROOT=/tmp/mosaic-test-root INSTALL_FLAGS="--offline --locked"
+install: ## Install the CLI binary from the cli crate.
+	$(MAKE) check
+	@if $(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG); then \
+		:; \
+	else \
+		echo "$(CLI_PACKAGE) is not currently installed in the selected Cargo root"; \
+	fi
+	$(CARGO_LINKER_ENV) $(CARGO) install --path $(CLI_PATH) --force $(INSTALL_ROOT_FLAG) $(INSTALL_FLAGS)
+
+# Notes: Uninstall the CLI package from Cargo's install root.
+# Usage: make uninstall
+# Usage: make uninstall INSTALL_ROOT=/tmp/mosaic-test-root
+uninstall: ## Uninstall the CLI package from Cargo's install root.
+	@if $(CARGO) uninstall $(CLI_PACKAGE) $(INSTALL_ROOT_FLAG); then \
+		:; \
+	else \
+		echo "$(CLI_PACKAGE) is not currently installed in the selected Cargo root"; \
+	fi
+
+# Notes: Run the CLI locally without installing it.
+# Usage: make run
+run: ## Run the CLI from the workspace.
+	$(CARGO_LINKER_ENV) $(CARGO) run -p $(CLI_PACKAGE) --bin $(CLI_BIN)
+
+# Notes: Build the CLI crate without installing it globally.
+# Usage: make build
+build: ## Build the CLI crate.
+	$(CARGO_LINKER_ENV) $(CARGO) build -p $(CLI_PACKAGE)
+
+# Notes: Build a release binary bundle with docs, examples, and env template under dist/.
+# Usage: make package
+package: ## Build a release bundle under dist/.
+	@set -eu; \
+	pkg_dir="dist/$(CLI_BIN)-$$($(GIT) rev-parse --short HEAD)"; \
+	rm -rf "$$pkg_dir" "$$pkg_dir.tar.gz"; \
+	mkdir -p "$$pkg_dir/bin"; \
+	$(CARGO_LINKER_ENV) $(CARGO) build -p $(CLI_PACKAGE) --release; \
+	cp target/release/$(CLI_BIN) "$$pkg_dir/bin/"; \
+	cp README.md LICENSE .env.example "$$pkg_dir/"; \
+	cp -R docs examples "$$pkg_dir/"; \
+	tar -czf "$$pkg_dir.tar.gz" -C dist "$$(basename "$$pkg_dir")"; \
+	printf "Created %s\n" "$$pkg_dir.tar.gz"
+
+# Notes: Remove Cargo build artifacts for the whole workspace.
+# Usage: make clean
+clean: ## Clean workspace build artifacts.
+	$(CARGO) clean
+
+# Notes: Run a lightweight workspace validation pass.
+# Usage: make check
+check: ## Run workspace checks.
+	$(CARGO_LINKER_ENV) $(CARGO) check --workspace
+
+# Notes: Run the workspace test suite.
+# Usage: make test
+test: ## Run workspace tests.
+	$(CARGO_LINKER_ENV) $(CARGO) test --workspace
+
+# Notes: Run fast unit-style tests for libraries and binaries only.
+# Usage: make test-unit
+test-unit: ## Run fast unit-focused tests.
+	$(CARGO_LINKER_ENV) $(CARGO) test --workspace --lib --bins
+
+# Notes: Run crate integration tests under crates/*/tests and cli/tests surfaces.
+# Usage: make test-integration
+test-integration: ## Run local integration tests.
+	$(CARGO_LINKER_ENV) $(CARGO) test --workspace --tests
+
+# Notes: Run golden example verification from setup to inspect in an isolated workspace.
+# Usage: make test-golden
+test-golden: ## Run golden example and docs command verification.
+	./scripts/test-golden-examples.sh
+
+# Notes: Verify the crate-to-acceptance mapping and release matrix docs stay in sync.
+# Usage: make test-matrix
+test-matrix: ## Run acceptance-matrix consistency checks.
+	./scripts/verify-test-matrix.sh
+
+# Notes: Run real integration tests when MOSAIC_REAL_TESTS=1 and any required secrets are present.
+# Usage: MOSAIC_REAL_TESTS=1 make test-real
+test-real: ## Run gated real integration tests.
+	./scripts/test-real-integrations.sh
+
+# Notes: Default CI lane for pull requests and local pre-merge checks.
+# Usage: make ci-fast
+ci-fast: ## Run the fast CI verification lane.
+	$(MAKE) check
+	$(MAKE) test-unit
+	$(MAKE) test-integration
+	$(MAKE) test-matrix
+	$(MAKE) test-golden
+
+# Notes: Optional CI lane for real service checks with secrets and local daemons.
+# Usage: MOSAIC_REAL_TESTS=1 make ci-real
+ci-real: ## Run the gated real-service CI lane.
+	$(MAKE) test-real
+
+# Notes: Run the release smoke path in an isolated temporary workspace.
+# Usage: make smoke
+smoke: ## Run the release smoke script in a temporary workspace.
+	./scripts/release-smoke.sh
+
+# Notes: Run the release checklist gate: docs/artifacts check, workspace verification, and smoke.
+# Usage: make release-check
+release-check: ## Run delivery artifact checks, verify, and smoke.
+	./scripts/verify-delivery-artifacts.sh
+	$(MAKE) test-matrix
+	$(MAKE) verify
+	$(MAKE) smoke
+
+# Notes: Run the default verification chain before handoff.
+# Usage: make verify
+verify: ## Run build, check, and test in sequence.
+	$(MAKE) build
+	$(MAKE) check
+	$(MAKE) test
+
+# Notes: Add, commit, and push when the worktree has changes.
+# Usage: make git-run m="message"
+git-run: ## Add, commit, and push if the worktree has changes. Usage: make git-run m="message"
+	$(call require_arg,m,git-run)
 	$(call git_push_if_needed)
 
-# Git run add commit push
-git-commit:
+# Notes: Add and commit locally when the worktree has changes.
+# Usage: make git-commit m="message"
+git-commit: ## Add and commit if the worktree has changes. Usage: make git-commit m="message"
+	$(call require_arg,m,git-commit)
 	$(call git_commit_if_needed)
 
-# Mosaic clean (Rust/Cargo + macOS/Swift + web/Node).
-# Usage: make clean
-clean:
-	@echo "Cleaning build artifacts..."
-	rm -rf node_modules
-	cd $(SERVER_PATH) && cargo clean
-	cd $(CLI_PATH) && cargo clean
-	cd $(CLI_PATH) && rm -rf dist
-	cd $(MACOS_PATH) && swift package clean
-	cd $(MACOS_PATH) && rm -rf dist
-	cd $(MACOS_PATH) && rm -rf .build
-	cd $(WEB_PATH) && rm -rf dist
-	cd $(WEB_PATH) && rm -rf node_modules
-
-
-# Desktop start dev server.
-# Usage: make desktop
-desktop:
-	@$(MAKE) macos-dev
-
-# macOS-native app start dev server.
-# Usage: make macos-dev
-macos-dev:
-	@echo "===> macOS app package and open (non-blocking)."
-	cd cli && cargo build --release -p mosaic-cli
-	SWIFT_CONFIGURATION=debug APP_BUILD=dev SKIP_CLI_BUILD=1 ./apps/macos/scripts/package_app.sh
-	open -n "$(PWD)/apps/macos/dist/Mosaic.app"
-
-# macOS-native app start dev server and wait for app exit.
-# Usage: make macos-dev-wait
-macos-dev-wait:
-	@echo "===> macOS app package and open (wait for exit)."
-	cd cli && cargo build --release -p mosaic-cli
-	SWIFT_CONFIGURATION=debug APP_BUILD=dev SKIP_CLI_BUILD=1 ./apps/macos/scripts/package_app.sh
-	open -n -W "$(PWD)/apps/macos/dist/Mosaic.app"
-
-# macOS-native app release build.
-# Usage: make macos-build
-macos-build:
-	@echo "===> macOS app release build."
-	$(CD) $(MACOS_PATH) && swift build -c release
-
-# macOS-native app tests.
-# Usage: make macos-test
-macos-test:
-	@echo "===> macOS app tests."
-	$(CD) $(MACOS_PATH) && swift test
-
-# Package macOS-native app bundle.
-# Usage: make macos-package
-macos-package:
-	@echo "===> Package macOS app bundle."
-	./apps/macos/scripts/package_app.sh
-
-# Web start dev server.
-# Usage: make web
-web:
-	@echo "===> Web start dev server."
-	$(CD) $(WEB_PATH) && $(PNPM) dev
-
-# Web production build.
-# Usage: make web-build
-web-build:
-	@echo "===> Web production build."
-	$(CD) $(WEB_PATH) && $(PNPM) build
-
-# Web lint.
-# Usage: make web-lint
-web-lint:
-	@echo "===> Web lint."
-	$(CD) $(WEB_PATH) && $(PNPM) lint
-
-# Web typecheck.
-# Usage: make web-typecheck
-web-typecheck:
-	@echo "===> Web typecheck."
-	$(CD) $(WEB_PATH) && $(PNPM) typecheck
-
-# Rust CLI clean
-# Usage: make cli-clean
-cli-clean:
-	@echo "===> Rust CLI clean."
-	cd cli && cargo clean -p mosaic-cli
-
-# Rust CLI debug build.
-# Usage: make cli-build
-cli-build:
-	@echo "===> Rust CLI debug build."
-	cd cli && cargo build -p mosaic-cli
-
-# Rust CLI release build.
-# Usage: make cli-build-release
-cli-build-release:
-	@echo "===> Rust CLI release build."
-	cd cli && cargo build --release -p mosaic-cli
-
-# Rust CLI run current source.
-# Usage: make cli-run [args='--help']
-cli-run:
-	@echo "===> Rust CLI run current source."
-	cd cli && cargo run -p mosaic-cli -- $(if $(args),$(args),--help)
-
-# Rust CLI install current source to Cargo bin.
-# Usage: make cli-install
-cli-install:
-	@echo "===> Rust CLI install current source."
-	@BIN_PATH="$${CARGO_HOME:-$$HOME/.cargo}/bin/mosaic"; \
-	if [ -e "$$BIN_PATH" ]; then \
-		echo "===> Removing existing CLI at $$BIN_PATH"; \
-		rm -f "$$BIN_PATH"; \
-	fi
-	cd cli && cargo install --path crates/mosaic-cli --force
-
-# Rust CLI uninstall from Cargo bin.
-# Usage: make cli-uninstall
-cli-uninstall:
-	@echo "===> Rust CLI uninstall current source."
-	@BIN_PATH="$${CARGO_HOME:-$$HOME/.cargo}/bin/mosaic"; \
-	if [ -e "$$BIN_PATH" ]; then \
-		echo "===> Removing existing CLI at $$BIN_PATH"; \
-		rm -f "$$BIN_PATH"; \
-	fi
-
-# Rust CLI workspace tests.
-# Usage: make cli-test
-cli-test:
-	@echo "===> Rust CLI workspace tests."
-	cd cli && cargo test --workspace
-
-# Rust CLI quality gate (fast local guardrails).
-# Usage: make cli-quality
-cli-quality:
-	@echo "===> Rust CLI quality gate (check + clippy + tests)."
-	cd cli && cargo check -p mosaic-cli
-	cd cli && cargo clippy -p mosaic-cli -- -D warnings
-	cd cli && cargo test -p mosaic-cli --test command_surface
-	cd cli && cargo test -p mosaic-cli
-
-# Rust CLI JSON contract gate (envelopes + schema snapshots + help snapshots + error codes).
-# Usage: make cli-json-contract
-cli-json-contract:
-	@echo "===> Rust CLI JSON contract gate."
-	cd cli && cargo test -p mosaic-cli --test error_codes
-	cd cli && cargo test -p mosaic-cli --test json_contract
-	cd cli && cargo test -p mosaic-cli --test json_contract_modules
-	cd cli && cargo test -p mosaic-cli --test help_snapshot
-
-# Rust CLI full regression.
-# Usage: make cli-regression
-cli-regression:
-	@echo "===> Rust CLI full regression."
-	cd cli && ./scripts/run_regression_suite.sh
-
-# Rust CLI beta readiness gate.
-# Usage: make cli-beta-check
-cli-beta-check:
-	@echo "===> Rust CLI beta readiness gate."
-	cd cli && ./scripts/beta_release_check.sh
-
-# Rust CLI release tooling smoke (release verifiers + dry-run summary path).
-# Usage: make cli-release-tooling-smoke [v=v0.2.0-beta.6]
-cli-release-tooling-smoke:
-	@echo "===> Rust CLI release tooling smoke."
-	cd cli && ./scripts/release_tooling_smoke.sh $(if $(v),--version "$(v)",)
-
-# Rust CLI installer smoke (install.sh local assets + release-only behavior).
-# Usage: make cli-release-install-smoke [v=v0.2.0-beta.6]
-cli-release-install-smoke:
-	@echo "===> Rust CLI release install smoke."
-	cd cli && ./scripts/release_install_smoke.sh $(if $(v),--version "$(v)",)
-
-# Rust CLI beta package.
-# Usage: make cli-beta-package v=v0.2.0-beta.6
-cli-beta-package:
-	@if [ -z "$(v)" ]; then \
-		echo "error: missing version. usage: make cli-beta-package v=v0.2.0-beta.6"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI beta package ($(v))."
-	cd cli && ./scripts/package_beta.sh --version "$(v)"
-
-# Rust CLI release asset package (single target).
-# Usage: make cli-release-assets v=v0.2.0-beta.6 t=aarch64-apple-darwin
-cli-release-assets:
-	@if [ -z "$(v)" ] || [ -z "$(t)" ]; then \
-		echo "error: missing args. usage: make cli-release-assets v=v0.2.0-beta.6 t=aarch64-apple-darwin"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI release asset ($(v), $(t))."
-	cd cli && ./scripts/package_release_asset.sh --version "$(v)" --target "$(t)"
-
-# Generate Homebrew/Scoop manifests from release assets.
-# Usage: make cli-release-manifests v=v0.2.0-beta.6 assets=dist/v0.2.0-beta.6 out=dist/v0.2.0-beta.6
-cli-release-manifests:
-	@if [ -z "$(v)" ] || [ -z "$(assets)" ]; then \
-		echo "error: missing args. usage: make cli-release-manifests v=v0.2.0-beta.6 assets=dist/v0.2.0-beta.6 [out=dist/v0.2.0-beta.6]"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI release manifests ($(v))."
-	cd cli && ./scripts/update_distribution_manifests.sh --version "$(v)" --assets-dir "$(assets)" $(if $(out),--output-dir "$(out)",)
-
-# Generate release notes draft from WORKLOG.
-# Usage:
-#   make cli-release-notes v=v0.2.0-beta.6
-#   make cli-release-notes v=v0.2.0-beta.6 from=2026-03-01T00:00:00Z max=30 out=docs/release-notes-v0.2.0-beta.6.md
-cli-release-notes:
-	@if [ -z "$(v)" ]; then \
-		echo "error: missing version. usage: make cli-release-notes v=v0.2.0-beta.6 [from=ISO8601] [max=20] [out=docs/release-notes-<version>.md]"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI release notes draft ($(v))."
-	cd cli && ./scripts/release_notes_from_worklog.sh --version "$(v)" $(if $(from),--from-date "$(from)",) $(if $(max),--max-entries "$(max)",) $(if $(out),--out "$(out)",)
-
-# One-command local release prepare (checks + notes + single-target asset + optional manifests).
-# Usage:
-#   make cli-release-prepare v=v0.2.0-beta.6
-#   make cli-release-prepare v=v0.2.0-beta.6 t=aarch64-apple-darwin max=30 notes=docs/release-notes-v0.2.0-beta.6.md summary=reports/release-prepare.json
-#   make cli-release-prepare v=v0.2.0-beta.6 assets=../release-assets out=../release-assets skip_check=1
-#   make cli-release-prepare v=v0.2.0-beta.6 assets=../release-assets out=../release-assets skip_verify=1
-#   make cli-release-prepare v=v0.2.0-beta.6 assets=../release-assets out=../release-assets skip_archive_check=1
-cli-release-prepare:
-	@if [ -z "$(v)" ]; then \
-		echo "error: missing version. usage: make cli-release-prepare v=v0.2.0-beta.6 [t=<target>] [from=ISO8601] [max=20] [notes=<path>] [assets=<dir>] [out=<dir>] [summary=<path>] [skip_check=1] [skip_archive_check=1] [skip_verify=1] [dry_run=1]"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI release prepare ($(v))."
-	cd cli && ./scripts/release_prepare.sh --version "$(v)" $(if $(t),--target "$(t)",) $(if $(from),--notes-from-date "$(from)",) $(if $(max),--notes-max-entries "$(max)",) $(if $(notes),--notes-out "$(notes)",) $(if $(assets),--assets-dir "$(assets)",) $(if $(out),--output-dir "$(out)",) $(if $(summary),--summary-out "$(summary)",) $(if $(filter 1 true yes,$(skip_check)),--skip-check,) $(if $(filter 1 true yes,$(skip_archive_check)),--skip-archive-check,) $(if $(filter 1 true yes,$(skip_verify)),--skip-verify,) $(if $(filter 1 true yes,$(dry_run)),--dry-run,)
-
-# Verify release assets in a directory (archives/checksums/manifests/installers/notes).
-# Usage:
-#   make cli-release-verify v=v0.2.0-beta.6 assets=../release-assets
-#   make cli-release-verify v=v0.2.0-beta.6 assets=../release-assets notes=docs/release-notes-v0.2.0-beta.6.md
-cli-release-verify:
-	@if [ -z "$(v)" ] || [ -z "$(assets)" ]; then \
-		echo "error: missing args. usage: make cli-release-verify v=v0.2.0-beta.6 assets=../release-assets [notes=<path>] [json=1]"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI release asset verification ($(v))."
-	cd cli && ./scripts/release_verify_assets.sh --version "$(v)" --assets-dir "$(assets)" $(if $(notes),--notes "$(notes)",) $(if $(filter 1 true yes,$(json)),--json,)
-
-# Verify archive internal contents in a directory (binary/docs/layout).
-# Usage:
-#   make cli-release-verify-archives v=v0.2.0-beta.6 assets=../release-assets
-cli-release-verify-archives:
-	@if [ -z "$(v)" ] || [ -z "$(assets)" ]; then \
-		echo "error: missing args. usage: make cli-release-verify-archives v=v0.2.0-beta.6 assets=../release-assets [json=1]"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI archive content verification ($(v))."
-	cd cli && ./scripts/release_verify_archives.sh --version "$(v)" --assets-dir "$(assets)" $(if $(filter 1 true yes,$(json)),--json,)
-
-# Verify published GitHub release assets by tag.
-# Usage:
-#   make cli-release-publish-check v=v0.2.0-beta.6
-#   make cli-release-publish-check v=v0.2.0-beta.6 repo=ooiai/mosaic json=1
-cli-release-publish-check:
-	@if [ -z "$(v)" ]; then \
-		echo "error: missing version. usage: make cli-release-publish-check v=v0.2.0-beta.6 [repo=owner/repo] [token_env=GITHUB_TOKEN] [notes=<path>] [json=1]"; \
-		exit 1; \
-	fi
-	@echo "===> Rust CLI published release verification ($(v))."
-	cd cli && ./scripts/release_publish_check.sh --version "$(v)" $(if $(repo),--repo "$(repo)",) $(if $(token_env),--token-env "$(token_env)",) $(if $(notes),--notes "$(notes)",) $(if $(filter 1 true yes,$(json)),--json,)
-
-# Docs static acceptance gate (docs.js syntax + local links).
-# Usage: make docs-check
-docs-check:
-	@echo "===> Docs acceptance checks."
-	bash site/scripts/check_docs.sh
-
-# Show common developer commands.
-# Usage: make help
-help:
-	@echo "Common commands:"
-	@echo "  make macos-dev        # Package and open the macOS app without blocking the terminal"
-	@echo "  make macos-dev-wait   # Package and open the macOS app, then wait for it to exit"
-	@echo "  make macos-build      # Build the macOS app in release mode"
-	@echo "  make macos-test       # Run macOS app tests"
-	@echo "  make macos-package    # Build Mosaic.app and Mosaic-macOS.zip"
-	@echo "  make web              # Run the web dev server"
-	@echo "  make web-build        # Build the web app"
-	@echo "  make web-lint         # Lint the web app"
-	@echo "  make web-typecheck    # Typecheck the web app"
-	@echo "  make cli-build        # Build the Rust CLI in debug mode"
-	@echo "  make cli-build-release # Build the Rust CLI in release mode"
-	@echo "  make cli-run          # Run the current Rust CLI source (default: --help)"
-	@echo "  make cli-install      # Install the current Rust CLI source to Cargo bin"
-	@echo "  make cli-test         # Run Rust CLI workspace tests"
-	@echo "  make cli-quality      # Run Rust CLI quality gates"
-	@echo "  make cli-json-contract # Run Rust CLI JSON contract tests"
+# Notes: Remove a file from the git index without deleting the working tree file.
+# Usage: make git-rm-cache f=path/to/file
+git-rm-cache: ## Remove a file from the git index only. Usage: make git-rm-cache f=path/to/file
+	$(call require_arg,f,git-rm-cache)
+	$(GIT) rm --cached $(f)

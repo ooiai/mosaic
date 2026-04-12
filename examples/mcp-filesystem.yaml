@@ -1,0 +1,25 @@
+app:
+  name: mcp-filesystem
+
+provider:
+  type: openai
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+
+tools: []
+
+skills: []
+
+mcp:
+  servers:
+    - name: filesystem
+      command: python3
+      args:
+        - scripts/mock_mcp_server.py
+        - filesystem
+
+agent:
+  system: "You are a helpful assistant. Use tools when needed."
+
+task:
+  input: "Read the README file for me."

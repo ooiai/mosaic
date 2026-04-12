@@ -1,0 +1,32 @@
+schema_version: 1
+active_profile: openai
+profiles:
+  openai:
+    type: openai
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+deployment:
+  profile: production
+  workspace_name: mosaic-prod
+auth:
+  operator_token_env: MOSAIC_OPERATOR_TOKEN
+  webchat_shared_secret_env: MOSAIC_WEBCHAT_SHARED_SECRET
+  telegram_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
+session_store:
+  root_dir: .mosaic/sessions
+inspect:
+  runs_dir: .mosaic/runs
+audit:
+  root_dir: .mosaic/audit
+  retention_days: 30
+  redact_inputs: true
+observability:
+  event_replay_window: 512
+  slow_consumer_lag_threshold: 64
+policies:
+  allow_exec: false
+  allow_webhook: true
+  allow_cron: true
+  allow_mcp: true
+  hot_reload_enabled: false

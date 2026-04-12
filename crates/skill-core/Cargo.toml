@@ -1,0 +1,19 @@
+[package]
+name = "mosaic-skill-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+
+mosaic-tool-core.workspace = true
+mosaic-sandbox-core.workspace = true
+
+[dev-dependencies]
+futures.workspace = true
+tokio.workspace = true

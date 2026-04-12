@@ -1,0 +1,19 @@
+app:
+  name: read-file-agent
+
+provider:
+  type: openai
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+
+tools:
+  - type: builtin
+    name: read_file
+
+skills: []
+
+agent:
+  system: "You are a helpful assistant. Use tools when needed."
+
+task:
+  input: "Read the file for me."

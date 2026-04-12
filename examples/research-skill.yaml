@@ -1,0 +1,34 @@
+app:
+  name: skill-demo
+
+provider:
+  type: openai
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+
+tools:
+  - type: builtin
+    name: echo
+
+skills:
+  - type: builtin
+    name: summarize
+
+workflows:
+  - name: research_brief
+    description: Draft a short research brief and summarize it
+    steps:
+      - name: draft
+        kind: prompt
+        system: "You are a concise research assistant."
+        prompt: "Draft notes for: {{input}}"
+      - name: summarize
+        kind: skill
+        skill: summarize
+        input: "{{steps.draft.output}}"
+
+agent:
+  system: "You are a helpful assistant."
+
+task:
+  input: "Rust async allows efficient concurrency with futures and executors."

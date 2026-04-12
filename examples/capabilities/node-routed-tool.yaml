@@ -1,0 +1,16 @@
+name: node-routed-tool-example
+version: 0.1.0
+description: Example manifest that marks a builtin tool as sandbox-aware for node-routed execution demos.
+schema_version: 1
+tools:
+  - type: builtin
+    name: read_file
+    visibility: visible
+    invocation_mode: explicit_only
+    accepts_attachments: true
+    sandbox:
+      kind: shell
+      env_name: read-file-shell
+      scope: capability
+      dependency_spec:
+        - sh

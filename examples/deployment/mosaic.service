@@ -1,0 +1,21 @@
+[Unit]
+Description=Mosaic Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mosaic
+EnvironmentFile=/etc/mosaic/mosaic.env
+ExecStart=/usr/local/bin/mosaic gateway serve --http 127.0.0.1:8080
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/mosaic/.mosaic
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

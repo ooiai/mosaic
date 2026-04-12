@@ -1,0 +1,44 @@
+schema_version: 1
+active_profile: openai
+provider_defaults:
+  timeout_ms: 45000
+  max_retries: 2
+  retry_backoff_ms: 250
+profiles:
+  openai:
+    type: openai
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    transport:
+      timeout_ms: 60000
+      max_retries: 3
+      retry_backoff_ms: 300
+runtime:
+  max_provider_round_trips: 8
+  max_workflow_provider_round_trips: 6
+  continue_after_tool_error: false
+deployment:
+  profile: local
+  workspace_name: mosaic-full-stack-openai
+auth:
+  telegram_secret_token_env: MOSAIC_TELEGRAM_SECRET_TOKEN
+session_store:
+  root_dir: .mosaic/sessions
+inspect:
+  runs_dir: .mosaic/runs
+audit:
+  root_dir: .mosaic/audit
+  retention_days: 30
+  event_replay_window: 512
+  redact_inputs: true
+observability:
+  enable_metrics: true
+  enable_readiness: true
+  slow_consumer_lag_threshold: 64
+policies:
+  allow_exec: false
+  allow_webhook: true
+  allow_cron: true
+  allow_mcp: true
+  hot_reload_enabled: false

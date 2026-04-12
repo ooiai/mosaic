@@ -1,0 +1,19 @@
+app:
+  name: time-now-agent
+
+provider:
+  type: openai
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+
+tools:
+  - type: builtin
+    name: time_now
+
+skills: []
+
+agent:
+  system: "You are a helpful assistant. Use tools when needed."
+
+task:
+  input: "What time is it now?"

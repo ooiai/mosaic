@@ -1,0 +1,14 @@
+name: builtin-tool-example
+version: 0.1.0
+description: Example manifest that exposes builtin tools with explicit visibility.
+schema_version: 1
+tools:
+  - type: builtin
+    name: time_now
+    visibility: visible
+    invocation_mode: explicit_only
+  - type: builtin
+    name: read_file
+    visibility: visible
+    invocation_mode: explicit_only
+    accepts_attachments: true

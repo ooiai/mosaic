@@ -1,0 +1,30 @@
+[package]
+name = "mosaic-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+mosaic-inspect.workspace = true
+mosaic-config.workspace = true
+mosaic-memory.workspace = true
+mosaic-node-protocol.workspace = true
+mosaic-provider.workspace = true
+mosaic-sandbox-core.workspace = true
+mosaic-session-core.workspace = true
+mosaic-skill-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+tokio.workspace = true

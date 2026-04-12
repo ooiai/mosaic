@@ -1,0 +1,19 @@
+{
+  "update_id": 1001,
+  "message": {
+    "message_id": 42,
+    "text": "Hello from the full-stack Telegram example.",
+    "message_thread_id": 99,
+    "chat": {
+      "id": -100123,
+      "type": "supergroup",
+      "title": "Build Ops"
+    },
+    "from": {
+      "id": 7,
+      "username": "ops_user",
+      "first_name": "Build",
+      "last_name": "Ops"
+    }
+  }
+}

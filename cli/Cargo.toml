@@ -1,49 +1,41 @@
-[workspace]
-resolver = "2"
-members = [
-  "crates/mosaic-cli",
-  "crates/mosaic-core",
-  "crates/mosaic-agent",
-  "crates/mosaic-agents",
-  "crates/mosaic-mcp",
-  "crates/mosaic-plugins",
-  "crates/mosaic-channels",
-  "crates/mosaic-gateway",
-  "crates/mosaic-ops",
-  "crates/mosaic-memory",
-  "crates/mosaic-security",
-  "crates/mosaic-tui",
-  "crates/mosaic-tools",
-  "crates/mosaic-provider-openai",
-]
-default-members = ["crates/mosaic-cli"]
+[package]
+name = "mosaic-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
-[workspace.package]
-version = "0.1.0-dev"
-edition = "2024"
-license = "MIT"
+[[bin]]
+name = "mosaic"
+path = "src/main.rs"
 
-[workspace.dependencies]
-assert_cmd = "2"
-async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
-clap_complete = "4"
-crossterm = "0.28"
-dirs = "6"
-libc = "0.2"
-predicates = "3"
-ratatui = "0.28"
-regex = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-png = "0.17"
-qrcodegen = "1.8"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tempfile = "3"
-thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "sync"] }
-toml = "0.8"
-tiny_http = "0.12"
-uuid = { version = "1", features = ["v4", "serde"] }
-walkdir = "2"
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+mosaic-tui.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+mosaic-config.workspace = true
+mosaic-channel-telegram.workspace = true
+mosaic-extension-core.workspace = true
+mosaic-control-protocol.workspace = true
+mosaic-gateway.workspace = true
+mosaic-inspect.workspace = true
+mosaic-memory.workspace = true
+mosaic-node-protocol.workspace = true
+mosaic-mcp-core.workspace = true
+mosaic-provider.workspace = true
+mosaic-sandbox-core.workspace = true
+mosaic-runtime.workspace = true
+mosaic-scheduler-core.workspace = true
+mosaic-sdk.workspace = true
+mosaic-session-core.workspace = true
+mosaic-skill-core.workspace = true
+mosaic-tool-core.workspace = true
+mosaic-workflow.workspace = true
+
+[dev-dependencies]
+axum.workspace = true

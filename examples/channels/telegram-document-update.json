@@ -1,0 +1,25 @@
+{
+  "update_id": 400002,
+  "message": {
+    "message_id": 102,
+    "caption": "Summarize the attached operator note document.",
+    "document": {
+      "file_id": "telegram-document-file-id",
+      "file_name": "operator-note.pdf",
+      "mime_type": "application/pdf",
+      "file_size": 40960
+    },
+    "message_thread_id": 99,
+    "chat": {
+      "id": -100123,
+      "type": "supergroup",
+      "title": "Mosaic Operators"
+    },
+    "from": {
+      "id": 123456789,
+      "username": "demo_operator",
+      "first_name": "Demo",
+      "last_name": "Operator"
+    }
+  }
+}

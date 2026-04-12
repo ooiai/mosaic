@@ -1,0 +1,32 @@
+name: sandbox-node-manifest-skill
+version: 0.1.0
+description: Example manifest skill bound to a Node sandbox environment.
+schema_version: 1
+sandbox:
+  node:
+    strategy: npm
+    install:
+      enabled: true
+      timeout_ms: 120000
+      retry_limit: 0
+      allowed_sources:
+        - registry
+        - file
+skills:
+  - type: manifest
+    name: summarize_document
+    description: Example manifest skill with a Node-oriented sandbox binding.
+    steps:
+      - kind: echo
+        name: normalize
+        input: "{{input}}"
+      - kind: summarize
+        name: summary
+        input: "{{current}}"
+    sandbox:
+      kind: node
+      env_name: document-processor
+      scope: capability
+      dependency_spec:
+        - typescript
+        - markdown-it

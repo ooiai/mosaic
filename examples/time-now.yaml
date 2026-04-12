@@ -1,0 +1,21 @@
+app:
+  name: time-now-demo
+
+provider:
+  type: openai
+  model: gpt-5.4-mini
+  api_key_env: OPENAI_API_KEY
+
+tools:
+  - type: builtin
+    name: time_now
+
+skills:
+  - type: builtin
+    name: summarize
+
+agent:
+  system: "You are a helpful assistant."
+
+task:
+  input: "Tell me the current time."

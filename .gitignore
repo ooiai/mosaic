@@ -61,7 +61,18 @@ cli/reports/
 **/assets/**
 .github/agents
 .github/skills
-specs/
+stages
+stages/**.md
+specs
 
 AGENT.md
+AGENTS.md
+AGENTS.md.bak.md
 WORKLOG.md
+stages
+Constraints.md
+README.md.bak
+examples/TESTING.md
+DESIGN.TUI.md
+DESIGN.TUI.CN.md
+

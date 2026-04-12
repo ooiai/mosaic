@@ -1,0 +1,47 @@
+schema_version: 1
+active_profile: openai
+profiles:
+  openai:
+    type: openai
+    model: gpt-5.4-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+runtime:
+  max_provider_round_trips: 8
+  max_workflow_provider_round_trips: 6
+  continue_after_tool_error: false
+sandbox:
+  base_dir: .mosaic/sandbox
+  python:
+    strategy: venv
+  node:
+    strategy: npm
+  cleanup:
+    run_workdirs_after_hours: 24
+    attachments_after_hours: 24
+tools:
+  - type: builtin
+    name: read_file
+    visibility: visible
+    invocation_mode: explicit_only
+    accepts_attachments: true
+    sandbox:
+      kind: shell
+      env_name: read-file-shell
+      scope: capability
+      dependency_spec:
+        - sh
+mcp:
+  servers:
+    - name: filesystem
+      command: python3
+      args:
+        - scripts/mock_mcp_server.py
+extensions:
+  manifests:
+    - path: examples/extensions/time-and-summary.yaml
+      version_pin: 0.1.0
+      enabled: true
+    - path: examples/extensions/markdown-skill-pack.yaml
+      version_pin: 0.1.0
+      enabled: true

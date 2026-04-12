@@ -1,0 +1,876 @@
+use ratatui::{
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+};
+
+use crate::transcript::{
+    TranscriptBlock, TranscriptDetailKind, TranscriptView, TurnPhase, body_lines,
+    current_timestamp_label,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryCellKey {
+    Placeholder,
+    Active,
+    Committed(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryCell {
+    pub key: HistoryCellKey,
+    pub title: String,
+    pub phase: Option<TurnPhase>,
+    pub detail_summary: Option<String>,
+    pub summary_lines: Vec<Line<'static>>,
+    pub detail_lines: Vec<Line<'static>>,
+    pub expandable: bool,
+    /// Raw body text stored for width-adaptive re-rendering.
+    pub body_raw: String,
+    /// Block type, determines how body is rendered.
+    pub block: TranscriptBlock,
+    /// Whether this cell is the active (in-progress) turn.
+    pub active: bool,
+    /// How many lines in `summary_lines` belong to the body section.
+    /// Used by `render_lines` to splice in width-adaptive body.
+    pub body_line_count: usize,
+}
+
+impl HistoryCell {
+    /// Render this cell's display lines at the given terminal width.
+    ///
+    /// The header and footer lines are reused from `summary_lines`; only the
+    /// body section is regenerated at the correct width.  This produces
+    /// correct word-wrap and markdown layout for any terminal width.
+    pub fn render_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let body_lines = self.body_at_width(width);
+        let header_count = 1usize;
+        let footer_start = header_count + self.body_line_count;
+        let mut lines = Vec::with_capacity(
+            header_count + body_lines.len() + self.summary_lines.len().saturating_sub(footer_start),
+        );
+        // Header line (always first)
+        if let Some(header) = self.summary_lines.first() {
+            lines.push(header.clone());
+        }
+        // Width-adaptive body
+        lines.extend(body_lines);
+        // Footer (detail chips, empty line, etc.)
+        if footer_start < self.summary_lines.len() {
+            lines.extend(self.summary_lines[footer_start..].iter().cloned());
+        }
+        lines
+    }
+
+    /// Return the number of display lines this cell occupies at `width`.
+    pub fn height(&self, width: u16) -> usize {
+        self.render_lines(width).len()
+    }
+
+    fn body_at_width(&self, width: u16) -> Vec<Line<'static>> {
+        if self.body_raw.is_empty() {
+            return Vec::new();
+        }
+        if self.block == TranscriptBlock::AssistantMessage {
+            crate::markdown::render_markdown(&self.body_raw, width)
+                .into_iter()
+                .map(|md_line| {
+                    let mut spans = vec![Span::styled("  ", Style::default().fg(Color::DarkGray))];
+                    spans.extend(md_line.spans);
+                    Line::from(spans)
+                })
+                .collect()
+        } else {
+            // For non-markdown blocks, use the pre-computed body lines unchanged.
+            // These blocks are typically short (3-4 lines) so no wrapping is needed.
+            self.summary_lines
+                .iter()
+                .skip(1) // skip header
+                .take(self.body_line_count)
+                .cloned()
+                .collect()
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryCells {
+    pub committed: Vec<HistoryCell>,
+    pub active: Option<HistoryCell>,
+    pub active_revision: Option<usize>,
+    pub streaming_preview: Option<Vec<Line<'static>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryDetailView {
+    pub key: HistoryCellKey,
+    pub title: String,
+    pub lines: Vec<Line<'static>>,
+}
+
+impl HistoryCells {
+    pub fn transcript_key(&self) -> (usize, Option<usize>, bool) {
+        (
+            self.committed.len(),
+            self.active_revision,
+            self.streaming_preview.is_some(),
+        )
+    }
+
+    pub fn summary_lines(&self) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
+        for cell in &self.committed {
+            lines.extend(cell.summary_lines.clone());
+        }
+        if let Some(active) = &self.active {
+            lines.extend(active.summary_lines.clone());
+        }
+        if self.active.is_none()
+            && let Some(preview) = &self.streaming_preview
+        {
+            lines.extend(preview.clone());
+        }
+        lines
+    }
+
+    pub fn latest_expandable(&self) -> Option<&HistoryCell> {
+        if let Some(active) = &self.active
+            && active.expandable
+        {
+            return Some(active);
+        }
+
+        self.committed.iter().rev().find(|cell| cell.expandable)
+    }
+
+    pub fn latest_expandable_key(&self) -> Option<HistoryCellKey> {
+        self.latest_expandable().map(|cell| cell.key)
+    }
+
+    pub fn cell_by_key(&self, key: HistoryCellKey) -> Option<&HistoryCell> {
+        match key {
+            HistoryCellKey::Placeholder => None,
+            HistoryCellKey::Active => self.active.as_ref(),
+            HistoryCellKey::Committed(index) => self.committed.get(index),
+        }
+    }
+
+    pub fn latest_expandable_title(&self) -> Option<&str> {
+        self.latest_expandable().map(|cell| cell.title.as_str())
+    }
+
+    pub fn resolve_detail_target(
+        &self,
+        requested: Option<HistoryCellKey>,
+    ) -> Option<HistoryCellKey> {
+        requested
+            .filter(|key| self.cell_by_key(*key).is_some_and(|cell| cell.expandable))
+            .or_else(|| self.latest_expandable_key())
+    }
+
+    pub fn detail_view(&self, requested: Option<HistoryCellKey>) -> Option<HistoryDetailView> {
+        let key = self.resolve_detail_target(requested)?;
+        let cell = self.cell_by_key(key)?;
+        Some(HistoryDetailView {
+            key,
+            title: cell.title.clone(),
+            lines: cell.detail_lines.clone(),
+        })
+    }
+
+    pub fn active_banner(&self) -> Option<String> {
+        let turn = self.latest_expandable()?;
+        let phase = turn.phase?;
+        if !phase.is_active() && !matches!(phase, TurnPhase::Failed | TurnPhase::Canceled) {
+            return None;
+        }
+        let detail_summary = turn
+            .detail_summary
+            .clone()
+            .unwrap_or_else(|| "waiting for runtime detail".to_owned());
+        Some(format!("{} · {}", phase.label(), detail_summary))
+    }
+}
+
+pub fn build_history_cells<'a>(transcript: &'a TranscriptView<'a>) -> HistoryCells {
+    if transcript.entries.is_empty()
+        && transcript.active_entry.is_none()
+        && transcript.streaming_preview.is_none()
+    {
+        return HistoryCells {
+            committed: vec![empty_state_cell()],
+            active: None,
+            active_revision: transcript.active_revision,
+            streaming_preview: None,
+        };
+    }
+
+    let committed = transcript
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            build_history_cell_with_key(entry, false, HistoryCellKey::Committed(index), 0)
+        })
+        .collect::<Vec<_>>();
+    let active = transcript.active_entry.map(|entry| {
+        build_history_cell_with_key(entry, true, HistoryCellKey::Active, transcript.spinner_tick)
+    });
+
+    let has_active_streaming_turn = transcript
+        .active_entry
+        .is_some_and(|entry| matches!(entry.phase, Some(TurnPhase::Streaming)))
+        || transcript
+            .entries
+            .iter()
+            .any(|entry| matches!(entry.phase, Some(TurnPhase::Streaming)));
+    let streaming_preview = if transcript.active_entry.is_none() && !has_active_streaming_turn {
+        transcript
+            .streaming_preview
+            .map(|preview| streaming_preview_lines(transcript.entries, preview))
+    } else {
+        None
+    };
+
+    HistoryCells {
+        committed,
+        active,
+        active_revision: transcript.active_revision,
+        streaming_preview,
+    }
+}
+
+pub fn transcript_lines<'a>(transcript: &'a TranscriptView<'a>) -> Vec<Line<'a>> {
+    build_history_cells(transcript).summary_lines()
+}
+
+fn empty_state_cell() -> HistoryCell {
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![Span::styled(
+        "◈  Mosaic",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::from(vec![Span::styled(
+        "Your AI-powered development assistant.",
+        Style::default().fg(Color::DarkGray),
+    )]));
+    lines.push(Line::from(vec![
+        Span::styled("Type ", Style::default().fg(Color::DarkGray)),
+        Span::styled("@", Style::default().fg(Color::Yellow)),
+        Span::styled(" for files  ·  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("/", Style::default().fg(Color::Yellow)),
+        Span::styled(" for commands  ·  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("?", Style::default().fg(Color::Yellow)),
+        Span::styled(" for shortcuts", Style::default().fg(Color::DarkGray)),
+    ]));
+    lines.push(Line::from(""));
+    HistoryCell {
+        key: HistoryCellKey::Placeholder,
+        title: "◈  Mosaic".to_owned(),
+        phase: None,
+        detail_summary: None,
+        summary_lines: lines.clone(),
+        detail_lines: lines,
+        expandable: false,
+        body_raw: String::new(),
+        block: TranscriptBlock::SystemNotice,
+        active: false,
+        body_line_count: 0,
+    }
+}
+
+fn streaming_preview_lines(
+    entries: &[crate::transcript::TimelineEntry],
+    preview: &str,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!("{}  ", current_timestamp_label(entries)),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            "assistant",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  [streaming]", Style::default().fg(Color::DarkGray)),
+    ]));
+    let md_lines = crate::markdown::render_markdown(preview, 100);
+    if md_lines.is_empty() {
+        for line in preview.lines() {
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::raw(line.to_owned()),
+            ]));
+        }
+    } else {
+        for md_line in md_lines {
+            let mut spans = vec![Span::raw("  ")];
+            spans.extend(md_line.spans);
+            lines.push(Line::from(spans));
+        }
+    }
+    lines.push(Line::from(""));
+    lines
+}
+
+pub fn build_history_cell(entry: &crate::transcript::TimelineEntry, active: bool) -> HistoryCell {
+    build_history_cell_with_key(
+        entry,
+        active,
+        if active {
+            HistoryCellKey::Active
+        } else {
+            HistoryCellKey::Committed(0)
+        },
+        0,
+    )
+}
+
+fn build_history_cell_with_key(
+    entry: &crate::transcript::TimelineEntry,
+    active: bool,
+    key: HistoryCellKey,
+    spinner_tick: usize,
+) -> HistoryCell {
+    let (label, label_style, body_style) = cell_identity(entry);
+    let dot_color = dot_color_for_entry(entry, active);
+
+    let mut header = vec![
+        Span::styled("●", Style::default().fg(dot_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!(" {}  ", entry.timestamp),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(label, label_style),
+    ];
+    if let Some(phase) = entry.phase {
+        header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+        header.push(Span::styled(
+            phase.label(),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    // For user/assistant messages the role label already conveys the identity;
+    // only show the title for tool/exec/failure cards where it adds context.
+    if entry.block != TranscriptBlock::UserMessage
+        && entry.block != TranscriptBlock::AssistantMessage
+    {
+        header.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+        header.push(Span::styled(
+            entry.title.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let mut summary_lines = vec![Line::from(header)];
+
+    if entry.block == TranscriptBlock::AssistantMessage && !entry.body.is_empty() {
+        let md_lines = crate::markdown::render_markdown(&entry.body, 100);
+        for md_line in md_lines {
+            let mut spans = vec![Span::styled("  ", Style::default().fg(Color::DarkGray))];
+            spans.extend(md_line.spans);
+            summary_lines.push(Line::from(spans));
+        }
+    } else {
+        for line in body_lines(entry) {
+            summary_lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(line, body_style),
+            ]));
+        }
+    }
+
+    // Record how many body lines were added (excluding header and footer).
+    let body_line_count = summary_lines.len() - 1; // -1 for the header line
+
+    // Render exec/tool call rows.
+    for exec in &entry.exec_calls {
+        let exec_rail = Style::default().fg(if exec.running {
+            Color::Yellow
+        } else if exec.exit_ok == Some(true) {
+            Color::Green
+        } else {
+            Color::Red
+        });
+        let status_span = if exec.running {
+            Span::styled(
+                format!(
+                    "  {} running",
+                    crate::transcript::spinner_frame(spinner_tick)
+                ),
+                Style::default().fg(Color::Yellow),
+            )
+        } else if exec.exit_ok == Some(true) {
+            Span::styled("  ✓ done", Style::default().fg(Color::Green))
+        } else {
+            Span::styled("  ✗ failed", Style::default().fg(Color::Red))
+        };
+        let mut exec_header_spans = vec![
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("└ ", exec_rail),
+            Span::styled(
+                format!("[{}]", exec.tool_name),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            status_span,
+        ];
+        if !exec.input_summary.is_empty() {
+            exec_header_spans.push(Span::styled(
+                format!(
+                    "  {}",
+                    exec.input_summary.chars().take(60).collect::<String>()
+                ),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+        summary_lines.push(Line::from(exec_header_spans));
+        for out_line in &exec.output_lines {
+            summary_lines.push(Line::from(vec![
+                Span::styled("    ", Style::default().fg(Color::DarkGray)),
+                Span::styled(out_line.clone(), Style::default().fg(Color::Gray)),
+            ]));
+        }
+    }
+
+    if !entry.details.is_empty() {
+        summary_lines.push(detail_summary_line(entry, active));
+        if let Some(preview) = detail_preview_line(entry, active) {
+            summary_lines.push(preview);
+        }
+        summary_lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                if entry.details_expanded {
+                    "detail overlay open · Esc closes"
+                } else {
+                    "Ctrl+O detail"
+                },
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    }
+
+    summary_lines.push(Line::from(""));
+
+    HistoryCell {
+        key,
+        title: entry.title.clone(),
+        phase: entry.phase,
+        detail_summary: entry
+            .details
+            .last()
+            .map(|detail| format!("{} · {}", detail.kind.label(), detail.title)),
+        summary_lines,
+        detail_lines: build_detail_lines(entry, label, label_style, body_style),
+        expandable: !entry.details.is_empty(),
+        body_raw: entry.body.clone(),
+        block: entry.block,
+        active,
+        body_line_count,
+    }
+}
+
+pub fn cell_lines(entry: &crate::transcript::TimelineEntry, active: bool) -> Vec<Line<'static>> {
+    build_history_cell(entry, active).summary_lines
+}
+
+pub fn detail_lines(entry: &crate::transcript::TimelineEntry) -> Vec<Line<'static>> {
+    build_history_cell(entry, false).detail_lines
+}
+
+fn build_detail_lines(
+    entry: &crate::transcript::TimelineEntry,
+    label: &'static str,
+    label_style: Style,
+    body_style: Style,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            format!("{}  ", entry.timestamp),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(label, label_style),
+        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            entry.title.clone(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])];
+
+    if !entry.actor.is_empty() && entry.actor != label {
+        lines.push(Line::from(vec![
+            Span::styled("actor ", Style::default().fg(Color::DarkGray)),
+            Span::styled(entry.actor.clone(), Style::default().fg(Color::Gray)),
+        ]));
+    }
+    if let Some(phase) = entry.phase {
+        lines.push(Line::from(vec![
+            Span::styled("phase ", Style::default().fg(Color::DarkGray)),
+            Span::styled(phase.label(), Style::default().fg(Color::Yellow)),
+        ]));
+    }
+    if let Some(run_id) = &entry.run_id {
+        lines.push(Line::from(vec![
+            Span::styled("run ", Style::default().fg(Color::DarkGray)),
+            Span::raw(run_id.clone()),
+        ]));
+    }
+
+    let body = body_lines(entry);
+    if !body.is_empty() {
+        lines.push(Line::from(""));
+        if entry.block == TranscriptBlock::AssistantMessage {
+            let md_lines = crate::markdown::render_markdown(&entry.body, 100);
+            for md_line in md_lines {
+                let mut spans = vec![Span::styled("│ ", Style::default().fg(Color::DarkGray))];
+                spans.extend(md_line.spans);
+                lines.push(Line::from(spans));
+            }
+        } else {
+            for line in body {
+                lines.push(Line::from(vec![
+                    Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(line, body_style),
+                ]));
+            }
+        }
+    }
+
+    if !entry.details.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "attached execution detail",
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for detail in &entry.details {
+            lines.push(Line::from(vec![
+                Span::styled("• ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    detail.kind.label(),
+                    Style::default().fg(detail_kind_color(detail.kind)),
+                ),
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::raw(detail.title.clone()),
+            ]));
+            if crate::diff_render::is_diff(&detail.body) {
+                for diff_line in crate::diff_render::render_diff(&detail.body, 100) {
+                    let mut spans =
+                        vec![Span::styled("    ", Style::default().fg(Color::DarkGray))];
+                    spans.extend(diff_line.spans);
+                    lines.push(Line::from(spans));
+                }
+            } else {
+                for body_line in detail.body.lines().filter(|line| !line.trim().is_empty()) {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(body_line.to_owned(), Style::default().fg(Color::Gray)),
+                    ]));
+                }
+            }
+            lines.push(Line::from(""));
+        }
+    }
+
+    lines.push(Line::from(vec![Span::styled(
+        "Esc closes  ·  Ctrl+O toggles detail",
+        Style::default().fg(Color::DarkGray),
+    )]));
+    lines
+}
+
+fn cell_identity(entry: &crate::transcript::TimelineEntry) -> (&'static str, Style, Style) {
+    match entry.block {
+        TranscriptBlock::UserMessage => (
+            "you",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            Style::default(),
+        ),
+        TranscriptBlock::AssistantMessage => (
+            "assistant",
+            Style::default()
+                .fg(match entry.phase {
+                    Some(TurnPhase::Failed) => Color::Red,
+                    Some(TurnPhase::Canceled) => Color::Yellow,
+                    Some(TurnPhase::Submitted) | Some(TurnPhase::Queued) => Color::Magenta,
+                    Some(TurnPhase::CapabilityActive) => Color::Yellow,
+                    _ => Color::Green,
+                })
+                .add_modifier(Modifier::BOLD),
+            Style::default(),
+        ),
+        TranscriptBlock::SystemNotice => (
+            "notice",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Gray),
+        ),
+        TranscriptBlock::OperatorResultCard => (
+            "result",
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Gray),
+        ),
+        TranscriptBlock::ExecutionCard => (
+            "exec",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Gray),
+        ),
+        TranscriptBlock::FailureCard => (
+            "failure",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Gray),
+        ),
+    }
+}
+
+fn dot_color_for_entry(entry: &crate::transcript::TimelineEntry, active: bool) -> Color {
+    match entry.block {
+        TranscriptBlock::UserMessage => Color::Cyan,
+        TranscriptBlock::AssistantMessage => {
+            if active {
+                Color::Green
+            } else {
+                match entry.phase {
+                    Some(crate::transcript::TurnPhase::Failed) => Color::Red,
+                    Some(crate::transcript::TurnPhase::Canceled) => Color::Yellow,
+                    _ => Color::DarkGray,
+                }
+            }
+        }
+        TranscriptBlock::SystemNotice => Color::Magenta,
+        TranscriptBlock::OperatorResultCard => Color::Blue,
+        TranscriptBlock::ExecutionCard => {
+            if active {
+                Color::Yellow
+            } else {
+                Color::DarkGray
+            }
+        }
+        TranscriptBlock::FailureCard => Color::Red,
+    }
+}
+
+fn detail_summary_line(entry: &crate::transcript::TimelineEntry, _active: bool) -> Line<'static> {
+    let mut spans = vec![
+        Span::styled("  ", Style::default().fg(Color::DarkGray)),
+    ];
+    let preview_len = entry.details.len().min(3);
+    for (index, detail) in entry.details.iter().rev().take(preview_len).enumerate() {
+        if index > 0 {
+            spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+        }
+        spans.extend(detail_chip(detail.kind, &detail.title));
+    }
+    if entry.details.len() > preview_len {
+        spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+        spans.push(Span::styled(
+            format!("+{}", entry.details.len() - preview_len),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn detail_preview_line(
+    entry: &crate::transcript::TimelineEntry,
+    _active: bool,
+) -> Option<Line<'static>> {
+    let detail = entry.details.last()?;
+    let lines = detail
+        .body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let body = lines
+        .iter()
+        .find(|line| {
+            line.starts_with("route=")
+                || line.starts_with("failure=")
+                || line.starts_with("next=")
+                || line.starts_with("target=")
+        })
+        .copied()
+        .or_else(|| lines.first().copied())?;
+    Some(Line::from(vec![
+        Span::styled("    ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            truncate_inline(body, 88),
+            Style::default().fg(Color::DarkGray),
+        ),
+    ]))
+}
+
+fn detail_chip(kind: TranscriptDetailKind, title: &str) -> Vec<Span<'static>> {
+    let label = kind.label();
+    let color = detail_kind_color(kind);
+    vec![
+        Span::styled("[", Style::default().fg(Color::DarkGray)),
+        Span::styled(label, Style::default().fg(color)),
+        Span::styled("]", Style::default().fg(Color::DarkGray)),
+        Span::styled(truncate_inline(title, 36), Style::default().fg(Color::Gray)),
+    ]
+}
+
+fn detail_kind_color(kind: TranscriptDetailKind) -> Color {
+    match kind {
+        TranscriptDetailKind::Notice => Color::Blue,
+        TranscriptDetailKind::Provider => Color::Magenta,
+        TranscriptDetailKind::Tool => Color::Yellow,
+        TranscriptDetailKind::Mcp => Color::LightYellow,
+        TranscriptDetailKind::Skill => Color::Green,
+        TranscriptDetailKind::Workflow => Color::Cyan,
+        TranscriptDetailKind::Capability => Color::Yellow,
+        TranscriptDetailKind::Sandbox => Color::LightMagenta,
+        TranscriptDetailKind::Node => Color::LightCyan,
+        TranscriptDetailKind::Failure => Color::Red,
+    }
+}
+
+fn truncate_inline(value: &str, max: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HistoryCellKey, HistoryCells, build_history_cell, cell_lines, detail_lines};
+    use crate::transcript::{
+        TimelineEntry, TimelineKind, TranscriptBlock, TranscriptDetail, TranscriptDetailKind,
+        TranscriptView, TurnPhase,
+    };
+
+    fn sample_entry() -> TimelineEntry {
+        TimelineEntry {
+            timestamp: "12:00".to_owned(),
+            kind: TimelineKind::Agent,
+            block: TranscriptBlock::AssistantMessage,
+            actor: "assistant".to_owned(),
+            title: "Working".to_owned(),
+            body: "first line\nsecond line".to_owned(),
+            run_id: Some("run-123".to_owned()),
+            phase: Some(TurnPhase::Streaming),
+            details: Vec::new(),
+            details_expanded: false,
+            exec_calls: vec![],
+        }
+    }
+
+    #[test]
+    fn active_cell_renders_live_marker_and_rail() {
+        let lines = cell_lines(&sample_entry(), true);
+        let rendered = lines
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert!(rendered.iter().any(|line| line.contains("first line")));
+        assert!(rendered.iter().any(|line| line.contains("assistant")));
+    }
+
+    #[test]
+    fn history_cell_builds_summary_and_detail_views() {
+        let cell = build_history_cell(&sample_entry(), true);
+        let summary = cell
+            .summary_lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        let detail = cell
+            .detail_lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert!(summary.iter().any(|line| line.contains("assistant")));
+        assert!(detail.iter().any(|line| line.contains("phase streaming")));
+        assert!(detail.iter().any(|line| line.contains("run run-123")));
+    }
+
+    #[test]
+    fn detail_lines_render_execution_detail_with_phase_and_run_id() {
+        let mut entry = sample_entry();
+        entry.details.push(TranscriptDetail {
+            kind: TranscriptDetailKind::Tool,
+            title: "time_now".to_owned(),
+            body: "target=tool:time_now\nstatus=ok".to_owned(),
+        });
+
+        let rendered = detail_lines(&entry)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert!(rendered.iter().any(|line| line.contains("phase streaming")));
+        assert!(rendered.iter().any(|line| line.contains("run run-123")));
+        assert!(
+            rendered
+                .iter()
+                .any(|line| line.contains("attached execution detail"))
+        );
+        assert!(rendered.iter().any(|line| line.contains("time_now")));
+    }
+
+    #[test]
+    fn latest_expandable_prefers_active_cell() {
+        let mut committed = sample_entry();
+        committed.details.push(TranscriptDetail {
+            kind: TranscriptDetailKind::Tool,
+            title: "old".to_owned(),
+            body: "target=tool:old".to_owned(),
+        });
+        let mut active = sample_entry();
+        active.title = "Active".to_owned();
+        active.details.push(TranscriptDetail {
+            kind: TranscriptDetailKind::Skill,
+            title: "new".to_owned(),
+            body: "target=skill:new".to_owned(),
+        });
+        let view = TranscriptView {
+            entries: &[committed],
+            active_entry: Some(&active),
+            active_revision: Some(3),
+            streaming_preview: None,
+            scroll: 0,
+            spinner_tick: 0,
+        };
+
+        let cells = HistoryCells::from(&view);
+        let latest = cells
+            .latest_expandable()
+            .expect("active cell should be expandable");
+        let rendered = latest
+            .detail_lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        assert!(rendered.iter().any(|line| line.contains("Active")));
+        assert!(rendered.iter().any(|line| line.contains("new")));
+        assert_eq!(cells.latest_expandable_key(), Some(HistoryCellKey::Active));
+    }
+}
+
+impl<'a> From<&TranscriptView<'a>> for HistoryCells {
+    fn from(transcript: &TranscriptView<'a>) -> Self {
+        build_history_cells(transcript)
+    }
+}

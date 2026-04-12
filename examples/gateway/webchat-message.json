@@ -1,0 +1,16 @@
+{
+  "session_id": "docs-webchat",
+  "profile": "gpt-5.4-mini",
+  "display_name": "Webchat Visitor",
+  "actor_id": "visitor-1",
+  "thread_id": "landing-page",
+  "input": "Hello from the webchat example.",
+  "ingress": {
+    "kind": "webchat",
+    "channel": "webchat",
+    "source": "docs-example",
+    "display_name": "Webchat Visitor",
+    "actor_id": "visitor-1",
+    "thread_id": "landing-page"
+  }
+}
